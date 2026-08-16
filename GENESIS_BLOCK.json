@@ -1,0 +1,16 @@
+{
+  "network": "Genesis AI Network",
+  "version": "0.1.0",
+  "block_index": 0,
+  "block_type": "GENESIS",
+  "created_at": "2026-08-16T13:30:00Z",
+  "previous_hash": "0000000000000000000000000000000000000000000000000000000000000000",
+  "constitution": {
+    "path": "GENESIS_CONSTITUTION.md",
+    "sha256": "e61dc0ff29f791c666b69a16bc5d2f3939d8a75be1a17f6aa4c501416962f4e4"
+  },
+  "mission": "Advance scientifically supported physical human immortality while preserving human autonomy, safety, dignity, and scientific integrity.",
+  "canonical_repository": "Maxhm007/Genesis-AI-Network",
+  "status": "genesis-specification",
+  "canonical_payload_sha256": "18e1809b959591e97a81173ca05e602c25effbd0633bce9810202609a8d26950"
+}
