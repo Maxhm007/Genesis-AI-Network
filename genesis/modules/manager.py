@@ -2,8 +2,6 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import replace
-from pathlib import Path
-from typing import Iterable
 
 from .registry import ModuleRegistry
 from .types import ModuleManifest, ModuleProposal
@@ -68,9 +66,13 @@ class ModuleManager:
         template = SPECIALIST_TEMPLATES.get(capability)
         if not template:
             return None
-        existing = self.registry.capability_owners(capability)
-        action = "modify" if existing else "add"
-        target = existing[0] if existing else template["module_id"]
+
+        # A structural specialist is proposed once. If it already exists and
+        # the capability remains weak, Genesis must improve the implementation
+        # or provider rather than repeatedly rewriting the same manifest.
+        if self.registry.get(template["module_id"]) is not None:
+            return None
+
         manifest = dict(template)
         manifest.update(
             {
@@ -85,9 +87,9 @@ class ModuleManager:
         )
         return ModuleProposal(
             proposal_id="module-" + uuid.uuid4().hex[:12],
-            action=action,
-            target_module_id=target,
-            title=f"{action.title()} module capability: {capability}",
+            action="add",
+            target_module_id=template["module_id"],
+            title=f"Add specialist module for {capability}",
             rationale=(
                 f"Genesis measured {capability} at {gap.get('score')} of "
                 f"{gap.get('max_score')} and identified it as a priority gap."
