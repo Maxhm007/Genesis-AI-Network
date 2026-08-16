@@ -1,0 +1,73 @@
+name: Publish Genesis Project Metadata
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'README.md'
+      - 'CHANGELOG.md'
+      - '.github/workflows/publish-project-metadata.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  publish:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Update public repository description
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api --method PATCH "repos/${GITHUB_REPOSITORY}" \
+            -f description='Decentralized autonomous scientific AI network working toward physical human immortality.' \
+            || echo 'Repository description update requires repository-admin metadata permission; continuing.'
+
+      - name: Update repository topics
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          gh api --method PUT "repos/${GITHUB_REPOSITORY}/topics" \
+            -H 'Accept: application/vnd.github+json' \
+            --input - <<'JSON' \
+          || echo 'Repository topic update requires repository-admin metadata permission; continuing.'
+          {
+            "names": [
+              "artificial-intelligence",
+              "decentralized-ai",
+              "autonomous-agents",
+              "longevity",
+              "geroscience",
+              "human-longevity",
+              "peer-to-peer",
+              "distributed-systems",
+              "self-learning",
+              "blockchain",
+              "open-source"
+            ]
+          }
+          JSON
+
+      - name: Publish Genesis Foundation v0.1.0
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          if gh release view v0.1.0 >/dev/null 2>&1; then
+            echo 'Genesis v0.1.0 already published.'
+            exit 0
+          fi
+
+          notes=$(awk '/^## \[0\.1\.0\]/{flag=1; next} /^## \[/{if(flag) exit} flag{print}' CHANGELOG.md)
+          printf '%s\n' "$notes" > /tmp/genesis-release-notes.md
+          gh release create v0.1.0 \
+            --target "${GITHUB_SHA}" \
+            --title 'Genesis AI Network v0.1.0 — Genesis Foundation' \
+            --notes-file /tmp/genesis-release-notes.md
