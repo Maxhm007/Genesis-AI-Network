@@ -12,6 +12,9 @@ on:
       - 'genesis/research_tasks.py'
       - 'genesis/self_learning.py'
       - 'genesis/selfdev.py'
+      - 'genesis/security.py'
+      - 'genesis/coding.py'
+      - 'genesis/autonomous_engineering.py'
       - 'genesis/modules/**'
       - 'config/modules.json'
       - 'config/immortality_sources.json'
@@ -20,12 +23,16 @@ on:
       - 'scripts/immortality_scan.py'
       - 'scripts/research_task_worker.py'
       - 'scripts/self_learn.py'
+      - 'scripts/autonomous_engineering.py'
       - 'scripts/competitive_reference_monitor.py'
       - 'tests/test_proactive.py'
       - 'tests/test_ai_score.py'
       - 'tests/test_immortality_scan.py'
       - 'tests/test_task_queue.py'
       - 'tests/test_self_learning.py'
+      - 'tests/test_security_module.py'
+      - 'tests/test_coding_module.py'
+      - 'tests/test_autonomous_engineering.py'
       - 'tests/test_modules.py'
   workflow_dispatch:
   schedule:
@@ -121,18 +128,27 @@ jobs:
         run: python scripts/research_task_worker.py
       - name: Run bounded self-learning pass
         run: python scripts/self_learn.py
-      - name: Preserve scan score task learning and review evidence
+      - name: Configure Genesis Git identity
+        run: |
+          git config user.name "Genesis AI"
+          git config user.email "genesis-ai@users.noreply.github.com"
+      - name: Security inspection and autonomous Coding pass
+        run: python scripts/autonomous_engineering.py
+      - name: Run legacy bounded proactive planner if Coding made no candidate
+        shell: bash
+        run: |
+          branch=$(git branch --show-current)
+          if [[ "$branch" == "main" ]]; then
+            python scripts/proactive_dev.py
+          else
+            echo "Autonomous Coding already created $branch; skipping second candidate generator."
+          fi
+      - name: Preserve scan score task learning security and coding evidence
         uses: actions/upload-artifact@v4
         with:
           name: genesis-autonomous-evidence-${{ github.run_id }}
           path: runtime/
           retention-days: 30
-      - name: Configure Genesis Git identity
-        run: |
-          git config user.name "Genesis AI"
-          git config user.email "genesis-ai@users.noreply.github.com"
-      - name: Inspect and develop one bounded improvement
-        run: python scripts/proactive_dev.py
       - name: Resolve generated candidate
         id: candidate
         shell: bash
@@ -161,6 +177,14 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Independent full test suite A
         run: python -m pytest -q
+      - name: Security review candidate A
+        run: python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('${{ needs.develop.outputs.candidate_sha }}^')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
       - name: Sign validator A approval
         run: python genesis/ephemeral_validator.py --validator-id proactive-validator-a --candidate ${{ needs.develop.outputs.candidate_sha }} --output validator-a.json
       - uses: actions/upload-artifact@v4
@@ -183,6 +207,14 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Independent full test suite B
         run: python -m pytest -q
+      - name: Security review candidate B
+        run: python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('${{ needs.develop.outputs.candidate_sha }}^')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
       - name: Sign validator B approval
         run: python genesis/ephemeral_validator.py --validator-id proactive-validator-b --candidate ${{ needs.develop.outputs.candidate_sha }} --output validator-b.json
       - uses: actions/upload-artifact@v4
@@ -222,8 +254,8 @@ jobs:
           main_sha=$(git rev-parse origin/main)
           test "$(git rev-parse origin/$branch)" = "$candidate"
           git merge-base --is-ancestor "$main_sha" "$candidate"
-          if git diff --name-only "$main_sha..$candidate" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
-            echo 'Protected Genesis identity file changed' >&2
+          if git diff --name-only "$main_sha..$candidate" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
+            echo 'Protected Genesis identity/workflow boundary changed' >&2
             exit 1
           fi
           git push origin "$candidate:refs/heads/main"
