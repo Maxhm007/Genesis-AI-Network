@@ -7,6 +7,9 @@ on:
       - '.github/workflows/proactive-development.yml'
       - 'genesis/proactive.py'
       - 'genesis/ai_score.py'
+      - 'genesis/scorecard.py'
+      - 'genesis/efficiency.py'
+      - 'genesis/intelligence_router.py'
       - 'genesis/competitive_reference.py'
       - 'genesis/immortality_scan.py'
       - 'genesis/research_tasks.py'
@@ -24,9 +27,13 @@ on:
       - 'scripts/research_task_worker.py'
       - 'scripts/self_learn.py'
       - 'scripts/autonomous_engineering.py'
+      - 'scripts/system_scorecard.py'
       - 'scripts/competitive_reference_monitor.py'
       - 'tests/test_proactive.py'
       - 'tests/test_ai_score.py'
+      - 'tests/test_scorecard.py'
+      - 'tests/test_efficiency.py'
+      - 'tests/test_intelligence_router.py'
       - 'tests/test_immortality_scan.py'
       - 'tests/test_task_queue.py'
       - 'tests/test_self_learning.py'
@@ -76,7 +83,9 @@ jobs:
             runtime/self_learning.sqlite3
             runtime/self_learning_status.json
             runtime/ai_score_history.jsonl
+            runtime/efficiency.jsonl
             runtime/research_reviews/
+            runtime/task_reviews/
           key: genesis-runtime-${{ runner.os }}-${{ github.run_id }}
           restore-keys: |
             genesis-runtime-${{ runner.os }}-
@@ -143,7 +152,9 @@ jobs:
           else
             echo "Autonomous Coding already created $branch; skipping second candidate generator."
           fi
-      - name: Preserve scan score task learning security and coding evidence
+      - name: Generate capability efficiency and mission scorecard
+        run: python scripts/system_scorecard.py
+      - name: Preserve scan score task learning security coding and efficiency evidence
         uses: actions/upload-artifact@v4
         with:
           name: genesis-autonomous-evidence-${{ github.run_id }}
