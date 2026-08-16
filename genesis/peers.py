@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import hashlib
 import json
-import socket
 import threading
 import urllib.request
 from dataclasses import dataclass
@@ -51,6 +50,8 @@ class PeerStore:
 
 
 class PeerClient:
+    """Legacy V0.1 Constitution-hash probe retained for compatibility."""
+
     def __init__(self, timeout: float = 3.0) -> None:
         self.timeout = timeout
 
@@ -70,27 +71,43 @@ class PeerClient:
 
 class _StatusHandler(BaseHTTPRequestHandler):
     status_factory: Callable[[], dict] = lambda: {}
+    handshake_factory: Callable[[], dict] | None = None
 
-    def do_GET(self):
-        if self.path != "/genesis/status":
-            self.send_response(404); self.end_headers(); return
-        body = json.dumps(type(self).status_factory(), sort_keys=True).encode("utf-8")
+    def _json(self, payload: dict) -> None:
+        body = json.dumps(payload, sort_keys=True).encode("utf-8")
         self.send_response(200)
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
         self.wfile.write(body)
 
+    def do_GET(self):
+        if self.path == "/genesis/status":
+            self._json(type(self).status_factory())
+            return
+        if self.path == "/genesis/handshake" and type(self).handshake_factory is not None:
+            self._json(type(self).handshake_factory())
+            return
+        self.send_response(404)
+        self.end_headers()
+
     def log_message(self, fmt, *args):
         return
 
 
 class PeerStatusServer:
-    """Small read-only status endpoint for V0.1 peer compatibility checks."""
+    """Read-only peer endpoint supporting legacy status and signed GDEN handshake."""
 
-    def __init__(self, host: str, port: int, status_factory: Callable[[], dict]) -> None:
+    def __init__(
+        self,
+        host: str,
+        port: int,
+        status_factory: Callable[[], dict],
+        handshake_factory: Callable[[], dict] | None = None,
+    ) -> None:
         handler = type("GenesisStatusHandler", (_StatusHandler,), {})
         handler.status_factory = staticmethod(status_factory)
+        handler.handshake_factory = staticmethod(handshake_factory) if handshake_factory is not None else None
         self.server = ThreadingHTTPServer((host, port), handler)
         self.thread = threading.Thread(target=self.server.serve_forever, daemon=True)
 
