@@ -59,6 +59,14 @@ class GenesisCommunicator:
             parts.append("I received your message and can route it through my team and any validated intelligence providers available to me.")
         return " ".join(parts)
 
+    @staticmethod
+    def _select_conversation_provider(available: list) -> object | None:
+        """Prefer a replaceable trained provider; keep bootstrap as fallback only."""
+        for provider in available:
+            if getattr(provider, "name", "") != "genesis-bootstrap":
+                return provider
+        return available[0] if available else None
+
     def reply(self, sender: str, message: str) -> dict:
         sender = (sender or "anonymous").strip()[:120]
         message = message.strip()
@@ -88,8 +96,8 @@ class GenesisCommunicator:
         available = self.providers.available_providers()
         response_text = "Genesis received the message but no intelligence provider is currently available."
         provider_name = None
-        if available:
-            provider = available[0]
+        provider = self._select_conversation_provider(available)
+        if provider is not None:
             provider_name = provider.name
             if provider_name == "genesis-bootstrap":
                 response_text = self._bootstrap_human_reply(sender, message, capability_report)
@@ -98,7 +106,8 @@ class GenesisCommunicator:
                     "ROLE: genesis_communicator\n"
                     "PURPOSE: Communicate as the Genesis AI Network without pretending to be conscious or omniscient.\n"
                     "INSTRUCTION: Answer the user's message directly. Be concise. State uncertainty and operational limits. "
-                    "Do not claim scientific facts unless they were supplied with evidence.\n"
+                    "Do not claim scientific facts unless they were supplied with evidence. "
+                    f"You are the replaceable intelligence provider named {provider_name}; do not present the provider as Genesis identity.\n"
                     f"OBJECTIVE: Reply to {sender}\n"
                     f"MESSAGE: {message}\n"
                     f"CAPABILITY_GAPS: {json.dumps(capability_report['priority_gaps'][:3], sort_keys=True)}\n"
