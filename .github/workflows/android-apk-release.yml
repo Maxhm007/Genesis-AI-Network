@@ -31,13 +31,13 @@ jobs:
         with:
           gradle-version: '9.4.1'
 
-      - name: Install Android SDK 37
+      - name: Install Android SDK 36
         shell: bash
         run: |
           SDKMANAGER="$ANDROID_SDK_ROOT/cmdline-tools/latest/bin/sdkmanager"
           test -x "$SDKMANAGER"
           yes | "$SDKMANAGER" --licenses >/dev/null || true
-          "$SDKMANAGER" 'platforms;android-37' 'build-tools;36.0.0'
+          "$SDKMANAGER" 'platforms;android-36' 'build-tools;36.0.0'
 
       - name: Build Genesis Android debug APK
         run: gradle -p mobile :app:assembleDebug --stacktrace
