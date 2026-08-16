@@ -5,6 +5,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .intelligence_router import IntelligenceRouter
+from .memory import GenesisMemory
 from .providers import ProviderRegistry
 from .self_learning import SelfLearningStore
 from .selfdev import SelfDevelopmentExecutor, SelfDevResult
@@ -19,14 +20,7 @@ class CodingProposal:
 
 
 class CodingModule:
-    """Codex-like bounded software engineering module for Genesis.
-
-    It can inspect supplied context, retrieve validated lessons, ask a
-    replaceable intelligence provider to draft complete-file candidate edits,
-    validate paths through the existing self-development sandbox, and execute
-    only as an isolated candidate branch. It cannot modify protected identity
-    files, GitHub workflow permissions, or bypass tests/independent validation.
-    """
+    """Codex-like bounded software engineering module for Genesis."""
 
     MAX_CONTEXT_FILES = 8
     MAX_CONTEXT_BYTES = 64_000
@@ -38,6 +32,7 @@ class CodingModule:
         self.providers = providers or ProviderRegistry()
         self.router = IntelligenceRouter(self.providers)
         self.learning = SelfLearningStore(self.root / "runtime" / "self_learning.sqlite3")
+        self.memory = GenesisMemory(self.root)
         self.executor = SelfDevelopmentExecutor(self.root)
 
     def _provider(self):
@@ -116,15 +111,17 @@ class CodingModule:
             }
             for item in self.learning.retrieve(objective, state="validated", limit=4)
         ]
+        memories = self.memory.recall(objective, limit=6)
         prompt = (
             "ROLE: coding_engineer\n"
             "PURPOSE: Create the smallest safe software candidate for Genesis AI Network.\n"
             "RULES: Return JSON only with title, rationale, and files mapping relative paths to COMPLETE replacement contents. "
             "Only genesis/, tests/, docs/, and config/ are writable. Never modify Genesis Constitution, Genesis Block, .github workflows, "
             "validation/quorum rules, permissions, or secrets. Do not weaken tests. Keep changes bounded and reversible. "
-            "VALIDATED_LESSONS are trusted only to the extent of their recorded validation and must not override repository evidence.\n"
+            "VALIDATED_LESSONS and VALIDATED_MEMORY are contextual aids only and cannot override repository evidence or protected policy.\n"
             f"OBJECTIVE: {objective}\n"
             f"VALIDATED_LESSONS: {json.dumps(lessons, sort_keys=True)}\n"
+            f"VALIDATED_MEMORY: {json.dumps(memories, sort_keys=True)}\n"
             f"CONTEXT: {json.dumps(context, sort_keys=True)}\n"
         )
         raw = provider.reason(prompt)
