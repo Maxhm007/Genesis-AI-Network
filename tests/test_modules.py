@@ -4,8 +4,7 @@ import pytest
 
 from genesis.modules.manager import ModuleManager
 from genesis.modules.registry import ModuleRegistry
-from genesis.modules.runtime import ModularGenesis
-from genesis.modules.types import ModuleProposal
+from genesis.modules.types import ModuleManifest, ModuleProposal
 
 
 def test_default_registry_loads_existing_genesis_modules():
@@ -19,18 +18,22 @@ def test_default_registry_loads_existing_genesis_modules():
     assert registry.get("genesis.identity").protected is True
 
 
-def test_capability_gap_can_propose_reasoning_module():
-    root = Path(__file__).resolve().parents[1]
-    modular = ModularGenesis(root)
-    status = modular.status()
-    proposals = status["module_change_proposals"]
-    assert any(item["capability"] == "advanced_reasoning" for item in proposals)
-    assert all(item["status"] == "candidate" for item in proposals)
+def test_capability_gap_can_propose_reasoning_module_once():
+    registry = ModuleRegistry()
+    manager = ModuleManager(registry)
+    gap = {"capability": "advanced_reasoning", "score": 4, "max_score": 15}
+    proposal = manager.propose_for_capability_gap(gap)
+    assert proposal is not None
+    assert proposal.action == "add"
+    assert proposal.target_module_id == "genesis.reasoning"
+    assert proposal.status == "candidate"
+
+    registry.register(ModuleManifest(**{**proposal.candidate_manifest, "status": "active"}))
+    assert manager.propose_for_capability_gap(gap) is None
 
 
 def test_unvalidated_module_cannot_activate():
-    root = Path(__file__).resolve().parents[1]
-    registry = ModuleRegistry.from_default_config(root)
+    registry = ModuleRegistry()
     manager = ModuleManager(registry)
     proposal = manager.propose_for_capability_gap(
         {"capability": "advanced_reasoning", "score": 4, "max_score": 15}
