@@ -13,6 +13,7 @@ from .communication import GenesisCommunicator
 class GenesisCommunicationHandler(BaseHTTPRequestHandler):
     communicator: GenesisCommunicator
     auth_token: str = ""
+    web_root: Path
 
     def _authorized(self) -> bool:
         if not type(self).auth_token:
@@ -29,7 +30,23 @@ class GenesisCommunicationHandler(BaseHTTPRequestHandler):
         self.end_headers()
         self.wfile.write(body)
 
+    def _serve_ui(self) -> None:
+        path = type(self).web_root / "index.html"
+        if not path.exists():
+            self._json(404, {"error": "ui_not_found"})
+            return
+        body = path.read_bytes()
+        self.send_response(200)
+        self.send_header("Content-Type", "text/html; charset=utf-8")
+        self.send_header("Cache-Control", "no-store")
+        self.send_header("Content-Length", str(len(body)))
+        self.end_headers()
+        self.wfile.write(body)
+
     def do_GET(self) -> None:
+        if self.path in {"/", "/index.html"}:
+            self._serve_ui()
+            return
         if self.path == "/health":
             self._json(200, {"status": "awake", "service": "genesis-communication"})
             return
@@ -73,8 +90,18 @@ def serve(root: Path, host: str, port: int, auth_token: str = "") -> None:
     handler = type("GenesisBoundCommunicationHandler", (GenesisCommunicationHandler,), {})
     handler.communicator = communicator
     handler.auth_token = auth_token
+    handler.web_root = root / "web"
     server = ThreadingHTTPServer((host, port), handler)
-    print(json.dumps({"status": "awake", "listen": f"http://{host}:{port}"}), flush=True)
+    print(
+        json.dumps(
+            {
+                "status": "awake",
+                "listen": f"http://{host}:{port}",
+                "ui": f"http://{host}:{port}/",
+            }
+        ),
+        flush=True,
+    )
     server.serve_forever()
 
 
