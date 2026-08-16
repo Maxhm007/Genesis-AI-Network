@@ -18,6 +18,14 @@ def test_default_registry_loads_existing_genesis_modules():
     assert registry.get("genesis.identity").protected is True
 
 
+def test_default_registry_loads_resource_intelligence_extensions():
+    root = Path(__file__).resolve().parents[1]
+    registry = ModuleRegistry.from_default_config(root)
+    ids = {module.module_id for module in registry.all()}
+    assert {"genesis.router", "genesis.efficiency", "genesis.scorecard"}.issubset(ids)
+    assert "capability_per_compute" in registry.get("genesis.efficiency").capabilities
+
+
 def test_capability_gap_can_propose_reasoning_module_once():
     registry = ModuleRegistry()
     manager = ModuleManager(registry)
