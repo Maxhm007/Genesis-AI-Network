@@ -21,30 +21,11 @@ class ApplicationTarget:
 class ApplicationModule:
     """Own Genesis application surfaces without owning release authority.
 
-    The module turns desktop/mobile product gaps into persistent engineering
-    tasks. Coding may modify application source through the normal bounded
-    candidate flow, but this module cannot alter GitHub workflows, signing
-    credentials, validator rules, or promote/release its own output.
+    The module turns explicitly configured desktop/mobile product gaps into
+    persistent engineering tasks. Coding may modify application source through
+    the normal bounded candidate flow, but this module cannot alter GitHub
+    workflows, signing credentials, validator rules, or promote/release output.
     """
-
-    DEFAULT_TARGETS = (
-        ApplicationTarget(
-            target_id="windows-desktop",
-            platform="windows",
-            source_root="desktop",
-            artifact="exe",
-            architecture="tauri-shell+local-genesis-core",
-            priority=94,
-        ),
-        ApplicationTarget(
-            target_id="android-mobile",
-            platform="android",
-            source_root="mobile",
-            artifact="apk",
-            architecture="mobile-client+authenticated-genesis-api",
-            priority=96,
-        ),
-    )
 
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
@@ -53,7 +34,7 @@ class ApplicationModule:
     def _config_targets(self) -> tuple[ApplicationTarget, ...]:
         path = self.root / "config" / "applications.json"
         if not path.exists():
-            return self.DEFAULT_TARGETS
+            return ()
         payload = json.loads(path.read_text(encoding="utf-8"))
         targets = payload.get("targets", [])
         if not isinstance(targets, list):
@@ -68,13 +49,7 @@ class ApplicationModule:
         for target in self.targets():
             source = self.root / target.source_root
             present = source.exists()
-            results.append(
-                {
-                    **asdict(target),
-                    "source_present": present,
-                    "status": "present" if present else "missing",
-                }
-            )
+            results.append({**asdict(target), "source_present": present, "status": "present" if present else "missing"})
         return {"module": "genesis.application", "targets": results}
 
     @staticmethod
