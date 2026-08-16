@@ -1,8 +1,40 @@
+import json
 from pathlib import Path
 
 from genesis.application import ApplicationModule
 from genesis.modules.registry import ModuleRegistry
 from genesis.selfdev import normalize_selfdev_path
+
+
+def write_targets(root: Path) -> None:
+    (root / "config").mkdir(parents=True, exist_ok=True)
+    (root / "config" / "applications.json").write_text(
+        json.dumps(
+            {
+                "targets": [
+                    {
+                        "target_id": "windows-desktop",
+                        "platform": "windows",
+                        "source_root": "desktop",
+                        "artifact": "exe",
+                        "architecture": "tauri-shell+local-genesis-core",
+                        "priority": 94,
+                        "enabled": True,
+                    },
+                    {
+                        "target_id": "android-mobile",
+                        "platform": "android",
+                        "source_root": "mobile",
+                        "artifact": "apk",
+                        "architecture": "mobile-client+authenticated-genesis-api",
+                        "priority": 96,
+                        "enabled": True,
+                    },
+                ]
+            }
+        ),
+        encoding="utf-8",
+    )
 
 
 def test_application_module_registers(tmp_path: Path):
@@ -15,9 +47,15 @@ def test_application_module_registers(tmp_path: Path):
     assert registry.get("genesis.application") is not None
 
 
+def test_application_tasks_require_explicit_target_config(tmp_path: Path):
+    (tmp_path / "runtime").mkdir()
+    assert ApplicationModule(tmp_path).ensure_development_tasks() == []
+
+
 def test_application_tasks_cover_desktop_and_android(tmp_path: Path):
     (tmp_path / "runtime").mkdir()
     (tmp_path / "desktop").mkdir()
+    write_targets(tmp_path)
     module = ApplicationModule(tmp_path)
     tasks = module.ensure_development_tasks()
     by_target = {item["target_id"]: item for item in tasks}
