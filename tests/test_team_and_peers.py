@@ -20,7 +20,7 @@ class FakeProvider:
 
 class TeamAndPeerTests(unittest.TestCase):
     def test_ai_team_routes_roles_to_available_provider(self):
-        registry = ProviderRegistry()
+        registry = ProviderRegistry(include_bootstrap=False)
         registry.register(FakeProvider())
         outputs = AITeam(registry).run_task("test objective")
         self.assertGreaterEqual(len(outputs), 8)
@@ -28,7 +28,8 @@ class TeamAndPeerTests(unittest.TestCase):
         self.assertTrue(all(item["provider"] == "fake-provider" for item in outputs))
 
     def test_ai_team_waits_safely_without_provider(self):
-        outputs = AITeam(ProviderRegistry()).run_task("test objective")
+        registry = ProviderRegistry(include_bootstrap=False)
+        outputs = AITeam(registry).run_task("test objective")
         self.assertGreaterEqual(len(outputs), 8)
         self.assertTrue(all(item["status"] == "waiting_for_provider" for item in outputs))
 
