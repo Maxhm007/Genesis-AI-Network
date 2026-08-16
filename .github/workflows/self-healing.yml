@@ -2,7 +2,9 @@ name: Genesis Self Healing
 
 on:
   workflow_run:
-    workflows: ["Genesis Independent Validator Gate"]
+    workflows:
+      - "Genesis Independent Validator Gate"
+      - "Genesis Proactive Development"
     types: [completed]
   workflow_dispatch:
   schedule:
