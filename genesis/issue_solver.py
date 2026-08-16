@@ -9,7 +9,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
-from .selfdev import SelfDevelopmentExecutor, SelfDevResult
+from .selfdev import SelfDevelopmentExecutor, SelfDevResult, normalize_selfdev_path
 
 PROTECTED_PATHS = {"GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"}
 ALLOWED_PREFIXES = ("genesis/", "tests/", "docs/", "config/")
@@ -266,21 +266,26 @@ class IssueSolver:
         if not files or len(files) > MAX_PATCH_FILES:
             raise ValueError("repair proposal file count out of bounds")
         total = 0
+        normalized_files: dict[str, str] = {}
         for relative, content in files.items():
-            normalized = str(relative).replace("\\", "/").lstrip("./")
-            if normalized in PROTECTED_PATHS or not normalized.startswith(ALLOWED_PREFIXES):
-                raise ValueError(f"repair path not allowed: {normalized}")
+            try:
+                normalized = normalize_selfdev_path(self.root, str(relative))
+            except RuntimeError as exc:
+                raise ValueError(f"repair path not allowed: {relative}") from exc
+            if normalized in normalized_files:
+                raise ValueError(f"duplicate repair path: {normalized}")
             if not isinstance(content, str):
                 raise ValueError("repair content must be text")
             total += len(content.encode("utf-8"))
             if normalized.endswith(".py"):
                 ast.parse(content, filename=normalized)
+            normalized_files[normalized] = content
         if total > MAX_PATCH_BYTES:
             raise ValueError("repair proposal too large")
         return {
             "title": str(proposal.get("title", "Genesis autonomous repair")),
             "rationale": str(proposal.get("rationale", "")),
-            "files": files,
+            "files": normalized_files,
         }
 
     def solve_once(self) -> RepairAttempt:
