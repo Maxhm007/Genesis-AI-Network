@@ -7,8 +7,11 @@ on:
       - '.github/workflows/proactive-development.yml'
       - 'genesis/proactive.py'
       - 'genesis/selfdev.py'
+      - 'genesis/modules/**'
+      - 'config/modules.json'
       - 'scripts/proactive_dev.py'
       - 'tests/test_proactive.py'
+      - 'tests/test_modules.py'
   workflow_dispatch:
   schedule:
     - cron: '7 * * * *'
