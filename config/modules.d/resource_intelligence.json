@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "module_id": "genesis.router",
+      "name": "Intelligence Router",
+      "version": "0.1.0",
+      "purpose": "Select the lowest-resource available intelligence provider that meets the task capability and reliability requirement.",
+      "capabilities": ["provider_routing", "resource_aware_selection", "task_model_matching"],
+      "permissions": ["provider.use", "metrics.read"],
+      "dependencies": ["genesis.provider"],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.intelligence_router",
+      "metadata": {"optimize_capability_per_resource": true, "default_profiles_are_provisional": true}
+    },
+    {
+      "module_id": "genesis.efficiency",
+      "name": "Capability per Compute Module",
+      "version": "0.1.0",
+      "purpose": "Measure successful task quality per observed compute, latency, and monetary resource usage.",
+      "capabilities": ["efficiency_measurement", "capability_per_compute", "cost_tracking"],
+      "permissions": ["metrics.read", "metrics.write"],
+      "dependencies": ["genesis.benchmark"],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.efficiency",
+      "metadata": {"unmeasured_receives_zero_credit": true, "not_an_intelligence_claim": true}
+    },
+    {
+      "module_id": "genesis.scorecard",
+      "name": "Genesis System Scorecard",
+      "version": "0.1.0",
+      "purpose": "Keep AI capability, resource efficiency, and immortality research progress as separate evidence-based scores.",
+      "capabilities": ["system_scorecard", "capability_score", "efficiency_score", "mission_progress_score"],
+      "permissions": ["metrics.read", "metrics.write", "tasks.read", "knowledge.read"],
+      "dependencies": ["genesis.ai_score", "genesis.efficiency", "genesis.self_learning", "genesis.task_queue"],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.scorecard",
+      "metadata": {"scores_must_remain_separate": true, "immortality_score_is_not_completion_percentage": true}
+    }
+  ]
+}
