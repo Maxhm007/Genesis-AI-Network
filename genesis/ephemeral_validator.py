@@ -19,6 +19,14 @@ def _git(root: Path, *args: str, check: bool = True) -> subprocess.CompletedProc
     return subprocess.run(["git", *args], cwd=root, text=True, capture_output=True, check=check)
 
 
+def _resolve_main(root: Path) -> str:
+    for ref in ("main", "origin/main"):
+        result = _git(root, "rev-parse", ref, check=False)
+        if result.returncode == 0:
+            return result.stdout.strip()
+    raise RuntimeError("cannot resolve main branch")
+
+
 def _payload(vote: dict) -> bytes:
     canonical = {
         "validator_id": vote["validator_id"],
@@ -39,7 +47,7 @@ def validate(root: Path, validator_id: str, candidate_commit: str) -> dict:
         decision = "reject"
         reason = "local Constitution does not match Genesis Block"
     else:
-        main = _git(root, "rev-parse", "main").stdout.strip()
+        main = _resolve_main(root)
         descendant = _git(root, "merge-base", "--is-ancestor", main, candidate_commit, check=False).returncode == 0
         if not descendant:
             decision = "reject"
@@ -50,7 +58,7 @@ def validate(root: Path, validator_id: str, candidate_commit: str) -> dict:
                 decision = "reject"
                 reason = "candidate changes protected Genesis identity files"
             else:
-                current = _git(root, "branch", "--show-current").stdout.strip() or "main"
+                original = _git(root, "rev-parse", "HEAD").stdout.strip()
                 _git(root, "checkout", "--detach", candidate_commit)
                 try:
                     test = subprocess.run(
@@ -60,7 +68,7 @@ def validate(root: Path, validator_id: str, candidate_commit: str) -> dict:
                         capture_output=True,
                     )
                 finally:
-                    _git(root, "checkout", current)
+                    _git(root, "checkout", "--detach", original)
                 if test.returncode == 0:
                     decision = "approve"
                     reason = "protected files unchanged and full test suite passed"
