@@ -5,7 +5,6 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass
-from datetime import datetime, timezone
 from pathlib import Path
 
 
@@ -64,13 +63,14 @@ class SelfDevelopmentExecutor:
             if not normalized.startswith(ALLOWED_PREFIXES):
                 raise RuntimeError(f"path outside self-development sandbox: {normalized}")
 
-    def next_builtin_improvement(self) -> dict:
-        """Return the next small deterministic improvement candidate.
+    def _tracked_tree_clean(self) -> bool:
+        """Ignore runtime/untracked files but reject tracked source changes."""
+        unstaged = self._git("diff", "--quiet", check=False).returncode == 0
+        staged = self._git("diff", "--cached", "--quiet", check=False).returncode == 0
+        return unstaged and staged
 
-        This bootstrap catalog gives Genesis a real self-development path before
-        a stronger model provider is available. Each item is intentionally small
-        and auditable.
-        """
+    def next_builtin_improvement(self) -> dict:
+        """Return the next small deterministic improvement candidate."""
         candidates = [
             {
                 "title": "Add runtime health snapshot helper",
@@ -160,8 +160,8 @@ class SelfDevelopmentExecutor:
         current_branch = self._git("branch", "--show-current").stdout.strip()
         if current_branch != "main":
             raise RuntimeError(f"self-development must start from main, got {current_branch or 'detached'}")
-        if self._git("status", "--porcelain").stdout.strip():
-            raise RuntimeError("working tree must be clean before self-development")
+        if not self._tracked_tree_clean():
+            raise RuntimeError("tracked working tree must be clean before self-development")
 
         self._git("checkout", "-b", branch)
         try:
