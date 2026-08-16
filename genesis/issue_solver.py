@@ -35,16 +35,19 @@ class RepairAttempt:
 class IssueSolver:
     """Bounded self-healing controller for Genesis software issues.
 
-    The solver diagnoses its own test failures, tries deterministic repair recipes,
-    and can optionally ask a configured Genesis Provider Protocol endpoint for a
-    structured patch. All patches remain restricted to non-protected paths and are
-    executed through SelfDevelopmentExecutor, so they must pass the full test suite
-    before becoming a candidate commit. The solver never merges to main itself.
+    Genesis first tries deterministic repair recipes. For harder failures it can
+    route a structured repair request to either a Genesis Provider Protocol
+    endpoint or GitHub Models when running inside GitHub Actions. Every returned
+    patch is still constrained to non-protected paths and must pass the complete
+    test suite through SelfDevelopmentExecutor before it becomes a candidate.
+    The solver never merges directly to main.
     """
 
     def __init__(self, root: Path, provider_url: str | None = None) -> None:
         self.root = root.resolve()
         self.provider_url = (provider_url or os.environ.get("GENESIS_REPAIR_PROVIDER_URL", "")).rstrip("/")
+        self.github_token = os.environ.get("GITHUB_TOKEN", "").strip()
+        self.github_model = os.environ.get("GENESIS_REPAIR_MODEL", "openai/gpt-4.1").strip()
 
     def run_tests(self) -> tuple[bool, str]:
         proc = subprocess.run(
@@ -87,10 +90,8 @@ class IssueSolver:
                 continue
             original = path.read_text(encoding="utf-8")
             updated = original
-            # Only alter tests that explicitly assert an empty-provider behavior.
             if "waiting_for_provider" in original or '"maintenance"' in original or "'maintenance'" in original:
                 updated = re.sub(r"ProviderRegistry\(\)", "ProviderRegistry(include_bootstrap=False)", updated)
-            # Provider routing tests should not accidentally include bootstrap alongside a fake provider.
             if "fake-provider" in original:
                 updated = re.sub(r"ProviderRegistry\(\)", "ProviderRegistry(include_bootstrap=False)", updated)
             if updated != original:
@@ -104,10 +105,8 @@ class IssueSolver:
             "files": replacements,
         }
 
-    def _provider_proposal(self, diagnosis: Diagnosis) -> dict | None:
-        if not self.provider_url or diagnosis.category == "constitution_integrity":
-            return None
-        prompt = {
+    def _repair_prompt(self, diagnosis: Diagnosis) -> dict:
+        return {
             "task": "Repair the Genesis AI repository test failure with the smallest safe patch.",
             "constraints": {
                 "protected_paths": sorted(PROTECTED_PATHS),
@@ -119,22 +118,85 @@ class IssueSolver:
                     "Do not change the Genesis Constitution or Genesis Block.",
                     "Do not disable, skip, xfail, or weaken tests merely to obtain a pass.",
                     "Prefer fixing production code over changing tests unless the test is demonstrably stale relative to an intentional documented behavior.",
+                    "Do not change workflow permissions, validation quorum, signing rules, or self-development protections.",
                 ],
             },
             "diagnosis": {"category": diagnosis.category, "summary": diagnosis.summary},
             "failure_text": diagnosis.failure_text[-16_000:],
         }
+
+    @staticmethod
+    def _extract_json(raw: str) -> dict:
+        text = raw.strip()
+        if text.startswith("```"):
+            text = re.sub(r"^```(?:json)?\s*", "", text)
+            text = re.sub(r"\s*```$", "", text)
+        return json.loads(text)
+
+    def _http_provider_proposal(self, diagnosis: Diagnosis) -> dict | None:
+        if not self.provider_url:
+            return None
         req = urllib.request.Request(
             self.provider_url + "/reason",
-            data=json.dumps({"prompt": json.dumps(prompt, sort_keys=True)}).encode("utf-8"),
+            data=json.dumps({"prompt": json.dumps(self._repair_prompt(diagnosis), sort_keys=True)}).encode("utf-8"),
             method="POST",
             headers={"Content-Type": "application/json", "User-Agent": "Genesis-AI-Network/0.1"},
         )
         with urllib.request.urlopen(req, timeout=45) as response:
             payload = json.loads(response.read().decode("utf-8"))
         raw = payload.get("response", "")
-        proposal = json.loads(raw) if isinstance(raw, str) else raw
+        proposal = self._extract_json(raw) if isinstance(raw, str) else raw
         return self.validate_proposal(proposal)
+
+    def _github_models_proposal(self, diagnosis: Diagnosis) -> dict | None:
+        if not self.github_token or not self.github_model:
+            return None
+        system = (
+            "You are a bounded software repair specialist inside Genesis AI. "
+            "Return only the requested JSON repair proposal. Never modify protected identity files, "
+            "weaken tests, bypass validation, change signing/quorum rules, or grant new permissions."
+        )
+        body = {
+            "model": self.github_model,
+            "temperature": 0.1,
+            "messages": [
+                {"role": "system", "content": system},
+                {"role": "user", "content": json.dumps(self._repair_prompt(diagnosis), sort_keys=True)},
+            ],
+        }
+        req = urllib.request.Request(
+            "https://models.github.ai/inference/chat/completions",
+            data=json.dumps(body).encode("utf-8"),
+            method="POST",
+            headers={
+                "Accept": "application/vnd.github+json",
+                "Authorization": f"Bearer {self.github_token}",
+                "Content-Type": "application/json",
+                "User-Agent": "Genesis-AI-Network/0.1",
+            },
+        )
+        with urllib.request.urlopen(req, timeout=90) as response:
+            payload = json.loads(response.read().decode("utf-8"))
+        choices = payload.get("choices") or []
+        if not choices:
+            return None
+        raw = choices[0].get("message", {}).get("content", "")
+        if not isinstance(raw, str) or not raw.strip():
+            return None
+        return self.validate_proposal(self._extract_json(raw))
+
+    def _provider_proposal(self, diagnosis: Diagnosis) -> dict | None:
+        if diagnosis.category == "constitution_integrity":
+            return None
+        errors: list[str] = []
+        for provider in (self._http_provider_proposal, self._github_models_proposal):
+            try:
+                proposal = provider(diagnosis)
+                if proposal is not None:
+                    return proposal
+            except Exception as exc:
+                errors.append(f"{provider.__name__}: {exc}")
+        return None
 
     def validate_proposal(self, proposal: dict) -> dict:
         if not isinstance(proposal, dict) or not isinstance(proposal.get("files"), dict):
@@ -168,12 +230,9 @@ class IssueSolver:
 
         proposal = self._deterministic_proposal(diagnosis)
         if proposal is None:
-            try:
-                proposal = self._provider_proposal(diagnosis)
-            except Exception:
-                proposal = None
+            proposal = self._provider_proposal(diagnosis)
         if proposal is None:
-            return RepairAttempt(diagnosis, None, None, "needs_new_capability")
+            return RepairAttempt(diagnosis, None, None, "retry_pending_capability")
 
         proposal = self.validate_proposal(proposal)
         result = SelfDevelopmentExecutor(self.root).execute(proposal)
