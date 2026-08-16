@@ -6,39 +6,53 @@ This file is a **human-readable near-term backlog**. It is not the authority for
 
 ## Immediate priorities
 
-- [ ] Validate the current Application Module integration on the latest `main` head.
+- [ ] Validate the current Application Module and capability-growth module integration on the latest `main` head.
 - [ ] Bootstrap the Android mobile application under `mobile/` and produce the first test APK.
 - [ ] Finish secure signed automatic-update support for Genesis Desktop.
 - [ ] Add persistent Tauri updater signing keys through GitHub Secrets; never commit private signing material.
 - [ ] Improve the Windows desktop UI with live Genesis Core status, Memory, Research, Coding, Security, Network and score views.
 - [ ] Make desktop/mobile clients display the three-score system: AI Capability, Efficiency, and Immortality Research Progress.
-- [ ] Add application build-health checks to the Application Module.
-- [ ] Add application compatibility/version checks between Genesis Core and clients.
 
-## Intelligence and efficiency
+## Intelligence, evaluation and experiments
 
+- [x] Add Evaluation Module foundation with evidence-first scoring and zero credit for unmeasured capability.
+- [x] Add Experiment Module foundation with baseline-versus-candidate keep/reject decisions.
+- [x] Add Resource Module foundation for bounded CPU/memory/disk/battery/network capacity scoring.
+- [x] Add Model Scout Module foundation with sequential discovered → quarantined → tested → validated → trusted → active lifecycle.
 - [ ] Expand system-level benchmarks for reasoning, coding, research, tool use, long-horizon tasks and memory.
-- [ ] Measure capability per compute unit and capability per dollar using real task outcomes.
-- [ ] Improve Intelligence Router provider selection using observed quality, latency, resource cost and task type.
-- [ ] Add automatic model discovery → quarantine → benchmark → validation → activation workflow.
-- [ ] Keep unmeasured capabilities at zero evidence credit rather than estimating them optimistically.
+- [ ] Persist experiment hypotheses, baseline results, candidate results and decisions.
+- [ ] Feed measured provider quality/latency/resource telemetry into Intelligence Router profiles.
+- [ ] Add real local OS telemetry collection without requiring privileged access.
+- [ ] Add model/provider discovery feeds with license verification and benchmark tournaments.
+- [ ] Keep activation separate from discovery: no model becomes active without required validation evidence.
 
-## Memory and learning
+## Evidence, memory and learning
 
+- [x] Add Evidence Module foundation with candidate/reviewed/validated/rejected/contradicted states.
+- [ ] Add persistent evidence graph storage linking claims, sources, supporting evidence and contradictions.
+- [ ] Connect research reviews and validated lessons to Evidence records.
 - [ ] Add hierarchical memory compression for long-lived Genesis nodes.
 - [ ] Add memory conflict detection and supersession/versioning.
 - [ ] Improve retrieval using semantic similarity while keeping provenance and validation state visible.
 - [ ] Convert validated successful strategies into procedural memory.
-- [ ] Prevent candidate/unvalidated memories from entering normal trusted reasoning by default.
 
 ## GDEN / decentralization
 
+- [x] Add Peer Compute Module foundation with bounded work leases and content-hash result verification.
 - [ ] Implement peer task advertisement and capability discovery.
-- [ ] Add bounded remote task leasing with owner-controlled resource policy.
-- [ ] Add result verification, hashes and provenance for peer-executed work.
+- [ ] Add owner-controlled resource offers/bids before remote task leasing.
+- [ ] Transport signed work leases over authenticated GDEN peer connections.
+- [ ] Require independent verification or reproducible checks before trusting peer-executed results.
 - [ ] Design persistent independent validator identities and key rotation/revocation.
 - [ ] Implement replicated state synchronization and conflict handling.
 - [ ] Design Sybil resistance/reputation without requiring cryptocurrency initially.
+
+## Applications
+
+- [ ] Add application build-health checks to the Application Module.
+- [ ] Add application compatibility/version checks between Genesis Core and clients.
+- [ ] Publish a stable Genesis Desktop release after alpha validation.
+- [ ] Publish a downloadable Android APK after security/build validation.
 
 ## Research mission
 
@@ -49,8 +63,6 @@ This file is a **human-readable near-term backlog**. It is not the authority for
 
 ## Product and sustainability
 
-- [ ] Publish a stable Genesis Desktop release after alpha validation.
-- [ ] Publish a downloadable Android APK after security/build validation.
 - [ ] Create a public status/download website using low-cost/free hosting first.
 - [ ] Add opt-in telemetry only if privacy-preserving and explicitly user-controlled.
 - [ ] Define a future Genesis Developer / hosted-node business model without making the open-source core dependent on paid services.
