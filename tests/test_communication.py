@@ -4,6 +4,16 @@ from genesis.communication import GenesisCommunicator
 from genesis.providers import ProviderRegistry
 
 
+class FakeReasoningProvider:
+    name = "fake-reasoning"
+
+    def available(self) -> bool:
+        return True
+
+    def reason(self, prompt: str) -> str:
+        return "trained-provider-response"
+
+
 def test_genesis_replies_and_reports_capabilities(tmp_path: Path):
     (tmp_path / "genesis").mkdir()
     for name in ("communication.py", "selfdev.py", "promotion.py"):
@@ -15,6 +25,15 @@ def test_genesis_replies_and_reports_capabilities(tmp_path: Path):
     assert result["provider"] == "genesis-bootstrap"
     assert result["genesis_response"]
     assert result["capability_summary"]["max_score"] == 100
+
+
+def test_trained_provider_is_preferred_over_bootstrap(tmp_path: Path):
+    registry = ProviderRegistry(include_bootstrap=True)
+    registry.register(FakeReasoningProvider())
+    communicator = GenesisCommunicator(tmp_path, registry)
+    result = communicator.reply("tester", "Hello")
+    assert result["provider"] == "fake-reasoning"
+    assert result["genesis_response"] == "trained-provider-response"
 
 
 def test_empty_message_is_rejected(tmp_path: Path):
