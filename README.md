@@ -6,7 +6,7 @@
 [![Proactive Development](https://github.com/Maxhm007/Genesis-AI-Network/actions/workflows/proactive-development.yml/badge.svg)](https://github.com/Maxhm007/Genesis-AI-Network/actions/workflows/proactive-development.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-**Current release:** `v0.1.0 — Genesis Foundation`
+**Current stable release:** `v0.1.0 — Genesis Foundation`
 
 Genesis AI Network is an open-source experimental AI system whose permanent mission is:
 
@@ -21,7 +21,7 @@ Genesis is being built as a continuously operating research and development netw
 - search for scientific and cross-domain developments relevant to physical human immortality;
 - turn useful discoveries into persistent research tasks;
 - learn from validated experience without treating generated guesses as truth;
-- measure itself against a moving competitive-AI benchmark reference;
+- measure itself against moving competitive-AI references and efficiency evidence;
 - identify capability gaps and create bounded candidate improvements;
 - validate software changes before promotion;
 - operate through replaceable intelligence providers;
@@ -38,12 +38,12 @@ Genesis is being built as a continuously operating research and development netw
                            │
      ┌──────────────┬──────┴──────┬──────────────┐
      │              │             │              │
- Research      Self-Learning   Self-Dev        GDEN
+ Research      Self-Learning    Coding          GDEN
      │              │             │              │
- Immortality    Candidate      Candidate      P2P identity
-    Lens          Lessons        Code        + signed state
-     │              │             │              │
-     └──────────────┴──────┬──────┴──────────────┘
+ Immortality      Memory       Security      P2P identity
+    Lens            │             │          + signed state
+     │              └──────┬──────┘              │
+     └─────────────────────┼─────────────────────┘
                            │
                   Independent Validation
                            │
@@ -57,32 +57,42 @@ Genesis currently includes:
 - **Constitution verification** and a canonical Genesis Block.
 - **Continuous proactive workflow** with scheduled research and development cycles.
 - **Replaceable reasoning providers**, with a bootstrap fallback and a validated local Qwen provider path.
+- **Resource-aware Intelligence Router** for selecting suitable providers.
 - **Task-aware multi-agent orchestration** for research, engineering, review, validation and network work.
 - **Everything-to-Immortality Lens** that evaluates developments as direct, indirect, speculative or unknown rather than forcing unsupported connections.
 - **Persistent research tasks** and bounded research review.
-- **Self-Learning Module** that records candidate lessons with provenance and requires validation before treating them as trusted knowledge.
-- **Competitive AI Score** that creates update pressure when Genesis is below its configured moving frontier reference. Unmeasured frontier abilities receive no frontier credit.
-- **Candidate → test → independent validator quorum → promotion** software evolution.
+- **Self-Learning Module** with candidate/validated lesson separation.
+- **Memory Module** with semantic, episodic, procedural and policy/context memory.
+- **Coding Module** for bounded provider-neutral software engineering candidates.
+- **Security Module** for repository inspection and candidate structural review.
+- **Application Module** for bounded desktop/mobile application development.
+- **AI Capability, Efficiency and Immortality Research Progress scoring** with evidence-based credit.
+- **Candidate → test → Security → independent validator quorum → promotion** software evolution.
 - **Cryptographic GDEN node identity**, signed peer handshakes, owner-controlled contribution policy and tamper-evident evolution history.
 - **Persistent runtime-state restoration** between autonomous cycles.
+- **Windows Desktop alpha packaging**, including an installable `.exe` release artifact and SHA-256 digest.
 
-## Competitive AI Score
+## Measurement
 
 Genesis does **not** award itself a high score merely because its software is healthy.
 
-The score is a moving engineering measure against configured frontier benchmark families plus autonomy, research, decentralization and validation.
+The system separates three measurements:
 
-- Low score → high development pressure.
-- Unmeasured benchmark family → little or no competitive credit.
-- Score increases only from recorded evidence.
-- `99/100` is reserved for broadly verified frontier-or-better performance across the defined benchmark suite plus continuous autonomy, research, resilience and safety.
+1. **AI Capability Score** — measured capability against configured competitive/frontier references.
+2. **Efficiency Score** — useful measured capability relative to compute/resource/cost evidence.
+3. **Immortality Research Progress Score** — research/evidence-pipeline maturity, not a percentage claim that physical immortality has been achieved.
+
+- Low measured capability creates development pressure.
+- Unmeasured capability receives little or no evidence credit.
+- Scores increase only from recorded evidence.
+- `99/100` AI Capability is reserved for broadly verified frontier-or-better performance across the defined suite plus continuous autonomy, research, resilience and safety.
 - `100/100` is intentionally not assigned.
 
-This is **not** a consciousness score and is not proof of superiority to every human in every domain.
+These are engineering/research measurements, not consciousness scores.
 
-## Self-learning
+## Self-learning and memory
 
-Genesis self-learning is deliberately bounded:
+Genesis learning is deliberately bounded:
 
 ```text
 Experience / Research / Benchmark / Failure / Peer Feedback
@@ -98,6 +108,8 @@ Experience / Research / Benchmark / Failure / Peer Feedback
                 Validate     Reject
                     ↓
                Trusted Memory
+                    ↓
+            Relevant retrieval
 ```
 
 The system must not promote its own generated statement into validated scientific knowledge simply because a model produced it.
@@ -119,7 +131,7 @@ Current GDEN foundations include:
 
 ### Important status
 
-Genesis does **not** currently claim to have a complete blockchain consensus network or cryptocurrency. Multi-peer state replication and decentralized consensus remain active development targets.
+Genesis does **not** currently claim to have a complete blockchain consensus network or cryptocurrency. Peer task execution, replicated state and decentralized consensus remain development targets.
 
 ## Quick start
 
@@ -177,7 +189,7 @@ python -m pytest -q
 ```text
 Verify Constitution
       ↓
-Restore persistent state
+Restore persistent state + validated memory
       ↓
 Start available validated intelligence provider
       ↓
@@ -185,19 +197,19 @@ Refresh competitive reference
       ↓
 Search scientific + cross-domain sources
       ↓
-Apply immortality-relevance lens
-      ↓
 Create/continue persistent tasks
       ↓
-Self-learn candidate lessons
+Self-learn + retrieve validated memory
       ↓
-Measure Competitive AI Score
+Measure capability and efficiency
       ↓
-Choose weakest bounded priority
+Choose bounded priority
       ↓
-Create candidate improvement
+Coding / Application candidate
       ↓
-Tests + independent validation
+Tests + Security review
+      ↓
+Independent validator quorum
       ↓
 Promote exact validated candidate
       ↺
@@ -216,62 +228,36 @@ Genesis is not designed as an unconstrained single-objective optimizer. The perm
 - node-owner control;
 - reversible, bounded software evolution.
 
-Protected identity files cannot be silently rewritten by the self-development system.
+Protected identity files cannot be silently rewritten by the self-development system. Application development may modify bounded `desktop/` and `mobile/` source candidates but does not receive authority over GitHub release workflows or signing secrets.
 
 ## Repository map
 
 | Area | Purpose |
 |---|---|
+| `README.md` | Public introduction, setup and overview |
+| `PROJECT_SUMMARY.md` | Current architecture/status snapshot |
+| `TODO.md` | Human-readable near-term backlog; not runtime authority |
+| `ROADMAP.md` | Major product, intelligence, network and scientific milestones |
+| `CHANGELOG.md` | Permanent notable-change and release history |
 | `GENESIS_CONSTITUTION.md` | Permanent mission and constraints |
 | `GENESIS_BLOCK.json` | Canonical initial network record |
 | `genesis/` | Genesis runtime modules |
 | `genesis/modules/` | Modular intelligence architecture components |
-| `config/` | Module, provider and research configuration |
+| `config/` | Module, provider, application and research configuration |
+| `desktop/` | Genesis Desktop application source |
+| `mobile/` | Genesis Mobile application source when bootstrapped |
 | `scripts/` | Autonomous, repair, research and validation tools |
 | `tests/` | Regression and architecture tests |
-| `.github/workflows/` | Autonomous development and validation workflows |
+| `.github/workflows/` | Autonomous development, validation and release workflows |
 | `web/` | Browser communication UI |
 
-## Roadmap
+## Roadmap and backlog
 
-### Genesis Foundation — v0.1
+The canonical human-readable roadmap is [`ROADMAP.md`](ROADMAP.md). Near-term work is summarized in [`TODO.md`](TODO.md).
 
-- [x] Constitution + Genesis Block
-- [x] autonomous runtime foundation
-- [x] modular AI team
-- [x] replaceable provider architecture
-- [x] bounded self-development
-- [x] independent validator gate
-- [x] persistent task queue
-- [x] self-learning candidate memory
-- [x] immortality relevance scanning
-- [x] competitive AI scoring foundation
-- [x] cryptographic GDEN identity and signed peer handshake
+Neither file authorizes autonomous execution. The persistent Genesis task queue remains the operational source of truth, and candidate changes still require the configured security/validation/promotion path.
 
-### Decentralized Network
-
-- [ ] authenticated peer discovery beyond manually configured peers
-- [ ] content-addressed state replication
-- [ ] multi-peer ledger reconciliation
-- [ ] independent persistent validator identities
-- [ ] decentralized task distribution
-- [ ] peer contribution reputation/provenance
-- [ ] consensus protocol for validated network state
-
-### Scientific Intelligence
-
-- [ ] broader primary-source scientific feeds
-- [ ] evidence graph and citation-level provenance
-- [ ] reproducible scientific benchmark suites
-- [ ] genomics/geroscience specialist evaluation
-- [ ] validated experimental hypothesis pipeline
-
-### Competitive Intelligence
-
-- [ ] run comparable frontier benchmark suites
-- [ ] continuously refresh competitive references
-- [ ] provider/model scouting and benchmark tournaments
-- [ ] evidence-backed score history
+For a concise current-state snapshot, see [`PROJECT_SUMMARY.md`](PROJECT_SUMMARY.md). For historical shipped changes, see [`CHANGELOG.md`](CHANGELOG.md).
 
 ## Contributing
 
