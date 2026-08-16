@@ -14,7 +14,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: write
 
 env:
   PYTHONPATH: ${{ github.workspace }}
@@ -27,6 +26,10 @@ jobs:
   develop:
     runs-on: ubuntu-latest
     timeout-minutes: 20
+    outputs:
+      has_candidate: ${{ steps.candidate.outputs.has_candidate }}
+      candidate_branch: ${{ steps.candidate.outputs.candidate_branch }}
+      candidate_sha: ${{ steps.candidate.outputs.candidate_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -43,6 +46,98 @@ jobs:
           git config user.name "Genesis AI"
           git config user.email "genesis-ai@users.noreply.github.com"
       - name: Inspect and develop one bounded improvement
-        env:
-          GH_TOKEN: ${{ github.token }}
         run: python scripts/proactive_dev.py
+      - name: Resolve generated candidate
+        id: candidate
+        shell: bash
+        run: |
+          branch=$(git branch --show-current)
+          if [[ "$branch" != genesis/candidate-* ]]; then
+            echo 'has_candidate=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo 'has_candidate=true' >> "$GITHUB_OUTPUT"
+          echo "candidate_branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  validator_a:
+    needs: develop
+    if: needs.develop.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.develop.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite A
+        run: python -m pytest -q
+      - name: Sign validator A approval
+        run: python genesis/ephemeral_validator.py --validator-id proactive-validator-a --candidate ${{ needs.develop.outputs.candidate_sha }} --output validator-a.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proactive-validator-a
+          path: validator-a.json
+
+  validator_b:
+    needs: develop
+    if: needs.develop.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.develop.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite B
+        run: python -m pytest -q
+      - name: Sign validator B approval
+        run: python genesis/ephemeral_validator.py --validator-id proactive-validator-b --candidate ${{ needs.develop.outputs.candidate_sha }} --output validator-b.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: proactive-validator-b
+          path: validator-b.json
+
+  promote:
+    needs: [develop, validator_a, validator_b]
+    if: needs.develop.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: proactive-validator-a
+          path: votes/a
+      - uses: actions/download-artifact@v4
+        with:
+          name: proactive-validator-b
+          path: votes/b
+      - name: Verify independent signed quorum
+        run: python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
+      - name: Protect identity and promote exact candidate
+        shell: bash
+        run: |
+          candidate='${{ needs.develop.outputs.candidate_sha }}'
+          branch='${{ needs.develop.outputs.candidate_branch }}'
+          git fetch origin main "$branch"
+          main_sha=$(git rev-parse origin/main)
+          test "$(git rev-parse origin/$branch)" = "$candidate"
+          git merge-base --is-ancestor "$main_sha" "$candidate"
+          if git diff --name-only "$main_sha..$candidate" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
+            echo 'Protected Genesis identity file changed' >&2
+            exit 1
+          fi
+          git push origin "$candidate:refs/heads/main"
