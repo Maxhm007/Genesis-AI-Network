@@ -1,0 +1,17 @@
+# Genesis local runtime state
+state/
+*.key
+*.pem
+
+# Python
+__pycache__/
+*.py[cod]
+.pytest_cache/
+
+# Local environments
+.venv/
+venv/
+
+# Local logs/artifacts
+*.log
+reasoning-*.json
