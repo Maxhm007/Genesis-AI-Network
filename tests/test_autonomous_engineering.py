@@ -25,9 +25,14 @@ def git(root: Path, *args: str) -> None:
 def make_repo(tmp_path: Path) -> None:
     (tmp_path / "genesis").mkdir()
     (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
     (tmp_path / "GENESIS_CONSTITUTION.md").write_text("constitution\n")
     (tmp_path / "GENESIS_BLOCK.json").write_text("{}\n")
     (tmp_path / "scripts" / "secret_guard.py").write_text("# guard\n")
+    # Self-development is intentionally fail-closed: a candidate is only
+    # committable when an actual test suite exists and passes. Keep the fixture
+    # representative rather than weakening that production invariant.
+    (tmp_path / "tests" / "test_baseline.py").write_text("def test_baseline():\n    assert True\n")
     git(tmp_path, "init", "-b", "main")
     git(tmp_path, "config", "user.name", "Test")
     git(tmp_path, "config", "user.email", "test@example.com")
