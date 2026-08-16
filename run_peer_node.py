@@ -82,13 +82,17 @@ def main() -> None:
             "state_root": ledger.head(),
         }
 
-    def handshake() -> dict:
+    def handshake(challenge: str | None = None) -> dict:
         return make_advertisement(
             identity,
             constitution_hash,
             capabilities,
             policy,
             state_root=ledger.head(),
+            # Modern GDEN clients supply an unpredictable challenge. Keeping a
+            # random nonce when absent preserves diagnostic/manual compatibility,
+            # but GDENPeerClient will trust only a challenge-bound response.
+            nonce=challenge,
         )
 
     server = PeerStatusServer(args.host, args.port, status, handshake_factory=handshake)
