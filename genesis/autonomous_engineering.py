@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from dataclasses import asdict
 from pathlib import Path
 
@@ -32,6 +33,9 @@ class AutonomousEngineeringLoop:
         self.queue = PersistentTaskQueue(self.root / "runtime" / "genesis_tasks.sqlite3")
         self.security = SecurityModule(self.root)
         self.coding = CodingModule(self.root, self.providers)
+
+    def _git(self, *args: str) -> None:
+        subprocess.run(["git", *args], cwd=self.root, check=False, capture_output=True, text=True)
 
     def _record_security_tasks(self, report: dict) -> list[str]:
         created: list[str] = []
@@ -77,12 +81,8 @@ class AutonomousEngineeringLoop:
             return result
 
         try:
-            if task.state == "new":
-                self.queue.transition(task.task_id, "assigned", module_id="genesis.coding")
-            elif task.state == "blocked":
-                self.queue.transition(task.task_id, "assigned", module_id="genesis.coding")
+            self.queue.transition(task.task_id, "assigned", module_id="genesis.coding")
             self.queue.transition(task.task_id, "running", module_id="genesis.coding")
-
             context_paths = list(task.payload.get("context_paths", []) or [])
             proposal = self.coding.propose(task.objective, context_paths=context_paths)
             candidate = self.coding.execute_candidate(proposal)
@@ -95,7 +95,10 @@ class AutonomousEngineeringLoop:
                 result["candidate_security"] = candidate_security
                 if candidate_security["status"] != "pass":
                     result["coding_status"] = "candidate_rejected_by_security"
-                self.queue.transition(task.task_id, "review", module_id="genesis.coding")
+                    self._git("checkout", "main")
+                    self.queue.transition(task.task_id, "blocked", module_id="genesis.security")
+                else:
+                    self.queue.transition(task.task_id, "review", module_id="genesis.coding")
             else:
                 self.queue.transition(task.task_id, "blocked", module_id="genesis.coding")
         except Exception as exc:
