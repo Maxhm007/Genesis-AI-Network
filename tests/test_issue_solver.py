@@ -41,6 +41,22 @@ def test_repair_proposal_cannot_escape_sandbox(tmp_path: Path):
         )
 
 
+def test_repair_proposal_rejects_allowed_prefix_traversal(tmp_path: Path):
+    solver = IssueSolver(tmp_path)
+    for path in (
+        "genesis/../GENESIS_CONSTITUTION.md",
+        "genesis/../.git/config",
+        "tests/../../outside.py",
+    ):
+        with pytest.raises(ValueError, match="not allowed"):
+            solver.validate_proposal(
+                {
+                    "title": "traversal attempt",
+                    "files": {path: "VALUE = 1\n"},
+                }
+            )
+
+
 def test_python_repair_must_parse(tmp_path: Path):
     solver = IssueSolver(tmp_path)
     with pytest.raises(SyntaxError):
