@@ -68,23 +68,27 @@ class ProactiveDevelopmentLoop:
         return sorted(checks, key=lambda item: item["priority"], reverse=True)
 
     def plan_next(self) -> DevelopmentPlan | None:
-        # Only known bounded bootstrap capabilities are executed directly.
-        bounded_missing = [
-            item for item in self.inspect()
-            if not item["present"] and not item["capability"].startswith("measured:")
-        ]
-        if not bounded_missing:
+        # Measured gaps can guide future work, but only a concrete bounded
+        # proposal from the approved bootstrap catalog may execute automatically.
+        proposal = self.executor.next_builtin_improvement()
+        title = str(proposal.get("title", ""))
+        if title == "Record self-development idle state":
             return None
 
-        proposal = self.executor.next_builtin_improvement()
-        title = str(proposal.get("title", "Genesis bounded improvement"))
+        primary_files = list(dict(proposal.get("files", {})))
+        if not primary_files:
+            return None
+        primary_path = self.root / primary_files[0]
+        if primary_path.exists():
+            return None
+
         measured_gaps = self.capability_report()["priority_gaps"][:3]
         return DevelopmentPlan(
-            title=title,
+            title=title or "Genesis bounded improvement",
             rationale=(
-                "Genesis detected a missing bounded runtime capability during "
-                "self-inspection. Current measured gaps: " +
-                ", ".join(item["capability"] for item in measured_gaps)
+                "Genesis detected an executable bounded runtime improvement during "
+                "self-inspection. Current measured gaps: "
+                + ", ".join(item["capability"] for item in measured_gaps)
             ),
             proposal=proposal,
         )
