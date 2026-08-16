@@ -4,34 +4,82 @@ on:
   push:
     branches: [main]
     paths:
-      - 'scripts/local_repair_provider.py'
+      - 'scripts/local_reasoning_provider.py'
+      - 'scripts/benchmark_reasoning_provider.py'
+      - 'genesis/provider_lifecycle.py'
+      - 'config/provider_candidates.json'
       - '.github/workflows/genesis-reasoning-smoke.yml'
   workflow_dispatch:
 
 permissions:
   contents: read
 
+env:
+  PYTHONPATH: ${{ github.workspace }}
+
 jobs:
-  reasoning:
+  benchmark_a:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 25
     steps:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Install local open-weight reasoning runtime
+      - name: Install local reasoning runtime
         run: |
           python -m pip install --upgrade pip
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install 'transformers>=4.48,<5' safetensors
-      - name: Verify Genesis local repair model
+          pip install 'transformers>=4.51,<5' safetensors
+      - name: Independent reasoning benchmark A
+        run: python scripts/benchmark_reasoning_provider.py --output reasoning-a.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reasoning-benchmark-a
+          path: reasoning-a.json
+
+  benchmark_b:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install local reasoning runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors
+      - name: Independent reasoning benchmark B
+        run: python scripts/benchmark_reasoning_provider.py --output reasoning-b.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: reasoning-benchmark-b
+          path: reasoning-b.json
+
+  quorum:
+    needs: [benchmark_a, benchmark_b]
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/download-artifact@v4
+        with:
+          name: reasoning-benchmark-a
+          path: votes/a
+      - uses: actions/download-artifact@v4
+        with:
+          name: reasoning-benchmark-b
+          path: votes/b
+      - name: Verify both independent benchmarks agree
         run: |
           python - <<'PY'
-          from scripts.local_repair_provider import LocalRepairModel, DEFAULT_MODEL
-          model = LocalRepairModel(DEFAULT_MODEL)
-          response = model.reason('{"task":"Return a tiny JSON repair proposal for a hypothetical one-line Python bug.","failure_text":"tests/test_demo.py: assert 1 == 2"}')
-          print(response[:1000])
-          assert isinstance(response, str) and response.strip()
-          print('GENESIS_LOCAL_REASONING=PASS')
+          import json
+          from pathlib import Path
+          a = json.loads(Path('votes/a/reasoning-a.json').read_text())
+          b = json.loads(Path('votes/b/reasoning-b.json').read_text())
+          assert a['model_id'] == b['model_id'] == 'Qwen/Qwen3-0.6B'
+          assert a['passed'] is True and b['passed'] is True
+          assert a['score'] == a['max_score']
+          assert b['score'] == b['max_score']
+          print('GENESIS_REASONING_PROVIDER_QUORUM=PASS')
           PY
