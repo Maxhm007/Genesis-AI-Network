@@ -40,29 +40,21 @@ jobs:
             echo 'has_candidate=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-
-          source_branch=${ref#origin/}
           source_sha=$(git rev-parse "$ref")
           main_sha=$(git rev-parse main)
           base=$(git merge-base "$main_sha" "$source_sha")
-
-          # Candidate content may be old because workflow-token pushes do not
-          # trigger chained workflows. Replay only the candidate commits after
-          # their common base onto the current main, then validate that exact SHA.
           git checkout -B genesis-staged "$source_sha"
           if [ "$base" != "$main_sha" ]; then
             git rebase --onto "$main_sha" "$base" genesis-staged
           fi
           staged_sha=$(git rev-parse HEAD)
           staged_branch="genesis/staged-${GITHUB_RUN_ID}"
-
           git merge-base --is-ancestor "$main_sha" "$staged_sha"
           if git diff --name-only "$main_sha..$staged_sha" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
             echo 'Protected Genesis identity file changed' >&2
             exit 1
           fi
           git push origin "$staged_sha:refs/heads/$staged_branch"
-
           echo "candidate_branch=$staged_branch" >> "$GITHUB_OUTPUT"
           echo "candidate_sha=$staged_sha" >> "$GITHUB_OUTPUT"
           echo 'has_candidate=true' >> "$GITHUB_OUTPUT"
@@ -123,6 +115,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - run: pip install -r requirements.txt
       - uses: actions/download-artifact@v4
         with:
           name: candidate-validator-a
