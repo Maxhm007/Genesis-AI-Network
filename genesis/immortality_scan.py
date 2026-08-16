@@ -9,6 +9,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from .modules.task_queue import PersistentTaskQueue
 from .research import ResearchEngine, ResearchItem
 
 
@@ -62,12 +63,7 @@ class ImmortalityAssessment:
 
 
 class ImmortalityScanner:
-    """Broad discovery with an explicit physical-human-immortality relevance lens.
-
-    Every item may be considered, but Genesis must not force a connection.
-    Low-scoring material remains unknown/weak rather than being converted into
-    a mission claim. All discoveries remain candidate evidence until reviewed.
-    """
+    """Broad discovery with an explicit physical-human-immortality relevance lens."""
 
     def __init__(self, root: Path, timeout: float = 12.0) -> None:
         self.root = root.resolve()
@@ -114,11 +110,10 @@ class ImmortalityScanner:
         return [ScanItem(i.source, i.title, i.url, i.published, i.summary) for i in items]
 
     def fetch_rss(self, source: str, url: str, limit: int = 10) -> list[ScanItem]:
-        request = urllib.request.Request(url, headers={"User-Agent": "Genesis-AI-Network/0.2"})
+        request = urllib.request.Request(url, headers={"User-Agent": "Genesis-AI-Network/0.3"})
         with urllib.request.urlopen(request, timeout=self.timeout) as response:
             root = ET.fromstring(response.read())
         output: list[ScanItem] = []
-        # Supports RSS item and Atom entry without third-party dependencies.
         nodes = root.findall(".//item") or root.findall("{http://www.w3.org/2005/Atom}entry")
         for node in nodes[: max(1, min(limit, 30))]:
             def value(*names: str) -> str:
@@ -137,6 +132,41 @@ class ImmortalityScanner:
                     link = atom_link.attrib.get("href", "")
             output.append(ScanItem(source, title, link or url, published, summary))
         return output
+
+    def queue_priority_tasks(self, assessments: list[ImmortalityAssessment]) -> dict[str, int]:
+        queue = PersistentTaskQueue(self.root / "runtime" / "genesis_tasks.sqlite3")
+        created = 0
+        existing = 0
+        for item in assessments:
+            if item.relevance_score < 5:
+                continue
+            priority = min(100, 50 + item.relevance_score * 5)
+            objective = (
+                "Investigate this candidate development for a defensible pathway to continuous physical human immortality: "
+                + item.title
+            )
+            _, was_created = queue.create_unique(
+                "immortality-scan:" + item.url,
+                objective,
+                module_id="genesis.research",
+                priority=priority,
+                payload={
+                    "task_type": "immortality_research",
+                    "source": item.source,
+                    "title": item.title,
+                    "url": item.url,
+                    "published": item.published,
+                    "relevance_score": item.relevance_score,
+                    "relevance": item.relevance,
+                    "domains": list(item.domains),
+                    "pathway_hypothesis": item.pathway,
+                    "evidence_status": "candidate",
+                    "required_next_stage": "multi_agent_review",
+                },
+            )
+            created += int(was_created)
+            existing += int(not was_created)
+        return {"created": created, "already_present": existing}
 
     def scan(self, per_source: int = 8) -> dict:
         discovered: list[ScanItem] = []
@@ -159,6 +189,8 @@ class ImmortalityScanner:
 
         assessments = [self.assess(item) for item in discovered]
         assessments.sort(key=lambda item: (-item.relevance_score, item.source, item.title))
+        priority = [item for item in assessments if item.relevance_score >= 5][:20]
+        task_result = self.queue_priority_tasks(priority)
         created_at = datetime.now(timezone.utc).isoformat()
         payload = {
             "created_at": created_at,
@@ -167,7 +199,8 @@ class ImmortalityScanner:
             "sources_checked": sorted({item.source for item in discovered}),
             "errors": errors,
             "items": [asdict(item) for item in assessments],
-            "priority_items": [asdict(item) for item in assessments if item.relevance_score >= 5][:20],
+            "priority_items": [asdict(item) for item in priority],
+            "persistent_tasks": task_result,
         }
         runtime = self.root / "runtime"
         runtime.mkdir(parents=True, exist_ok=True)
