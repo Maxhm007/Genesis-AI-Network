@@ -40,7 +40,14 @@ class ModuleRegistry:
     @classmethod
     def from_default_config(cls, root: str | Path) -> "ModuleRegistry":
         registry = cls()
-        registry.load_file(Path(root) / "config" / "modules.json")
+        config_root = Path(root) / "config"
+        registry.load_file(config_root / "modules.json")
+        # Small extension manifests keep the core registry reviewable while
+        # allowing validated capability families to be added independently.
+        extension_dir = config_root / "modules.d"
+        if extension_dir.exists():
+            for path in sorted(extension_dir.glob("*.json")):
+                registry.load_file(path)
         return registry
 
     def capability_owners(self, capability: str) -> list[str]:
