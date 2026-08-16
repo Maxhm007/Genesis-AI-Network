@@ -10,6 +10,7 @@ on:
       - 'genesis/scorecard.py'
       - 'genesis/efficiency.py'
       - 'genesis/intelligence_router.py'
+      - 'genesis/memory.py'
       - 'genesis/competitive_reference.py'
       - 'genesis/immortality_scan.py'
       - 'genesis/research_tasks.py'
@@ -27,6 +28,7 @@ on:
       - 'scripts/immortality_scan.py'
       - 'scripts/research_task_worker.py'
       - 'scripts/self_learn.py'
+      - 'scripts/memory_sync.py'
       - 'scripts/autonomous_engineering.py'
       - 'scripts/system_scorecard.py'
       - 'scripts/competitive_reference_monitor.py'
@@ -35,6 +37,7 @@ on:
       - 'tests/test_scorecard.py'
       - 'tests/test_efficiency.py'
       - 'tests/test_intelligence_router.py'
+      - 'tests/test_memory.py'
       - 'tests/test_immortality_scan.py'
       - 'tests/test_task_queue.py'
       - 'tests/test_self_learning.py'
@@ -83,6 +86,8 @@ jobs:
             runtime/genesis_tasks.sqlite3
             runtime/self_learning.sqlite3
             runtime/self_learning_status.json
+            runtime/memory.sqlite3
+            runtime/memory_status.json
             runtime/ai_score_history.jsonl
             runtime/efficiency.jsonl
             runtime/research_reviews/
@@ -138,6 +143,8 @@ jobs:
         run: python scripts/research_task_worker.py
       - name: Run bounded self-learning pass
         run: python scripts/self_learn.py
+      - name: Refresh validated long-term memory
+        run: python scripts/memory_sync.py
       - name: Configure Genesis Git identity
         run: |
           git config user.name "Genesis AI"
@@ -155,7 +162,7 @@ jobs:
           fi
       - name: Generate capability efficiency and mission scorecard
         run: python scripts/system_scorecard.py
-      - name: Preserve scan score task learning security coding and efficiency evidence
+      - name: Preserve scan score task learning memory security coding and efficiency evidence
         uses: actions/upload-artifact@v4
         with:
           name: genesis-autonomous-evidence-${{ github.run_id }}
