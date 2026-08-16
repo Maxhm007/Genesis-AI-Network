@@ -2,17 +2,11 @@
   "version": 1,
   "rss": [
     {
-      "name": "NASA JPL News",
-      "url": "https://www.jpl.nasa.gov/feeds/news/",
-      "enabled": true,
-      "domains": ["space", "robotics", "energy", "materials", "computing", "planetary_survival"]
-    },
-    {
       "name": "NASA CNEOS",
       "url": "https://cneos.jpl.nasa.gov/feed/news.xml",
       "enabled": true,
       "domains": ["planetary_defense", "space", "risk", "long_term_survival"]
     }
   ],
-  "notes": "Europe PMC scientific discovery is built into genesis.immortality_scan. Sources are read-only; findings remain candidate evidence. Add broad reputable feeds over time without forcing an immortality connection."
+  "notes": "Europe PMC scientific discovery is built into genesis.immortality_scan. Sources are read-only; findings remain candidate evidence. Add broad reputable feeds over time only after live availability checks, without forcing an immortality connection."
 }
