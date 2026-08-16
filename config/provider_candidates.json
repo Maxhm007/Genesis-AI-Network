@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "providers": [
+    {
+      "provider_id": "qwen3-0.6b-local",
+      "provider_type": "local-open-weight",
+      "model_id": "Qwen/Qwen3-0.6B",
+      "state": "QUARANTINED",
+      "source": "https://huggingface.co/Qwen/Qwen3-0.6B",
+      "license": "apache-2.0",
+      "capabilities": [
+        "advanced_reasoning",
+        "planning",
+        "instruction_following"
+      ],
+      "evidence": [
+        {
+          "kind": "metadata_review",
+          "result": "candidate accepted for sandbox benchmark only",
+          "notes": "Open-weight candidate; does not define Genesis identity and is not trusted or active yet."
+        }
+      ],
+      "metadata": {
+        "trust_remote_code": false,
+        "runtime": "transformers-cpu",
+        "activation_requires_independent_benchmark": true
+      }
+    }
+  ]
+}
