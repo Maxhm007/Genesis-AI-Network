@@ -5,7 +5,7 @@
       "provider_id": "qwen3-0.6b-local",
       "provider_type": "local-open-weight",
       "model_id": "Qwen/Qwen3-0.6B",
-      "state": "QUARANTINED",
+      "state": "ACTIVE",
       "source": "https://huggingface.co/Qwen/Qwen3-0.6B",
       "license": "apache-2.0",
       "capabilities": [
@@ -16,14 +16,50 @@
       "evidence": [
         {
           "kind": "metadata_review",
-          "result": "candidate accepted for sandbox benchmark only",
-          "notes": "Open-weight candidate; does not define Genesis identity and is not trusted or active yet."
+          "state": "QUARANTINED",
+          "result": "pass",
+          "notes": "Open-weight candidate; Genesis identity remains provider-independent."
+        },
+        {
+          "kind": "sandbox_benchmark",
+          "state": "TESTED",
+          "result": "pass",
+          "workflow_run": 31959538090,
+          "runner": "benchmark_a",
+          "artifact_digest": "sha256:816452ac42607f189dcd89f6bf58cf2c66f33ea6e4cb4cac2e881b2ce5b36876"
+        },
+        {
+          "kind": "sandbox_benchmark",
+          "state": "TESTED",
+          "result": "pass",
+          "workflow_run": 31959538090,
+          "runner": "benchmark_b",
+          "artifact_digest": "sha256:a8e8558d6b705dd44569a270ddd0835af9f6c957ad7a545d8526d495df0e7cc0"
+        },
+        {
+          "kind": "independent_benchmark_quorum",
+          "state": "VALIDATED",
+          "result": "pass",
+          "workflow_run": 31959538090
+        },
+        {
+          "kind": "provider_policy_review",
+          "state": "TRUSTED",
+          "result": "pass",
+          "notes": "Apache-2.0 metadata, trust_remote_code=false, local replaceable runtime, and identity-boundary benchmark passed."
+        },
+        {
+          "kind": "activation",
+          "state": "ACTIVE",
+          "result": "approved",
+          "notes": "Approved as a replaceable reasoning provider; availability still depends on the local provider runtime being started."
         }
       ],
       "metadata": {
         "trust_remote_code": false,
         "runtime": "transformers-cpu",
-        "activation_requires_independent_benchmark": true
+        "activation_requires_independent_benchmark": true,
+        "benchmark_quorum_run": 31959538090
       }
     }
   ]
