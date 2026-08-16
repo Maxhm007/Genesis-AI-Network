@@ -1,5 +1,6 @@
 # Genesis local runtime state
 state/
+runtime/
 *.key
 *.pem
 
