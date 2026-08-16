@@ -56,6 +56,9 @@ class GenesisCommunicationHandler(BaseHTTPRequestHandler):
         if self.path == "/v1/capabilities":
             self._json(200, type(self).communicator.capabilities.report())
             return
+        if self.path == "/v1/modules":
+            self._json(200, type(self).communicator.module_status())
+            return
         self._json(404, {"error": "not_found"})
 
     def do_POST(self) -> None:
@@ -98,6 +101,7 @@ def serve(root: Path, host: str, port: int, auth_token: str = "") -> None:
                 "status": "awake",
                 "listen": f"http://{host}:{port}",
                 "ui": f"http://{host}:{port}/",
+                "modules": f"http://{host}:{port}/v1/modules",
             }
         ),
         flush=True,
