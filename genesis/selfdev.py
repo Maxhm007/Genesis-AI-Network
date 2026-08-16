@@ -64,13 +64,11 @@ class SelfDevelopmentExecutor:
                 raise RuntimeError(f"path outside self-development sandbox: {normalized}")
 
     def _tracked_tree_clean(self) -> bool:
-        """Ignore runtime/untracked files but reject tracked source changes."""
         unstaged = self._git("diff", "--quiet", check=False).returncode == 0
         staged = self._git("diff", "--cached", "--quiet", check=False).returncode == 0
         return unstaged and staged
 
     def next_builtin_improvement(self) -> dict:
-        """Return the next small deterministic improvement candidate."""
         candidates = [
             {
                 "title": "Add runtime health snapshot helper",
@@ -157,15 +155,17 @@ class SelfDevelopmentExecutor:
         paths = list(files)
         self._validate_paths(paths)
 
-        payload = json.dumps(proposal, sort_keys=True, separators=(",", ":"))
-        candidate_id = hashlib.sha256(payload.encode("utf-8")).hexdigest()[:12]
-        branch = f"genesis/candidate-{candidate_id}"
-
         current_branch = self._git("branch", "--show-current").stdout.strip()
         if current_branch != "main":
             raise RuntimeError(f"self-development must start from main, got {current_branch or 'detached'}")
         if not self._tracked_tree_clean():
             raise RuntimeError("tracked working tree must be clean before self-development")
+
+        base_sha = self._git("rev-parse", "HEAD").stdout.strip()
+        payload = json.dumps(proposal, sort_keys=True, separators=(",", ":"))
+        candidate_seed = f"{base_sha}|{payload}"
+        candidate_id = hashlib.sha256(candidate_seed.encode("utf-8")).hexdigest()[:12]
+        branch = f"genesis/candidate-{candidate_id}"
 
         self._git("checkout", "-b", branch)
         try:
