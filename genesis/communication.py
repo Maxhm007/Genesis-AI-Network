@@ -92,6 +92,7 @@ class GenesisCommunicator:
                 f"Active GMIA modules: {module_status['active_module_count']}."
             ),
         )
+        consulted_roles = [item.get("agent") for item in team_outputs]
 
         available = self.providers.available_providers()
         response_text = "Genesis received the message but no intelligence provider is currently available."
@@ -107,9 +108,15 @@ class GenesisCommunicator:
                     "PURPOSE: Communicate as the Genesis AI Network without pretending to be conscious or omniscient.\n"
                     "INSTRUCTION: Answer the user's message directly. Be concise. State uncertainty and operational limits. "
                     "Do not claim scientific facts unless they were supplied with evidence. "
+                    "Treat the RUNTIME_FACTS below as authoritative; do not estimate or contradict them. "
                     f"You are the replaceable intelligence provider named {provider_name}; do not present the provider as Genesis identity.\n"
                     f"OBJECTIVE: Reply to {sender}\n"
                     f"MESSAGE: {message}\n"
+                    "RUNTIME_FACTS:\n"
+                    f"- provider={provider_name}\n"
+                    f"- operational_capability={capability_report['score']}/{capability_report['max_score']} ({capability_report['percent']}%)\n"
+                    f"- active_modules={module_status['active_module_count']}\n"
+                    f"- team_roles_consulted={json.dumps(consulted_roles)}\n"
                     f"CAPABILITY_GAPS: {json.dumps(capability_report['priority_gaps'][:3], sort_keys=True)}\n"
                     f"MODULE_PROPOSALS: {json.dumps(module_status['module_change_proposals'][:3], sort_keys=True)}\n"
                 )
@@ -119,7 +126,7 @@ class GenesisCommunicator:
             "message": asdict(envelope),
             "genesis_response": response_text,
             "provider": provider_name,
-            "team_members_consulted": [item.get("agent") for item in team_outputs],
+            "team_members_consulted": consulted_roles,
             "new_specialists": [
                 item.get("agent") for item in team_outputs if item.get("newly_added")
             ],
