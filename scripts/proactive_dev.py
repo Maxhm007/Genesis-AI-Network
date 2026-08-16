@@ -11,14 +11,22 @@ from genesis.proactive import ProactiveDevelopmentLoop
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     loop = ProactiveDevelopmentLoop(root)
+    score = loop.ai_score_report()
     plan, result = loop.develop_once()
 
     if plan is None or result is None:
-        print(json.dumps({"status": "no_bounded_gap_detected", "inspection": loop.inspect()}, indent=2))
+        print(json.dumps({
+            "status": "no_bounded_gap_detected",
+            "ai_score": score,
+            "update_pressure": score["urgency"],
+            "inspection": loop.inspect(),
+        }, indent=2))
         return
 
     payload = {
         "status": "candidate_created" if result.tests_passed and result.committed else "candidate_failed",
+        "ai_score": score,
+        "update_pressure": score["urgency"],
         "plan": asdict(plan),
         "result": asdict(result),
     }
