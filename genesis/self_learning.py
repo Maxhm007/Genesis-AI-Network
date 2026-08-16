@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import hashlib
 import json
+import re
 import sqlite3
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
@@ -153,6 +154,26 @@ class SelfLearningStore:
             rows = db.execute(query, params).fetchall()
         return [self._from_row(row) for row in rows]
 
+    def retrieve(self, query: str, *, state: str = "validated", limit: int = 5) -> list[LearningLesson]:
+        """Return the most lexically relevant provenance-linked lessons.
+
+        Validated memory is the default. Candidate lessons must be requested
+        explicitly so generated hypotheses cannot silently become trusted context.
+        """
+        if state not in LESSON_STATES:
+            raise ValueError("invalid lesson state")
+        terms = {t for t in re.findall(r"[a-z0-9_]+", query.lower()) if len(t) > 2}
+        ranked: list[tuple[float, LearningLesson]] = []
+        for item in self.list(state=state, limit=1000):
+            haystack = f"{item.topic} {item.lesson}".lower()
+            overlap = sum(1 for term in terms if term in haystack)
+            if overlap == 0 and terms:
+                continue
+            score = overlap + item.confidence
+            ranked.append((score, item))
+        ranked.sort(key=lambda pair: (pair[0], pair[1].updated_at), reverse=True)
+        return [item for _, item in ranked[: max(0, limit)]]
+
     def transition(self, lesson_id: str, new_state: str, *, validation_evidence: dict[str, Any] | None = None) -> LearningLesson:
         if new_state not in {"validated", "rejected"}:
             raise ValueError("lessons may only transition to validated or rejected")
@@ -200,35 +221,36 @@ class SelfLearningEngine:
         self.store = SelfLearningStore(self.root / "runtime" / "self_learning.sqlite3")
 
     def learn_from_research_reviews(self) -> list[LearningLesson]:
-        review_dir = self.root / "runtime" / "research_reviews"
-        if not review_dir.exists():
-            return []
+        review_dirs = [self.root / "runtime" / "research_reviews", self.root / "runtime" / "task_reviews"]
         learned: list[LearningLesson] = []
-        for path in sorted(review_dir.glob("*.json")):
-            payload = json.loads(path.read_text(encoding="utf-8"))
-            task = payload.get("task", {})
-            outputs = payload.get("team_outputs", [])
-            completed = [item for item in outputs if item.get("status") == "completed" and item.get("output")]
-            if not completed:
+        for review_dir in review_dirs:
+            if not review_dir.exists():
                 continue
-            lesson_text = "\n\n".join(
-                f"{item.get('agent')}: {str(item.get('output'))[:2500]}" for item in completed[:4]
-            )
-            learned.append(
-                self.store.add_candidate(
-                    source_type="research_review",
-                    source_ref=str(task.get("task_id") or path.stem),
-                    topic=str(task.get("objective") or "immortality research review")[:500],
-                    lesson=lesson_text,
-                    evidence={
-                        "review_file": str(path.relative_to(self.root)),
-                        "source_url": task.get("payload", {}).get("url"),
-                        "rule": payload.get("rule"),
-                        "team_members": [item.get("agent") for item in completed],
-                    },
-                    confidence=0.45,
+            for path in sorted(review_dir.glob("*.json")):
+                payload = json.loads(path.read_text(encoding="utf-8"))
+                task = payload.get("task", {})
+                outputs = payload.get("team_outputs", [])
+                completed = [item for item in outputs if item.get("status") == "completed" and item.get("output")]
+                if not completed:
+                    continue
+                lesson_text = "\n\n".join(
+                    f"{item.get('agent')}: {str(item.get('output'))[:2500]}" for item in completed[:4]
                 )
-            )
+                learned.append(
+                    self.store.add_candidate(
+                        source_type="research_review",
+                        source_ref=str(task.get("task_id") or path.stem),
+                        topic=str(task.get("objective") or "immortality research review")[:500],
+                        lesson=lesson_text,
+                        evidence={
+                            "review_file": str(path.relative_to(self.root)),
+                            "source_url": task.get("payload", {}).get("url"),
+                            "rule": payload.get("rule"),
+                            "team_members": [item.get("agent") for item in completed],
+                        },
+                        confidence=0.45,
+                    )
+                )
         return learned
 
     def learn_from_ai_score(self) -> LearningLesson | None:
