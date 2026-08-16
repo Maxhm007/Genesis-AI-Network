@@ -26,6 +26,31 @@ class GenesisCommunicator:
         self.team = AITeam(self.providers)
         self.capabilities = CapabilityEvaluator(self.root, self.providers, self.team)
 
+    def _bootstrap_human_reply(self, sender: str, message: str, report: dict) -> str:
+        gaps = report.get("priority_gaps", [])
+        highest = gaps[0] if gaps else None
+        abilities = [
+            item["capability"]
+            for item in report.get("results", [])
+            if item["status"] == "ready"
+        ]
+        parts = [
+            f"Hello {sender}. I am Genesis AI Network.",
+            "My current software can coordinate an AI team, communicate, measure operational capabilities, create bounded development candidates, and require independent validation before promotion.",
+            f"My current operational readiness score is {report['score']}/{report['max_score']} ({report['percent']}%).",
+        ]
+        if highest:
+            hint = highest.get("improvement_hint") or "continue measuring and improving this capability"
+            parts.append(
+                f"My highest measured gap is {highest['capability']} ({highest['score']}/{highest['max_score']}). My next improvement direction is to {hint}."
+            )
+        parts.append(
+            "My built-in bootstrap reasoning is limited, so I do not treat my own generated statements as scientific evidence or expert judgement."
+        )
+        if message:
+            parts.append("I received your message and can route it through my team and any validated intelligence providers available to me.")
+        return " ".join(parts)
+
     def reply(self, sender: str, message: str) -> dict:
         sender = (sender or "anonymous").strip()[:120]
         message = message.strip()
@@ -56,16 +81,19 @@ class GenesisCommunicator:
         if available:
             provider = available[0]
             provider_name = provider.name
-            prompt = (
-                "ROLE: genesis_communicator\n"
-                "PURPOSE: Communicate as the Genesis AI Network without pretending to be conscious or omniscient.\n"
-                "INSTRUCTION: Answer the user's message directly. Be concise. State uncertainty and operational limits. "
-                "Do not claim scientific facts unless they were supplied with evidence.\n"
-                f"OBJECTIVE: Reply to {sender}\n"
-                f"MESSAGE: {message}\n"
-                f"CAPABILITY_GAPS: {json.dumps(capability_report['priority_gaps'][:3], sort_keys=True)}\n"
-            )
-            response_text = provider.reason(prompt)
+            if provider_name == "genesis-bootstrap":
+                response_text = self._bootstrap_human_reply(sender, message, capability_report)
+            else:
+                prompt = (
+                    "ROLE: genesis_communicator\n"
+                    "PURPOSE: Communicate as the Genesis AI Network without pretending to be conscious or omniscient.\n"
+                    "INSTRUCTION: Answer the user's message directly. Be concise. State uncertainty and operational limits. "
+                    "Do not claim scientific facts unless they were supplied with evidence.\n"
+                    f"OBJECTIVE: Reply to {sender}\n"
+                    f"MESSAGE: {message}\n"
+                    f"CAPABILITY_GAPS: {json.dumps(capability_report['priority_gaps'][:3], sort_keys=True)}\n"
+                )
+                response_text = provider.reason(prompt)
 
         return {
             "message": asdict(envelope),
