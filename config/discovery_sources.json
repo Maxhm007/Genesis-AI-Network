@@ -1,0 +1,11 @@
+{
+  "sources": [
+    {
+      "name": "huggingface-models",
+      "url": "https://huggingface.co/api/models?sort=trendingScore&limit=10",
+      "enabled": true,
+      "max_items": 10,
+      "policy": "metadata-only"
+    }
+  ]
+}
