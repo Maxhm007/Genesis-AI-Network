@@ -12,6 +12,7 @@ permissions:
   contents: write
   pull-requests: write
   issues: write
+  models: read
 
 jobs:
   self_heal:
@@ -30,8 +31,10 @@ jobs:
         run: |
           git config user.name "Genesis AI"
           git config user.email "genesis-ai@users.noreply.github.com"
-      - name: Diagnose and attempt bounded repair
+      - name: Diagnose and autonomously attempt repair
         env:
           GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
           GENESIS_REPAIR_PROVIDER_URL: ${{ secrets.GENESIS_REPAIR_PROVIDER_URL }}
+          GENESIS_REPAIR_MODEL: openai/gpt-4.1
         run: python scripts/self_heal.py
