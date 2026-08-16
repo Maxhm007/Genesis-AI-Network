@@ -39,3 +39,17 @@ def test_validation_requires_separate_evidence(tmp_path: Path):
     validated = store.transition(lesson.lesson_id, "validated", validation_evidence={"reviewer": "independent", "result": "pass"})
     assert validated.state == "validated"
     assert validated.evidence["validation"]["result"] == "pass"
+
+
+def test_retrieval_defaults_to_validated_lessons(tmp_path: Path):
+    store = SelfLearningStore(tmp_path / "learning.sqlite3")
+    candidate = store.add_candidate(
+        source_type="research_review", source_ref="c1", topic="coding safety", lesson="candidate-only advice", confidence=0.9
+    )
+    validated = store.add_candidate(
+        source_type="research_review", source_ref="v1", topic="coding safety", lesson="validated advice", confidence=0.8
+    )
+    store.transition(validated.lesson_id, "validated", validation_evidence={"result": "pass"})
+    results = store.retrieve("coding safety")
+    assert [item.lesson_id for item in results] == [validated.lesson_id]
+    assert candidate.lesson_id not in [item.lesson_id for item in results]
