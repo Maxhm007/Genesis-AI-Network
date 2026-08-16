@@ -1,9 +1,11 @@
 from __future__ import annotations
 
+import json
 from dataclasses import dataclass
 from pathlib import Path
 
 from .capabilities import CapabilityEvaluator
+from .modules.runtime import ModularGenesis
 from .selfdev import SelfDevelopmentExecutor, SelfDevResult
 
 
@@ -17,9 +19,10 @@ class DevelopmentPlan:
 class ProactiveDevelopmentLoop:
     """Choose and execute one bounded improvement at a time.
 
-    Genesis combines concrete file/runtime checks with its operational
-    capability report. Unknown or unsafe gaps are recorded for later model/team
-    work; only catalogued bounded changes are executed automatically.
+    Genesis first applies explicitly catalogued bootstrap improvements. Once
+    those are complete, measured capability gaps may produce bounded module
+    manifest additions. They still travel through SelfDevelopmentExecutor and
+    the independent validation/promotion path before reaching main.
     """
 
     def __init__(self, root: Path) -> None:
@@ -51,6 +54,11 @@ class ProactiveDevelopmentLoop:
                 "present": (self.root / "genesis" / "capabilities.py").exists(),
                 "priority": 95,
             },
+            {
+                "capability": "modular_intelligence_architecture",
+                "present": (self.root / "config" / "modules.json").exists(),
+                "priority": 95,
+            },
         ]
         report = self.capability_report()
         for result in report["results"]:
@@ -67,31 +75,72 @@ class ProactiveDevelopmentLoop:
             )
         return sorted(checks, key=lambda item: item["priority"], reverse=True)
 
-    def plan_next(self) -> DevelopmentPlan | None:
-        # Measured gaps can guide future work, but only a concrete bounded
-        # proposal from the approved bootstrap catalog may execute automatically.
-        proposal = self.executor.next_builtin_improvement()
-        title = str(proposal.get("title", ""))
-        if title == "Record self-development idle state":
+    def _module_evolution_plan(self) -> DevelopmentPlan | None:
+        config_path = self.root / "config" / "modules.json"
+        if not config_path.exists():
+            return None
+        modular = ModularGenesis(self.root)
+        status = modular.status()
+        proposals = status.get("module_change_proposals", [])
+        if not proposals:
             return None
 
-        primary_files = list(dict(proposal.get("files", {})))
-        if not primary_files:
+        structural = next((item for item in proposals if item.get("action") == "add"), None)
+        if structural is None:
             return None
-        primary_path = self.root / primary_files[0]
-        if primary_path.exists():
+        candidate = dict(structural.get("candidate_manifest", {}))
+        if not candidate:
             return None
 
-        measured_gaps = self.capability_report()["priority_gaps"][:3]
+        payload = json.loads(config_path.read_text(encoding="utf-8"))
+        modules = list(payload.get("modules", []))
+        module_id = candidate.get("module_id")
+        if not module_id or any(item.get("module_id") == module_id for item in modules):
+            return None
+
+        # The candidate branch treats the module as active so validators test
+        # the exact configuration that would land on main. It is not canonical
+        # until the candidate itself passes independent validation and promotion.
+        candidate["status"] = "active"
+        metadata = dict(candidate.get("metadata", {}))
+        metadata["activation_requires_candidate_promotion"] = True
+        candidate["metadata"] = metadata
+        modules.append(candidate)
+        payload["modules"] = modules
+
+        proposal = {
+            "title": structural.get("title", "Add Genesis specialist module"),
+            "files": {
+                "config/modules.json": json.dumps(payload, indent=2, sort_keys=False) + "\n"
+            },
+        }
         return DevelopmentPlan(
-            title=title or "Genesis bounded improvement",
+            title=proposal["title"],
             rationale=(
-                "Genesis detected an executable bounded runtime improvement during "
-                "self-inspection. Current measured gaps: "
-                + ", ".join(item["capability"] for item in measured_gaps)
+                structural.get("rationale", "Measured capability gap requires a specialist module.")
+                + " The module is activated only if the candidate passes the existing independent validator quorum."
             ),
             proposal=proposal,
         )
+
+    def plan_next(self) -> DevelopmentPlan | None:
+        proposal = self.executor.next_builtin_improvement()
+        title = str(proposal.get("title", ""))
+        if title != "Record self-development idle state":
+            primary_files = list(dict(proposal.get("files", {})))
+            if primary_files and not (self.root / primary_files[0]).exists():
+                measured_gaps = self.capability_report()["priority_gaps"][:3]
+                return DevelopmentPlan(
+                    title=title or "Genesis bounded improvement",
+                    rationale=(
+                        "Genesis detected an executable bounded runtime improvement during "
+                        "self-inspection. Current measured gaps: "
+                        + ", ".join(item["capability"] for item in measured_gaps)
+                    ),
+                    proposal=proposal,
+                )
+
+        return self._module_evolution_plan()
 
     def develop_once(self) -> tuple[DevelopmentPlan | None, SelfDevResult | None]:
         plan = self.plan_next()
