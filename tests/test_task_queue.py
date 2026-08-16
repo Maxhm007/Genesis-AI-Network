@@ -24,3 +24,13 @@ def test_task_state_machine_rejects_invalid_jump(tmp_path: Path):
     task = queue.create("Do work")
     with pytest.raises(ValueError, match="invalid transition"):
         queue.transition(task.task_id, "complete")
+
+
+def test_create_unique_prevents_duplicate_scan_tasks(tmp_path: Path):
+    queue = PersistentTaskQueue(tmp_path / "tasks.sqlite3")
+    first, created_first = queue.create_unique("source:https://example.invalid/1", "Review finding", priority=90)
+    second, created_second = queue.create_unique("source:https://example.invalid/1", "Review finding again", priority=90)
+    assert created_first is True
+    assert created_second is False
+    assert first.task_id == second.task_id
+    assert len(queue.list()) == 1
