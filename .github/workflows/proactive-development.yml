@@ -7,16 +7,22 @@ on:
       - '.github/workflows/proactive-development.yml'
       - 'genesis/proactive.py'
       - 'genesis/ai_score.py'
+      - 'genesis/competitive_reference.py'
       - 'genesis/immortality_scan.py'
+      - 'genesis/research_tasks.py'
       - 'genesis/selfdev.py'
       - 'genesis/modules/**'
       - 'config/modules.json'
       - 'config/immortality_sources.json'
+      - 'config/competitive_ai_reference.json'
       - 'scripts/proactive_dev.py'
       - 'scripts/immortality_scan.py'
+      - 'scripts/research_task_worker.py'
+      - 'scripts/competitive_reference_monitor.py'
       - 'tests/test_proactive.py'
       - 'tests/test_ai_score.py'
       - 'tests/test_immortality_scan.py'
+      - 'tests/test_task_queue.py'
       - 'tests/test_modules.py'
   workflow_dispatch:
   schedule:
@@ -39,7 +45,7 @@ concurrency:
 jobs:
   develop:
     runs-on: ubuntu-latest
-    timeout-minutes: 30
+    timeout-minutes: 35
     outputs:
       has_candidate: ${{ steps.candidate.outputs.has_candidate }}
       candidate_branch: ${{ steps.candidate.outputs.candidate_branch }}
@@ -92,12 +98,16 @@ jobs:
             echo 'Validated reasoning provider unavailable; Genesis will degrade to bootstrap mode.' >&2
             cat /tmp/genesis-reasoning.log || true
           fi
+      - name: Check moving competitive AI reference
+        run: python scripts/competitive_reference_monitor.py
       - name: Scan public scientific and cross-domain sources through immortality lens
         run: python scripts/immortality_scan.py
-      - name: Preserve scan and AI score evidence
+      - name: Advance one immortality research task
+        run: python scripts/research_task_worker.py
+      - name: Preserve scan score task and review evidence
         uses: actions/upload-artifact@v4
         with:
-          name: genesis-immortality-scan-${{ github.run_id }}
+          name: genesis-autonomous-evidence-${{ github.run_id }}
           path: runtime/
           retention-days: 30
       - name: Configure Genesis Git identity
