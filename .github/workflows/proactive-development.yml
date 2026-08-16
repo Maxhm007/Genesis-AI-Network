@@ -1,0 +1,45 @@
+name: Genesis Proactive Development
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/proactive-development.yml'
+      - 'genesis/proactive.py'
+      - 'scripts/proactive_dev.py'
+      - 'tests/test_proactive.py'
+  workflow_dispatch:
+  schedule:
+    - cron: '7 * * * *'
+
+permissions:
+  contents: write
+  pull-requests: write
+
+concurrency:
+  group: genesis-proactive-development
+  cancel-in-progress: false
+
+jobs:
+  develop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Verify stable baseline
+        run: python -m pytest -q
+      - name: Configure Genesis Git identity
+        run: |
+          git config user.name "Genesis AI"
+          git config user.email "genesis-ai@users.noreply.github.com"
+      - name: Inspect and develop one bounded improvement
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/proactive_dev.py
