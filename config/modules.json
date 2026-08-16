@@ -6,8 +6,14 @@
       "name": "Genesis Identity Core",
       "version": "0.1.0",
       "purpose": "Verify canonical Genesis identity, Constitution and protected network rules.",
-      "capabilities": ["identity", "constitution_verification"],
-      "permissions": ["identity.read", "constitution.read"],
+      "capabilities": [
+        "identity",
+        "constitution_verification"
+      ],
+      "permissions": [
+        "identity.read",
+        "constitution.read"
+      ],
       "dependencies": [],
       "status": "active",
       "dynamic": false,
@@ -21,9 +27,17 @@
       "name": "Communication Module",
       "version": "0.1.0",
       "purpose": "Communicate with humans, AI clients, web interfaces and APIs.",
-      "capabilities": ["communication"],
-      "permissions": ["messages.read", "messages.reply", "capabilities.read"],
-      "dependencies": ["genesis.capability"],
+      "capabilities": [
+        "communication"
+      ],
+      "permissions": [
+        "messages.read",
+        "messages.reply",
+        "capabilities.read"
+      ],
+      "dependencies": [
+        "genesis.capability"
+      ],
       "status": "active",
       "dynamic": false,
       "mutable": true,
@@ -36,8 +50,13 @@
       "name": "Capability Measurement Module",
       "version": "0.1.0",
       "purpose": "Measure operational readiness and identify prioritized capability gaps.",
-      "capabilities": ["capability_measurement"],
-      "permissions": ["metrics.read", "modules.read"],
+      "capabilities": [
+        "capability_measurement"
+      ],
+      "permissions": [
+        "metrics.read",
+        "modules.read"
+      ],
       "dependencies": [],
       "status": "active",
       "dynamic": false,
@@ -51,9 +70,17 @@
       "name": "Research Module",
       "version": "0.1.0",
       "purpose": "Perform scientific research discovery and evidence-oriented analysis.",
-      "capabilities": ["scientific_research"],
-      "permissions": ["network.read", "knowledge.read", "knowledge.propose"],
-      "dependencies": ["genesis.knowledge"],
+      "capabilities": [
+        "scientific_research"
+      ],
+      "permissions": [
+        "network.read",
+        "knowledge.read",
+        "knowledge.propose"
+      ],
+      "dependencies": [
+        "genesis.knowledge"
+      ],
       "status": "active",
       "dynamic": false,
       "mutable": true,
@@ -66,8 +93,13 @@
       "name": "Knowledge Module",
       "version": "0.1.0",
       "purpose": "Store provenance-aware candidate and validated knowledge.",
-      "capabilities": ["knowledge_management"],
-      "permissions": ["knowledge.read", "knowledge.write_candidate"],
+      "capabilities": [
+        "knowledge_management"
+      ],
+      "permissions": [
+        "knowledge.read",
+        "knowledge.write_candidate"
+      ],
       "dependencies": [],
       "status": "active",
       "dynamic": false,
@@ -81,9 +113,19 @@
       "name": "Repair Module",
       "version": "0.1.0",
       "purpose": "Diagnose failures and create bounded candidate repairs.",
-      "capabilities": ["repair", "debugging"],
-      "permissions": ["code.read", "code.write_candidate", "tests.run"],
-      "dependencies": ["genesis.self_development", "genesis.validation"],
+      "capabilities": [
+        "repair",
+        "debugging"
+      ],
+      "permissions": [
+        "code.read",
+        "code.write_candidate",
+        "tests.run"
+      ],
+      "dependencies": [
+        "genesis.self_development",
+        "genesis.validation"
+      ],
       "status": "active",
       "dynamic": false,
       "mutable": true,
@@ -96,9 +138,18 @@
       "name": "Self Development Module",
       "version": "0.1.0",
       "purpose": "Create isolated, bounded candidate software improvements.",
-      "capabilities": ["self_development"],
-      "permissions": ["code.write_candidate", "tests.run", "benchmarks.run"],
-      "dependencies": ["genesis.capability", "genesis.validation"],
+      "capabilities": [
+        "self_development"
+      ],
+      "permissions": [
+        "code.write_candidate",
+        "tests.run",
+        "benchmarks.run"
+      ],
+      "dependencies": [
+        "genesis.capability",
+        "genesis.validation"
+      ],
       "status": "active",
       "dynamic": false,
       "mutable": true,
@@ -111,8 +162,15 @@
       "name": "Validation Module",
       "version": "0.1.0",
       "purpose": "Independently validate candidate changes before promotion.",
-      "capabilities": ["independent_validation"],
-      "permissions": ["tests.run", "audit.read", "candidate.approve", "candidate.reject"],
+      "capabilities": [
+        "independent_validation"
+      ],
+      "permissions": [
+        "tests.run",
+        "audit.read",
+        "candidate.approve",
+        "candidate.reject"
+      ],
       "dependencies": [],
       "status": "active",
       "dynamic": false,
@@ -126,9 +184,16 @@
       "name": "Network Module",
       "version": "0.1.0",
       "purpose": "Coordinate compatible Genesis peers and network resilience.",
-      "capabilities": ["distributed_operation"],
-      "permissions": ["network.read", "network.propose"],
-      "dependencies": ["genesis.identity"],
+      "capabilities": [
+        "distributed_operation"
+      ],
+      "permissions": [
+        "network.read",
+        "network.propose"
+      ],
+      "dependencies": [
+        "genesis.identity"
+      ],
       "status": "active",
       "dynamic": false,
       "mutable": true,
@@ -141,8 +206,14 @@
       "name": "Intelligence Provider Module",
       "version": "0.1.0",
       "purpose": "Discover and expose replaceable intelligence providers without defining Genesis identity.",
-      "capabilities": ["bootstrap_reasoning", "advanced_reasoning"],
-      "permissions": ["provider.use", "provider.discover"],
+      "capabilities": [
+        "bootstrap_reasoning",
+        "advanced_reasoning"
+      ],
+      "permissions": [
+        "provider.use",
+        "provider.discover"
+      ],
       "dependencies": [],
       "status": "active",
       "dynamic": false,
@@ -150,6 +221,31 @@
       "protected": false,
       "implementation": "genesis.providers",
       "metadata": {}
+    },
+    {
+      "module_id": "genesis.reasoning",
+      "name": "Reasoning Module",
+      "purpose": "Provide replaceable structured reasoning and planning capability.",
+      "capabilities": [
+        "advanced_reasoning",
+        "planning"
+      ],
+      "permissions": [
+        "provider.use",
+        "knowledge.read",
+        "knowledge.propose"
+      ],
+      "implementation": "genesis.providers",
+      "version": "0.1.0",
+      "dependencies": [],
+      "status": "active",
+      "dynamic": true,
+      "mutable": true,
+      "protected": false,
+      "metadata": {
+        "generated_from_capability_gap": "advanced_reasoning",
+        "activation_requires_candidate_promotion": true
+      }
     }
   ]
 }
