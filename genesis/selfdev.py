@@ -5,7 +5,7 @@ import json
 import os
 import subprocess
 from dataclasses import dataclass
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 
 
 PROTECTED_PATHS = {
@@ -19,6 +19,42 @@ ALLOWED_PREFIXES = (
     "docs/",
     "config/",
 )
+
+
+def normalize_selfdev_path(root: Path, path: str) -> str:
+    """Return a canonical allowed repository-relative path or reject it.
+
+    Provider/model output is untrusted. Prefix checks alone are insufficient
+    because `genesis/../.git/...` still begins with an allowed prefix while the
+    filesystem resolves it outside that sandbox. Reject traversal, absolute
+    paths, Git metadata, protected identity files, and symlink escapes before
+    any file is written or tests are executed.
+    """
+    root = root.resolve()
+    raw = str(path).replace("\\", "/")
+    if not raw or "\x00" in raw:
+        raise RuntimeError("invalid self-development path")
+    candidate = PurePosixPath(raw)
+    if candidate.is_absolute() or ".." in candidate.parts:
+        raise RuntimeError(f"path traversal is forbidden: {raw}")
+    normalized = candidate.as_posix()
+    if normalized in {"", "."}:
+        raise RuntimeError("invalid self-development path")
+    if normalized in PROTECTED_PATHS:
+        raise RuntimeError(f"protected path cannot be changed: {normalized}")
+    if normalized == ".git" or normalized.startswith(".git/"):
+        raise RuntimeError("self-development may not modify Git metadata")
+    if normalized.startswith(".github/"):
+        raise RuntimeError("self-development may not modify GitHub workflow permissions")
+    if not normalized.startswith(ALLOWED_PREFIXES):
+        raise RuntimeError(f"path outside self-development sandbox: {normalized}")
+
+    target = root.joinpath(*candidate.parts).resolve()
+    try:
+        target.relative_to(root)
+    except ValueError as exc:
+        raise RuntimeError(f"path outside repository root: {normalized}") from exc
+    return normalized
 
 
 @dataclass(frozen=True)
@@ -55,13 +91,7 @@ class SelfDevelopmentExecutor:
 
     def _validate_paths(self, paths: list[str]) -> None:
         for path in paths:
-            normalized = path.replace("\\", "/").lstrip("./")
-            if normalized in PROTECTED_PATHS:
-                raise RuntimeError(f"protected path cannot be changed: {normalized}")
-            if normalized.startswith(".github/"):
-                raise RuntimeError("self-development may not modify GitHub workflow permissions")
-            if not normalized.startswith(ALLOWED_PREFIXES):
-                raise RuntimeError(f"path outside self-development sandbox: {normalized}")
+            normalize_selfdev_path(self.root, path)
 
     def _tracked_tree_clean(self) -> bool:
         unstaged = self._git("diff", "--quiet", check=False).returncode == 0
@@ -149,9 +179,16 @@ class SelfDevelopmentExecutor:
 
     def execute(self, proposal: dict | None = None) -> SelfDevResult:
         proposal = proposal or self.next_builtin_improvement()
-        files = dict(proposal.get("files", {}))
-        if not files:
+        raw_files = dict(proposal.get("files", {}))
+        if not raw_files:
             raise RuntimeError("proposal contains no files")
+
+        files: dict[str, object] = {}
+        for relative, content in raw_files.items():
+            normalized = normalize_selfdev_path(self.root, str(relative))
+            if normalized in files:
+                raise RuntimeError(f"duplicate self-development path: {normalized}")
+            files[normalized] = content
         paths = list(files)
         self._validate_paths(paths)
 
@@ -162,7 +199,9 @@ class SelfDevelopmentExecutor:
             raise RuntimeError("tracked working tree must be clean before self-development")
 
         base_sha = self._git("rev-parse", "HEAD").stdout.strip()
-        payload = json.dumps(proposal, sort_keys=True, separators=(",", ":"))
+        safe_proposal = dict(proposal)
+        safe_proposal["files"] = files
+        payload = json.dumps(safe_proposal, sort_keys=True, separators=(",", ":"))
         candidate_seed = f"{base_sha}|{payload}"
         candidate_id = hashlib.sha256(candidate_seed.encode("utf-8")).hexdigest()[:12]
         branch = f"genesis/candidate-{candidate_id}"
@@ -170,7 +209,10 @@ class SelfDevelopmentExecutor:
         self._git("checkout", "-b", branch)
         try:
             for relative, content in files.items():
-                path = self.root / relative
+                # Revalidate immediately before the write to catch symlink/path
+                # changes that occurred after proposal normalization.
+                normalized = normalize_selfdev_path(self.root, relative)
+                path = self.root / normalized
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(str(content), encoding="utf-8")
 
