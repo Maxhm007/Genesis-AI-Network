@@ -20,7 +20,7 @@ jobs:
           python - <<'PY'
           import json, os, urllib.request
           body = {
-              "model": "openai/gpt-4.1",
+              "model": "openai/gpt-4o",
               "temperature": 0,
               "messages": [
                   {"role": "system", "content": "Return JSON only."},
@@ -35,6 +35,7 @@ jobs:
                   "Accept": "application/vnd.github+json",
                   "Authorization": f"Bearer {os.environ['GITHUB_TOKEN']}",
                   "Content-Type": "application/json",
+                  "X-GitHub-Api-Version": "2022-11-28",
               },
           )
           with urllib.request.urlopen(req, timeout=60) as response:
