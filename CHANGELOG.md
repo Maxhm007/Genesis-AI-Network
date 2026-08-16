@@ -15,11 +15,21 @@ All notable Genesis AI Network milestones are documented here.
 - **Coding Module** for bounded provider-neutral software-engineering proposals and candidate execution.
 - Autonomous Security → Coding → candidate review bridge.
 - **Application Module** for bounded Genesis desktop/mobile product development.
+- **Evaluation Module** with evidence-first benchmark scoring and zero credit for unmeasured capability.
+- **Experiment Module** with baseline-versus-candidate keep/reject comparisons.
+- **Resource Module** for bounded CPU/memory/disk/battery/network capacity scoring.
+- **Model Scout Module** with sequential discovered → quarantined → tested → validated → trusted → active lifecycle.
+- **Evidence Module** with candidate/reviewed/validated/rejected/contradicted claim states.
+- **Peer Compute Module** foundation with bounded leases and result-hash verification.
+- Provider telemetry store and capability-growth coordinator connecting Evaluation → Experiment → Model Scout → measured routing telemetry.
+- Minimum three-sample evidence threshold before measured provider profiles can influence Intelligence Router cost/reliability.
 - Self-development sandbox support for `desktop/` and `mobile/` application source while keeping `.github/`, protected identity files and Git metadata forbidden.
 - Windows Tauri desktop shell with bundled standalone Genesis Core sidecar.
 - Windows desktop release workflow capable of producing an installable Genesis `.exe` and SHA-256 digest.
 - First Genesis Windows Desktop alpha prerelease.
-- Explicit Android mobile application target for a lightweight authenticated Genesis API client.
+- Native Android client under `mobile/` with HTTPS-only Genesis API configuration, bearer-token chat and health/status checks.
+- Android APK build/release workflow pinned to JDK 17, Gradle 9.4.1, AGP 9.2.0 and stable Android API 36.
+- First downloadable Genesis Android alpha APK with SHA-256 checksum.
 - `TODO.md` as a human-readable short-term backlog.
 - `ROADMAP.md` for major product, intelligence, GDEN, scientific and sustainability milestones.
 
@@ -27,13 +37,20 @@ All notable Genesis AI Network milestones are documented here.
 
 - Genesis development strategy now explicitly optimizes **validated useful capability per unit of compute/cost**, rather than model size alone.
 - Autonomous Coding uses validated memory/context to reduce repeated work.
+- Coding routing can now consume persistent measured provider telemetry once the evidence threshold is reached.
+- Autonomous cycles synchronize new efficiency observations into capability-growth telemetry for future routing decisions.
 - Application development tasks enter the same persistent engineering queue and still require testing, security review and independent validator quorum.
+- Android alpha targets stable API 36 instead of depending on a preview SDK channel.
 - `PROJECT_SUMMARY.md` is maintained as a current snapshot rather than a historical release note.
 - `TODO.md` is explicitly non-authoritative; the persistent SQLite task queue remains the operational source of truth.
 
 ### Security
 
 - Application self-development does not receive authority to modify GitHub Actions workflows, release/signing policy, Constitution, Genesis Block, validator rules or signing secrets.
+- Model Scout recommendations do not automatically activate models.
+- One isolated provider result cannot change measured routing; routing requires a minimum evidence sample threshold.
+- Android remote cleartext HTTP is disabled and the bearer token is not persisted by the alpha client.
+- The Android alpha APK is debug-signed for testing; production signing is still required before a stable mobile release.
 - Automatic desktop update installation remains dependent on properly signed update artifacts; unsigned autonomous code must never be installed as a trusted update.
 
 ## [0.1.0] — Genesis Foundation
