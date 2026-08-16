@@ -10,6 +10,13 @@ on:
       - 'genesis/scorecard.py'
       - 'genesis/efficiency.py'
       - 'genesis/intelligence_router.py'
+      - 'genesis/capability_integration.py'
+      - 'genesis/evaluation.py'
+      - 'genesis/experiment.py'
+      - 'genesis/resource.py'
+      - 'genesis/model_scout.py'
+      - 'genesis/evidence.py'
+      - 'genesis/peer_compute.py'
       - 'genesis/memory.py'
       - 'genesis/competitive_reference.py'
       - 'genesis/immortality_scan.py'
@@ -30,6 +37,7 @@ on:
       - 'scripts/self_learn.py'
       - 'scripts/memory_sync.py'
       - 'scripts/autonomous_engineering.py'
+      - 'scripts/capability_growth_sync.py'
       - 'scripts/system_scorecard.py'
       - 'scripts/competitive_reference_monitor.py'
       - 'tests/test_proactive.py'
@@ -37,6 +45,7 @@ on:
       - 'tests/test_scorecard.py'
       - 'tests/test_efficiency.py'
       - 'tests/test_intelligence_router.py'
+      - 'tests/test_capability_integration.py'
       - 'tests/test_memory.py'
       - 'tests/test_immortality_scan.py'
       - 'tests/test_task_queue.py'
@@ -90,6 +99,8 @@ jobs:
             runtime/memory_status.json
             runtime/ai_score_history.jsonl
             runtime/efficiency.jsonl
+            runtime/provider_telemetry.json
+            runtime/capability_growth_sync.json
             runtime/research_reviews/
             runtime/task_reviews/
           key: genesis-runtime-${{ runner.os }}-${{ github.run_id }}
@@ -151,6 +162,8 @@ jobs:
           git config user.email "genesis-ai@users.noreply.github.com"
       - name: Security inspection and autonomous Coding pass
         run: python scripts/autonomous_engineering.py
+      - name: Feed measured outcomes into capability growth telemetry
+        run: python scripts/capability_growth_sync.py
       - name: Run legacy bounded proactive planner if Coding made no candidate
         shell: bash
         run: |
