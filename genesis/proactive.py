@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from pathlib import Path
 
+from .capabilities import CapabilityEvaluator
 from .selfdev import SelfDevelopmentExecutor, SelfDevResult
 
 
@@ -16,15 +17,17 @@ class DevelopmentPlan:
 class ProactiveDevelopmentLoop:
     """Choose and execute one bounded improvement at a time.
 
-    This is intentionally conservative: Genesis proposes a small capability,
-    executes it only on a candidate branch through SelfDevelopmentExecutor,
-    and leaves promotion to the independent validation path. It never edits
-    protected identity files or GitHub workflow permissions.
+    Genesis combines concrete file/runtime checks with its operational
+    capability report. Unknown or unsafe gaps are recorded for later model/team
+    work; only catalogued bounded changes are executed automatically.
     """
 
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
         self.executor = SelfDevelopmentExecutor(self.root)
+
+    def capability_report(self) -> dict:
+        return CapabilityEvaluator(self.root).report()
 
     def inspect(self) -> list[dict]:
         checks = [
@@ -38,21 +41,50 @@ class ProactiveDevelopmentLoop:
                 "present": (self.root / "genesis" / "budget.py").exists(),
                 "priority": 90,
             },
+            {
+                "capability": "communication_bridge",
+                "present": (self.root / "genesis" / "communication.py").exists(),
+                "priority": 95,
+            },
+            {
+                "capability": "capability_measurement",
+                "present": (self.root / "genesis" / "capabilities.py").exists(),
+                "priority": 95,
+            },
         ]
-        return checks
+        report = self.capability_report()
+        for result in report["results"]:
+            checks.append(
+                {
+                    "capability": "measured:" + result["capability"],
+                    "present": result["score"] == result["max_score"],
+                    "priority": 80 if result["status"] in {"missing", "failing"} else 60,
+                    "score": result["score"],
+                    "max_score": result["max_score"],
+                    "status": result["status"],
+                    "improvement_hint": result["improvement_hint"],
+                }
+            )
+        return sorted(checks, key=lambda item: item["priority"], reverse=True)
 
     def plan_next(self) -> DevelopmentPlan | None:
-        gaps = [item for item in self.inspect() if not item["present"]]
-        if not gaps:
+        # Only known bounded bootstrap capabilities are executed directly.
+        bounded_missing = [
+            item for item in self.inspect()
+            if not item["present"] and not item["capability"].startswith("measured:")
+        ]
+        if not bounded_missing:
             return None
 
         proposal = self.executor.next_builtin_improvement()
         title = str(proposal.get("title", "Genesis bounded improvement"))
+        measured_gaps = self.capability_report()["priority_gaps"][:3]
         return DevelopmentPlan(
             title=title,
             rationale=(
                 "Genesis detected a missing bounded runtime capability during "
-                "its proactive self-inspection."
+                "self-inspection. Current measured gaps: " +
+                ", ".join(item["capability"] for item in measured_gaps)
             ),
             proposal=proposal,
         )
