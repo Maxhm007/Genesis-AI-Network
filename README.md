@@ -16,17 +16,25 @@ Genesis AI is not one model. Its identity is defined by:
 
 Models may change. Code may evolve. Knowledge may expand. The permanent mission and constitutional constraints may not.
 
+## No Codex dependency
+
+Genesis AI must run as its own software. Codex, ChatGPT, GitHub Copilot, Ollama, Gemini, DeepSeek, or any other model/provider may be used during development or as optional intelligence resources, but none is part of Genesis AI's permanent identity or mandatory runtime.
+
+The node must be able to stay alive in maintenance/discovery mode even when no external intelligence provider is available, then acquire and evaluate new permitted capabilities when resources become available.
+
 ## V0.1 goals
 
-The first version establishes the foundation for:
+The first executable version establishes:
 
 - immutable constitution verification
 - a Genesis Block
-- persistent and provenance-aware knowledge
-- discovery and evaluation of publicly available models
+- a continuous autonomous runtime loop
+- persistent and provenance-aware state
+- discovery and evaluation of publicly available intelligence/model resources
 - learning from users without blindly trusting user claims
-- self-research with evidence tracking
+- self-directed research with evidence tracking
 - candidate → sandbox → test → validate → release evolution
+- resource governance controlled by node operators
 - future peer-to-peer nodes and distributed storage
 - signed, mirrored releases independent of any single host
 
@@ -36,7 +44,7 @@ Genesis AI must not directly replace its running production code merely because 
 
 ## Current state
 
-This repository is the **Genesis specification and development seed**. V0.1 does not yet claim to be an autonomous, continuously running decentralized intelligence.
+This repository is the **Genesis specification and development seed**. The next milestone is the first executable self-running node. GitHub itself is a publication/distribution location, not the runtime.
 
 ## Repository documents
 
@@ -46,13 +54,14 @@ This repository is the **Genesis specification and development seed**. V0.1 does
 - `MODEL_POLICY.md` — model discovery and assimilation rules
 - `KNOWLEDGE_POLICY.md` — learning, research, provenance, and validation rules
 - `DISTRIBUTION_PROTOCOL.md` — release hashing, signing, mirroring, and verification
-- `CODEX_HANDOFF.md` — context for coding agents
+- `AUTONOMY_SPEC.md` — self-running/bootstrap requirements
+- `CODEX_HANDOFF.md` — optional historical development context only; not a runtime dependency
 - `CURRENT_TASK.md` — immediate implementation objective
 - `PROJECT_SUMMARY.md` — project overview and roadmap
 
 ## Long-term direction
 
-The mature network should be able to continue operating even if individual computers, repositories, websites, cloud providers, or storage accounts disappear, provided enough independent nodes continue participating.
+The mature network should be able to continue operating even if individual computers, repositories, websites, cloud providers, model providers, or storage accounts disappear, provided enough independent nodes continue participating.
 
 A node may sleep. **The network must not.**
 
