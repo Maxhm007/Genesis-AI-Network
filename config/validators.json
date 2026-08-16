@@ -1,0 +1,17 @@
+{
+  "restart_delay_seconds": 2,
+  "validators": [
+    {
+      "validator_id": "validator-a",
+      "port": 19101,
+      "key_path": "state/validators/validator-a.key",
+      "enabled": true
+    },
+    {
+      "validator_id": "validator-b",
+      "port": 19102,
+      "key_path": "state/validators/validator-b.key",
+      "enabled": true
+    }
+  ]
+}
