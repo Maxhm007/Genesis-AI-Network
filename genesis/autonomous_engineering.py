@@ -2,10 +2,13 @@ from __future__ import annotations
 
 import json
 import subprocess
+import time
 from dataclasses import asdict
 from pathlib import Path
 
 from .coding import CodingModule
+from .efficiency import EfficiencyTracker
+from .intelligence_router import IntelligenceRouter
 from .modules.task_queue import PersistentTaskQueue
 from .providers import ProviderRegistry
 from .security import SecurityModule
@@ -33,6 +36,7 @@ class AutonomousEngineeringLoop:
         self.queue = PersistentTaskQueue(self.root / "runtime" / "genesis_tasks.sqlite3")
         self.security = SecurityModule(self.root)
         self.coding = CodingModule(self.root, self.providers)
+        self.efficiency = EfficiencyTracker(self.root / "runtime" / "efficiency.jsonl")
 
     def _git(self, *args: str) -> None:
         subprocess.run(["git", *args], cwd=self.root, check=False, capture_output=True, text=True)
@@ -62,6 +66,20 @@ class AutonomousEngineeringLoop:
                     return task
         return None
 
+    def _record_efficiency(self, provider_name: str, started: float, success: bool) -> None:
+        class _ProviderName:
+            name = provider_name
+        profile = IntelligenceRouter.profile(_ProviderName())
+        self.efficiency.record(
+            task_type="coding",
+            provider=provider_name,
+            success=success,
+            quality=1.0 if success else 0.0,
+            latency_seconds=max(0.0, time.perf_counter() - started),
+            compute_units=max(profile.resource_cost, 0.05),
+            monetary_cost_usd=0.0,
+        )
+
     def run_once(self) -> dict:
         runtime = self.root / "runtime"
         runtime.mkdir(parents=True, exist_ok=True)
@@ -80,14 +98,18 @@ class AutonomousEngineeringLoop:
             (runtime / "autonomous_engineering.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
             return result
 
+        started = time.perf_counter()
+        provider_name = "unknown"
         try:
             self.queue.transition(task.task_id, "assigned", module_id="genesis.coding")
             self.queue.transition(task.task_id, "running", module_id="genesis.coding")
             context_paths = list(task.payload.get("context_paths", []) or [])
             proposal = self.coding.propose(task.objective, context_paths=context_paths)
+            provider_name = proposal.provider
             candidate = self.coding.execute_candidate(proposal)
             result["coding_status"] = "candidate_created" if candidate.committed else "candidate_not_committed"
             result["candidate"] = asdict(candidate)
+            success = False
             if candidate.committed:
                 candidate_security = self.security.write_report(
                     runtime / "candidate_security_report.json", candidate=True, base_ref="main"
@@ -99,8 +121,10 @@ class AutonomousEngineeringLoop:
                     self.queue.transition(task.task_id, "blocked", module_id="genesis.security")
                 else:
                     self.queue.transition(task.task_id, "review", module_id="genesis.coding")
+                    success = True
             else:
                 self.queue.transition(task.task_id, "blocked", module_id="genesis.coding")
+            self._record_efficiency(provider_name, started, success)
         except Exception as exc:
             result["coding_status"] = "provider_or_candidate_error"
             result["error"] = f"{type(exc).__name__}: {exc}"[:2000]
@@ -110,6 +134,12 @@ class AutonomousEngineeringLoop:
                     self.queue.transition(task.task_id, "blocked", module_id="genesis.coding")
                 except Exception:
                     pass
+            if provider_name != "unknown":
+                try:
+                    self._record_efficiency(provider_name, started, False)
+                except Exception:
+                    pass
 
+        result["efficiency"] = self.efficiency.report()
         (runtime / "autonomous_engineering.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
         return result
