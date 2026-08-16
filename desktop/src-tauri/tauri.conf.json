@@ -30,7 +30,7 @@
     "windows": {
       "nsis": {
         "displayLanguageSelector": false,
-        "installerMode": "currentUser"
+        "installMode": "currentUser"
       }
     }
   }
