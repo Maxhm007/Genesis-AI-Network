@@ -13,6 +13,8 @@ Status: substantially implemented.
 - Persistent task queue and state restoration.
 - Modular intelligence architecture.
 - Research, Self-Learning, Memory, Coding and Security modules.
+- Application Module for desktop/mobile development.
+- Evaluation, Experiment, Resource, Model Scout, Evidence and Peer Compute foundations.
 - Independent validator quorum and bounded promotion.
 - Competitive/system scoring foundation.
 
@@ -39,32 +41,53 @@ Status: substantially implemented.
 
 Later targets: Linux, macOS and iOS.
 
-## Phase 3 — Efficient Intelligence
+## Phase 3 — Measured Efficient Intelligence
 
 **Goal:** outperform larger standalone systems on useful work per unit of compute, not merely model size.
 
-- System-level reasoning/coding/research/tool benchmarks.
-- Capability-per-compute and capability-per-dollar measurement.
-- Resource-aware Intelligence Router.
-- Automatic provider/model scouting and lifecycle validation.
-- Retrieval-driven use of validated long-term memory.
-- Experiment-driven architectural self-improvement.
+Foundation modules now exist for Evaluation, Experiment, Resource and Model Scout. Next milestones:
 
-## Phase 4 — GDEN Peer Compute
+- System-level reasoning/coding/research/tool benchmarks.
+- Capability-per-compute and capability-per-dollar measurement from real outcomes.
+- Live resource telemetry feeding the Intelligence Router.
+- Measured provider reliability/cost profiles replacing provisional defaults.
+- Automatic provider/model discovery, quarantine and benchmark tournaments.
+- Experiment persistence: hypothesis → baseline → candidate → comparison → keep/reject.
+- Retrieval-driven use of validated long-term memory.
+
+## Phase 4 — Evidence-Centered Scientific Intelligence
+
+**Goal:** turn research output into a structured, auditable evidence system.
+
+The Evidence Module foundation exists. Next milestones:
+
+- Persistent claim/evidence graph.
+- Citation-level provenance.
+- Supporting and contradicting evidence relationships.
+- Explicit candidate/reviewed/validated/rejected states.
+- Hypothesis/experiment linkage.
+- Reproducible analysis and independent scientific review.
+
+Scientific findings remain evidence candidates until appropriately validated.
+
+## Phase 5 — GDEN Peer Compute
 
 **Goal:** turn installations into owner-controlled cooperating Genesis nodes.
 
-- Peer discovery and authenticated capabilities.
-- Resource advertisement and owner policy.
-- Task leasing and execution.
-- Result hashes, provenance and independent verification.
+The Peer Compute Module now provides bounded work leases and content-hash verification primitives. Next milestones:
+
+- Peer discovery and authenticated capability advertisement.
+- Resource offers and node-owner policy.
+- Task advertisement, bidding/selection and leases.
+- Signed task/result transport.
+- Independent or reproducible result verification.
 - Replicated state and content-addressed artifacts.
 - Persistent independent validator identities.
 - Key rotation/revocation, reputation and Sybil controls.
 
 No cryptocurrency is required unless later evidence shows it is necessary for network coordination.
 
-## Phase 5 — Decentralized Evolution
+## Phase 6 — Decentralized Evolution
 
 **Goal:** allow validated improvements to propagate through the network without dependence on a single host.
 
@@ -74,19 +97,6 @@ No cryptocurrency is required unless later evidence shows it is necessary for ne
 - Consensus/fork-handling design for shared validated state.
 - Node-controlled update channels and rollback.
 - Constitution/Genesis Block compatibility enforcement.
-
-## Phase 6 — Scientific Research Network
-
-**Goal:** make Genesis increasingly useful for rigorous physical-human-longevity research.
-
-- Broader scientific source ingestion.
-- Evidence graphs and contradiction tracking.
-- Hypothesis/experiment management.
-- Specialist scientific tools and models.
-- Reproducible analysis and independent review.
-- Collaboration with human researchers and institutions.
-
-Scientific findings remain evidence candidates until appropriately validated.
 
 ## Phase 7 — Sustainable Open Network
 
@@ -104,4 +114,4 @@ The guiding economic metric is useful validated capability per unit of cost and 
 
 ## Ultimate direction
 
-Genesis should become a persistent decentralized intelligence network that can continuously learn, research, engineer and coordinate resources toward its permanent physical-human-immortality mission while remaining constitution-bound, evidence-driven and under human/node-owner control.
+Genesis should become a persistent decentralized intelligence network that can continuously learn, research, evaluate, experiment, engineer and coordinate resources toward its permanent physical-human-immortality mission while remaining constitution-bound, evidence-driven and under human/node-owner control.
