@@ -1,0 +1,131 @@
+name: Genesis Candidate Promotion
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/candidate-promotion.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '27 * * * *'
+
+permissions:
+  contents: write
+
+concurrency:
+  group: genesis-candidate-promotion
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      candidate_branch: ${{ steps.resolve.outputs.candidate_branch }}
+      candidate_sha: ${{ steps.resolve.outputs.candidate_sha }}
+      has_candidate: ${{ steps.resolve.outputs.has_candidate }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Resolve newest queued Genesis candidate
+        id: resolve
+        shell: bash
+        run: |
+          git fetch origin '+refs/heads/genesis/candidate-*:refs/remotes/origin/genesis/candidate-*'
+          ref=$(git for-each-ref --sort=-committerdate --format='%(refname:short)' 'refs/remotes/origin/genesis/candidate-*' | head -n1)
+          if [ -z "$ref" ]; then
+            echo 'has_candidate=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          branch=${ref#origin/}
+          sha=$(git rev-parse "$ref")
+          main_sha=$(git rev-parse main)
+          git merge-base --is-ancestor "$main_sha" "$sha"
+          if git diff --name-only "$main_sha..$sha" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
+            echo 'Protected Genesis identity file changed' >&2
+            exit 1
+          fi
+          echo "candidate_branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$sha" >> "$GITHUB_OUTPUT"
+          echo 'has_candidate=true' >> "$GITHUB_OUTPUT"
+
+  validator_a:
+    needs: prepare
+    if: needs.prepare.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite A
+        run: python -m pytest -q
+      - name: Sign validator A approval
+        run: python genesis/ephemeral_validator.py --validator-id candidate-validator-a --candidate ${{ needs.prepare.outputs.candidate_sha }} --output validator-a.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-validator-a
+          path: validator-a.json
+
+  validator_b:
+    needs: prepare
+    if: needs.prepare.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite B
+        run: python -m pytest -q
+      - name: Sign validator B approval
+        run: python genesis/ephemeral_validator.py --validator-id candidate-validator-b --candidate ${{ needs.prepare.outputs.candidate_sha }} --output validator-b.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-validator-b
+          path: validator-b.json
+
+  promote:
+    needs: [prepare, validator_a, validator_b]
+    if: needs.prepare.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-validator-a
+          path: votes/a
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-validator-b
+          path: votes/b
+      - name: Verify signed two-job quorum
+        run: python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
+      - name: Re-verify candidate and fast-forward main
+        shell: bash
+        run: |
+          git fetch origin main '${{ needs.prepare.outputs.candidate_branch }}'
+          candidate='${{ needs.prepare.outputs.candidate_sha }}'
+          main_sha=$(git rev-parse origin/main)
+          test "$(git rev-parse origin/${{ needs.prepare.outputs.candidate_branch }})" = "$candidate"
+          git merge-base --is-ancestor "$main_sha" "$candidate"
+          if git diff --name-only "$main_sha..$candidate" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
+            echo 'Protected Genesis identity file changed' >&2
+            exit 1
+          fi
+          git push origin "$candidate:refs/heads/main"
