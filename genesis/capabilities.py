@@ -37,12 +37,52 @@ class CapabilityEvaluator:
         self.team = team or AITeam(self.providers)
         self.test_probe = test_probe
 
+    def _team_orchestration_result(self) -> CapabilityResult:
+        roles = {role.name for role in self.team.roles}
+        core_roles = {"planner", "researcher", "model_scout", "engineer", "scientist", "reviewer", "validator", "network_steward"}
+        score = 0
+        evidence: list[str] = []
+
+        if core_roles.issubset(roles):
+            score += 8
+            evidence.append("permanent core roster present")
+        else:
+            evidence.append("permanent core roster incomplete")
+
+        chat = self.team.plan_task("Respond to user: hello", "This is a communication request.")
+        if "planner" in chat.role_names and len(chat.role_names) <= 3:
+            score += 3
+            evidence.append(f"bounded communication plan={list(chat.role_names)}")
+        else:
+            evidence.append(f"unbounded communication plan={list(chat.role_names)}")
+
+        research = self.team.plan_task("Research evidence about cellular senescence and longevity")
+        if {"researcher", "reviewer"}.issubset(set(research.role_names)):
+            score += 2
+            evidence.append(f"research/review separation={list(research.role_names)}")
+        else:
+            evidence.append("research/review separation missing")
+
+        engineering = self.team.plan_task("Fix a failing Python test in the repair module")
+        if {"engineer", "reviewer"}.issubset(set(engineering.role_names)):
+            score += 2
+            evidence.append(f"engineering/review separation={list(engineering.role_names)}")
+        else:
+            evidence.append("engineering/review separation missing")
+
+        return CapabilityResult(
+            "team_orchestration",
+            score,
+            15,
+            "ready" if score == 15 else "limited",
+            "; ".join(evidence),
+            None if score == 15 else "improve bounded task-aware role selection and independent review separation",
+        )
+
     def evaluate(self) -> list[CapabilityResult]:
         available = self.providers.available_providers()
         provider_names = [p.name for p in available]
         trained_or_remote = [name for name in provider_names if name != "genesis-bootstrap"]
-        roles = self.team.roles
-        dynamic = [role for role in roles if role.dynamic]
 
         tests_ok = self.test_probe() if self.test_probe is not None else True
         checks = [
@@ -62,14 +102,7 @@ class CapabilityEvaluator:
                 f"non-bootstrap providers: {trained_or_remote}",
                 None if trained_or_remote else "discover and validate a stronger replaceable reasoning provider",
             ),
-            CapabilityResult(
-                "team_orchestration",
-                min(15, 8 + len(dynamic)),
-                15,
-                "ready" if len(roles) >= 8 else "limited",
-                f"roles={len(roles)}, dynamic_specialists={len(dynamic)}",
-                None if len(roles) >= 8 else "restore the permanent core AI team",
-            ),
+            self._team_orchestration_result(),
             CapabilityResult(
                 "communication",
                 15 if (self.root / "genesis" / "communication.py").exists() else 0,
