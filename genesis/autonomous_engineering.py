@@ -6,6 +6,7 @@ import time
 from dataclasses import asdict
 from pathlib import Path
 
+from .application import ApplicationModule
 from .coding import CodingModule
 from .efficiency import EfficiencyTracker
 from .intelligence_router import IntelligenceRouter
@@ -19,15 +20,17 @@ ENGINEERING_MODULES = {
     "genesis.coding",
     "genesis.self_development",
     "genesis.ai_score",
+    "genesis.application",
 }
 
 
 class AutonomousEngineeringLoop:
-    """Bounded bridge from security/competitive gaps to coding candidates.
+    """Bounded bridge from persistent engineering gaps to coding candidates.
 
     This loop may select one persistent engineering task, ask the Coding Module
     for one bounded patch, and run Security review on the produced candidate.
-    It never promotes code. Independent validators remain mandatory.
+    Application work follows exactly the same candidate and validator path.
+    It never promotes or releases code. Independent validators remain mandatory.
     """
 
     def __init__(self, root: Path, providers: ProviderRegistry | None = None) -> None:
@@ -35,6 +38,7 @@ class AutonomousEngineeringLoop:
         self.providers = providers or ProviderRegistry()
         self.queue = PersistentTaskQueue(self.root / "runtime" / "genesis_tasks.sqlite3")
         self.security = SecurityModule(self.root)
+        self.application = ApplicationModule(self.root)
         self.coding = CodingModule(self.root, self.providers)
         self.efficiency = EfficiencyTracker(self.root / "runtime" / "efficiency.jsonl")
 
@@ -66,12 +70,12 @@ class AutonomousEngineeringLoop:
                     return task
         return None
 
-    def _record_efficiency(self, provider_name: str, started: float, success: bool) -> None:
+    def _record_efficiency(self, provider_name: str, started: float, success: bool, task_type: str = "coding") -> None:
         class _ProviderName:
             name = provider_name
         profile = IntelligenceRouter.profile(_ProviderName())
         self.efficiency.record(
-            task_type="coding",
+            task_type=task_type,
             provider=provider_name,
             success=success,
             quality=1.0 if success else 0.0,
@@ -85,10 +89,13 @@ class AutonomousEngineeringLoop:
         runtime.mkdir(parents=True, exist_ok=True)
         security_report = self.security.write_report(runtime / "security_report.json")
         created_security_tasks = self._record_security_tasks(security_report)
+        application_tasks = self.application.ensure_development_tasks()
         task = self._select_task()
         result = {
             "security": security_report,
             "created_security_tasks": created_security_tasks,
+            "application": self.application.inspect(),
+            "application_tasks": application_tasks,
             "selected_task": asdict(task) if task else None,
             "coding_status": "idle",
             "candidate": None,
@@ -100,6 +107,7 @@ class AutonomousEngineeringLoop:
 
         started = time.perf_counter()
         provider_name = "unknown"
+        task_type = str(task.payload.get("task_type", "coding"))
         try:
             self.queue.transition(task.task_id, "assigned", module_id="genesis.coding")
             self.queue.transition(task.task_id, "running", module_id="genesis.coding")
@@ -124,7 +132,7 @@ class AutonomousEngineeringLoop:
                     success = True
             else:
                 self.queue.transition(task.task_id, "blocked", module_id="genesis.coding")
-            self._record_efficiency(provider_name, started, success)
+            self._record_efficiency(provider_name, started, success, task_type=task_type)
         except Exception as exc:
             result["coding_status"] = "provider_or_candidate_error"
             result["error"] = f"{type(exc).__name__}: {exc}"[:2000]
@@ -136,7 +144,7 @@ class AutonomousEngineeringLoop:
                     pass
             if provider_name != "unknown":
                 try:
-                    self._record_efficiency(provider_name, started, False)
+                    self._record_efficiency(provider_name, started, False, task_type=task_type)
                 except Exception:
                     pass
 
