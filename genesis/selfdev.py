@@ -132,7 +132,11 @@ class SelfDevelopmentExecutor:
         ]
 
         for candidate in candidates:
-            if not all((self.root / p).exists() for p in candidate["files"]):
+            # The first file is the production capability marker; supporting
+            # tests are installed with the candidate but do not determine whether
+            # that capability already exists.
+            primary_path = next(iter(candidate["files"]))
+            if not (self.root / primary_path).exists():
                 return candidate
         return {
             "title": "Record self-development idle state",
