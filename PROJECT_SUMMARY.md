@@ -1,39 +1,90 @@
 # Genesis AI Network — Project Summary
 
-Genesis AI Network is an open, decentralized, self-improving scientific AI project whose permanent mission is to advance **physical human immortality** while preserving human autonomy, safety, dignity, and scientific integrity.
+Genesis AI Network is an open-source, decentralized, continuously improving scientific AI system whose permanent mission is to advance **physical human immortality** while preserving human autonomy, safety, dignity, privacy and scientific integrity.
 
-## Core design
+## Core principle
 
-Genesis AI is not one model. Its identity is the Genesis Constitution, cryptographic history, validated memory, and network protocol. Models, tools, agents, and software modules are replaceable and evolvable.
+> **Models are replaceable. Code is evolvable. Knowledge is expandable. The physical-human-immortality mission is permanent.**
 
-## Learning
+Genesis is not one model. Its identity is anchored in the Genesis Constitution, canonical Genesis Block, cryptographic identity/history, accumulated validated memory and protocol.
 
-The system is intended to learn from users, public research, experiments, and peer nodes. New information begins as candidate knowledge and requires provenance and validation before it becomes trusted.
+## Current architecture
 
-## Model assimilation
+Genesis currently combines:
 
-Genesis AI may discover publicly available models, check their licenses, quarantine them, benchmark them, test them for security and constitutional compatibility, and adopt them only when they improve a capability safely and legally.
+- replaceable intelligence providers with a deterministic bootstrap fallback;
+- resource-aware Intelligence Router;
+- task-aware specialist AI team orchestration;
+- persistent task queue and runtime-state restoration;
+- Research and immortality-relevance scanning;
+- Self-Learning with candidate/validated lesson separation;
+- Memory Module with semantic, episodic, procedural and policy/context memory;
+- Coding Module for bounded software engineering candidates;
+- Security Module for repository and candidate structural review;
+- Application Module for desktop/mobile application development;
+- Competitive AI Capability scoring, Efficiency scoring and Immortality Research Progress scoring;
+- GDEN foundations for authenticated peer identity and future distributed resources;
+- independent validator quorum before candidate promotion.
 
-## Self-development
+## Autonomous development
 
-Self-development follows:
+The software-evolution path is:
 
-`research → candidate → sandbox → test → review → validate → sign → release`
+`research / measured gap / app need / security finding → persistent task → memory/context → Coding Module → bounded candidate → tests → Security review → independent validators → signed quorum → promotion`
 
-The stable system does not automatically execute or promote AI-generated code.
+Genesis does not grant AI-generated code direct authority over stable `main`.
 
-## Decentralization
+## Application status
 
-The long-term network should use independent nodes, replicated state, P2P communication, content-addressed artifacts, signed releases, and multiple storage mirrors so that no single repository, server, provider, or developer is a permanent dependency.
+### Windows desktop
 
-## Continuity
+A Windows desktop alpha has been built using a lightweight Tauri shell with a bundled local Genesis Core. GitHub Releases can publish an installable `.exe` plus SHA-256 digest.
 
-Individual nodes may disconnect. The design objective is continuous network presence through redundancy and failover.
+Secure unattended automatic installation is intended to use signed update artifacts and must not rely on unsigned self-generated releases.
+
+### Android mobile
+
+The Application Module has an Android target configured for a lightweight APK client connected to an explicitly configured authenticated Genesis API. The Android source/application is a current development target.
+
+The Application Module may create candidates under `desktop/` and `mobile/`, but it has **no release authority**, cannot access signing secrets and cannot modify GitHub workflows.
+
+## Memory and learning
+
+Genesis separates memory/learning trust states. New findings and generated lessons are candidates until validation. Normal trusted retrieval favors validated memories and lessons with provenance.
+
+The long-term objective is for small/replaceable models to gain system-level capability through validated memory, tool use, specialization, routing, research and peer resources rather than relying on extremely large models alone.
+
+## Measurement
+
+Genesis uses separate measurements rather than one overloaded score:
+
+1. **AI Capability Score** — measured capability against configured competitive/frontier references.
+2. **Efficiency Score** — useful measured capability relative to compute/resource/cost evidence.
+3. **Immortality Research Progress Score** — research/evidence-pipeline maturity, not a claim about the percentage of physical immortality achieved.
+
+Unmeasured capabilities should not receive optimistic evidence credit.
+
+## Decentralization — GDEN
+
+GDEN is intended to evolve Genesis installations into owner-controlled peers that can contribute approved compute, storage, inference, research and validation resources.
+
+Current foundations include cryptographic node identity, authenticated peer handshakes, contribution policy and signed/tamper-evident state information. Full decentralized consensus, replicated shared state, peer task leasing, Sybil controls and persistent independent validator identities remain development targets.
+
+Genesis does not currently claim to operate a complete cryptocurrency/blockchain consensus network.
+
+## Documentation roles
+
+- `README.md` — public introduction, installation and overview.
+- `PROJECT_SUMMARY.md` — concise snapshot of the current architecture and state.
+- `TODO.md` — human-readable near-term backlog only.
+- `ROADMAP.md` — major product/network/scientific milestones.
+- `CHANGELOG.md` — permanent record of notable shipped changes/releases.
+- `GENESIS_CONSTITUTION.md` and `GENESIS_BLOCK.json` — protected identity/mission foundation.
+
+The persistent SQLite task queue—not `TODO.md`—is the operational source of truth for autonomous work.
+
+## Current direction
+
+The near-term priorities are to stabilize Genesis Desktop, bootstrap the Android APK, complete secure signed updates, improve real system-level capability-per-compute benchmarking, strengthen long-term memory, and evolve GDEN from authenticated peers toward useful distributed execution and verified shared progress.
 
 **A node may sleep. The network must not.**
-
-## V0.1
-
-The first executable milestone focuses on constitution verification, persistent state, pluggable intelligence providers, a model registry, candidate evolution workflows, and an auditable event log.
-
-P2P consensus, distributed storage, and large-scale model assimilation come later.
