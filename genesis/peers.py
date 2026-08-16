@@ -8,6 +8,11 @@ from dataclasses import dataclass
 from datetime import datetime, timezone
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from typing import Callable
+from urllib.parse import parse_qs, urlsplit
+
+
+MAX_PEER_STATUS_BYTES = 64 * 1024
+MAX_CHALLENGE_CHARS = 128
 
 
 @dataclass(frozen=True)
@@ -49,6 +54,24 @@ class PeerStore:
         return [PeerRecord(*row) for row in rows]
 
 
+def _read_bounded_json_response(response, max_bytes: int = MAX_PEER_STATUS_BYTES) -> dict:
+    length_header = response.headers.get("Content-Length")
+    if length_header:
+        try:
+            length = int(length_header)
+        except ValueError as exc:
+            raise ValueError("invalid peer Content-Length") from exc
+        if length < 0 or length > max_bytes:
+            raise ValueError("peer response too large")
+    raw = response.read(max_bytes + 1)
+    if len(raw) > max_bytes:
+        raise ValueError("peer response too large")
+    payload = json.loads(raw.decode("utf-8"))
+    if not isinstance(payload, dict):
+        raise ValueError("peer response must be a JSON object")
+    return payload
+
+
 class PeerClient:
     """Legacy V0.1 Constitution-hash probe retained for compatibility."""
 
@@ -61,7 +84,7 @@ class PeerClient:
         now = datetime.now(timezone.utc).isoformat()
         try:
             with urllib.request.urlopen(req, timeout=self.timeout) as response:
-                payload = json.loads(response.read().decode("utf-8"))
+                payload = _read_bounded_json_response(response)
             remote_hash = str(payload.get("constitution_sha256", ""))
             status = "compatible" if remote_hash == expected_constitution_hash else "constitution_mismatch"
             return PeerRecord(str(payload.get("node_id", url)), url, remote_hash, now, status)
@@ -71,7 +94,7 @@ class PeerClient:
 
 class _StatusHandler(BaseHTTPRequestHandler):
     status_factory: Callable[[], dict] = lambda: {}
-    handshake_factory: Callable[[], dict] | None = None
+    handshake_factory: Callable[[str | None], dict] | None = None
 
     def _json(self, payload: dict) -> None:
         body = json.dumps(payload, sort_keys=True).encode("utf-8")
@@ -82,11 +105,18 @@ class _StatusHandler(BaseHTTPRequestHandler):
         self.wfile.write(body)
 
     def do_GET(self):
-        if self.path == "/genesis/status":
+        parsed = urlsplit(self.path)
+        if parsed.path == "/genesis/status":
             self._json(type(self).status_factory())
             return
-        if self.path == "/genesis/handshake" and type(self).handshake_factory is not None:
-            self._json(type(self).handshake_factory())
+        if parsed.path == "/genesis/handshake" and type(self).handshake_factory is not None:
+            challenge_values = parse_qs(parsed.query, keep_blank_values=True).get("challenge", [])
+            challenge = challenge_values[0] if challenge_values else None
+            if challenge is not None and (not challenge or len(challenge) > MAX_CHALLENGE_CHARS):
+                self.send_response(400)
+                self.end_headers()
+                return
+            self._json(type(self).handshake_factory(challenge))
             return
         self.send_response(404)
         self.end_headers()
@@ -96,14 +126,14 @@ class _StatusHandler(BaseHTTPRequestHandler):
 
 
 class PeerStatusServer:
-    """Read-only peer endpoint supporting legacy status and signed GDEN handshake."""
+    """Read-only peer endpoint supporting legacy status and nonce-bound GDEN handshake."""
 
     def __init__(
         self,
         host: str,
         port: int,
         status_factory: Callable[[], dict],
-        handshake_factory: Callable[[], dict] | None = None,
+        handshake_factory: Callable[[str | None], dict] | None = None,
     ) -> None:
         handler = type("GenesisStatusHandler", (_StatusHandler,), {})
         handler.status_factory = staticmethod(status_factory)
