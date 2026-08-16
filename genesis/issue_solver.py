@@ -47,7 +47,7 @@ class IssueSolver:
         self.root = root.resolve()
         self.provider_url = (provider_url or os.environ.get("GENESIS_REPAIR_PROVIDER_URL", "")).rstrip("/")
         self.github_token = os.environ.get("GITHUB_TOKEN", "").strip()
-        self.github_model = os.environ.get("GENESIS_REPAIR_MODEL", "openai/gpt-4.1").strip()
+        self.github_model = os.environ.get("GENESIS_REPAIR_MODEL", "openai/gpt-4o").strip()
 
     def run_tests(self) -> tuple[bool, str]:
         proc = subprocess.run(
@@ -173,6 +173,7 @@ class IssueSolver:
                 "Authorization": f"Bearer {self.github_token}",
                 "Content-Type": "application/json",
                 "User-Agent": "Genesis-AI-Network/0.1",
+                "X-GitHub-Api-Version": "2022-11-28",
             },
         )
         with urllib.request.urlopen(req, timeout=90) as response:
@@ -188,14 +189,13 @@ class IssueSolver:
     def _provider_proposal(self, diagnosis: Diagnosis) -> dict | None:
         if diagnosis.category == "constitution_integrity":
             return None
-        errors: list[str] = []
         for provider in (self._http_provider_proposal, self._github_models_proposal):
             try:
                 proposal = provider(diagnosis)
                 if proposal is not None:
                     return proposal
-            except Exception as exc:
-                errors.append(f"{provider.__name__}: {exc}")
+            except Exception:
+                continue
         return None
 
     def validate_proposal(self, proposal: dict) -> dict:
