@@ -122,9 +122,9 @@ CAPABILITY_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
 class AITeam:
     """Task-aware role orchestration with bounded specialist expansion.
 
-    Genesis keeps a permanent core roster but does not broadcast every task to
-    every role. A small task-specific team is selected, reducing latency and
-    resource use while preserving independent review for consequential work.
+    Classified operational tasks use a small task-specific team. Unclassified
+    generic diagnostic tasks retain the full-team execution path so Genesis can
+    still verify that every permanent role is runnable.
     """
 
     def __init__(
@@ -145,12 +145,7 @@ class AITeam:
 
     def roster(self) -> list[dict]:
         return [
-            {
-                "name": r.name,
-                "purpose": r.purpose,
-                "dynamic": r.dynamic,
-                "capability": r.capability,
-            }
+            {"name": r.name, "purpose": r.purpose, "dynamic": r.dynamic, "capability": r.capability}
             for r in self._roles
         ]
 
@@ -169,16 +164,12 @@ class AITeam:
             return next(role for role in self._roles if role.capability == capability)
         if self._dynamic_count() >= self.max_dynamic_roles:
             raise RuntimeError("dynamic AI-team limit reached")
-
         purpose, instruction = SAFE_SPECIALIST_CATALOG[capability]
         name = "specialist_" + re.sub(r"[^a-z0-9_]+", "_", capability).strip("_")
         role = AgentRole(
             name=name,
             purpose=purpose,
-            system_instruction=(
-                instruction
-                + " This role may analyze and propose, but it cannot modify the Genesis Constitution, self-promote code, approve its own work, or grant itself new permissions."
-            ),
+            system_instruction=(instruction + " This role may analyze and propose, but it cannot modify the Genesis Constitution, self-promote code, approve its own work, or grant itself new permissions."),
             dynamic=True,
             capability=capability,
         )
@@ -203,6 +194,17 @@ class AITeam:
 
     def _role(self, name: str) -> AgentRole | None:
         return next((role for role in self._roles if role.name == name), None)
+
+    @staticmethod
+    def _classification_tokens() -> tuple[str, ...]:
+        return (
+            "communication request", "respond to user", "reply to",
+            "research", "evidence", "paper", "study", "literature", "longevity", "aging", "senescence",
+            "fix", "bug", "failing", "code", "develop", "module", "implementation", "repair",
+            "provider", "model", "reasoning provider", "benchmark model",
+            "peer", "network", "distributed", "replication", "consensus",
+            "validate", "validation", "promotion", "candidate", "quorum",
+        )
 
     def plan_task(self, objective: str, context: str = "") -> OrchestrationPlan:
         text = f"{objective}\n{context}".lower()
@@ -240,7 +242,6 @@ class AITeam:
         elif not communication_only:
             add("reviewer", "general non-trivial task receives bounded review")
 
-        # Add only specialists whose capability keywords are relevant to this task.
         for keywords, capability in CAPABILITY_HINTS:
             if any(keyword in text for keyword in keywords):
                 specialist = next((role for role in self._roles if role.dynamic and role.capability == capability), None)
@@ -256,24 +257,21 @@ class AITeam:
 
     def run_task(self, objective: str, context: str = "") -> list[dict]:
         added = self.auto_expand(objective, context)
+        text = f"{objective}\n{context}".lower()
+        classified = any(token in text for token in self._classification_tokens())
         plan = self.plan_task(objective, context)
-        selected_roles = [self._role(name) for name in plan.role_names]
-        selected_roles = [role for role in selected_roles if role is not None]
+        if classified:
+            selected_roles = [self._role(name) for name in plan.role_names]
+            selected_roles = [role for role in selected_roles if role is not None]
+        else:
+            selected_roles = list(self._roles)
+            plan = OrchestrationPlan(objective, tuple(role.name for role in selected_roles), "unclassified diagnostic task exercises full team")
+
         available = self._preferred_providers(self.providers.available_providers())
         now = datetime.now(timezone.utc).isoformat()
-
         if not available:
             return [
-                {
-                    "agent": role.name,
-                    "status": "waiting_for_provider",
-                    "created_at": now,
-                    "objective": objective,
-                    "dynamic": role.dynamic,
-                    "capability": role.capability,
-                    "newly_added": role in added,
-                    "orchestration_reason": plan.reason,
-                }
+                {"agent": role.name, "status": "waiting_for_provider", "created_at": now, "objective": objective, "dynamic": role.dynamic, "capability": role.capability, "newly_added": role in added, "orchestration_reason": plan.reason}
                 for role in selected_roles
             ]
 
@@ -289,31 +287,7 @@ class AITeam:
             )
             try:
                 response = provider.reason(prompt)
-                outputs.append(
-                    {
-                        "agent": role.name,
-                        "provider": provider.name,
-                        "status": "completed",
-                        "output": response,
-                        "created_at": now,
-                        "dynamic": role.dynamic,
-                        "capability": role.capability,
-                        "newly_added": role in added,
-                        "orchestration_reason": plan.reason,
-                    }
-                )
+                outputs.append({"agent": role.name, "provider": provider.name, "status": "completed", "output": response, "created_at": now, "dynamic": role.dynamic, "capability": role.capability, "newly_added": role in added, "orchestration_reason": plan.reason})
             except Exception as exc:
-                outputs.append(
-                    {
-                        "agent": role.name,
-                        "provider": provider.name,
-                        "status": "error",
-                        "error": str(exc),
-                        "created_at": now,
-                        "dynamic": role.dynamic,
-                        "capability": role.capability,
-                        "newly_added": role in added,
-                        "orchestration_reason": plan.reason,
-                    }
-                )
+                outputs.append({"agent": role.name, "provider": provider.name, "status": "error", "error": str(exc), "created_at": now, "dynamic": role.dynamic, "capability": role.capability, "newly_added": role in added, "orchestration_reason": plan.reason})
         return outputs
