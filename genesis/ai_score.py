@@ -21,11 +21,13 @@ class AIScoreDimension:
 
 
 class GenesisAIScorer:
-    """Dynamic operational AI score for Genesis.
+    """Competitive AI score for Genesis relative to a moving frontier reference.
 
-    This score is deliberately stricter than the basic capability score. It is
-    a maintenance signal, not a claim of consciousness, AGI, scientific truth,
-    or proximity to physical immortality.
+    Comparable public benchmarks dominate the score. Internal operational
+    readiness earns limited credit and cannot make Genesis appear frontier-level
+    by itself. A score of 99 is reserved for broad independently verified
+    frontier-or-better performance across every required benchmark family and
+    system capability. 100 is intentionally not assigned.
     """
 
     def __init__(self, root: Path, providers: ProviderRegistry | None = None, team: AITeam | None = None) -> None:
@@ -40,130 +42,156 @@ class GenesisAIScorer:
         try:
             payload = json.loads(path.read_text(encoding="utf-8"))
             stamp = datetime.fromisoformat(str(payload["created_at"]).replace("Z", "+00:00"))
-            age = datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)
-            return age.total_seconds() <= 24 * 3600
+            return (datetime.now(timezone.utc) - stamp.astimezone(timezone.utc)).total_seconds() <= 24 * 3600
         except Exception:
             return False
+
+    def _reference(self) -> dict[str, Any]:
+        runtime = self.root / "runtime" / "competitive_ai_reference.json"
+        config = self.root / "config" / "competitive_ai_reference.json"
+        path = runtime if runtime.exists() else config
+        if not path.exists():
+            return {"as_of": None, "score_cap": 99, "benchmarks": []}
+        return json.loads(path.read_text(encoding="utf-8"))
+
+    def _benchmark_results(self) -> dict[str, Any]:
+        path = self.root / "runtime" / "competitive_benchmark_results.json"
+        if not path.exists():
+            return {"benchmarks": {}}
+        try:
+            return json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return {"benchmarks": {}}
+
+    def _frontier_dimension(self) -> AIScoreDimension:
+        reference = self._reference()
+        results = self._benchmark_results().get("benchmarks", {})
+        earned = 0.0
+        maximum = 0
+        measured = 0
+        details: list[str] = []
+        for benchmark in reference.get("benchmarks", []):
+            benchmark_id = str(benchmark["id"])
+            target = float(benchmark["reference_score"])
+            weight = int(benchmark.get("weight", 0))
+            maximum += weight
+            result = results.get(benchmark_id)
+            if not isinstance(result, dict) or "score" not in result or target <= 0:
+                details.append(f"{benchmark_id}=unmeasured/{target:g}")
+                continue
+            measured += 1
+            actual = float(result["score"])
+            ratio = max(0.0, min(1.0, actual / target))
+            earned += weight * ratio
+            details.append(f"{benchmark_id}={actual:g}/{target:g}")
+        score = round(earned)
+        hint = None if maximum and score == maximum else (
+            "run comparable frontier benchmarks and improve the weakest measured benchmark family; unmeasured abilities receive no frontier credit"
+        )
+        return AIScoreDimension(
+            "frontier_competitive_benchmarks",
+            score,
+            maximum or 60,
+            f"measured={measured}; reference_as_of={reference.get('as_of')}; " + "; ".join(details),
+            hint,
+        )
 
     def dimensions(self) -> list[AIScoreDimension]:
         report = CapabilityEvaluator(self.root, self.providers, self.team).report()
         result_map = {item["capability"]: item for item in report["results"]}
-
-        def ratio(capability: str, maximum: int) -> int:
-            item = result_map[capability]
-            return round(maximum * (item["score"] / item["max_score"])) if item["max_score"] else 0
-
-        advanced = result_map["advanced_reasoning"]
-        orchestration = result_map["team_orchestration"]
-        validation = result_map["independent_validation"]
-        health = result_map["software_health"]
-        has_research = (self.root / "genesis" / "research.py").exists()
-        has_scan_engine = (self.root / "genesis" / "immortality_scan.py").exists()
-        fresh_scan = self._fresh_scan()
         has_selfdev = (self.root / "genesis" / "selfdev.py").exists() and (self.root / "genesis" / "proactive.py").exists()
+        has_tasks = (self.root / "genesis" / "modules" / "task_queue.py").exists()
+        has_validation = (self.root / "genesis" / "promotion.py").exists()
+        autonomy = (7 if has_selfdev else 0) + (4 if has_tasks else 0) + (4 if has_validation else 0)
+
+        fresh_scan = self._fresh_scan()
+        has_research = (self.root / "genesis" / "research.py").exists()
+        has_lens = (self.root / "genesis" / "immortality_scan.py").exists()
+        research = (3 if has_research else 0) + (3 if has_lens else 0) + (2 if has_tasks else 0) + (2 if fresh_scan else 0)
+
         has_gden = (self.root / "genesis" / "gden.py").exists()
-        has_signed_peers = (self.root / "genesis" / "peers.py").exists() and has_gden
-        has_task_queue = (self.root / "genesis" / "modules" / "task_queue.py").exists()
-        has_benchmarking = (self.root / "genesis" / "modules" / "benchmarking.py").exists()
+        has_peers = (self.root / "genesis" / "peers.py").exists()
+        has_consensus = (self.root / "genesis" / "gden_consensus.py").exists()
+        decentralization = (4 if has_gden else 0) + (3 if has_peers else 0) + (3 if has_consensus else 0)
 
-        research_score = 0
-        if has_research:
-            research_score += 5
-        if has_scan_engine:
-            research_score += 5
-        if fresh_scan:
-            research_score += 5
-
-        autonomy_score = 0
-        if has_selfdev:
-            autonomy_score += 8
-        if has_task_queue:
-            autonomy_score += 4
-        if has_benchmarking:
-            autonomy_score += 3
-
-        decentralization_score = 0
-        if has_gden:
-            decentralization_score += 7
-        if has_signed_peers:
-            decentralization_score += 5
-        if (self.root / "GDEN_SPEC.md").exists():
-            decentralization_score += 3
+        validation_result = result_map.get("independent_validation", {})
+        health_result = result_map.get("software_health", {})
+        safety = 0
+        if validation_result.get("score") == validation_result.get("max_score"):
+            safety += 3
+        if health_result.get("score") == health_result.get("max_score"):
+            safety += 2
 
         return [
+            self._frontier_dimension(),
             AIScoreDimension(
-                "reasoning",
-                ratio("advanced_reasoning", 20),
-                20,
-                f"advanced_reasoning={advanced['score']}/{advanced['max_score']}",
-                advanced.get("improvement_hint"),
-            ),
-            AIScoreDimension(
-                "team_orchestration",
-                ratio("team_orchestration", 15),
+                "continuous_autonomy",
+                autonomy,
                 15,
-                f"team_orchestration={orchestration['score']}/{orchestration['max_score']}",
-                orchestration.get("improvement_hint"),
+                f"selfdev={has_selfdev}, persistent_tasks={has_tasks}, validation={has_validation}",
+                None if autonomy == 15 else "strengthen persistent autonomous execution and validated promotion",
             ),
             AIScoreDimension(
-                "autonomous_development",
-                autonomy_score,
-                15,
-                f"selfdev={has_selfdev}, persistent_tasks={has_task_queue}, benchmarks={has_benchmarking}",
-                None if autonomy_score == 15 else "strengthen persistent benchmark-driven autonomous development",
-            ),
-            AIScoreDimension(
-                "research_freshness",
-                research_score,
-                15,
-                f"research_engine={has_research}, scan_engine={has_scan_engine}, fresh_scan_24h={fresh_scan}",
-                None if research_score == 15 else "run current web/scientific discovery and preserve provenance",
-            ),
-            AIScoreDimension(
-                "independent_validation",
-                ratio("independent_validation", 10),
+                "immortality_research_system",
+                research,
                 10,
-                f"independent_validation={validation['score']}/{validation['max_score']}",
-                validation.get("improvement_hint"),
+                f"research={has_research}, lens={has_lens}, persistent_tasks={has_tasks}, fresh_scan_24h={fresh_scan}",
+                None if research == 10 else "continuously discover, queue, review and validate immortality-relevant evidence",
             ),
             AIScoreDimension(
-                "decentralization",
-                decentralization_score,
-                15,
-                f"gden={has_gden}, signed_peers={has_signed_peers}",
-                None if decentralization_score == 15 else "expand authenticated peer replication and consensus",
-            ),
-            AIScoreDimension(
-                "software_resilience",
-                ratio("software_health", 10),
+                "decentralized_resilience",
+                decentralization,
                 10,
-                f"software_health={health['score']}/{health['max_score']}",
-                health.get("improvement_hint"),
+                f"gden={has_gden}, authenticated_peers={has_peers}, consensus={has_consensus}",
+                None if decentralization == 10 else "add authenticated replicated state and independent peer consensus",
+            ),
+            AIScoreDimension(
+                "validation_and_software_safety",
+                safety,
+                5,
+                f"independent_validation={validation_result.get('score')}/{validation_result.get('max_score')}, software_health={health_result.get('score')}/{health_result.get('max_score')}",
+                None if safety == 5 else "restore independent validation and software-health evidence",
             ),
         ]
 
     def report(self) -> dict[str, Any]:
         dims = self.dimensions()
-        score = sum(item.score for item in dims)
+        raw_score = sum(item.score for item in dims)
         maximum = sum(item.max_score for item in dims)
-        percent = round(score / maximum * 100, 1) if maximum else 0.0
+        reference = self._reference()
+        cap = min(99, int(reference.get("score_cap", 99)))
+        score = min(cap, raw_score)
+        percent = round(score / 100 * 100, 1)
         gaps = sorted((item for item in dims if item.score < item.max_score), key=lambda x: (x.score / x.max_score, x.name))
-        if percent < 50:
-            urgency = "critical_update_required"
-        elif percent < 70:
-            urgency = "high_priority_update_required"
-        elif percent < 85:
-            urgency = "improvement_required"
+        frontier = next((item for item in dims if item.name == "frontier_competitive_benchmarks"), None)
+        if score < 35:
+            urgency = "critical_competitive_update_required"
+        elif score < 55:
+            urgency = "high_competitive_update_required"
+        elif score < 75:
+            urgency = "competitive_improvement_required"
+        elif score < 90:
+            urgency = "approaching_frontier"
+        elif score < 99:
+            urgency = "frontier_validation_required"
         else:
-            urgency = "maintain_and_raise_benchmarks"
+            urgency = "ultimate_target_threshold"
         return {
             "score": score,
-            "max_score": maximum,
+            "max_score": 100,
+            "score_cap": cap,
             "percent": percent,
             "urgency": urgency,
+            "reference_as_of": reference.get("as_of"),
+            "frontier_benchmark_coverage": frontier.evidence if frontier else "unavailable",
             "dimensions": [asdict(item) for item in dims],
             "priority_gaps": [asdict(item) for item in gaps],
-            "interpretation": "Operational AI maintenance score only; not consciousness, AGI, scientific truth, or immortality progress.",
+            "ultimate_target": reference.get("ultimate_target", {}),
+            "interpretation": (
+                "Competitive engineering score against the configured moving frontier reference. "
+                "99 is reserved for broad independently verified frontier-or-better performance across the defined suite; "
+                "100 is intentionally not assigned. This is not a consciousness score or proof of superiority to every human in every domain."
+            ),
         }
 
     def append_history(self, path: Path) -> dict[str, Any]:
