@@ -16,6 +16,9 @@ permissions:
   issues: write
   models: read
 
+env:
+  PYTHONPATH: ${{ github.workspace }}
+
 jobs:
   self_heal:
     if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure'
