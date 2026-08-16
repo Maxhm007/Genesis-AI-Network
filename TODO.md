@@ -6,8 +6,9 @@ This file is a **human-readable near-term backlog**. It is not the authority for
 
 ## Immediate priorities
 
-- [ ] Validate the current Application Module and capability-growth module integration on the latest `main` head.
-- [ ] Bootstrap the Android mobile application under `mobile/` and produce the first test APK.
+- [ ] Complete the current proactive validation cycle for the capability-growth integration on `main`.
+- [x] Bootstrap the Android mobile application under `mobile/` and produce the first test APK.
+- [ ] Add production Android signing and a stable mobile release channel after alpha validation.
 - [ ] Finish secure signed automatic-update support for Genesis Desktop.
 - [ ] Add persistent Tauri updater signing keys through GitHub Secrets; never commit private signing material.
 - [ ] Improve the Windows desktop UI with live Genesis Core status, Memory, Research, Coding, Security, Network and score views.
@@ -19,9 +20,9 @@ This file is a **human-readable near-term backlog**. It is not the authority for
 - [x] Add Experiment Module foundation with baseline-versus-candidate keep/reject decisions.
 - [x] Add Resource Module foundation for bounded CPU/memory/disk/battery/network capacity scoring.
 - [x] Add Model Scout Module foundation with sequential discovered → quarantined → tested → validated → trusted → active lifecycle.
+- [x] Feed measured provider outcome telemetry into Intelligence Router profiles after a minimum evidence threshold.
 - [ ] Expand system-level benchmarks for reasoning, coding, research, tool use, long-horizon tasks and memory.
-- [ ] Persist experiment hypotheses, baseline results, candidate results and decisions.
-- [ ] Feed measured provider quality/latency/resource telemetry into Intelligence Router profiles.
+- [ ] Persist richer experiment hypotheses, baseline results, candidate results and decisions beyond provider telemetry.
 - [ ] Add real local OS telemetry collection without requiring privileged access.
 - [ ] Add model/provider discovery feeds with license verification and benchmark tournaments.
 - [ ] Keep activation separate from discovery: no model becomes active without required validation evidence.
@@ -49,10 +50,12 @@ This file is a **human-readable near-term backlog**. It is not the authority for
 
 ## Applications
 
+- [x] Publish a downloadable Android alpha APK with SHA-256 checksum.
+- [ ] Add Android production signing; the current alpha is debug-signed for testing only.
 - [ ] Add application build-health checks to the Application Module.
 - [ ] Add application compatibility/version checks between Genesis Core and clients.
 - [ ] Publish a stable Genesis Desktop release after alpha validation.
-- [ ] Publish a downloadable Android APK after security/build validation.
+- [ ] Publish a stable Android release after security, signing and compatibility validation.
 
 ## Research mission
 
