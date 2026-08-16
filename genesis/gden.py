@@ -80,17 +80,41 @@ class NodeIdentity:
 
     @classmethod
     def load_or_create(cls, path: Path) -> "NodeIdentity":
-        if path.exists():
-            raw = base64.b64decode(path.read_text(encoding="utf-8").strip())
-            return cls(Ed25519PrivateKey.from_private_bytes(raw))
-        identity = cls.generate()
         path.parent.mkdir(parents=True, exist_ok=True)
+        if path.is_symlink():
+            raise RuntimeError("refusing to load Genesis node identity through a symlink")
+        if path.exists():
+            try:
+                os.chmod(path, 0o600)
+            except OSError:
+                pass
+            raw = base64.b64decode(path.read_text(encoding="utf-8").strip(), validate=True)
+            return cls(Ed25519PrivateKey.from_private_bytes(raw))
+
+        identity = cls.generate()
         raw = identity._private_key.private_bytes(Encoding.Raw, PrivateFormat.Raw, NoEncryption())
-        path.write_text(base64.b64encode(raw).decode("ascii") + "\n", encoding="utf-8")
+        encoded = base64.b64encode(raw) + b"\n"
+        flags = os.O_WRONLY | os.O_CREAT | os.O_EXCL
+        if hasattr(os, "O_NOFOLLOW"):
+            flags |= os.O_NOFOLLOW
         try:
-            os.chmod(path, 0o600)
-        except OSError:
-            pass
+            fd = os.open(path, flags, 0o600)
+        except FileExistsError:
+            # Another local process created the identity between the existence
+            # check and the exclusive create. Load that identity rather than
+            # overwriting it.
+            return cls.load_or_create(path)
+        try:
+            with os.fdopen(fd, "wb") as handle:
+                handle.write(encoded)
+                handle.flush()
+                os.fsync(handle.fileno())
+        except Exception:
+            try:
+                path.unlink(missing_ok=True)
+            except OSError:
+                pass
+            raise
         return identity
 
     @property
@@ -111,8 +135,12 @@ class NodeIdentity:
     @staticmethod
     def verify(public_key_b64: str, payload: dict[str, Any], signature_b64: str) -> bool:
         try:
-            key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key_b64))
-            key.verify(base64.b64decode(signature_b64), _canonical(payload))
+            key_bytes = base64.b64decode(public_key_b64, validate=True)
+            signature = base64.b64decode(signature_b64, validate=True)
+            if len(key_bytes) != 32 or len(signature) != 64:
+                return False
+            key = Ed25519PublicKey.from_public_bytes(key_bytes)
+            key.verify(signature, _canonical(payload))
             return True
         except Exception:
             return False
@@ -141,7 +169,11 @@ def make_advertisement(
     return {"advertisement": payload, "signature": identity.sign(payload)}
 
 
-def verify_advertisement(envelope: dict[str, Any], expected_constitution_hash: str) -> tuple[bool, str]:
+def verify_advertisement(
+    envelope: dict[str, Any],
+    expected_constitution_hash: str,
+    expected_nonce: str | None = None,
+) -> tuple[bool, str]:
     payload = envelope.get("advertisement")
     signature = envelope.get("signature")
     if not isinstance(payload, dict) or not isinstance(signature, str):
@@ -149,7 +181,10 @@ def verify_advertisement(envelope: dict[str, Any], expected_constitution_hash: s
     public_key = str(payload.get("public_key", ""))
     node_id = str(payload.get("node_id", ""))
     try:
-        derived = "genesis:node:" + _sha256(base64.b64decode(public_key))[:32]
+        public_key_bytes = base64.b64decode(public_key, validate=True)
+        if len(public_key_bytes) != 32:
+            return False, "invalid_public_key"
+        derived = "genesis:node:" + _sha256(public_key_bytes)[:32]
     except Exception:
         return False, "invalid_public_key"
     if node_id != derived:
@@ -158,6 +193,8 @@ def verify_advertisement(envelope: dict[str, Any], expected_constitution_hash: s
         return False, "constitution_mismatch"
     if payload.get("protocol_version") != "gden/0.1":
         return False, "protocol_mismatch"
+    if expected_nonce is not None and payload.get("nonce") != expected_nonce:
+        return False, "challenge_mismatch"
     if not NodeIdentity.verify(public_key, payload, signature):
         return False, "invalid_signature"
     return True, "authenticated"
@@ -238,7 +275,13 @@ class EvolutionLedger:
                 return False, "index_mismatch"
             if entry.previous_hash != previous:
                 return False, "chain_mismatch"
-            derived = "genesis:node:" + _sha256(base64.b64decode(entry.signer_public_key))[:32]
+            try:
+                key_bytes = base64.b64decode(entry.signer_public_key, validate=True)
+                if len(key_bytes) != 32:
+                    return False, "invalid_public_key"
+                derived = "genesis:node:" + _sha256(key_bytes)[:32]
+            except Exception:
+                return False, "invalid_public_key"
             if derived != entry.signer_node_id:
                 return False, "signer_mismatch"
             if not NodeIdentity.verify(entry.signer_public_key, entry.signing_payload(), entry.signature):
