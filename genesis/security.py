@@ -32,25 +32,27 @@ class SecurityReport:
 class SecurityModule:
     """Bounded security control plane for Genesis.
 
-    This module performs deterministic repository checks and records findings.
-    It does not silently modify code, rotate credentials, weaken validation, or
-    treat model-generated security claims as verified vulnerabilities.
+    Security observes and reviews. It never silently modifies code or approves
+    its own remediation. Candidate changes still require tests and independent
+    validation before promotion.
     """
 
     SENSITIVE_SUFFIXES = (".key", ".pem", ".p12", ".pfx")
     SENSITIVE_NAMES = {".env", "credentials.json", "secrets.json"}
+    PROTECTED_PATHS = {"GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"}
+    MAX_CANDIDATE_FILES = 6
+    MAX_CANDIDATE_BYTES = 80_000
 
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
 
-    def _tracked_files(self) -> list[str]:
-        proc = subprocess.run(
-            ["git", "ls-files"],
-            cwd=self.root,
-            text=True,
-            capture_output=True,
-            check=False,
+    def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
+        return subprocess.run(
+            ["git", *args], cwd=self.root, text=True, capture_output=True, check=False
         )
+
+    def _tracked_files(self) -> list[str]:
+        proc = self._git("ls-files")
         if proc.returncode != 0:
             return []
         return [line.strip() for line in proc.stdout.splitlines() if line.strip()]
@@ -66,33 +68,28 @@ class SecurityModule:
         ]
         if exposed:
             findings.append(SecurityFinding(
-                finding_id="tracked-sensitive-file",
-                severity="high",
-                title="Potential sensitive file is tracked by Git",
-                evidence=", ".join(sorted(exposed)[:20]),
-                remediation="Remove the sensitive material from Git, rotate affected credentials, and review repository history.",
+                "tracked-sensitive-file", "high",
+                "Potential sensitive file is tracked by Git",
+                ", ".join(sorted(exposed)[:20]),
+                "Remove sensitive material, rotate affected credentials, and review Git history.",
             ))
 
-        protected_present = all((self.root / name).is_file() for name in (
-            "GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"
-        ))
+        protected_present = all((self.root / name).is_file() for name in self.PROTECTED_PATHS)
         if not protected_present:
             findings.append(SecurityFinding(
-                finding_id="protected-identity-missing",
-                severity="critical",
-                title="Protected Genesis identity file is missing",
-                evidence="GENESIS_CONSTITUTION.md and GENESIS_BLOCK.json must both exist.",
-                remediation="Stop autonomous operation and restore identity files from a verified release.",
+                "protected-identity-missing", "critical",
+                "Protected Genesis identity file is missing",
+                "GENESIS_CONSTITUTION.md and GENESIS_BLOCK.json must both exist.",
+                "Stop autonomous operation and restore identity files from a verified release.",
             ))
 
         secret_guard_present = (self.root / "scripts" / "secret_guard.py").is_file()
         if not secret_guard_present:
             findings.append(SecurityFinding(
-                finding_id="secret-guard-missing",
-                severity="medium",
-                title="Permanent secret guard is unavailable",
-                evidence="scripts/secret_guard.py was not found.",
-                remediation="Restore the secret scanning guard and require it in CI.",
+                "secret-guard-missing", "medium",
+                "Permanent secret guard is unavailable",
+                "scripts/secret_guard.py was not found.",
+                "Restore the secret scanning guard and require it in CI.",
             ))
 
         checks = {
@@ -100,11 +97,70 @@ class SecurityModule:
             "secret_guard_present": secret_guard_present,
             "no_tracked_sensitive_files": not exposed,
         }
-        status = "pass" if not findings else "findings"
-        return SecurityReport(status, tuple(findings), checks)
+        return SecurityReport("pass" if not findings else "findings", tuple(findings), checks)
 
-    def write_report(self, path: Path) -> dict:
-        report = self.inspect().as_dict()
+    def review_candidate(self, base_ref: str = "main") -> SecurityReport:
+        """Review the actual candidate diff before external validation."""
+        findings: list[SecurityFinding] = []
+        proc = self._git("diff", "--name-only", f"{base_ref}..HEAD")
+        if proc.returncode != 0:
+            return SecurityReport(
+                "findings",
+                (SecurityFinding(
+                    "candidate-diff-unavailable", "high",
+                    "Candidate security diff could not be resolved",
+                    proc.stderr[-1000:],
+                    "Do not promote until the candidate can be compared with its trusted base.",
+                ),),
+                {"candidate_diff_resolved": False},
+            )
+        changed = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
+        forbidden = [p for p in changed if p in self.PROTECTED_PATHS or p.startswith(".github/")]
+        sensitive = [
+            p for p in changed
+            if Path(p).name.lower() in self.SENSITIVE_NAMES
+            or Path(p).suffix.lower() in self.SENSITIVE_SUFFIXES
+        ]
+        if forbidden:
+            findings.append(SecurityFinding(
+                "candidate-forbidden-path", "critical",
+                "Candidate modifies a protected security boundary",
+                ", ".join(forbidden),
+                "Reject the candidate and recreate it within the bounded coding sandbox.",
+            ))
+        if sensitive:
+            findings.append(SecurityFinding(
+                "candidate-sensitive-file", "critical",
+                "Candidate introduces or modifies sensitive file types",
+                ", ".join(sensitive),
+                "Reject the candidate and keep secrets in local or secret-managed state only.",
+            ))
+        if len(changed) > self.MAX_CANDIDATE_FILES:
+            findings.append(SecurityFinding(
+                "candidate-too-wide", "high",
+                "Candidate exceeds bounded file-change limit",
+                f"changed_files={len(changed)}",
+                "Split the work into smaller independently reviewable candidates.",
+            ))
+        stat = self._git("diff", "--numstat", f"{base_ref}..HEAD")
+        approx_bytes = len((stat.stdout + proc.stdout).encode("utf-8"))
+        if approx_bytes > self.MAX_CANDIDATE_BYTES:
+            findings.append(SecurityFinding(
+                "candidate-review-size", "medium",
+                "Candidate review metadata is unexpectedly large",
+                f"review_bytes={approx_bytes}",
+                "Reduce candidate scope before promotion.",
+            ))
+        checks = {
+            "candidate_diff_resolved": True,
+            "protected_paths_unchanged": not forbidden,
+            "no_sensitive_files_changed": not sensitive,
+            "bounded_file_count": len(changed) <= self.MAX_CANDIDATE_FILES,
+        }
+        return SecurityReport("pass" if not findings else "findings", tuple(findings), checks)
+
+    def write_report(self, path: Path, *, candidate: bool = False, base_ref: str = "main") -> dict:
+        report = (self.review_candidate(base_ref) if candidate else self.inspect()).as_dict()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return report
