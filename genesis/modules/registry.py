@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 from pathlib import Path
-from typing import Iterable
 
 from .types import ModuleManifest
 
@@ -28,7 +27,10 @@ class ModuleRegistry:
         return tuple(m for m in self._modules.values() if m.status == "active")
 
     def load_file(self, path: str | Path) -> None:
-        payload = json.loads(Path(path).read_text(encoding="utf-8"))
+        path = Path(path)
+        if not path.exists():
+            return
+        payload = json.loads(path.read_text(encoding="utf-8"))
         modules = payload.get("modules", [])
         if not isinstance(modules, list):
             raise ValueError("modules registry must contain a modules list")
