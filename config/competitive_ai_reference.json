@@ -1,0 +1,72 @@
+{
+  "version": 1,
+  "as_of": "2026-08-16",
+  "refresh_after_days": 30,
+  "score_cap": 99,
+  "ultimate_target": {
+    "score": 99,
+    "meaning": "Reserved for broad, independently verified performance at or above the current frontier across every required benchmark family plus continuous autonomy, research, resilience and safety. It is not assigned from self-description and is not by itself proof of consciousness or literal superiority to every human in every domain."
+  },
+  "reference_sources": [
+    {
+      "name": "OpenAI GPT-5.6 frontier evaluation table",
+      "url": "https://openai.com/index/gpt-5-6/",
+      "kind": "official_model_evaluation"
+    },
+    {
+      "name": "OpenAI GeneBench-Pro",
+      "url": "https://openai.com/index/introducing-genebench-pro/",
+      "kind": "official_scientific_benchmark"
+    }
+  ],
+  "benchmarks": [
+    {
+      "id": "agents_last_exam",
+      "family": "professional_agentic_work",
+      "reference_score": 52.7,
+      "unit": "percent",
+      "weight": 10,
+      "reference_note": "GPT-5.6 Sol public result"
+    },
+    {
+      "id": "swe_bench_pro",
+      "family": "software_engineering",
+      "reference_score": 80.3,
+      "unit": "percent",
+      "weight": 10,
+      "reference_note": "Highest value in the GPT-5.6 comparison table (Claude Mythos 5)"
+    },
+    {
+      "id": "terminal_bench_2_1",
+      "family": "long_horizon_tool_coding",
+      "reference_score": 91.9,
+      "unit": "percent",
+      "weight": 10,
+      "reference_note": "GPT-5.6 Sol Ultra public result"
+    },
+    {
+      "id": "coding_agent_index",
+      "family": "coding_agents",
+      "reference_score": 80.0,
+      "unit": "index",
+      "weight": 10,
+      "reference_note": "GPT-5.6 Sol Artificial Analysis Coding Agent Index v1.1"
+    },
+    {
+      "id": "artificial_analysis_intelligence_index",
+      "family": "general_frontier_intelligence",
+      "reference_score": 59.9,
+      "unit": "index",
+      "weight": 10,
+      "reference_note": "Highest value in GPT-5.6 comparison table (Claude Fable 5)"
+    },
+    {
+      "id": "genebench_pro",
+      "family": "genomics_scientific_reasoning",
+      "reference_score": 31.5,
+      "unit": "percent",
+      "weight": 10,
+      "reference_note": "GPT-5.6 Sol Pro-mode public result"
+    }
+  ]
+}
