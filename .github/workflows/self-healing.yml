@@ -36,5 +36,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
           GENESIS_REPAIR_PROVIDER_URL: ${{ secrets.GENESIS_REPAIR_PROVIDER_URL }}
-          GENESIS_REPAIR_MODEL: openai/gpt-4.1
+          GENESIS_REPAIR_MODEL: openai/gpt-4o
         run: python scripts/self_heal.py
