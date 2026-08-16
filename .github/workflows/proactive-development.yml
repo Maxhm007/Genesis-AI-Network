@@ -6,11 +6,17 @@ on:
     paths:
       - '.github/workflows/proactive-development.yml'
       - 'genesis/proactive.py'
+      - 'genesis/ai_score.py'
+      - 'genesis/immortality_scan.py'
       - 'genesis/selfdev.py'
       - 'genesis/modules/**'
       - 'config/modules.json'
+      - 'config/immortality_sources.json'
       - 'scripts/proactive_dev.py'
+      - 'scripts/immortality_scan.py'
       - 'tests/test_proactive.py'
+      - 'tests/test_ai_score.py'
+      - 'tests/test_immortality_scan.py'
       - 'tests/test_modules.py'
   workflow_dispatch:
   schedule:
@@ -21,6 +27,10 @@ permissions:
 
 env:
   PYTHONPATH: ${{ github.workspace }}
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_NAME: qwen3-0.6b-local
+  HF_HOME: ~/.cache/huggingface
+  PIP_CACHE_DIR: ~/.cache/pip
 
 concurrency:
   group: genesis-proactive-development
@@ -29,7 +39,7 @@ concurrency:
 jobs:
   develop:
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    timeout-minutes: 30
     outputs:
       has_candidate: ${{ steps.candidate.outputs.has_candidate }}
       candidate_branch: ${{ steps.candidate.outputs.candidate_branch }}
@@ -42,9 +52,54 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Restore Genesis reasoning caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/pip
+          key: genesis-qwen3-0.6b-${{ runner.os }}-py312-v1
       - run: pip install -r requirements.txt
       - name: Verify stable baseline
         run: python -m pytest -q
+      - name: Install active local reasoning runtime
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors
+      - name: Start validated reasoning provider
+        shell: bash
+        run: |
+          nohup python scripts/local_reasoning_provider.py --host 127.0.0.1 --port 8766 > /tmp/genesis-reasoning.log 2>&1 &
+          ready=false
+          for i in {1..60}; do
+            if python - <<'PY'
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=2) as response:
+                  raise SystemExit(0 if response.status == 200 else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ready" == true ]]; then
+            echo 'GENESIS_AUTONOMOUS_REASONING_PROVIDER=READY'
+          else
+            echo 'Validated reasoning provider unavailable; Genesis will degrade to bootstrap mode.' >&2
+            cat /tmp/genesis-reasoning.log || true
+          fi
+      - name: Scan public scientific and cross-domain sources through immortality lens
+        run: python scripts/immortality_scan.py
+      - name: Preserve scan and AI score evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-immortality-scan-${{ github.run_id }}
+          path: runtime/
+          retention-days: 30
       - name: Configure Genesis Git identity
         run: |
           git config user.name "Genesis AI"
