@@ -1,8 +1,9 @@
 from __future__ import annotations
 
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
+import hashlib
 import json
 import sqlite3
 import uuid
@@ -66,23 +67,7 @@ class PersistentTaskQueue:
                 """
             )
 
-    def create(self, objective: str, *, module_id: str | None = None, priority: int = 50, payload: dict | None = None) -> GenesisTask:
-        objective = objective.strip()
-        if not objective:
-            raise ValueError("objective is required")
-        if priority < 0 or priority > 100:
-            raise ValueError("priority must be between 0 and 100")
-        now = utc_now()
-        task = GenesisTask(
-            task_id="task-" + uuid.uuid4().hex[:16],
-            objective=objective,
-            module_id=module_id,
-            state="new",
-            priority=priority,
-            payload=dict(payload or {}),
-            created_at=now,
-            updated_at=now,
-        )
+    def _insert(self, task: GenesisTask) -> GenesisTask:
         with self._connect() as db:
             db.execute(
                 "INSERT INTO genesis_tasks VALUES (?, ?, ?, ?, ?, ?, ?, ?)",
@@ -98,6 +83,50 @@ class PersistentTaskQueue:
                 ),
             )
         return task
+
+    def create(self, objective: str, *, module_id: str | None = None, priority: int = 50, payload: dict | None = None) -> GenesisTask:
+        objective = objective.strip()
+        if not objective:
+            raise ValueError("objective is required")
+        if priority < 0 or priority > 100:
+            raise ValueError("priority must be between 0 and 100")
+        now = utc_now()
+        return self._insert(GenesisTask(
+            task_id="task-" + uuid.uuid4().hex[:16],
+            objective=objective,
+            module_id=module_id,
+            state="new",
+            priority=priority,
+            payload=dict(payload or {}),
+            created_at=now,
+            updated_at=now,
+        ))
+
+    def create_unique(self, dedupe_key: str, objective: str, *, module_id: str | None = None, priority: int = 50, payload: dict | None = None) -> tuple[GenesisTask, bool]:
+        """Create a deterministic task once, returning (task, created)."""
+        dedupe_key = dedupe_key.strip()
+        if not dedupe_key:
+            raise ValueError("dedupe_key is required")
+        objective = objective.strip()
+        if not objective:
+            raise ValueError("objective is required")
+        if priority < 0 or priority > 100:
+            raise ValueError("priority must be between 0 and 100")
+        task_id = "task-" + hashlib.sha256(dedupe_key.encode("utf-8")).hexdigest()[:16]
+        existing = self.get(task_id)
+        if existing is not None:
+            return existing, False
+        now = utc_now()
+        task_payload = dict(payload or {})
+        task_payload.setdefault("dedupe_key", dedupe_key)
+        task = GenesisTask(task_id, objective, module_id, "new", priority, task_payload, now, now)
+        try:
+            return self._insert(task), True
+        except sqlite3.IntegrityError:
+            existing = self.get(task_id)
+            if existing is None:
+                raise
+            return existing, False
 
     def get(self, task_id: str) -> GenesisTask | None:
         with self._connect() as db:
