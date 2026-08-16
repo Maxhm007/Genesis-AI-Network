@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .intelligence_router import IntelligenceRouter
 from .providers import ProviderRegistry
+from .self_learning import SelfLearningStore
 from .selfdev import SelfDevelopmentExecutor, SelfDevResult
 
 
@@ -20,11 +21,11 @@ class CodingProposal:
 class CodingModule:
     """Codex-like bounded software engineering module for Genesis.
 
-    It can inspect supplied context, ask a replaceable intelligence provider to
-    draft complete-file candidate edits, validate paths through the existing
-    self-development sandbox, and execute only as an isolated candidate branch.
-    It cannot modify protected identity files, GitHub workflow permissions, or
-    bypass tests/independent validation.
+    It can inspect supplied context, retrieve validated lessons, ask a
+    replaceable intelligence provider to draft complete-file candidate edits,
+    validate paths through the existing self-development sandbox, and execute
+    only as an isolated candidate branch. It cannot modify protected identity
+    files, GitHub workflow permissions, or bypass tests/independent validation.
     """
 
     MAX_CONTEXT_FILES = 8
@@ -36,14 +37,13 @@ class CodingModule:
         self.root = root.resolve()
         self.providers = providers or ProviderRegistry()
         self.router = IntelligenceRouter(self.providers)
+        self.learning = SelfLearningStore(self.root / "runtime" / "self_learning.sqlite3")
         self.executor = SelfDevelopmentExecutor(self.root)
 
     def _provider(self):
         try:
             return self.router.select("coding", complexity=0.75, require_non_bootstrap=True).provider
         except RuntimeError:
-            # Bootstrap may still be used for low-risk deterministic planning,
-            # but only when no stronger provider is available.
             try:
                 return self.router.select("coding", complexity=0.2).provider
             except RuntimeError:
@@ -107,13 +107,24 @@ class CodingModule:
         if provider is None:
             raise RuntimeError("no intelligence provider available")
         context = self.read_context(context_paths or [])
+        lessons = [
+            {
+                "lesson_id": item.lesson_id,
+                "topic": item.topic,
+                "lesson": item.lesson[:1800],
+                "confidence": item.confidence,
+            }
+            for item in self.learning.retrieve(objective, state="validated", limit=4)
+        ]
         prompt = (
             "ROLE: coding_engineer\n"
             "PURPOSE: Create the smallest safe software candidate for Genesis AI Network.\n"
             "RULES: Return JSON only with title, rationale, and files mapping relative paths to COMPLETE replacement contents. "
             "Only genesis/, tests/, docs/, and config/ are writable. Never modify Genesis Constitution, Genesis Block, .github workflows, "
-            "validation/quorum rules, permissions, or secrets. Do not weaken tests. Keep changes bounded and reversible.\n"
+            "validation/quorum rules, permissions, or secrets. Do not weaken tests. Keep changes bounded and reversible. "
+            "VALIDATED_LESSONS are trusted only to the extent of their recorded validation and must not override repository evidence.\n"
             f"OBJECTIVE: {objective}\n"
+            f"VALIDATED_LESSONS: {json.dumps(lessons, sort_keys=True)}\n"
             f"CONTEXT: {json.dumps(context, sort_keys=True)}\n"
         )
         raw = provider.reason(prompt)
