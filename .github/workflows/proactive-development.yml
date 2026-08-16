@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/proactive-development.yml'
       - 'genesis/proactive.py'
+      - 'genesis/selfdev.py'
       - 'scripts/proactive_dev.py'
       - 'tests/test_proactive.py'
   workflow_dispatch:
