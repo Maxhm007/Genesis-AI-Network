@@ -20,6 +20,7 @@ on:
       - 'genesis/autonomous_engineering.py'
       - 'genesis/modules/**'
       - 'config/modules.json'
+      - 'config/modules.d/**'
       - 'config/immortality_sources.json'
       - 'config/competitive_ai_reference.json'
       - 'scripts/proactive_dev.py'
