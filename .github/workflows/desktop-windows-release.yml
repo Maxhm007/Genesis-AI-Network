@@ -29,11 +29,11 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Build standalone Genesis Core sidecar
+      - name: Build standalone Genesis Core sidecar and icon
         shell: pwsh
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt pyinstaller
+          pip install -r requirements.txt pyinstaller pillow
           pyinstaller --noconfirm --clean --onefile --name genesis-core --paths . `
             --add-data "GENESIS_CONSTITUTION.md;." `
             --add-data "GENESIS_BLOCK.json;." `
@@ -43,6 +43,16 @@ jobs:
             scripts/desktop_core.py
           New-Item -ItemType Directory -Force desktop/src-tauri/binaries | Out-Null
           Copy-Item dist/genesis-core.exe desktop/src-tauri/binaries/genesis-core-x86_64-pc-windows-msvc.exe
+          New-Item -ItemType Directory -Force desktop/src-tauri/icons | Out-Null
+          @'
+          from PIL import Image, ImageDraw
+          im = Image.new('RGBA', (256, 256), (7, 17, 31, 255))
+          d = ImageDraw.Draw(im)
+          d.ellipse((28, 28, 228, 228), outline=(56, 189, 248, 255), width=18)
+          d.ellipse((78, 78, 178, 178), fill=(22, 78, 122, 255))
+          d.line((64, 192, 192, 64), fill=(125, 211, 252, 255), width=16)
+          im.save('desktop/src-tauri/icons/icon.ico', sizes=[(16,16),(32,32),(48,48),(64,64),(128,128),(256,256)])
+          '@ | python -
 
       - uses: actions/setup-node@v4
         with:
