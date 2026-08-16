@@ -25,6 +25,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
+      - name: Full test suite
+        run: python -m pytest -q
       - name: Resolve candidate
         id: candidate
         shell: bash
@@ -52,6 +54,8 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
+      - name: Full test suite
+        run: python -m pytest -q
       - name: Resolve candidate
         id: candidate
         shell: bash
