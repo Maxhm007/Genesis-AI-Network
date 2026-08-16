@@ -3,9 +3,12 @@ from __future__ import annotations
 import argparse
 import base64
 import hashlib
+import io
 import json
 import os
 import subprocess
+import tarfile
+import tempfile
 from dataclasses import asdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -60,8 +63,22 @@ class ValidatorEngine:
         if self.constitution_hash != expected:
             raise RuntimeError("validator refuses startup: Constitution mismatch")
 
-    def _git(self, *args: str, check: bool = True):
-        return subprocess.run(["git", *args], cwd=self.root, text=True, capture_output=True, check=check)
+    def _git(self, *args: str, check: bool = True, text: bool = True):
+        return subprocess.run(["git", *args], cwd=self.root, text=text, capture_output=True, check=check)
+
+    def _test_archived_commit(self, candidate_commit: str) -> tuple[bool, str]:
+        archive = self._git("archive", "--format=tar", candidate_commit, text=False).stdout
+        with tempfile.TemporaryDirectory(prefix=f"genesis-{self.validator_id}-") as td:
+            sandbox = Path(td)
+            with tarfile.open(fileobj=io.BytesIO(archive), mode="r:") as tf:
+                tf.extractall(sandbox)
+            test = subprocess.run(
+                [os.environ.get("PYTHON", "python"), "-m", "pytest", "-q"],
+                cwd=sandbox,
+                text=True,
+                capture_output=True,
+            )
+            return test.returncode == 0, (test.stdout + "\n" + test.stderr)[-8000:]
 
     def validate_commit(self, candidate_commit: str) -> tuple[str, str]:
         main = self._git("rev-parse", "main").stdout.strip()
@@ -71,21 +88,10 @@ class ValidatorEngine:
         if any(path in PROTECTED_PATHS for path in changed):
             return "reject", "candidate changes protected Genesis identity files"
 
-        current = self._git("branch", "--show-current").stdout.strip()
-        self._git("checkout", "--detach", candidate_commit)
-        try:
-            test = subprocess.run(
-                [os.environ.get("PYTHON", "python"), "-m", "pytest", "-q"],
-                cwd=self.root,
-                text=True,
-                capture_output=True,
-            )
-        finally:
-            self._git("checkout", current or "main")
-
-        if test.returncode != 0:
-            return "reject", "test suite failed"
-        return "approve", "protected files unchanged and full tests passed"
+        tests_passed, _ = self._test_archived_commit(candidate_commit)
+        if not tests_passed:
+            return "reject", "test suite failed in isolated archive sandbox"
+        return "approve", "protected files unchanged and full tests passed in isolated archive sandbox"
 
     def vote(self, candidate_commit: str):
         decision, reason = self.validate_commit(candidate_commit)
