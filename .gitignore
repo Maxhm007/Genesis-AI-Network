@@ -1,8 +1,31 @@
-# Genesis local runtime state
+# Genesis local runtime/state
 state/
 runtime/
+.genesis/
+*.db
+*.sqlite
+*.sqlite3
+
+# Private keys and certificate bundles
 *.key
 *.pem
+*.p12
+*.pfx
+id_rsa
+id_dsa
+id_ecdsa
+id_ed25519
+
+# Secrets / local environment configuration
+.env
+.env.*
+!.env.example
+credentials.json
+service-account.json
+service_account.json
+*.secrets.json
+*.secrets.yml
+*.secrets.yaml
 
 # Python
 __pycache__/
