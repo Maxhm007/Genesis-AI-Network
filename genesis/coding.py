@@ -4,6 +4,7 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from .intelligence_router import IntelligenceRouter
 from .providers import ProviderRegistry
 from .selfdev import SelfDevelopmentExecutor, SelfDevResult
 
@@ -34,14 +35,19 @@ class CodingModule:
     def __init__(self, root: Path, providers: ProviderRegistry | None = None) -> None:
         self.root = root.resolve()
         self.providers = providers or ProviderRegistry()
+        self.router = IntelligenceRouter(self.providers)
         self.executor = SelfDevelopmentExecutor(self.root)
 
     def _provider(self):
-        available = self.providers.available_providers()
-        for provider in available:
-            if getattr(provider, "name", "") != "genesis-bootstrap":
-                return provider
-        return available[0] if available else None
+        try:
+            return self.router.select("coding", complexity=0.75, require_non_bootstrap=True).provider
+        except RuntimeError:
+            # Bootstrap may still be used for low-risk deterministic planning,
+            # but only when no stronger provider is available.
+            try:
+                return self.router.select("coding", complexity=0.2).provider
+            except RuntimeError:
+                return None
 
     def read_context(self, paths: list[str]) -> dict[str, str]:
         context: dict[str, str] = {}
