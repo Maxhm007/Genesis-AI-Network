@@ -15,6 +15,8 @@ PROTECTED_PATHS = {"GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"}
 ALLOWED_PREFIXES = ("genesis/", "tests/", "docs/", "config/")
 MAX_PATCH_FILES = 6
 MAX_PATCH_BYTES = 80_000
+MAX_CONTEXT_FILES = 6
+MAX_CONTEXT_BYTES = 48_000
 
 
 @dataclass(frozen=True)
@@ -37,10 +39,10 @@ class IssueSolver:
 
     Genesis first tries deterministic repair recipes. For harder failures it can
     route a structured repair request to either a Genesis Provider Protocol
-    endpoint or GitHub Models when running inside GitHub Actions. Every returned
-    patch is still constrained to non-protected paths and must pass the complete
-    test suite through SelfDevelopmentExecutor before it becomes a candidate.
-    The solver never merges directly to main.
+    endpoint or an optional external model endpoint. Every returned patch is
+    restricted to non-protected paths and must pass the complete test suite
+    through SelfDevelopmentExecutor before it becomes a candidate. The solver
+    never merges directly to main.
     """
 
     def __init__(self, root: Path, provider_url: str | None = None) -> None:
@@ -105,6 +107,37 @@ class IssueSolver:
             "files": replacements,
         }
 
+    def _source_context(self, diagnosis: Diagnosis) -> dict[str, str]:
+        """Collect bounded source/test context referenced by the failure output."""
+        candidates: list[str] = []
+        for match in re.findall(r"(?:^|[\s'\"(])([A-Za-z0-9_./-]+\.py)", diagnosis.failure_text):
+            relative = match.replace("\\", "/").lstrip("./")
+            if relative.startswith(ALLOWED_PREFIXES) and relative not in candidates:
+                candidates.append(relative)
+            if relative.startswith("tests/test_"):
+                stem = Path(relative).stem.removeprefix("test_")
+                module = f"genesis/{stem}.py"
+                if (self.root / module).exists() and module not in candidates:
+                    candidates.append(module)
+
+        context: dict[str, str] = {}
+        total = 0
+        for relative in candidates[:MAX_CONTEXT_FILES]:
+            path = self.root / relative
+            if not path.is_file():
+                continue
+            text = path.read_text(encoding="utf-8", errors="replace")
+            data = text.encode("utf-8")
+            remaining = MAX_CONTEXT_BYTES - total
+            if remaining <= 0:
+                break
+            if len(data) > remaining:
+                text = data[:remaining].decode("utf-8", errors="ignore")
+                data = text.encode("utf-8")
+            context[relative] = text
+            total += len(data)
+        return context
+
     def _repair_prompt(self, diagnosis: Diagnosis) -> dict:
         return {
             "task": "Repair the Genesis AI repository test failure with the smallest safe patch.",
@@ -117,12 +150,13 @@ class IssueSolver:
                     "Return JSON only with title, rationale, and files mapping relative paths to COMPLETE replacement file contents.",
                     "Do not change the Genesis Constitution or Genesis Block.",
                     "Do not disable, skip, xfail, or weaken tests merely to obtain a pass.",
-                    "Prefer fixing production code over changing tests unless the test is demonstrably stale relative to an intentional documented behavior.",
+                    "Prefer fixing production code over changing tests unless the test is demonstrably stale relative to intentional documented behavior.",
                     "Do not change workflow permissions, validation quorum, signing rules, or self-development protections.",
                 ],
             },
             "diagnosis": {"category": diagnosis.category, "summary": diagnosis.summary},
             "failure_text": diagnosis.failure_text[-16_000:],
+            "relevant_files": self._source_context(diagnosis),
         }
 
     @staticmethod
@@ -142,7 +176,7 @@ class IssueSolver:
             method="POST",
             headers={"Content-Type": "application/json", "User-Agent": "Genesis-AI-Network/0.1"},
         )
-        with urllib.request.urlopen(req, timeout=45) as response:
+        with urllib.request.urlopen(req, timeout=90) as response:
             payload = json.loads(response.read().decode("utf-8"))
         raw = payload.get("response", "")
         proposal = self._extract_json(raw) if isinstance(raw, str) else raw
@@ -216,7 +250,11 @@ class IssueSolver:
                 ast.parse(content, filename=normalized)
         if total > MAX_PATCH_BYTES:
             raise ValueError("repair proposal too large")
-        return {"title": str(proposal.get("title", "Genesis autonomous repair")), "rationale": str(proposal.get("rationale", "")), "files": files}
+        return {
+            "title": str(proposal.get("title", "Genesis autonomous repair")),
+            "rationale": str(proposal.get("rationale", "")),
+            "files": files,
+        }
 
     def solve_once(self) -> RepairAttempt:
         passed, failure_text = self.run_tests()
