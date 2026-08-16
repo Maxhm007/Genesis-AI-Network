@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+import pytest
+
 from genesis.gden import (
     ContributionPolicy,
     EvolutionLedger,
@@ -22,6 +24,18 @@ def test_node_identity_persists(tmp_path: Path):
     assert first.public_key_b64 == second.public_key_b64
 
 
+def test_node_identity_rejects_symlink(tmp_path: Path):
+    target = tmp_path / "real.key"
+    NodeIdentity.load_or_create(target)
+    link = tmp_path / "link.key"
+    try:
+        link.symlink_to(target)
+    except (OSError, NotImplementedError):
+        pytest.skip("symlink creation unavailable")
+    with pytest.raises(RuntimeError, match="symlink"):
+        NodeIdentity.load_or_create(link)
+
+
 def test_signed_advertisement_authenticates_and_detects_tampering():
     identity = NodeIdentity.generate()
     constitution = "a" * 64
@@ -33,15 +47,34 @@ def test_signed_advertisement_authenticates_and_detects_tampering():
         state_root="b" * 64,
         nonce="test-nonce",
     )
-    valid, status = verify_advertisement(envelope, constitution)
+    valid, status = verify_advertisement(envelope, constitution, expected_nonce="test-nonce")
     assert valid is True
     assert status == "authenticated"
 
     tampered = json.loads(json.dumps(envelope))
     tampered["advertisement"]["state_root"] = "c" * 64
-    valid, status = verify_advertisement(tampered, constitution)
+    valid, status = verify_advertisement(tampered, constitution, expected_nonce="test-nonce")
     assert valid is False
     assert status == "invalid_signature"
+
+
+def test_replayed_handshake_with_wrong_challenge_is_rejected():
+    identity = NodeIdentity.generate()
+    constitution = "a" * 64
+    captured = make_advertisement(
+        identity,
+        constitution,
+        ["research"],
+        ContributionPolicy(),
+        nonce="old-challenge",
+    )
+    valid, status = verify_advertisement(
+        captured,
+        constitution,
+        expected_nonce="fresh-challenge",
+    )
+    assert valid is False
+    assert status == "challenge_mismatch"
 
 
 def test_constitution_mismatch_is_rejected_before_peer_trust():
@@ -77,7 +110,7 @@ def test_evolution_ledger_detects_chain_tampering(tmp_path: Path):
     assert ledger.verify()[0] is False
 
 
-def test_authenticated_peer_probe():
+def test_authenticated_peer_probe_uses_client_challenge():
     identity = NodeIdentity.generate()
     constitution = "a" * 64
     policy = ContributionPolicy(max_cpu_percent=20, allow_model_inference=False)
@@ -86,12 +119,13 @@ def test_authenticated_peer_probe():
         "127.0.0.1",
         0,
         lambda: {"node_id": identity.node_id, "constitution_sha256": constitution},
-        handshake_factory=lambda: make_advertisement(
+        handshake_factory=lambda challenge=None: make_advertisement(
             identity,
             constitution,
             ["research", "validation"],
             policy,
             state_root="d" * 64,
+            nonce=challenge,
         ),
     )
     server.start()
