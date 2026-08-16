@@ -35,15 +35,7 @@ class RepairAttempt:
 
 
 class IssueSolver:
-    """Bounded self-healing controller for Genesis software issues.
-
-    Genesis first tries deterministic repair recipes. For harder failures it can
-    route a structured repair request to either a Genesis Provider Protocol
-    endpoint or an optional external model endpoint. Every returned patch is
-    restricted to non-protected paths and must pass the complete test suite
-    through SelfDevelopmentExecutor before it becomes a candidate. The solver
-    never merges directly to main.
-    """
+    """Bounded self-healing controller for Genesis software issues."""
 
     def __init__(self, root: Path, provider_url: str | None = None) -> None:
         self.root = root.resolve()
@@ -66,7 +58,16 @@ class IssueSolver:
         if "waiting_for_provider" in text and "providerregistry" in text:
             return Diagnosis(
                 "provider_mode_expectation",
-                "Tests appear to assume an empty provider registry while the native bootstrap provider is enabled by default.",
+                "Tests assume an empty provider registry while native bootstrap intelligence is enabled by default.",
+                failure_text,
+            )
+        if (
+            "test_proactive_planner_moves_to_budget_after_health" in text
+            and "add runtime health snapshot helper" in text
+        ):
+            return Diagnosis(
+                "selfdev_catalog_marker_mismatch",
+                "The proactive planner sees the health capability as present, but the self-development catalog still selects the health candidate because it uses every candidate file as the completion marker.",
                 failure_text,
             )
         if "modulenotfounderror" in text or "importerror" in text:
@@ -78,37 +79,64 @@ class IssueSolver:
         return Diagnosis("unknown_test_failure", "The test suite failed without a recognized deterministic repair signature.", failure_text)
 
     def _deterministic_proposal(self, diagnosis: Diagnosis) -> dict | None:
-        if diagnosis.category != "provider_mode_expectation":
-            return None
+        if diagnosis.category == "provider_mode_expectation":
+            replacements: dict[str, str] = {}
+            for relative in (
+                "tests/test_provider_modes.py",
+                "tests/test_team_and_peers.py",
+                "tests/test_dynamic_team.py",
+            ):
+                path = self.root / relative
+                if not path.exists():
+                    continue
+                original = path.read_text(encoding="utf-8")
+                updated = original
+                if "waiting_for_provider" in original or '"maintenance"' in original or "'maintenance'" in original:
+                    updated = re.sub(r"ProviderRegistry\(\)", "ProviderRegistry(include_bootstrap=False)", updated)
+                if "fake-provider" in original:
+                    updated = re.sub(r"ProviderRegistry\(\)", "ProviderRegistry(include_bootstrap=False)", updated)
+                if updated != original:
+                    replacements[relative] = updated
+            if not replacements:
+                return None
+            return {
+                "title": "Repair stale empty-provider test assumptions",
+                "rationale": diagnosis.summary,
+                "files": replacements,
+            }
 
-        replacements: dict[str, str] = {}
-        for relative in (
-            "tests/test_provider_modes.py",
-            "tests/test_team_and_peers.py",
-            "tests/test_dynamic_team.py",
-        ):
+        if diagnosis.category == "selfdev_catalog_marker_mismatch":
+            relative = "genesis/selfdev.py"
             path = self.root / relative
             if not path.exists():
-                continue
+                return None
             original = path.read_text(encoding="utf-8")
-            updated = original
-            if "waiting_for_provider" in original or '"maintenance"' in original or "'maintenance'" in original:
-                updated = re.sub(r"ProviderRegistry\(\)", "ProviderRegistry(include_bootstrap=False)", updated)
-            if "fake-provider" in original:
-                updated = re.sub(r"ProviderRegistry\(\)", "ProviderRegistry(include_bootstrap=False)", updated)
-            if updated != original:
-                replacements[relative] = updated
+            old = (
+                '        for candidate in candidates:\n'
+                '            if not all((self.root / p).exists() for p in candidate["files"]):\n'
+                '                return candidate\n'
+            )
+            new = (
+                '        for candidate in candidates:\n'
+                '            # The first file is the production capability marker; supporting\n'
+                '            # tests are installed with the candidate but do not determine whether\n'
+                '            # that capability already exists.\n'
+                '            primary_path = next(iter(candidate["files"]))\n'
+                '            if not (self.root / primary_path).exists():\n'
+                '                return candidate\n'
+            )
+            if old not in original:
+                return None
+            updated = original.replace(old, new, 1)
+            return {
+                "title": "Use production capability as self-development catalog marker",
+                "rationale": diagnosis.summary,
+                "files": {relative: updated},
+            }
 
-        if not replacements:
-            return None
-        return {
-            "title": "Repair stale empty-provider test assumptions",
-            "rationale": diagnosis.summary,
-            "files": replacements,
-        }
+        return None
 
     def _source_context(self, diagnosis: Diagnosis) -> dict[str, str]:
-        """Collect bounded source/test context referenced by the failure output."""
         candidates: list[str] = []
         for match in re.findall(r"(?:^|[\s'\"(])([A-Za-z0-9_./-]+\.py)", diagnosis.failure_text):
             relative = match.replace("\\", "/").lstrip("./")
@@ -186,9 +214,8 @@ class IssueSolver:
         if not self.github_token or not self.github_model:
             return None
         system = (
-            "You are a bounded software repair specialist inside Genesis AI. "
-            "Return only the requested JSON repair proposal. Never modify protected identity files, "
-            "weaken tests, bypass validation, change signing/quorum rules, or grant new permissions."
+            "You are a bounded software repair specialist inside Genesis AI. Return only the requested JSON repair proposal. "
+            "Never modify protected identity files, weaken tests, bypass validation, change signing/quorum rules, or grant new permissions."
         )
         body = {
             "model": self.github_model,
