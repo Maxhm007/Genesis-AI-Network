@@ -1,0 +1,21 @@
+[Unit]
+Description=Genesis AI Validator Node
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=genesis
+WorkingDirectory=/opt/genesis-ai
+EnvironmentFile=/etc/genesis-validator.env
+ExecStart=/opt/genesis-ai/.venv/bin/python -m genesis.validator_service --validator-id ${GENESIS_VALIDATOR_ID} --key-path ${GENESIS_VALIDATOR_KEY_PATH} --host 0.0.0.0 --port ${GENESIS_VALIDATOR_PORT}
+Restart=always
+RestartSec=3
+NoNewPrivileges=true
+PrivateTmp=true
+ProtectSystem=strict
+ProtectHome=true
+ReadWritePaths=/opt/genesis-ai/state
+
+[Install]
+WantedBy=multi-user.target
