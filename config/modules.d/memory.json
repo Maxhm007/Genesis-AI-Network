@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "module_id": "genesis.memory",
+      "name": "Memory Module",
+      "version": "0.1.0",
+      "purpose": "Persist and retrieve validated semantic, episodic, procedural and policy/context memory for resource-efficient long-horizon Genesis operation.",
+      "capabilities": ["long_term_memory", "memory_retrieval", "episodic_memory", "procedural_memory", "semantic_memory"],
+      "permissions": ["memory.read", "memory.write_candidate", "memory.write_validated", "knowledge.read", "tasks.read"],
+      "dependencies": ["genesis.knowledge", "genesis.self_learning", "genesis.validation"],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.memory",
+      "metadata": {
+        "candidate_memory_not_trusted_by_default": true,
+        "validated_retrieval_default": true,
+        "constitution_override": false,
+        "persistent_sqlite": true
+      }
+    }
+  ]
+}
