@@ -3,7 +3,7 @@ from genesis.team import AITeam
 
 
 def test_team_auto_adds_needed_specialists_without_duplicates():
-    team = AITeam(ProviderRegistry())
+    team = AITeam(ProviderRegistry(include_bootstrap=False))
     original = len(team.roles)
 
     output = team.run_task(
