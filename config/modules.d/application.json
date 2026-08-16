@@ -4,7 +4,7 @@
     {
       "module_id": "genesis.application",
       "name": "Application Module",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "purpose": "Continuously develop Genesis desktop and mobile application surfaces while keeping signing, CI release authority and promotion outside autonomous application control.",
       "capabilities": ["desktop_application_development", "android_application_development", "application_packaging_planning", "application_update_planning", "cross_platform_ui"],
       "permissions": ["tasks.read", "tasks.write", "coding.request", "desktop.source_candidate", "mobile.source_candidate", "security.review_request"],
@@ -19,6 +19,7 @@
         "may_modify_workflows": false,
         "may_access_signing_secrets": false,
         "candidate_validation_required": true,
+        "autonomous_task_generation": true,
         "desktop_target": "windows",
         "mobile_target": "android"
       }
