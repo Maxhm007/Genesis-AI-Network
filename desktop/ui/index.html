@@ -1,0 +1,116 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8" />
+  <meta name="viewport" content="width=device-width,initial-scale=1" />
+  <title>Genesis AI</title>
+  <style>
+    :root { font-family: Inter, ui-sans-serif, system-ui, -apple-system, Segoe UI, sans-serif; color:#eef4ff; background:#07111f; }
+    * { box-sizing:border-box; }
+    body { margin:0; min-height:100vh; background:radial-gradient(circle at top right,#17345d 0,#07111f 42%); }
+    .app { display:grid; grid-template-columns:230px 1fr; min-height:100vh; }
+    aside { border-right:1px solid #20344f; padding:24px 16px; background:rgba(4,12,23,.88); }
+    .brand { font-size:22px; font-weight:800; letter-spacing:.04em; margin:0 8px 28px; }
+    .brand span { color:#7dd3fc; }
+    nav button { width:100%; display:flex; gap:10px; align-items:center; border:0; background:transparent; color:#9fb2c9; padding:11px 12px; border-radius:10px; margin:3px 0; text-align:left; font:inherit; cursor:pointer; }
+    nav button.active, nav button:hover { background:#10233d; color:#fff; }
+    main { padding:28px; overflow:auto; }
+    header { display:flex; align-items:center; justify-content:space-between; margin-bottom:26px; }
+    h1 { font-size:27px; margin:0; }
+    .status { display:flex; align-items:center; gap:8px; color:#a7b8ca; font-size:14px; }
+    .dot { width:10px; height:10px; border-radius:50%; background:#f59e0b; box-shadow:0 0 14px currentColor; }
+    .dot.online { background:#22c55e; }
+    .grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:16px; }
+    .card { background:rgba(14,29,50,.82); border:1px solid #263f61; border-radius:16px; padding:18px; box-shadow:0 14px 35px rgba(0,0,0,.18); }
+    .label { color:#91a8c1; font-size:13px; margin-bottom:8px; }
+    .score { font-size:34px; font-weight:800; }
+    .score small { font-size:14px; font-weight:500; color:#7590ad; }
+    .wide { grid-column:1/-1; }
+    textarea { width:100%; min-height:110px; resize:vertical; border:1px solid #304a6d; border-radius:12px; background:#091829; color:#fff; padding:14px; font:inherit; outline:none; }
+    textarea:focus { border-color:#38bdf8; }
+    .actions { display:flex; gap:10px; margin-top:10px; }
+    .btn { border:0; border-radius:10px; padding:10px 15px; font-weight:700; cursor:pointer; background:#38bdf8; color:#032238; }
+    .btn.secondary { background:#173252; color:#dce8f5; }
+    pre { white-space:pre-wrap; word-break:break-word; background:#07111f; border-radius:12px; padding:14px; min-height:80px; color:#cce1f5; }
+    .muted { color:#829ab5; font-size:13px; }
+    .section { display:none; }
+    .section.active { display:block; }
+    .list { display:grid; gap:10px; }
+    .item { padding:12px 14px; background:#0b1c30; border:1px solid #213a59; border-radius:11px; }
+    @media(max-width:900px){ .app{grid-template-columns:1fr} aside{display:none}.grid{grid-template-columns:1fr} main{padding:18px} }
+  </style>
+</head>
+<body>
+<div class="app">
+  <aside>
+    <div class="brand">GENESIS <span>AI</span></div>
+    <nav>
+      <button class="active" data-section="home">⌂ Dashboard</button>
+      <button data-section="chat">◉ Chat</button>
+      <button data-section="memory">🧠 Memory</button>
+      <button data-section="coding">⌘ Coding</button>
+      <button data-section="security">◈ Security</button>
+      <button data-section="research">◎ Research</button>
+      <button data-section="network">◇ Network</button>
+      <button data-section="updates">↻ Updates</button>
+    </nav>
+  </aside>
+  <main>
+    <header>
+      <h1 id="title">Genesis Dashboard</h1>
+      <div class="status"><span id="coreDot" class="dot"></span><span id="coreStatus">Starting Genesis Core…</span></div>
+    </header>
+
+    <section id="home" class="section active">
+      <div class="grid">
+        <div class="card"><div class="label">AI Capability</div><div class="score" id="capabilityScore">— <small>/100</small></div></div>
+        <div class="card"><div class="label">Efficiency</div><div class="score" id="efficiencyScore">— <small>/100</small></div></div>
+        <div class="card"><div class="label">Research Progress</div><div class="score" id="researchScore">— <small>/100</small></div></div>
+        <div class="card wide">
+          <div class="label">Genesis Core</div>
+          <div id="summary" class="muted">Waiting for local runtime…</div>
+        </div>
+      </div>
+    </section>
+
+    <section id="chat" class="section">
+      <div class="card">
+        <div class="label">Talk to Genesis</div>
+        <textarea id="message" placeholder="Ask Genesis anything…"></textarea>
+        <div class="actions"><button class="btn" id="send">Send</button></div>
+        <pre id="reply">Genesis is starting…</pre>
+      </div>
+    </section>
+
+    <section id="memory" class="section"><div class="card"><div class="label">Memory Module</div><p>Persistent semantic, episodic, procedural and policy/context memory is stored locally on this device.</p><div class="muted">Normal reasoning retrieves validated memory by default.</div></div></section>
+    <section id="coding" class="section"><div class="card"><div class="label">Coding Module</div><p>Autonomous bounded coding uses candidate branches, tests, security review and independent validation before promotion.</p></div></section>
+    <section id="security" class="section"><div class="card"><div class="label">Security Module</div><p>Genesis continuously checks protected identity boundaries, secrets, candidate diffs and runtime security.</p></div></section>
+    <section id="research" class="section"><div class="card"><div class="label">Research</div><p>Scientific discoveries remain candidate evidence until separately validated.</p></div></section>
+    <section id="network" class="section"><div class="card"><div class="label">GDEN Network</div><p>Authenticated peer networking is available; decentralized consensus remains an ongoing milestone.</p></div></section>
+
+    <section id="updates" class="section">
+      <div class="card">
+        <div class="label">Desktop Updates</div>
+        <h2 style="margin-top:0">Genesis AI Desktop v0.2.0 alpha</h2>
+        <p id="updateText">Checking GitHub Releases…</p>
+        <div class="actions"><button class="btn" id="checkUpdate">Check for updates</button><button class="btn secondary" id="openRelease">Open Releases</button></div>
+        <p class="muted">Background version checks are enabled. Automatic installation will activate only when the signed Tauri update channel is configured; Genesis will not install unsigned self-generated binaries.</p>
+      </div>
+    </section>
+  </main>
+</div>
+<script>
+const API='http://127.0.0.1:8787';
+const repo='Maxhm007/Genesis-AI-Network';
+const titles={home:'Genesis Dashboard',chat:'Chat with Genesis',memory:'Memory',coding:'Coding',security:'Security',research:'Research',network:'GDEN Network',updates:'Updates'};
+for(const button of document.querySelectorAll('nav button')) button.onclick=()=>{document.querySelectorAll('nav button,.section').forEach(x=>x.classList.remove('active'));button.classList.add('active');document.getElementById(button.dataset.section).classList.add('active');document.getElementById('title').textContent=titles[button.dataset.section];};
+async function health(){try{const r=await fetch(API+'/health');if(!r.ok)throw 0;document.getElementById('coreDot').classList.add('online');document.getElementById('coreStatus').textContent='Genesis Core active';document.getElementById('summary').textContent='Local Genesis runtime is active on 127.0.0.1. Your runtime state is stored under your Windows local application data directory.';document.getElementById('reply').textContent='Ready.';}catch(e){setTimeout(health,1200)}}
+health();
+document.getElementById('send').onclick=async()=>{const box=document.getElementById('reply');box.textContent='Thinking…';try{const r=await fetch(API+'/v1/message',{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify({sender:'desktop-user',message:document.getElementById('message').value})});const data=await r.json();box.textContent=data.response||data.reply||JSON.stringify(data,null,2);}catch(e){box.textContent='Genesis Core is unavailable.'}};
+async function checkUpdates(){const el=document.getElementById('updateText');el.textContent='Checking…';try{const r=await fetch('https://api.github.com/repos/'+repo+'/releases?per_page=10');const releases=await r.json();const rel=releases.find(x=>x.assets&&x.assets.some(a=>/Genesis.*Setup.*\.exe$/i.test(a.name)));if(rel){const asset=rel.assets.find(a=>/Genesis.*Setup.*\.exe$/i.test(a.name));el.textContent='Latest Windows build: '+rel.tag_name+' — '+asset.name;window.latestRelease=rel;}else el.textContent='No Windows installer release found yet.';}catch(e){el.textContent='Could not check GitHub Releases.'}}
+document.getElementById('checkUpdate').onclick=checkUpdates;
+document.getElementById('openRelease').onclick=()=>{const url=(window.latestRelease&&window.latestRelease.html_url)||'https://github.com/'+repo+'/releases';if(window.__TAURI__?.opener?.openUrl)window.__TAURI__.opener.openUrl(url);else window.open(url,'_blank');};
+checkUpdates();
+</script>
+</body>
+</html>
