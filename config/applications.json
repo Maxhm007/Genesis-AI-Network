@@ -1,0 +1,22 @@
+{
+  "targets": [
+    {
+      "target_id": "windows-desktop",
+      "platform": "windows",
+      "source_root": "desktop",
+      "artifact": "exe",
+      "architecture": "tauri-shell+local-genesis-core",
+      "priority": 94,
+      "enabled": true
+    },
+    {
+      "target_id": "android-mobile",
+      "platform": "android",
+      "source_root": "mobile",
+      "artifact": "apk",
+      "architecture": "mobile-client+authenticated-genesis-api",
+      "priority": 96,
+      "enabled": true
+    }
+  ]
+}
