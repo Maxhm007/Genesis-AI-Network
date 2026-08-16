@@ -4,9 +4,12 @@ import json
 from dataclasses import dataclass
 from pathlib import Path
 
+from .ai_score import GenesisAIScorer
 from .capabilities import CapabilityEvaluator
 from .modules.runtime import ModularGenesis
+from .providers import ProviderRegistry
 from .selfdev import SelfDevelopmentExecutor, SelfDevResult
+from .team import AITeam
 
 
 @dataclass(frozen=True)
@@ -19,21 +22,51 @@ class DevelopmentPlan:
 class ProactiveDevelopmentLoop:
     """Choose and execute one bounded improvement at a time.
 
-    Genesis first applies explicitly catalogued bootstrap improvements. Once
-    those are complete, measured capability gaps may produce bounded module
-    manifest additions. They still travel through SelfDevelopmentExecutor and
-    the independent validation/promotion path before reaching main.
+    Genesis measures its current runtime, AI Score, and available intelligence
+    providers before choosing work. A low score creates update pressure, but it
+    never bypasses bounded candidate generation or independent validation.
     """
 
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
         self.executor = SelfDevelopmentExecutor(self.root)
+        self.providers = ProviderRegistry()
+        self.team = AITeam(self.providers)
 
     def capability_report(self) -> dict:
-        return CapabilityEvaluator(self.root).report()
+        return CapabilityEvaluator(self.root, self.providers, self.team).report()
+
+    def ai_score_report(self) -> dict:
+        return GenesisAIScorer(self.root, self.providers, self.team).report()
+
+    def _scan_summary(self) -> dict:
+        path = self.root / "runtime" / "immortality_scan.json"
+        if not path.exists():
+            return {"fresh": False, "priority_count": 0, "top_items": []}
+        try:
+            payload = json.loads(path.read_text(encoding="utf-8"))
+            return {
+                "fresh": True,
+                "created_at": payload.get("created_at"),
+                "priority_count": len(payload.get("priority_items", [])),
+                "top_items": payload.get("priority_items", [])[:3],
+            }
+        except Exception:
+            return {"fresh": False, "priority_count": 0, "top_items": []}
 
     def inspect(self) -> list[dict]:
+        score = self.ai_score_report()
         checks = [
+            {
+                "capability": "genesis_ai_score",
+                "present": score["percent"] >= 85,
+                "priority": 110 if score["percent"] < 70 else 105,
+                "score": score["score"],
+                "max_score": score["max_score"],
+                "percent": score["percent"],
+                "status": score["urgency"],
+                "improvement_hint": score["priority_gaps"][0]["improvement_hint"] if score["priority_gaps"] else None,
+            },
             {
                 "capability": "runtime_health_snapshot",
                 "present": (self.root / "genesis" / "health.py").exists(),
@@ -59,6 +92,12 @@ class ProactiveDevelopmentLoop:
                 "present": (self.root / "config" / "modules.json").exists(),
                 "priority": 95,
             },
+            {
+                "capability": "immortality_relevance_scan",
+                "present": self._scan_summary()["fresh"],
+                "priority": 92,
+                "scan": self._scan_summary(),
+            },
         ]
         report = self.capability_report()
         for result in report["results"]:
@@ -79,7 +118,7 @@ class ProactiveDevelopmentLoop:
         config_path = self.root / "config" / "modules.json"
         if not config_path.exists():
             return None
-        modular = ModularGenesis(self.root)
+        modular = ModularGenesis(self.root, self.providers)
         status = modular.status()
         proposals = status.get("module_change_proposals", [])
         if not proposals:
@@ -98,9 +137,6 @@ class ProactiveDevelopmentLoop:
         if not module_id or any(item.get("module_id") == module_id for item in modules):
             return None
 
-        # The candidate branch treats the module as active so validators test
-        # the exact configuration that would land on main. It is not canonical
-        # until the candidate itself passes independent validation and promotion.
         candidate["status"] = "active"
         metadata = dict(candidate.get("metadata", {}))
         metadata["activation_requires_candidate_promotion"] = True
@@ -129,13 +165,13 @@ class ProactiveDevelopmentLoop:
         if title != "Record self-development idle state":
             primary_files = list(dict(proposal.get("files", {})))
             if primary_files and not (self.root / primary_files[0]).exists():
-                measured_gaps = self.capability_report()["priority_gaps"][:3]
+                measured_gaps = self.ai_score_report()["priority_gaps"][:3]
                 return DevelopmentPlan(
                     title=title or "Genesis bounded improvement",
                     rationale=(
-                        "Genesis detected an executable bounded runtime improvement during "
-                        "self-inspection. Current measured gaps: "
-                        + ", ".join(item["capability"] for item in measured_gaps)
+                        "Genesis detected an executable bounded runtime improvement. AI Score pressure is "
+                        f"{self.ai_score_report()['urgency']}. Priority dimensions: "
+                        + ", ".join(item["name"] for item in measured_gaps)
                     ),
                     proposal=proposal,
                 )
