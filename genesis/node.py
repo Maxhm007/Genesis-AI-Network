@@ -7,13 +7,16 @@ import time
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .providers import ProviderRegistry
+
 
 class GenesisNode:
-    def __init__(self, root: Path, db_path: Path | None = None) -> None:
+    def __init__(self, root: Path, db_path: Path | None = None, providers: ProviderRegistry | None = None) -> None:
         self.root = root.resolve()
         self.constitution_path = self.root / "GENESIS_CONSTITUTION.md"
         self.genesis_block_path = self.root / "GENESIS_BLOCK.json"
         self.db_path = db_path or (self.root / "state" / "genesis.db")
+        self.providers = providers or ProviderRegistry()
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.db_path)
         self.conn.execute(
@@ -79,12 +82,31 @@ class GenesisNode:
         )
         self.conn.commit()
 
+    def refresh_operating_mode(self) -> str:
+        statuses = self.providers.statuses()
+        available = [status.name for status in statuses if status.available]
+        mode = "active" if available else "maintenance"
+        self.set_state("operating_mode", mode)
+        self.set_state("available_providers", json.dumps(available, sort_keys=True))
+        self.audit(
+            "provider_discovery",
+            {
+                "mode": mode,
+                "providers": [
+                    {"name": status.name, "available": status.available}
+                    for status in statuses
+                ],
+            },
+        )
+        return mode
+
     def heartbeat(self, cycle: int) -> None:
         now = datetime.now(timezone.utc).isoformat()
+        mode = self.refresh_operating_mode()
         self.set_state("last_heartbeat", now)
         self.set_state("cycle", str(cycle))
-        self.audit("heartbeat", {"cycle": cycle, "at": now})
-        print(f"[{now}] Genesis Node awake — cycle {cycle}", flush=True)
+        self.audit("heartbeat", {"cycle": cycle, "at": now, "mode": mode})
+        print(f"[{now}] Genesis Node awake — cycle {cycle} — mode={mode}", flush=True)
 
     def run(self, interval_seconds: float = 5.0, cycles: int | None = None) -> None:
         constitution_hash = self.verify_constitution()
