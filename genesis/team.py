@@ -17,6 +17,13 @@ class AgentRole:
     capability: str | None = None
 
 
+@dataclass(frozen=True)
+class OrchestrationPlan:
+    objective: str
+    role_names: tuple[str, ...]
+    reason: str
+
+
 DEFAULT_TEAM: tuple[AgentRole, ...] = (
     AgentRole("planner", "Turn the mission into bounded research/work plans", "Plan small, testable, reversible steps. Respect the Genesis Constitution."),
     AgentRole("researcher", "Find and summarize evidence", "Prefer primary scientific sources. Label uncertainty and contradictions."),
@@ -113,12 +120,11 @@ CAPABILITY_HINTS: tuple[tuple[tuple[str, ...], str], ...] = (
 
 
 class AITeam:
-    """Dynamically extensible role-based orchestration.
+    """Task-aware role orchestration with bounded specialist expansion.
 
-    Genesis begins with a small permanent core team. It may add specialist roles
-    when a task exposes a capability gap. Dynamic members do not gain special
-    authority: they use the same provider abstraction, their output remains
-    untrusted candidate material, and validators/reviewers remain independent.
+    Genesis keeps a permanent core roster but does not broadcast every task to
+    every role. A small task-specific team is selected, reducing latency and
+    resource use while preserving independent review for consequential work.
     """
 
     def __init__(
@@ -126,10 +132,12 @@ class AITeam:
         providers: ProviderRegistry,
         roles: Iterable[AgentRole] = DEFAULT_TEAM,
         max_dynamic_roles: int = 32,
+        max_roles_per_task: int = 4,
     ) -> None:
         self.providers = providers
         self._roles: list[AgentRole] = list(roles)
         self.max_dynamic_roles = max_dynamic_roles
+        self.max_roles_per_task = max(1, min(max_roles_per_task, 8))
 
     @property
     def roles(self) -> tuple[AgentRole, ...]:
@@ -193,9 +201,65 @@ class AITeam:
             added.append(self.add_specialist(capability))
         return added
 
+    def _role(self, name: str) -> AgentRole | None:
+        return next((role for role in self._roles if role.name == name), None)
+
+    def plan_task(self, objective: str, context: str = "") -> OrchestrationPlan:
+        text = f"{objective}\n{context}".lower()
+        selected: list[str] = ["planner"]
+        reasons: list[str] = ["planner coordinates bounded execution"]
+
+        def add(name: str, reason: str) -> None:
+            if name not in selected and self._role(name) is not None and len(selected) < self.max_roles_per_task:
+                selected.append(name)
+                reasons.append(reason)
+
+        communication_only = any(token in text for token in ("communication request", "respond to user", "reply to"))
+        research = any(token in text for token in ("research", "evidence", "paper", "study", "literature", "longevity", "aging", "senescence"))
+        engineering = any(token in text for token in ("fix", "bug", "failing", "code", "develop", "module", "implementation", "repair"))
+        model_work = any(token in text for token in ("provider", "model", "reasoning provider", "benchmark model"))
+        network_work = any(token in text for token in ("peer", "network", "distributed", "replication", "consensus"))
+        validation_work = any(token in text for token in ("validate", "validation", "promotion", "candidate", "quorum"))
+
+        if research:
+            add("researcher", "task requires evidence gathering")
+            add("reviewer", "research conclusions require independent critique")
+            add("scientist", "research task benefits from falsifiable hypotheses")
+        elif engineering:
+            add("engineer", "task requires an implementation candidate")
+            add("reviewer", "candidate change requires independent critique")
+        elif model_work:
+            add("model_scout", "task concerns replaceable intelligence providers")
+            add("reviewer", "provider recommendation requires independent critique")
+        elif network_work:
+            add("network_steward", "task concerns distributed operation")
+            add("reviewer", "network change requires independent critique")
+        elif validation_work:
+            add("validator", "task explicitly concerns validation")
+            add("reviewer", "validation benefits from separate critique")
+        elif not communication_only:
+            add("reviewer", "general non-trivial task receives bounded review")
+
+        # Add only specialists whose capability keywords are relevant to this task.
+        for keywords, capability in CAPABILITY_HINTS:
+            if any(keyword in text for keyword in keywords):
+                specialist = next((role for role in self._roles if role.dynamic and role.capability == capability), None)
+                if specialist is not None:
+                    add(specialist.name, f"specialist capability matched: {capability}")
+
+        return OrchestrationPlan(objective, tuple(selected), "; ".join(reasons))
+
+    @staticmethod
+    def _preferred_providers(available: list) -> list:
+        stronger = [provider for provider in available if getattr(provider, "name", "") != "genesis-bootstrap"]
+        return stronger or available
+
     def run_task(self, objective: str, context: str = "") -> list[dict]:
         added = self.auto_expand(objective, context)
-        available = self.providers.available_providers()
+        plan = self.plan_task(objective, context)
+        selected_roles = [self._role(name) for name in plan.role_names]
+        selected_roles = [role for role in selected_roles if role is not None]
+        available = self._preferred_providers(self.providers.available_providers())
         now = datetime.now(timezone.utc).isoformat()
 
         if not available:
@@ -208,17 +272,19 @@ class AITeam:
                     "dynamic": role.dynamic,
                     "capability": role.capability,
                     "newly_added": role in added,
+                    "orchestration_reason": plan.reason,
                 }
-                for role in self._roles
+                for role in selected_roles
             ]
 
         outputs: list[dict] = []
-        for index, role in enumerate(self._roles):
+        for index, role in enumerate(selected_roles):
             provider = available[index % len(available)]
             prompt = (
                 f"ROLE: {role.name}\nPURPOSE: {role.purpose}\n"
                 f"INSTRUCTION: {role.system_instruction}\n"
                 f"OBJECTIVE: {objective}\nCONTEXT:\n{context}\n"
+                f"TEAM_PLAN: {plan.reason}\n"
                 "Return concise findings, evidence gaps, risks, and the smallest next action."
             )
             try:
@@ -233,6 +299,7 @@ class AITeam:
                         "dynamic": role.dynamic,
                         "capability": role.capability,
                         "newly_added": role in added,
+                        "orchestration_reason": plan.reason,
                     }
                 )
             except Exception as exc:
@@ -246,6 +313,7 @@ class AITeam:
                         "dynamic": role.dynamic,
                         "capability": role.capability,
                         "newly_added": role in added,
+                        "orchestration_reason": plan.reason,
                     }
                 )
         return outputs
