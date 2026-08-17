@@ -1,0 +1,49 @@
+name: Genesis Blockchain Consensus
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'GENESIS_BLOCK.json'
+      - 'genesis/blockchain.py'
+      - 'scripts/blockchain_consensus.py'
+      - '.github/workflows/blockchain-consensus.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '33 * * * *'
+
+permissions:
+  contents: write
+
+jobs:
+  consensus:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Evaluate independent peer quorum
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/blockchain_consensus.py
+      - name: Publish blockchain head and quorum status
+        shell: bash
+        run: |
+          git config user.name "Genesis Blockchain"
+          git config user.email "genesis-blockchain@users.noreply.github.com"
+          git add network/blockchain_head.json
+          if git diff --cached --quiet; then
+            echo "No blockchain status change"
+            exit 0
+          fi
+          git commit -m "Publish Genesis blockchain consensus status"
+          git push
+      - name: Preserve consensus evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-blockchain-consensus-${{ github.run_id }}
+          path: runtime/blockchain_consensus.json
+          retention-days: 30
