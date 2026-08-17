@@ -3,9 +3,30 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from genesis.modules.task_queue import PersistentTaskQueue
+from genesis.modules.task_queue import GenesisTask, PersistentTaskQueue
 from genesis.providers import ProviderRegistry
 from genesis.team import AITeam
+
+
+BENCHMARK_EVIDENCE_GUARD = (
+    "EVIDENCE GUARD: reference_score is a comparison target only. It is NOT a measured Genesis result. "
+    "Do not claim that Genesis achieved, matched, passed, or was independently validated on a benchmark unless the context contains "
+    "an actual measured result with status=validated plus provenance.source and provenance.measured_at. "
+    "If those fields are absent, state that the benchmark remains unmeasured and recommend only a reproducible execution/ingestion step."
+)
+
+
+def build_team_context(task: GenesisTask) -> str:
+    payload = dict(task.payload)
+    context = {
+        "owner_module": task.module_id,
+        "priority": task.priority,
+        "payload": payload,
+    }
+    if payload.get("task_type") == "frontier_benchmark_measurement":
+        context["evidence_guard"] = BENCHMARK_EVIDENCE_GUARD
+        context["measurement_status"] = "unmeasured_until_validated_result_exists"
+    return json.dumps(context, sort_keys=True)
 
 
 if __name__ == "__main__":
@@ -26,21 +47,16 @@ if __name__ == "__main__":
             task = queue.get(task_id)
             if task is not None:
                 team = AITeam(ProviderRegistry())
-                context = json.dumps(
-                    {
-                        "owner_module": task.module_id,
-                        "priority": task.priority,
-                        "payload": task.payload,
-                    },
-                    sort_keys=True,
-                )
-                outputs = team.run_task(task.objective, context=context)
+                outputs = team.run_task(task.objective, context=build_team_context(task))
                 report = {
                     "status": "completed",
                     "task_id": task.task_id,
                     "owner_module": task.module_id,
                     "outputs": outputs,
-                    "rule": "AI Team provides bounded specialist analysis. The owning module remains responsible for execution and normal Security/validation gates still apply.",
+                    "rule": (
+                        "AI Team provides bounded specialist analysis. The owning module remains responsible for execution and normal "
+                        "Security/validation gates still apply. Benchmark reference scores are never treated as measured Genesis results."
+                    ),
                 }
 
     (runtime / "ai_team_dispatch.json").write_text(
