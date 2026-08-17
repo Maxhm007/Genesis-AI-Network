@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -89,45 +90,49 @@ def _apply_line_edit(current: str, start: int, end: int, new: str) -> str:
     return "".join(lines[: start - 1]) + replacement + "".join(lines[end:])
 
 
-def validate_compact_proposal(raw: str, files: dict[str, str]) -> tuple[dict | None, str]:
+def validate_compact_proposal(raw: str, files: dict[str, str]) -> tuple[dict | None, str, dict | None]:
     block = _balanced_json(raw.strip())
     if not block:
-        return None, "response did not contain a complete JSON object"
+        return None, "response did not contain a complete JSON object", None
     try:
         proposal = json.loads(block)
     except Exception as exc:
-        return None, f"response JSON could not be parsed: {exc}"
+        return None, f"response JSON could not be parsed: {exc}", None
     if not isinstance(proposal, dict):
-        return None, "proposal must be a JSON object"
+        return None, "proposal must be a JSON object", None
 
     edit = proposal.get("edit")
     if edit is None and isinstance(proposal.get("edits"), list) and len(proposal["edits"]) == 1:
         edit = proposal["edits"][0]
     if not isinstance(edit, dict):
-        return None, "proposal must contain exactly one edit"
+        return None, "proposal must contain exactly one edit", None
 
     path = str(edit.get("path", "")).replace("\\", "/").lstrip("./")
     start = edit.get("start_line")
     end = edit.get("end_line")
     new = edit.get("new")
+    debug_edit = {"path": path, "start_line": start, "end_line": end, "new": new}
     if path in PROTECTED or not path.startswith("genesis/"):
-        return None, "repair edit must target production code under genesis/"
+        return None, "repair edit must target production code under genesis/", debug_edit
     if path not in files:
-        return None, "repair edit path must be one of the supplied production context files"
+        return None, "repair edit path must be one of the supplied production context files", debug_edit
     if not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool):
-        return None, "start_line and end_line must be integers"
+        return None, "start_line and end_line must be integers", debug_edit
     if not isinstance(new, str) or not new.strip():
-        return None, "replacement text must be non-empty"
+        return None, "replacement text must be non-empty", debug_edit
     try:
         rendered = _apply_line_edit(files[path], start, end, new)
+        ast.parse(rendered, filename=path)
+    except SyntaxError as exc:
+        return None, f"edited Python is invalid: {exc.msg} at line {exc.lineno}", debug_edit
     except Exception as exc:
-        return None, str(exc)
+        return None, str(exc), debug_edit
 
     return {
         "title": str(proposal.get("title", "Genesis compact autonomous repair")),
         "rationale": str(proposal.get("rationale", "Smallest bounded production-code repair")),
         "files": {path: rendered},
-    }, ""
+    }, "", debug_edit
 
 
 def compact_problem(prompt_text: str) -> str:
@@ -199,12 +204,12 @@ class LocalRepairModel:
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ])
-            proposal, error = validate_compact_proposal(raw, production_files)
+            proposal, error, edit = validate_compact_proposal(raw, production_files)
             if proposal is not None:
-                print(json.dumps({"repair_attempt": attempt, "status": "proposal_valid", "proposal": proposal.get("title")}), flush=True)
+                print(json.dumps({"repair_attempt": attempt, "status": "proposal_valid", "proposal": proposal.get("title"), "edit": edit}), flush=True)
                 return json.dumps(proposal, sort_keys=True)
-            print(json.dumps({"repair_attempt": attempt, "status": "proposal_rejected", "reason": error, "output": raw[:600]}), flush=True)
-            feedback = f"{error}. Previous output: {raw[:600]}"
+            print(json.dumps({"repair_attempt": attempt, "status": "proposal_rejected", "reason": error, "edit": edit, "output": raw[:600]}), flush=True)
+            feedback = f"{error}. Previous edit: {json.dumps(edit)}. Previous output: {raw[:500]}"
         raise RuntimeError(f"repair proposal invalid after {MAX_ATTEMPTS} attempts: {feedback[:1200]}")
 
 
