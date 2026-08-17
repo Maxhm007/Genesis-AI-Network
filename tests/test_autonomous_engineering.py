@@ -40,7 +40,7 @@ class MalformedCodingProvider:
         return '{"title":"truncated"'
 
 
-class TestRepairCodingProvider:
+class RepairCodingProvider:
     name = "test-repair-coder"
 
     def __init__(self) -> None:
@@ -52,15 +52,11 @@ class TestRepairCodingProvider:
     def reason(self, prompt: str) -> str:
         self.prompts.append(prompt)
         if "CANDIDATE_TEST_REPAIR" not in prompt:
-            return (
-                '{"title":"Bad first candidate","rationale":"force a real test failure",'
-                '"files":{"tests/test_generated_bad.py":"from missing_genesis_module import VALUE\\n"}}'
-            )
-        return (
-            '{"title":"Repair from test evidence","rationale":"use repository evidence",'
-            '"files":{"genesis/repaired.py":"VALUE = 7\\n",'
-            '"tests/test_repaired.py":"from genesis.repaired import VALUE\\n\\ndef test_repaired():\\n    assert VALUE == 7\\n"}}'
-        )
+            return ('{"title":"Bad first candidate","rationale":"force a real test failure",'
+                    '"files":{"tests/test_generated_bad.py":"from missing_genesis_module import VALUE\\n"}}')
+        return ('{"title":"Repair from test evidence","rationale":"use repository evidence",'
+                '"files":{"genesis/repaired.py":"VALUE = 7\\n",'
+                '"tests/test_repaired.py":"from genesis.repaired import VALUE\\n\\ndef test_repaired():\\n    assert VALUE == 7\\n"}}')
 
 
 def git(root: Path, *args: str) -> None:
@@ -115,7 +111,6 @@ def test_failed_high_priority_task_does_not_block_next_task(tmp_path: Path):
     registry.register(SelectiveCodingProvider())
     loop = AutonomousEngineeringLoop(tmp_path, registry)
     result = loop.run_once()
-
     assert len(result["attempted_tasks"]) == 2
     assert result["attempted_tasks"][0]["task"]["task_id"] == first.task_id
     assert result["attempted_tasks"][0]["coding_status"] == "provider_or_candidate_error"
@@ -135,9 +130,7 @@ def test_malformed_provider_outputs_still_create_efficiency_evidence(tmp_path: P
     registry = ProviderRegistry(include_bootstrap=False)
     registry.register(MalformedCodingProvider())
     loop = AutonomousEngineeringLoop(tmp_path, registry)
-
     result = loop.run_once()
-
     assert len(result["attempted_tasks"]) == 3
     assert all(item["coding_status"] == "provider_or_candidate_error" for item in result["attempted_tasks"])
     assert result["efficiency"]["samples"] == 3
@@ -153,9 +146,7 @@ def test_module_task_gets_existing_repository_context(tmp_path: Path):
     queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
     task = queue.create("Improve score evidence", module_id="genesis.ai_score", priority=90)
     loop = AutonomousEngineeringLoop(tmp_path, ProviderRegistry(include_bootstrap=False))
-
     paths = loop._context_paths_for_task(task)
-
     assert "genesis/ai_score.py" in paths
     assert "tests/test_ai_score.py" in paths
     assert len(paths) <= loop.coding.MAX_CONTEXT_FILES
@@ -165,13 +156,11 @@ def test_failed_candidate_is_revised_from_test_feedback_on_same_issue(tmp_path: 
     make_repo(tmp_path)
     queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
     task = queue.create("Repair same issue until tests pass", module_id="genesis.coding", priority=100)
-    provider = TestRepairCodingProvider()
+    provider = RepairCodingProvider()
     registry = ProviderRegistry(include_bootstrap=False)
     registry.register(provider)
     loop = AutonomousEngineeringLoop(tmp_path, registry)
-
     result = loop.run_once()
-
     first = result["attempted_tasks"][0]
     assert first["task"]["task_id"] == task.task_id
     assert first["candidate_revisions"] == 1
@@ -183,3 +172,4 @@ def test_failed_candidate_is_revised_from_test_feedback_on_same_issue(tmp_path: 
     assert len(provider.prompts) == 2
     assert "CANDIDATE_TEST_REPAIR" in provider.prompts[1]
     assert "missing_genesis_module" in provider.prompts[1]
+    assert not (tmp_path / "tests" / "test_generated_bad.py").exists()
