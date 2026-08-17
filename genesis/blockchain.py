@@ -38,9 +38,9 @@ class BlockchainModule:
     """Compact tamper-evident Genesis commitment chain.
 
     Large data stays off-chain. This module stores hashes and compact state
-    commitments only. It is a working local append-only chain, not a claim of
-    network consensus. Consensus becomes active only after independent peers
-    attest to the same chain head with the configured quorum.
+    commitments only. The local append-only chain is independently verifiable.
+    Distributed consensus becomes active only after the configured quorum of
+    trusted independent peers attests to the exact same chain head.
     """
 
     def __init__(self, root: Path, quorum: int = 2) -> None:
@@ -120,24 +120,55 @@ class BlockchainModule:
         except Exception as exc:
             return {"valid": False, "height": 0, "error": f"{type(exc).__name__}: {exc}"}
 
-    def consensus_status(self, peer_attestations: list[dict] | None = None) -> dict:
+    def consensus_status(
+        self,
+        peer_attestations: list[dict] | None = None,
+        *,
+        trusted_peers: dict[str, str] | None = None,
+    ) -> dict:
+        """Return quorum status for the local head.
+
+        When ``trusted_peers`` is supplied, only attestations whose peer ID maps
+        to the expected repository are counted. The attestation must also name
+        the same Genesis anchor and GDEN network. This prevents arbitrary caller
+        input from being treated as an independent repository vote.
+        """
         verification = self.verify()
         head = verification.get("head")
+        genesis_anchor = verification.get("genesis_anchor")
         unique_peers: set[str] = set()
         matching = 0
+        rejected = 0
         for attestation in peer_attestations or []:
             peer_id = str(attestation.get("peer_id", "")).strip()
             peer_head = str(attestation.get("head", "")).strip()
-            if peer_id and peer_id not in unique_peers and peer_head == head:
-                unique_peers.add(peer_id)
-                matching += 1
+            repository = str(attestation.get("repository", "")).strip()
+            network = str(attestation.get("network", "")).strip()
+            attested_anchor = str(attestation.get("genesis_anchor", "")).strip()
+
+            if not peer_id or peer_id in unique_peers or peer_head != head:
+                rejected += 1
+                continue
+            if trusted_peers is not None:
+                expected_repository = trusted_peers.get(peer_id)
+                if not expected_repository or repository != expected_repository:
+                    rejected += 1
+                    continue
+                if network != "gden/0.1" or attested_anchor != genesis_anchor:
+                    rejected += 1
+                    continue
+            unique_peers.add(peer_id)
+            matching += 1
+
         active = bool(verification.get("valid")) and matching >= self.quorum
         return {
             "module": "genesis.blockchain",
             "chain_valid": bool(verification.get("valid")),
             "height": verification.get("height", 0),
             "head": head,
+            "genesis_anchor": genesis_anchor,
             "matching_independent_peers": matching,
+            "rejected_attestations": rejected,
             "required_quorum": self.quorum,
             "consensus_active": active,
             "status": "consensus_active" if active else "local_chain_active_consensus_pending",
