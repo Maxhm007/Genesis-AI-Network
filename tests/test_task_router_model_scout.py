@@ -4,7 +4,7 @@ from pathlib import Path
 
 from genesis.model_scout import ModelCandidate, ModelScoutModule
 from genesis.modules.task_queue import PersistentTaskQueue
-from genesis.task_router import TaskRouterModule
+from genesis.task_router import ACTIVE_TASK_LIMIT, TaskRouterModule
 
 
 def test_task_router_assigns_highest_priority_and_keeps_todo(tmp_path: Path):
@@ -22,6 +22,46 @@ def test_task_router_assigns_highest_priority_and_keeps_todo(tmp_path: Path):
     assert queue.get(high.task_id).state == "assigned"
     todo = router.write_todo()
     assert todo["pending"] == 2
+    assert todo["active"] == 1
+    assert todo["active_limit"] == 3
+
+
+def test_task_router_keeps_three_active_slots_without_replacing_running_work(tmp_path: Path):
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    active_ids = []
+    for index in range(ACTIVE_TASK_LIMIT):
+        task = queue.create(f"Active task {index}", priority=90 - index)
+        queue.transition(task.task_id, "assigned")
+        if index == 0:
+            queue.transition(task.task_id, "running")
+        active_ids.append(task.task_id)
+    waiting = queue.create("Waiting task", priority=100)
+
+    result = TaskRouterModule(tmp_path).assign_next()
+
+    assert result["status"] == "active_slots_full"
+    assert result["active"] == 3
+    assert set(result["active_task_ids"]) == set(active_ids)
+    assert queue.get(waiting.task_id).state == "new"
+    assert queue.get(active_ids[0]).state == "running"
+
+
+def test_paused_task_frees_active_slot_but_remains_durable(tmp_path: Path):
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    tasks = []
+    for index in range(ACTIVE_TASK_LIMIT):
+        task = queue.create(f"Task {index}", priority=80 - index)
+        queue.transition(task.task_id, "assigned")
+        tasks.append(task)
+    queue.pause(tasks[0].task_id, "Owner requested hold")
+    waiting = queue.create("Replacement slot task", priority=99)
+
+    result = TaskRouterModule(tmp_path).assign_next()
+
+    assert result["status"] == "assigned"
+    assert result["task"]["task_id"] == waiting.task_id
+    assert queue.get(tasks[0].task_id).state == "paused"
+    assert queue.get(tasks[0].task_id).state_reason == "Owner requested hold"
 
 
 def test_task_router_uses_ai_team_only_for_complex_cross_module_work(tmp_path: Path):
