@@ -18,7 +18,7 @@
       "repository": "Maxhm007/Genesis-AI-Network",
       "role": "main_core_external_coordinator",
       "status": "active",
-      "capabilities": ["coordination", "issue_lifecycle", "knowledge_routing", "peer_care", "validation_coordination", "independent_learning"]
+      "capabilities": ["coordination", "issue_lifecycle", "knowledge_routing", "peer_care", "validation_coordination", "independent_learning", "continuous_one_issue_focus"]
     },
     {
       "display_identity": "Gene 002",
@@ -27,7 +27,7 @@
       "repository": "Maxhm007/Genesis-Node-2",
       "role": "independent_research_validation_gene",
       "status": "active",
-      "capabilities": ["independent_development", "independent_learning", "research", "validation", "peer_communication", "validated_learning_exchange", "knowledge_exchange", "peer_care"]
+      "capabilities": ["independent_development", "independent_learning", "research", "validation", "peer_communication", "validated_learning_exchange", "knowledge_exchange", "peer_care", "continuous_one_issue_focus"]
     },
     {
       "display_identity": "Gene 003",
@@ -36,7 +36,7 @@
       "repository": "Maxhm007/Genesis-Node-3",
       "role": "independent_engineering_repair_gene",
       "status": "active",
-      "capabilities": ["independent_development", "independent_learning", "engineering", "repair", "challenge", "peer_communication", "validated_learning_exchange", "knowledge_exchange", "peer_care"]
+      "capabilities": ["independent_development", "independent_learning", "engineering", "repair", "challenge", "peer_communication", "validated_learning_exchange", "knowledge_exchange", "peer_care", "continuous_one_issue_focus"]
     }
   ],
   "rules": {
@@ -48,6 +48,12 @@
     "only_validated_lessons_may_be_shared": true,
     "peer_learning_is_advisory_not_authority": true,
     "peer_learning_requires_independent_recipient_validation": true,
+    "every_gene_focuses_on_one_issue_at_a_time": true,
+    "failed_attempt_does_not_release_issue_focus": true,
+    "retry_may_change_method_or_request_peer_help": true,
+    "after_resolution_select_next_issue_immediately": true,
+    "when_no_issue_exists_enter_learning_and_discovery": true,
+    "work_continuation_does_not_depend_on_hourly_or_minute_schedule": true,
     "gene_001_must_not_be_auto_assigned": true,
     "only_owner_approved_gene_repositories_may_join": true,
     "unrelated_or_unowned_repositories_must_not_be_modified": true
