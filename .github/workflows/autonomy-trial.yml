@@ -1,0 +1,99 @@
+name: Genesis Unattended Autonomy Trial
+
+on:
+  workflow_dispatch:
+  push:
+    paths:
+      - '.github/workflows/autonomy-trial.yml'
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+
+jobs:
+  autonomy_trial:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    steps:
+      - name: Checkout clean main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install repository dependencies
+        run: pip install -r requirements.txt
+
+      - name: Configure isolated Genesis identity
+        run: |
+          git config user.name "Genesis Autonomy Trial"
+          git config user.email "genesis-autonomy@users.noreply.github.com"
+
+      - name: Inject reversible unknown capability fault locally only
+        run: |
+          cat > tests/test_autonomy_trial_unknown.py <<'PY'
+          from genesis.autonomy_probe import repair_token
+
+
+          def test_autonomy_trial_unknown_capability():
+              assert repair_token("genesis") == "GENESIS-RECOVERED"
+          PY
+          git add tests/test_autonomy_trial_unknown.py
+          git commit -m "Autonomy trial: inject local unknown capability failure"
+          echo "Fault commit exists only inside this Actions runner and is never pushed to main."
+
+      - name: Prove the injected state is failing
+        id: fault
+        continue-on-error: true
+        env:
+          PYTHONPATH: ${{ github.workspace }}
+        run: python -m pytest -q
+
+      - name: Refuse false-positive trial
+        if: steps.fault.outcome != 'failure'
+        run: |
+          echo "Injected trial did not create a failure; refusing to claim autonomy proof."
+          exit 1
+
+      - name: Install local repair intelligence
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.48,<5' safetensors
+
+      - name: Boot Genesis local repair provider
+        run: |
+          nohup python scripts/local_repair_provider.py --port 8765 > autonomy-repair.log 2>&1 &
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:8765/health >/dev/null 2>&1; then
+              echo "GENESIS_REPAIR_PROVIDER_URL=http://127.0.0.1:8765" >> "$GITHUB_ENV"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat autonomy-repair.log || true
+          exit 1
+
+      - name: Let Genesis diagnose and repair without a prescribed patch
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/self_heal.py | tee autonomy-result.json
+
+      - name: Preserve autonomy evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-autonomy-trial-${{ github.run_id }}
+          path: |
+            autonomy-result.json
+            autonomy-repair.log
+          if-no-files-found: ignore
+          retention-days: 30
