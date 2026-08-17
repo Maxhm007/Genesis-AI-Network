@@ -34,6 +34,44 @@
       }
     },
     {
+      "module_id": "genesis.job_failure",
+      "name": "Genesis Job Failure Intelligence Module",
+      "version": "0.1.0",
+      "purpose": "Classify failed jobs, enforce bounded exponential retry, switch recovery strategy after repeated failure, recruit specialist diagnosis when needed, and quarantine exhausted jobs instead of looping forever.",
+      "capabilities": [
+        "failure_classification",
+        "retry_backoff",
+        "failure_history",
+        "recovery_routing",
+        "specialist_escalation",
+        "job_quarantine"
+      ],
+      "permissions": [
+        "tasks.read",
+        "tasks.assign",
+        "tasks.failure.write",
+        "ai_team.request"
+      ],
+      "dependencies": [
+        "genesis.task_queue",
+        "genesis.task_router",
+        "genesis.ai_team"
+      ],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.job_failure",
+      "metadata": {
+        "default_max_attempts": 3,
+        "default_backoff_seconds": 60,
+        "max_backoff_seconds": 3600,
+        "blind_infinite_retry": false,
+        "repeated_unknown_failure_recruits_specialist": true,
+        "capability_gap_requests_validated_expansion": true
+      }
+    },
+    {
       "module_id": "genesis.ai_team",
       "name": "Genesis AI Team Module",
       "version": "0.1.0",
