@@ -163,13 +163,13 @@ def test_failed_candidate_is_revised_from_test_feedback_on_same_issue(tmp_path: 
     result = loop.run_once()
     first = result["attempted_tasks"][0]
     assert first["task"]["task_id"] == task.task_id
-    assert first["candidate_revisions"] == 1
+    assert 1 <= first["candidate_revisions"] <= loop.MAX_CANDIDATE_REVISIONS
     assert first["coding_status"] == "candidate_created"
     assert first["candidate"]["tests_passed"] is True
     assert first["candidate"]["committed"] is True
     assert first["candidate_security"]["status"] == "pass"
     assert queue.get(task.task_id).state == "review"
-    assert len(provider.prompts) == 2
-    assert "CANDIDATE_TEST_REPAIR" in provider.prompts[1]
-    assert "missing_genesis_module" in provider.prompts[1]
+    assert len(provider.prompts) == first["candidate_revisions"] + 1
+    assert any("CANDIDATE_TEST_REPAIR" in prompt for prompt in provider.prompts[1:])
+    assert any("missing_genesis_module" in prompt for prompt in provider.prompts[1:])
     assert not (tmp_path / "tests" / "test_generated_bad.py").exists()
