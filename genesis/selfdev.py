@@ -88,6 +88,12 @@ class SelfDevelopmentExecutor:
             elif target.is_dir():
                 shutil.rmtree(target)
 
+    def _candidate_test_env(self) -> dict[str, str]:
+        """Run candidate tests against this checkout, not an ambient parent checkout."""
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(self.root)
+        return env
+
     def next_builtin_improvement(self) -> dict:
         candidates = [
             {
@@ -143,7 +149,13 @@ class SelfDevelopmentExecutor:
                 path = self.root / normalized
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(str(content), encoding="utf-8")
-            test = subprocess.run([os.environ.get("PYTHON", "python"), "-m", "pytest", "-q"], cwd=self.root, text=True, capture_output=True)
+            test = subprocess.run(
+                [os.environ.get("PYTHON", "python"), "-m", "pytest", "-q"],
+                cwd=self.root,
+                text=True,
+                capture_output=True,
+                env=self._candidate_test_env(),
+            )
             if test.returncode != 0:
                 self._git("reset", "--hard", "HEAD")
                 self._cleanup_new_paths(existed_before)
