@@ -35,6 +35,7 @@ jobs:
     env:
       GENE_ID: ${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
       CONTINUE_CHAIN: ${{ inputs.continue_chain || github.event.client_payload.continue_chain || 'true' }}
+      PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
 
