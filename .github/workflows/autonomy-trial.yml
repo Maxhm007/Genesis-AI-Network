@@ -39,12 +39,11 @@ jobs:
         run: |
           cat >> tests/test_health.py <<'PY'
 
-
-def test_health_snapshot_accepts_explicit_status():
-    result = build_health_snapshot(status='degraded', node='autonomy-trial')
-    assert result['status'] == 'degraded'
-    assert result['details']['node'] == 'autonomy-trial'
-    assert 'status' not in result['details']
+          def test_health_snapshot_accepts_explicit_status():
+              result = build_health_snapshot(status='degraded', node='autonomy-trial')
+              assert result['status'] == 'degraded'
+              assert result['details']['node'] == 'autonomy-trial'
+              assert 'status' not in result['details']
           PY
           git add tests/test_health.py
           git commit -m "Autonomy trial: inject local behavioral regression requirement"
