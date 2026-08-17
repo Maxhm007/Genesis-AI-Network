@@ -35,10 +35,10 @@ class RecoveringCodingProvider(FakeCodingProvider):
         self.calls += 1
         self.prompts.append(prompt)
         if self.calls == 1:
-            return '{"title":"Broken","rationale":"test","files":{"genesis/helper.py":"VALUE = 1\\n"}'
+            return '{"edits":['
         if self.calls == 2:
-            return '{"title":"Still incomplete","rationale":"test"}'
-        return '{"title":"Recovered","rationale":"test","files":{"genesis/recovered.py":"VALUE = 3\\n"}}'
+            return '{"title":"Still incomplete"}'
+        return '{"edits":[{"path":"genesis/example.py","old":"VALUE = 7","new":"VALUE = 8"}]}'
 
 
 class AlwaysBrokenCodingProvider(FakeCodingProvider):
@@ -49,17 +49,17 @@ class AlwaysBrokenCodingProvider(FakeCodingProvider):
 
     def reason(self, prompt: str) -> str:
         self.calls += 1
-        return '{"title":"Broken"'
+        return '{"edits":['
 
 
 class CompactEditProvider(FakeCodingProvider):
     name = "compact-edit-coder"
 
     def reason(self, prompt: str) -> str:
-        return '{"title":"Tune value","rationale":"small surgical change","edits":[{"path":"genesis/example.py","old":"VALUE = 7","new":"VALUE = 8"}]}'
+        return '{"edits":[{"path":"genesis/example.py","old":"VALUE = 7","new":"VALUE = 8"}]}'
 
 
-class PromptCaptureProvider(FakeCodingProvider):
+class PromptCaptureProvider(CompactEditProvider):
     name = "prompt-capture-coder"
 
     def __init__(self) -> None:
@@ -67,7 +67,7 @@ class PromptCaptureProvider(FakeCodingProvider):
 
     def reason(self, prompt: str) -> str:
         self.prompt = prompt
-        return '{"title":"Tune value","rationale":"small surgical change","edits":[{"path":"genesis/example.py","old":"VALUE = 7","new":"VALUE = 8"}]}'
+        return super().reason(prompt)
 
 
 def _load_local_provider_module():
@@ -97,13 +97,15 @@ def test_coding_module_extracts_balanced_json_from_wrapped_output(tmp_path: Path
 
 
 def test_coding_module_repairs_parse_and_schema_errors_with_same_provider(tmp_path: Path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "genesis" / "example.py").write_text("VALUE = 7\n", encoding="utf-8")
     provider = RecoveringCodingProvider()
     module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
-    proposal = module.propose("Recover a malformed proposal", provider=provider)
-    assert proposal.title == "Recovered"
+    proposal = module.propose("Recover a malformed proposal", ["genesis/example.py"], provider=provider)
+    assert proposal.files["genesis/example.py"] == "VALUE = 8\n"
     assert provider.calls == 3
-    assert "RECOVERY:" in provider.prompts[1]
-    assert "files mapping or compact edits list" in provider.prompts[2]
+    assert "RETRY:" in provider.prompts[1]
+    assert "Exactly one edit" in provider.prompts[2]
 
 
 def test_coding_module_recovery_is_bounded(tmp_path: Path):
@@ -121,16 +123,19 @@ def test_coding_module_accepts_compact_exact_edit(tmp_path: Path):
     module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
     proposal = module.propose("Tune one value", ["genesis/example.py"], provider=provider)
     assert proposal.files["genesis/example.py"] == "VALUE = 8\nOTHER = 1\n"
+    assert proposal.title == "Genesis bounded coding candidate"
 
 
-def test_coding_prompt_prefers_compact_surgical_edits(tmp_path: Path):
+def test_coding_prompt_requires_exactly_one_small_edit(tmp_path: Path):
     (tmp_path / "genesis").mkdir()
     (tmp_path / "genesis" / "example.py").write_text("VALUE = 7\n", encoding="utf-8")
     provider = PromptCaptureProvider()
     module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
     module.propose("Tune one value", ["genesis/example.py"], provider=provider)
-    assert "preferably an edits list" in provider.prompt
-    assert "faster and safer than reproducing whole files" in provider.prompt
+    assert "exactly ONE smallest useful edit" in provider.prompt
+    assert "no title/rationale/markdown/explanation" in provider.prompt
+    assert module.MAX_EDITS == 1
+    assert module.MAX_CONTEXT_BYTES <= 12_000
 
 
 def test_local_provider_compacts_large_prompt_without_losing_ends():
@@ -148,16 +153,27 @@ def test_local_provider_output_budget_stays_bounded():
     assert 256 <= provider_module.DEFAULT_MAX_NEW_TOKENS <= provider_module.MAX_ALLOWED_NEW_TOKENS <= 1024
 
 
+def test_coding_module_rejects_multiple_compact_edits(tmp_path: Path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "genesis" / "example.py").write_text("A = 1\nB = 2\n", encoding="utf-8")
+    module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
+    with pytest.raises(ValueError, match="edits count out of bounds"):
+        module.validate_proposal(
+            {"edits": [
+                {"path": "genesis/example.py", "old": "A = 1", "new": "A = 2"},
+                {"path": "genesis/example.py", "old": "B = 2", "new": "B = 3"},
+            ]},
+            "test",
+        )
+
+
 def test_coding_module_rejects_ambiguous_compact_edit(tmp_path: Path):
     (tmp_path / "genesis").mkdir()
     (tmp_path / "genesis" / "example.py").write_text("VALUE = 7\nVALUE = 7\n", encoding="utf-8")
     module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
     with pytest.raises(ValueError, match="match exactly once"):
         module.validate_proposal(
-            {
-                "title": "ambiguous",
-                "edits": [{"path": "genesis/example.py", "old": "VALUE = 7", "new": "VALUE = 8"}],
-            },
+            {"edits": [{"path": "genesis/example.py", "old": "VALUE = 7", "new": "VALUE = 8"}]},
             "test",
         )
 
@@ -165,25 +181,13 @@ def test_coding_module_rejects_ambiguous_compact_edit(tmp_path: Path):
 def test_coding_module_rejects_protected_file(tmp_path: Path):
     module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
     with pytest.raises(RuntimeError):
-        module.validate_proposal(
-            {
-                "title": "bad",
-                "files": {"GENESIS_CONSTITUTION.md": "changed"},
-            },
-            "test",
-        )
+        module.validate_proposal({"files": {"GENESIS_CONSTITUTION.md": "changed"}}, "test")
 
 
 def test_coding_module_rejects_path_traversal(tmp_path: Path):
     module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
     with pytest.raises(RuntimeError):
-        module.validate_proposal(
-            {
-                "title": "bad",
-                "files": {"genesis/../run_genesis.py": "changed"},
-            },
-            "test",
-        )
+        module.validate_proposal({"files": {"genesis/../run_genesis.py": "changed"}}, "test")
 
 
 def test_coding_context_is_bounded_to_allowed_paths(tmp_path: Path):
