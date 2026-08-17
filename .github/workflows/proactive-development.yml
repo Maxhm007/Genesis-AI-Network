@@ -38,6 +38,8 @@ on:
       - 'config/competitive_ai_reference.json'
       - 'scripts/proactive_dev.py'
       - 'scripts/task_router.py'
+      - 'scripts/model_scout_worker.py'
+      - 'scripts/ai_team_dispatch.py'
       - 'scripts/immortality_scan.py'
       - 'scripts/research_task_worker.py'
       - 'scripts/self_learn.py'
@@ -112,6 +114,8 @@ jobs:
             runtime/genesis_tasks.sqlite3
             runtime/todo.json
             runtime/task_route.json
+            runtime/model_scout_recommendations.json
+            runtime/ai_team_dispatch.json
             runtime/self_learning.sqlite3
             runtime/self_learning_status.json
             runtime/memory.sqlite3
@@ -190,8 +194,12 @@ jobs:
         run: |
           python scripts/genesis_hourly_ops.py collect
           python scripts/genesis_hourly_ops.py sync-issues
+      - name: Proactively scout and recommend replacement intelligence models
+        run: python scripts/model_scout_worker.py
       - name: Route next persistent TODO task to its owning module
         run: python scripts/task_router.py
+      - name: Dispatch AI Team only when routed task needs cross-module specialists
+        run: python scripts/ai_team_dispatch.py
       - name: Configure Genesis Git identity
         run: |
           git config user.name "Genesis AI"
