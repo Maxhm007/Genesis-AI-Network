@@ -6,7 +6,7 @@ from pathlib import Path
 
 from .intelligence_router import IntelligenceRouter
 from .memory import GenesisMemory
-from .providers import ProviderRegistry
+from .providers import IntelligenceProvider, ProviderRegistry
 from .self_learning import SelfLearningStore
 from .selfdev import SelfDevelopmentExecutor, SelfDevResult
 
@@ -97,11 +97,17 @@ class CodingModule:
             provider=provider_name,
         )
 
-    def propose(self, objective: str, context_paths: list[str] | None = None) -> CodingProposal:
+    def propose(
+        self,
+        objective: str,
+        context_paths: list[str] | None = None,
+        *,
+        provider: IntelligenceProvider | None = None,
+    ) -> CodingProposal:
         objective = objective.strip()
         if not objective:
             raise ValueError("coding objective is required")
-        provider = self._provider()
+        provider = provider or self._provider()
         if provider is None:
             raise RuntimeError("no intelligence provider available")
         context = self.read_context(context_paths or [])
