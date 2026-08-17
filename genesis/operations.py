@@ -29,13 +29,19 @@ class OperationalIssue:
 
 
 class GenesisOperations:
-    """Detect, persist and queue operational issues without bypassing validation.
+    """Detect, remember and keep working operational issues until resolved.
 
-    The ledger is an audit/reporting surface. Repair authority remains with the
-    existing bounded engineering loop, Security review and independent validators.
+    `operations_issues.jsonl` is the compact current-state ledger.
+    `operations_issue_history.jsonl` is append-only and records observations,
+    status transitions and repair-task generations so Gene 0 can reconstruct
+    exactly what happened over time.
+
+    Repair authority remains with the bounded engineering loop, Security review
+    and independent validators.
     """
 
     VALID_SEVERITY = {"info", "low", "medium", "high", "critical"}
+    ACTIVE_TASK_STATES = {"new", "assigned", "running", "blocked", "review"}
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root).resolve()
@@ -43,11 +49,70 @@ class GenesisOperations:
         self.runtime.mkdir(parents=True, exist_ok=True)
         self.queue = PersistentTaskQueue(self.runtime / "genesis_tasks.sqlite3")
         self.ledger_path = self.runtime / "operations_issues.jsonl"
+        self.history_path = self.runtime / "operations_issue_history.jsonl"
 
     @staticmethod
     def _stable_key(title: str, evidence: str) -> str:
         raw = f"{title.strip()}\n{evidence.strip()}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()[:20]
+
+    def _append_history(self, event: str, issue_key: str, **payload) -> dict:
+        row = {"at": utc_now(), "event": event, "issue_key": issue_key, **payload}
+        with self.history_path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(row, sort_keys=True) + "\n")
+        return row
+
+    def history(self, issue_key: str | None = None, limit: int = 500) -> list[dict]:
+        if not self.history_path.exists():
+            return []
+        rows: list[dict] = []
+        for line in self.history_path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+            except Exception:
+                continue
+            if issue_key is None or row.get("issue_key") == issue_key:
+                rows.append(row)
+        return rows[-max(1, limit):]
+
+    def _tasks_for_issue(self, issue_key: str):
+        return [task for task in self.queue.list(limit=5000) if task.payload.get("issue_key") == issue_key]
+
+    def _ensure_issue_work(self, issue: OperationalIssue) -> tuple[str | None, int]:
+        tasks = self._tasks_for_issue(issue.issue_key)
+        active = [task for task in tasks if task.state in self.ACTIVE_TASK_STATES]
+        if active:
+            return None, len(tasks)
+
+        generation = len(tasks) + 1
+        priority = {"info": 20, "low": 40, "medium": 70, "high": 90, "critical": 100}.get(issue.severity, 70)
+        task, created = self.queue.create_unique(
+            f"ops:{issue.issue_key}:work:{generation}",
+            f"Resolve detected Genesis issue: {issue.title}. {issue.remediation}",
+            module_id=issue.module_id,
+            priority=priority,
+            payload={
+                "task_type": "operational_issue",
+                "issue_key": issue.issue_key,
+                "severity": issue.severity,
+                "evidence": issue.evidence,
+                "remediation": issue.remediation,
+                "source": "genesis_operations",
+                "work_generation": generation,
+                "gene_coordinator": "Gene 0",
+            },
+        )
+        if not created:
+            return None, generation
+        self._append_history(
+            "repair_task_created",
+            issue.issue_key,
+            task_id=task.task_id,
+            work_generation=generation,
+            module_id=issue.module_id,
+            priority=priority,
+        )
+        return task.task_id, generation
 
     def detect(self, scorecard: dict) -> list[OperationalIssue]:
         issues: list[OperationalIssue] = []
@@ -141,10 +206,11 @@ class GenesisOperations:
 
         for key, old in existing.items():
             if key not in current_keys and old.get("status") in {"open", "blocked"}:
-                old = dict(old)
-                old["status"] = "resolved"
-                old["resolved_at"] = now
-                rows.append(old)
+                resolved = dict(old)
+                resolved["status"] = "resolved"
+                resolved["resolved_at"] = now
+                rows.append(resolved)
+                self._append_history("resolved", key, title=old.get("title"), previous_status=old.get("status"))
 
         for issue in issues:
             row = issue.as_dict()
@@ -153,39 +219,29 @@ class GenesisOperations:
             row["last_seen_at"] = now
             if prior.get("status") == "resolved":
                 row["reopened_at"] = now
+                self._append_history("reopened", issue.issue_key, title=issue.title, evidence=issue.evidence)
+            elif not prior:
+                self._append_history("detected", issue.issue_key, title=issue.title, severity=issue.severity, evidence=issue.evidence)
+            else:
+                self._append_history("observed_open", issue.issue_key, title=issue.title, evidence=issue.evidence)
+
+            if not issue.owner_action_required:
+                task_id, generation = self._ensure_issue_work(issue)
+                if task_id:
+                    created_tasks.append(task_id)
+                row["work_generation"] = generation
             rows.append(row)
 
-            if issue.owner_action_required:
-                continue
-            priority = {"info": 20, "low": 40, "medium": 70, "high": 90, "critical": 100}.get(issue.severity, 70)
-            task, created = self.queue.create_unique(
-                f"ops:{issue.issue_key}",
-                f"Resolve detected Genesis issue: {issue.title}. {issue.remediation}",
-                module_id=issue.module_id,
-                priority=priority,
-                payload={
-                    "task_type": "operational_issue",
-                    "issue_key": issue.issue_key,
-                    "severity": issue.severity,
-                    "evidence": issue.evidence,
-                    "remediation": issue.remediation,
-                    "source": "genesis_operations",
-                },
-            )
-            if created:
-                created_tasks.append(task.task_id)
-
-        # Keep one latest row per issue key.
-        compact = {}
+        compact: dict[str, dict] = {}
         for row in rows:
             compact[row["issue_key"]] = row
         ordered = sorted(compact.values(), key=lambda r: (r.get("status") == "resolved", r.get("severity", ""), r.get("first_seen_at", "")))
         self.ledger_path.write_text("".join(json.dumps(row, sort_keys=True) + "\n" for row in ordered), encoding="utf-8")
-        return {"issues": ordered, "created_tasks": created_tasks, "updated_at": now}
+        return {"issues": ordered, "created_tasks": created_tasks, "updated_at": now, "history_events": len(self.history())}
 
     def report(self) -> dict:
         if not self.ledger_path.exists():
-            return {"issues": [], "open": 0, "blocked": 0, "resolved": 0}
+            return {"issues": [], "open": 0, "blocked": 0, "resolved": 0, "history_events": len(self.history())}
         rows = []
         for line in self.ledger_path.read_text(encoding="utf-8").splitlines():
             try:
@@ -197,4 +253,5 @@ class GenesisOperations:
             "open": sum(1 for r in rows if r.get("status") == "open"),
             "blocked": sum(1 for r in rows if r.get("status") == "blocked"),
             "resolved": sum(1 for r in rows if r.get("status") == "resolved"),
+            "history_events": len(self.history()),
         }
