@@ -3,9 +3,9 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
+from genesis.adaptive_learning import LearningAwareAITeam
 from genesis.modules.task_queue import GenesisTask, PersistentTaskQueue
 from genesis.providers import ProviderRegistry
-from genesis.team import AITeam
 
 
 BENCHMARK_EVIDENCE_GUARD = (
@@ -46,16 +46,24 @@ if __name__ == "__main__":
             queue = PersistentTaskQueue(runtime / "genesis_tasks.sqlite3")
             task = queue.get(task_id)
             if task is not None:
-                team = AITeam(ProviderRegistry())
-                outputs = team.run_task(task.objective, context=build_team_context(task))
+                team = LearningAwareAITeam(
+                    ProviderRegistry(),
+                    preferences_path=runtime / "learning_preferences.json",
+                )
+                context = build_team_context(task)
+                outputs = team.run_task(task.objective, context=context)
                 report = {
                     "status": "completed",
                     "task_id": task.task_id,
+                    "objective": task.objective,
                     "owner_module": task.module_id,
                     "outputs": outputs,
+                    "learning_domain": team._current_domain,
                     "rule": (
                         "AI Team provides bounded specialist analysis. The owning module remains responsible for execution and normal "
-                        "Security/validation gates still apply. Benchmark reference scores are never treated as measured Genesis results."
+                        "Security/validation gates still apply. Historical provider preference is based only on measured operational "
+                        "outcomes and never converts candidate knowledge into validated fact. Benchmark reference scores are never "
+                        "treated as measured Genesis results."
                     ),
                 }
 
