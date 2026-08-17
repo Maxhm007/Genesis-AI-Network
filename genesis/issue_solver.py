@@ -17,6 +17,7 @@ MAX_PATCH_FILES = 6
 MAX_PATCH_BYTES = 80_000
 MAX_CONTEXT_FILES = 6
 MAX_CONTEXT_BYTES = 48_000
+DEFAULT_PROVIDER_TIMEOUT_SECONDS = 300
 
 
 @dataclass(frozen=True)
@@ -42,6 +43,7 @@ class IssueSolver:
         self.provider_url = (provider_url or os.environ.get("GENESIS_REPAIR_PROVIDER_URL", "")).rstrip("/")
         self.github_token = os.environ.get("GITHUB_TOKEN", "").strip()
         self.github_model = os.environ.get("GENESIS_REPAIR_MODEL", "openai/gpt-4o").strip()
+        self.provider_timeout = int(os.environ.get("GENESIS_REPAIR_TIMEOUT_SECONDS", str(DEFAULT_PROVIDER_TIMEOUT_SECONDS)))
 
     def run_tests(self) -> tuple[bool, str]:
         proc = subprocess.run(
@@ -204,7 +206,7 @@ class IssueSolver:
             method="POST",
             headers={"Content-Type": "application/json", "User-Agent": "Genesis-AI-Network/0.1"},
         )
-        with urllib.request.urlopen(req, timeout=90) as response:
+        with urllib.request.urlopen(req, timeout=self.provider_timeout) as response:
             payload = json.loads(response.read().decode("utf-8"))
         raw = payload.get("response", "")
         proposal = self._extract_json(raw) if isinstance(raw, str) else raw
@@ -250,13 +252,16 @@ class IssueSolver:
     def _provider_proposal(self, diagnosis: Diagnosis) -> dict | None:
         if diagnosis.category == "constitution_integrity":
             return None
+        errors: list[str] = []
         for provider in (self._http_provider_proposal, self._github_models_proposal):
             try:
                 proposal = provider(diagnosis)
                 if proposal is not None:
                     return proposal
-            except Exception:
-                continue
+            except Exception as exc:
+                errors.append(f"{provider.__name__}: {type(exc).__name__}: {exc}")
+        if errors:
+            print(json.dumps({"status": "repair_provider_errors", "errors": errors}), flush=True)
         return None
 
     def validate_proposal(self, proposal: dict) -> dict:
