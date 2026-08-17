@@ -76,3 +76,41 @@ def test_duplicate_peer_does_not_fake_consensus(tmp_path: Path):
     ])
     assert status["matching_independent_peers"] == 1
     assert status["consensus_active"] is False
+
+
+def test_trusted_repository_peers_are_required_for_authenticated_consensus(tmp_path: Path):
+    root = make_root(tmp_path)
+    chain = BlockchainModule(root, quorum=2)
+    verification = chain.verify()
+    head = verification["head"]
+    anchor = verification["genesis_anchor"]
+    trusted = {
+        "genesis-node-2": "Maxhm007/Genesis-Node-2",
+        "genesis-node-3": "Maxhm007/Genesis-Node-3",
+    }
+    attestations = [
+        {
+            "peer_id": "genesis-node-2",
+            "repository": "Maxhm007/Genesis-Node-2",
+            "network": "gden/0.1",
+            "genesis_anchor": anchor,
+            "head": head,
+        },
+        {
+            "peer_id": "genesis-node-3",
+            "repository": "Maxhm007/Genesis-Node-3",
+            "network": "gden/0.1",
+            "genesis_anchor": anchor,
+            "head": head,
+        },
+    ]
+    active = chain.consensus_status(attestations, trusted_peers=trusted)
+    assert active["consensus_active"] is True
+    assert active["matching_independent_peers"] == 2
+
+    forged = list(attestations)
+    forged[1] = {**forged[1], "repository": "attacker/fake-node"}
+    blocked = chain.consensus_status(forged, trusted_peers=trusted)
+    assert blocked["consensus_active"] is False
+    assert blocked["matching_independent_peers"] == 1
+    assert blocked["rejected_attestations"] >= 1
