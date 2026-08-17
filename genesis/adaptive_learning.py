@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 import math
 import sqlite3
-from dataclasses import asdict, dataclass
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Iterable
@@ -124,7 +124,6 @@ class OutcomeLearningStore:
                 continue
             success = sum(row.success * row.evidence_weight for row in rows) / total_weight
             quality = sum(row.quality * row.evidence_weight for row in rows) / total_weight
-            # Mild Bayesian-style shrinkage keeps tiny samples from dominating.
             confidence = min(1.0, math.log1p(len(rows)) / math.log(10))
             score = ((0.65 * success) + (0.35 * quality)) * (0.6 + 0.4 * confidence)
             ranked.append(
@@ -223,7 +222,9 @@ class AdaptiveLearningEngine:
         self.root = Path(root).resolve()
         self.runtime = self.root / "runtime"
         self.runtime.mkdir(parents=True, exist_ok=True)
-        self.store = OutcomeLearningStore(self.runtime / "adaptive_learning.sqlite3")
+        # Keep outcomes in a separate table inside Genesis's already-persistent
+        # self-learning database so autonomous runs retain performance history.
+        self.store = OutcomeLearningStore(self.runtime / "self_learning.sqlite3")
         self.preferences_path = self.runtime / "learning_preferences.json"
 
     def _ingest_outputs(self, *, task_ref: str, objective: str, outputs: Iterable[dict[str, Any]], source: str, review: dict[str, Any] | None = None) -> int:
