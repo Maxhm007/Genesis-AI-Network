@@ -84,6 +84,7 @@ env:
   PYTHONPATH: ${{ github.workspace }}
   GENESIS_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_NAME: qwen3-0.6b-local
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '180'
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
   GENESIS_EMAIL_FROM: ${{ secrets.GENESIS_EMAIL_FROM }}
