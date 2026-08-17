@@ -4,32 +4,42 @@
     {
       "module_id": "genesis.automation",
       "name": "Genesis Automation Module",
-      "version": "0.1.0",
-      "active": true,
-      "dynamic": false,
-      "mutable": true,
-      "protected": false,
+      "version": "0.1.1",
+      "purpose": "Coordinate bounded autonomous issue repair, persistent retry state, owner-only blocking, and structured ChatGPT escalation through GitHub without bypassing Genesis safety or validation boundaries.",
+      "capabilities": [
+        "operational_issue_retry",
+        "repair_budget_tracking",
+        "chatgpt_escalation",
+        "owner_action_classification",
+        "automation_audit"
+      ],
+      "permissions": [
+        "tasks.read",
+        "tasks.write",
+        "operations.read",
+        "runtime.automation.write",
+        "github.issues.request"
+      ],
       "dependencies": [
         "genesis.security",
         "genesis.coding",
         "genesis.application",
         "genesis.validation"
       ],
-      "permissions": {
-        "task_queue_read": true,
-        "task_queue_write": true,
-        "operations_ledger_read": true,
-        "github_issue_escalation": true,
-        "automatic_promotion": false,
-        "release_authority": false,
-        "secret_access": false,
-        "owner_control_bypass": false
-      },
-      "policy": {
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.automation",
+      "metadata": {
         "max_autonomous_repair_cycles": 2,
         "external_escalation": "chatgpt_via_github_issue",
         "owner_only_actions_are_not_delegated": true,
-        "validation_required_for_repairs": true
+        "validation_required_for_repairs": true,
+        "automatic_promotion": false,
+        "release_authority": false,
+        "may_access_secrets": false,
+        "may_bypass_owner_control": false
       }
     }
   ]
