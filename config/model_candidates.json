@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "rule": "Seeded candidates are discovery inputs only. Model Scout must quarantine, test, benchmark and validate them before trust or activation. resource_cost is a relative parameter-scale hint, not measured runtime cost.",
+  "candidates": [
+    {
+      "name": "Qwen/Qwen3.5-2B",
+      "source": "https://huggingface.co/Qwen/Qwen3.5-2B",
+      "license": "apache-2.0",
+      "state": "discovered",
+      "benchmark_score": null,
+      "resource_cost": 2.0,
+      "capabilities": ["reasoning", "coding", "research", "vision", "multilingual"],
+      "notes": "Primary next evaluation candidate. Official Qwen post-trained 2B multimodal model; do not activate until Genesis benchmarks it on available hardware."
+    },
+    {
+      "name": "Qwen/Qwen3.5-4B",
+      "source": "https://huggingface.co/Qwen/Qwen3.5-4B",
+      "license": "apache-2.0",
+      "state": "discovered",
+      "benchmark_score": null,
+      "resource_cost": 4.0,
+      "capabilities": ["reasoning", "coding", "research", "vision", "multilingual"],
+      "notes": "Higher-capability follow-up candidate when compute and memory budgets permit."
+    },
+    {
+      "name": "microsoft/Phi-4-mini-instruct",
+      "source": "https://huggingface.co/microsoft/Phi-4-mini-instruct",
+      "license": "mit",
+      "state": "discovered",
+      "benchmark_score": null,
+      "resource_cost": 3.8,
+      "capabilities": ["reasoning", "coding", "instruction_following", "multilingual"],
+      "notes": "Alternative small-model candidate. Keep quarantined until Genesis verifies runtime requirements, custom-code/trust settings, benchmarks and security."
+    }
+  ]
+}
