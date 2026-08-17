@@ -18,7 +18,7 @@
       "repository": "Maxhm007/Genesis-AI-Network",
       "role": "main_core_external_coordinator",
       "status": "active",
-      "capabilities": ["coordination", "issue_lifecycle", "knowledge_routing", "peer_care", "validation_coordination"]
+      "capabilities": ["coordination", "issue_lifecycle", "knowledge_routing", "peer_care", "validation_coordination", "independent_learning"]
     },
     {
       "display_identity": "Gene 002",
@@ -27,7 +27,7 @@
       "repository": "Maxhm007/Genesis-Node-2",
       "role": "independent_research_validation_gene",
       "status": "active",
-      "capabilities": ["independent_development", "research", "validation", "peer_communication", "knowledge_exchange", "peer_care"]
+      "capabilities": ["independent_development", "independent_learning", "research", "validation", "peer_communication", "validated_learning_exchange", "knowledge_exchange", "peer_care"]
     },
     {
       "display_identity": "Gene 003",
@@ -36,7 +36,7 @@
       "repository": "Maxhm007/Genesis-Node-3",
       "role": "independent_engineering_repair_gene",
       "status": "active",
-      "capabilities": ["independent_development", "engineering", "repair", "challenge", "peer_communication", "knowledge_exchange", "peer_care"]
+      "capabilities": ["independent_development", "independent_learning", "engineering", "repair", "challenge", "peer_communication", "validated_learning_exchange", "knowledge_exchange", "peer_care"]
     }
   ],
   "rules": {
@@ -44,6 +44,10 @@
     "gene_0_is_registry_authority": true,
     "registry_updates_when_gene_membership_or_status_changes": true,
     "peer_registry_cache_may_refresh_automatically": true,
+    "every_gene_keeps_independent_learning_memory": true,
+    "only_validated_lessons_may_be_shared": true,
+    "peer_learning_is_advisory_not_authority": true,
+    "peer_learning_requires_independent_recipient_validation": true,
     "gene_001_must_not_be_auto_assigned": true,
     "only_owner_approved_gene_repositories_may_join": true,
     "unrelated_or_unowned_repositories_must_not_be_modified": true
