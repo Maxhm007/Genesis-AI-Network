@@ -18,6 +18,7 @@ on:
       - 'genesis/evidence.py'
       - 'genesis/peer_compute.py'
       - 'genesis/memory.py'
+      - 'genesis/operations.py'
       - 'genesis/competitive_reference.py'
       - 'genesis/immortality_scan.py'
       - 'genesis/research_tasks.py'
@@ -38,6 +39,7 @@ on:
       - 'scripts/memory_sync.py'
       - 'scripts/autonomous_engineering.py'
       - 'scripts/capability_growth_sync.py'
+      - 'scripts/genesis_hourly_ops.py'
       - 'scripts/system_scorecard.py'
       - 'scripts/competitive_reference_monitor.py'
       - 'tests/test_proactive.py'
@@ -47,6 +49,7 @@ on:
       - 'tests/test_intelligence_router.py'
       - 'tests/test_capability_integration.py'
       - 'tests/test_memory.py'
+      - 'tests/test_operations.py'
       - 'tests/test_immortality_scan.py'
       - 'tests/test_task_queue.py'
       - 'tests/test_self_learning.py'
@@ -60,6 +63,7 @@ on:
 
 permissions:
   contents: write
+  issues: write
 
 env:
   PYTHONPATH: ${{ github.workspace }}
@@ -67,6 +71,10 @@ env:
   GENESIS_PROVIDER_NAME: qwen3-0.6b-local
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
+  GENESIS_EMAIL_FROM: ${{ secrets.GENESIS_EMAIL_FROM }}
+  GENESIS_EMAIL_TO: ${{ secrets.GENESIS_EMAIL_TO }}
+  GENESIS_SMTP_USERNAME: ${{ secrets.GENESIS_SMTP_USERNAME }}
+  GENESIS_SMTP_APP_PASSWORD: ${{ secrets.GENESIS_SMTP_APP_PASSWORD }}
 
 concurrency:
   group: genesis-proactive-development
@@ -101,6 +109,9 @@ jobs:
             runtime/efficiency.jsonl
             runtime/provider_telemetry.json
             runtime/capability_growth_sync.json
+            runtime/operations_issues.jsonl
+            runtime/github_issue_sync.json
+            runtime/email_delivery_status.json
             runtime/research_reviews/
             runtime/task_reviews/
           key: genesis-runtime-${{ runner.os }}-${{ github.run_id }}
@@ -156,6 +167,14 @@ jobs:
         run: python scripts/self_learn.py
       - name: Refresh validated long-term memory
         run: python scripts/memory_sync.py
+      - name: Generate pre-repair KPI scorecard
+        run: python scripts/system_scorecard.py
+      - name: Detect persist and queue Genesis operational issues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/genesis_hourly_ops.py collect
+          python scripts/genesis_hourly_ops.py sync-issues
       - name: Configure Genesis Git identity
         run: |
           git config user.name "Genesis AI"
@@ -173,9 +192,17 @@ jobs:
           else
             echo "Autonomous Coding already created $branch; skipping second candidate generator."
           fi
-      - name: Generate capability efficiency and mission scorecard
+      - name: Generate final capability efficiency and mission scorecard
         run: python scripts/system_scorecard.py
-      - name: Preserve scan score task learning memory security coding and efficiency evidence
+      - name: Refresh issue ledger after repair attempt and sync GitHub Issues
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/genesis_hourly_ops.py collect
+          python scripts/genesis_hourly_ops.py sync-issues
+      - name: Send Genesis hourly email from GitHub
+        run: python scripts/genesis_hourly_ops.py email
+      - name: Preserve scan score task learning memory security coding efficiency and operations evidence
         uses: actions/upload-artifact@v4
         with:
           name: genesis-autonomous-evidence-${{ github.run_id }}
