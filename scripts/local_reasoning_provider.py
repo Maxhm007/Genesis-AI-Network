@@ -8,6 +8,16 @@ from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
 DEFAULT_MAX_NEW_TOKENS = 512
 MAX_ALLOWED_NEW_TOKENS = 768
+MAX_PROVIDER_PROMPT_CHARS = 14_000
+
+
+def compact_prompt(prompt: str) -> str:
+    """Keep bounded instructions/objective and recent repository context."""
+    if len(prompt) <= MAX_PROVIDER_PROMPT_CHARS:
+        return prompt
+    head = MAX_PROVIDER_PROMPT_CHARS // 2
+    tail = MAX_PROVIDER_PROMPT_CHARS - head
+    return prompt[:head] + "\n[...bounded context elided...]\n" + prompt[-tail:]
 
 
 class LocalReasoningModel:
@@ -33,6 +43,7 @@ class LocalReasoningModel:
             "You do not define Genesis identity. Give concise, testable, evidence-aware answers. "
             "Do not claim certainty where evidence is missing."
         )
+        prompt = compact_prompt(prompt)
         messages = [
             {"role": "system", "content": system},
             {"role": "user", "content": prompt},
