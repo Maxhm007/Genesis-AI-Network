@@ -39,13 +39,39 @@ class CodingModule:
         self.executor = SelfDevelopmentExecutor(self.root)
 
     def _provider(self):
+        """Return the best live coding provider without allowing telemetry lockout.
+
+        Normal selection remains telemetry-aware. If measured reliability has
+        temporarily suppressed every non-bootstrap provider, perform one bounded
+        fallback over providers that are live *now* and whose declared/default
+        profile includes coding. This breaks the circular failure mode where a
+        healthy reasoning service cannot repair Genesis because prior failed
+        coding samples drove its routing reliability below threshold.
+
+        Bootstrap is deliberately excluded from this fallback because it cannot
+        generate repository replacement contents safely enough for Coding.
+        """
         try:
             return self.router.select("coding", complexity=0.75, require_non_bootstrap=True).provider
         except RuntimeError:
-            try:
-                return self.router.select("coding", complexity=0.2).provider
-            except RuntimeError:
-                return None
+            pass
+
+        live_candidates = []
+        for provider in self.providers.available_providers():
+            profile = IntelligenceRouter.profile(provider)
+            if profile.name == "genesis-bootstrap":
+                continue
+            if "coding" not in profile.capabilities and "reasoning" not in profile.capabilities:
+                continue
+            live_candidates.append((profile.resource_cost, -profile.reliability, profile.name, provider))
+        if live_candidates:
+            live_candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+            return live_candidates[0][3]
+
+        try:
+            return self.router.select("coding", complexity=0.2).provider
+        except RuntimeError:
+            return None
 
     def read_context(self, paths: list[str]) -> dict[str, str]:
         context: dict[str, str] = {}
