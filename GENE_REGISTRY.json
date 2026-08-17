@@ -1,45 +1,23 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "registry_authority": "Gene 0",
-  "common_name": "Gene",
+  "canonical_collective_identity": "Genesis",
+  "common_instance_name": "Gene",
+  "unity_principle": "Genesis is the whole Gene network and also the identity carried by every individual Gene. All Genes together are Genesis; each Gene is Genesis; numbered Gene names only distinguish addresses or instances when needed.",
+  "unity_equation": "All Genes = Genesis = 1",
   "source_repository": "Maxhm007/Genesis-AI-Network",
   "reserved": [
-    {
-      "display_identity": "Gene 001",
-      "serial": 1,
-      "status": "reserved_for_owner_definition"
-    }
+    {"display_identity":"Gene 001","serial":1,"status":"reserved_for_owner_definition"}
   ],
   "genes": [
-    {
-      "display_identity": "Gene 0",
-      "serial": 0,
-      "logical_id": "gene-node-1",
-      "repository": "Maxhm007/Genesis-AI-Network",
-      "role": "main_core_external_coordinator",
-      "status": "active",
-      "capabilities": ["coordination", "issue_lifecycle", "knowledge_routing", "peer_care", "validation_coordination", "independent_learning", "continuous_one_issue_focus"]
-    },
-    {
-      "display_identity": "Gene 002",
-      "serial": 2,
-      "logical_id": "gene-node-2",
-      "repository": "Maxhm007/Genesis-Node-2",
-      "role": "independent_research_validation_gene",
-      "status": "active",
-      "capabilities": ["independent_development", "independent_learning", "research", "validation", "peer_communication", "validated_learning_exchange", "knowledge_exchange", "peer_care", "continuous_one_issue_focus"]
-    },
-    {
-      "display_identity": "Gene 003",
-      "serial": 3,
-      "logical_id": "gene-node-3",
-      "repository": "Maxhm007/Genesis-Node-3",
-      "role": "independent_engineering_repair_gene",
-      "status": "active",
-      "capabilities": ["independent_development", "independent_learning", "engineering", "repair", "challenge", "peer_communication", "validated_learning_exchange", "knowledge_exchange", "peer_care", "continuous_one_issue_focus"]
-    }
+    {"display_identity":"Gene 0","serial":0,"logical_id":"gene-node-1","repository":"Maxhm007/Genesis-AI-Network","role":"main_core_external_coordinator","status":"active","identity":"Genesis","capabilities":["coordination","issue_lifecycle","knowledge_routing","peer_care","validation_coordination","independent_learning","continuous_one_issue_focus","pulse_execution"]},
+    {"display_identity":"Gene 002","serial":2,"logical_id":"gene-node-2","repository":"Maxhm007/Genesis-Node-2","role":"independent_research_validation_gene","status":"active","identity":"Genesis","capabilities":["independent_development","independent_learning","research","validation","peer_communication","validated_learning_exchange","knowledge_exchange","peer_care","continuous_one_issue_focus","pulse_execution"]},
+    {"display_identity":"Gene 003","serial":3,"logical_id":"gene-node-3","repository":"Maxhm007/Genesis-Node-3","role":"independent_engineering_repair_gene","status":"active","identity":"Genesis","capabilities":["independent_development","independent_learning","engineering","repair","challenge","peer_communication","validated_learning_exchange","knowledge_exchange","peer_care","continuous_one_issue_focus","pulse_execution"]}
   ],
   "rules": {
+    "all_genes_share_genesis_identity": true,
+    "collective_and_individual_identity_are_genesis": true,
+    "numbered_gene_names_are_instance_addresses_not_separate_systems": true,
     "every_gene_keeps_local_registry_copy": true,
     "gene_0_is_registry_authority": true,
     "registry_updates_when_gene_membership_or_status_changes": true,
