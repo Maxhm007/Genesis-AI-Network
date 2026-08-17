@@ -89,7 +89,7 @@ def _apply_line_edit(current: str, start: int, end: int, new: str) -> str:
     return "".join(lines[: start - 1]) + replacement + "".join(lines[end:])
 
 
-def validate_compact_proposal(raw: str, prompt_text: str, files: dict[str, str]) -> tuple[dict | None, str]:
+def validate_compact_proposal(raw: str, files: dict[str, str]) -> tuple[dict | None, str]:
     block = _balanced_json(raw.strip())
     if not block:
         return None, "response did not contain a complete JSON object"
@@ -130,6 +130,18 @@ def validate_compact_proposal(raw: str, prompt_text: str, files: dict[str, str])
     }, ""
 
 
+def compact_problem(prompt_text: str) -> str:
+    payload = _payload(prompt_text)
+    diagnosis = payload.get("diagnosis") if isinstance(payload.get("diagnosis"), dict) else {}
+    failure = str(payload.get("failure_text", ""))[-5000:]
+    return (
+        f"DIAGNOSIS_CATEGORY: {diagnosis.get('category', 'unknown')}\n"
+        f"DIAGNOSIS_SUMMARY: {diagnosis.get('summary', '')}\n"
+        "FAILING_TEST_OUTPUT:\n"
+        f"{failure}\n"
+    )
+
+
 class LocalRepairModel:
     def __init__(self, model_id: str) -> None:
         import torch
@@ -148,11 +160,11 @@ class LocalRepairModel:
 
     def _generate(self, messages: list[dict]) -> str:
         text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
-        inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=12000)
+        inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=8000)
         with self.torch.no_grad():
             output = self.model.generate(
                 **inputs,
-                max_new_tokens=900,
+                max_new_tokens=700,
                 do_sample=False,
                 repetition_penalty=1.05,
                 pad_token_id=self.tokenizer.eos_token_id,
@@ -162,32 +174,38 @@ class LocalRepairModel:
 
     def reason(self, prompt: str) -> str:
         files = context_files(prompt)
-        context = numbered_context(files)
+        production_files = {path: text for path, text in files.items() if path.startswith("genesis/")}
+        if not production_files:
+            raise RuntimeError("no production source context available for autonomous repair")
+        context = numbered_context(production_files)
+        problem = compact_problem(prompt)
         system = (
             "You are the bounded software-debugging specialist for Genesis AI. Return JSON only. "
-            "Make exactly ONE smallest production-code line-range edit. Never edit tests. Never change protected identity, "
-            "workflow permissions, validation/quorum, signing, secrets, or self-development protections. Do not weaken tests. "
-            "Use 1-based inclusive line numbers exactly from NUMBERED_CONTEXT."
+            "Fix the production root cause of the failing test with exactly ONE smallest line-range edit. "
+            "Never edit tests. Never change protected identity, workflows, permissions, validation/quorum, signing, secrets, "
+            "or self-development protections. Use 1-based inclusive line numbers exactly from NUMBERED_CONTEXT."
         )
         feedback = ""
         for attempt in range(1, MAX_ATTEMPTS + 1):
             user = (
-                prompt
+                problem
                 + "\nNUMBERED_CONTEXT:"
                 + context
-                + '\nOUTPUT SHAPE: {"title":"...","rationale":"...","edit":{"path":"genesis/file.py","start_line":1,"end_line":1,"new":"replacement text"}}'
+                + '\nOUTPUT_JSON: {"title":"short repair title","rationale":"why this fixes the root cause","edit":{"path":"genesis/file.py","start_line":1,"end_line":1,"new":"replacement text"}}'
             )
             if feedback:
-                user += "\nPREVIOUS PROPOSAL REJECTED: " + feedback + "\nReturn corrected JSON only."
+                user += "\nREJECTION_FEEDBACK: " + feedback + "\nReturn corrected JSON only."
             raw = self._generate([
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ])
-            proposal, error = validate_compact_proposal(raw, prompt, files)
+            proposal, error = validate_compact_proposal(raw, production_files)
             if proposal is not None:
+                print(json.dumps({"repair_attempt": attempt, "status": "proposal_valid", "proposal": proposal.get("title")}), flush=True)
                 return json.dumps(proposal, sort_keys=True)
-            feedback = f"attempt {attempt}: {error}; previous output: {raw[:1000]}"
-        raise RuntimeError(f"repair proposal invalid after {MAX_ATTEMPTS} attempts: {feedback[:1600]}")
+            print(json.dumps({"repair_attempt": attempt, "status": "proposal_rejected", "reason": error, "output": raw[:600]}), flush=True)
+            feedback = f"{error}. Previous output: {raw[:600]}"
+        raise RuntimeError(f"repair proposal invalid after {MAX_ATTEMPTS} attempts: {feedback[:1200]}")
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -221,6 +239,7 @@ class Handler(BaseHTTPRequestHandler):
             response = self.model.reason(prompt) if self.model else ""
             self._json(200, {"response": response})
         except Exception as exc:
+            print(json.dumps({"status": "repair_error", "error": str(exc)[:1200]}), flush=True)
             self._json(500, {"error": str(exc)})
 
     def log_message(self, *_args) -> None:
