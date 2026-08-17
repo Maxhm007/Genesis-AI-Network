@@ -1,4 +1,5 @@
 from pathlib import Path
+import importlib.util
 
 import pytest
 
@@ -69,6 +70,15 @@ class PromptCaptureProvider(FakeCodingProvider):
         return '{"title":"Tune value","rationale":"small surgical change","edits":[{"path":"genesis/example.py","old":"VALUE = 7","new":"VALUE = 8"}]}'
 
 
+def _load_local_provider_module():
+    path = Path(__file__).resolve().parents[1] / "scripts" / "local_reasoning_provider.py"
+    spec = importlib.util.spec_from_file_location("genesis_local_reasoning_provider", path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+    return module
+
+
 def test_coding_module_prefers_non_bootstrap_provider(tmp_path: Path):
     registry = ProviderRegistry(include_bootstrap=True)
     registry.register(FakeCodingProvider())
@@ -121,6 +131,21 @@ def test_coding_prompt_prefers_compact_surgical_edits(tmp_path: Path):
     module.propose("Tune one value", ["genesis/example.py"], provider=provider)
     assert "preferably an edits list" in provider.prompt
     assert "faster and safer than reproducing whole files" in provider.prompt
+
+
+def test_local_provider_compacts_large_prompt_without_losing_ends():
+    provider_module = _load_local_provider_module()
+    prompt = "RULES-AND-OBJECTIVE:" + ("A" * 20_000) + ":REPOSITORY-CONTEXT-END"
+    compacted = provider_module.compact_prompt(prompt)
+    assert len(compacted) < len(prompt)
+    assert compacted.startswith("RULES-AND-OBJECTIVE:")
+    assert compacted.endswith(":REPOSITORY-CONTEXT-END")
+    assert len(compacted) <= provider_module.MAX_PROVIDER_PROMPT_CHARS + 40
+
+
+def test_local_provider_output_budget_stays_bounded():
+    provider_module = _load_local_provider_module()
+    assert 256 <= provider_module.DEFAULT_MAX_NEW_TOKENS <= provider_module.MAX_ALLOWED_NEW_TOKENS <= 1024
 
 
 def test_coding_module_rejects_ambiguous_compact_edit(tmp_path: Path):
