@@ -108,6 +108,22 @@ def _load_model_proposal(raw: str) -> dict:
     proposal = json.loads(block)
     if not isinstance(proposal, dict):
         raise ValueError("proposal must be a JSON object")
+
+    # Small local models often wrap the requested JSON in one or more semantic
+    # envelopes. Unwrap only dictionaries until the actual repair object is
+    # reached; all normal proposal validation still happens afterward.
+    for _ in range(5):
+        if any(key in proposal for key in ("edit", "edits", "files")):
+            break
+        nested = None
+        for key in ("proposal", "repair", "output", "result", "response"):
+            value = proposal.get(key)
+            if isinstance(value, dict):
+                nested = value
+                break
+        if nested is None:
+            break
+        proposal = nested
     return proposal
 
 
