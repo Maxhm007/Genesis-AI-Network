@@ -1,12 +1,15 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
-from .gene_names import canonical_gene_name
+from .gene_names import identity_for_logical_id
 from .peer_network import GenePeerNetwork
 from .self_learning import LearningLesson, SelfLearningStore
+
+
+def _gene_name(logical_id: str) -> str:
+    return identity_for_logical_id(logical_id).display_name
 
 
 class GeneLearningEngine:
@@ -41,7 +44,7 @@ class GeneLearningEngine:
             source_ref=source_ref,
             topic=topic,
             lesson=lesson,
-            evidence={"gene": canonical_gene_name(self.logical_id), **dict(evidence or {})},
+            evidence={"gene": _gene_name(self.logical_id), **dict(evidence or {})},
             confidence=confidence,
         )
 
@@ -69,7 +72,7 @@ class GeneLearningEngine:
                 "source_ref": lesson.source_ref,
             },
             provenance={
-                "author_gene": canonical_gene_name(self.logical_id),
+                "author_gene": _gene_name(self.logical_id),
                 "learning_state": lesson.state,
                 "rule": "validated_lessons_only",
             },
@@ -90,7 +93,7 @@ class GeneLearningEngine:
             lesson=str(packet.get("claim", "")),
             evidence={
                 "peer_packet": packet,
-                "peer_author": canonical_gene_name(author),
+                "peer_author": _gene_name(author),
                 "rule": "import_as_candidate_not_authority",
             },
             confidence=float((packet.get("evidence") or {}).get("confidence", 0.5)),
@@ -98,7 +101,7 @@ class GeneLearningEngine:
 
     def status(self) -> dict[str, Any]:
         return {
-            "gene": canonical_gene_name(self.logical_id),
+            "gene": _gene_name(self.logical_id),
             "logical_id": self.logical_id,
             "store": str(self.node_root / "learning.sqlite3"),
             "candidate": len(self.store.list(state="candidate", limit=10000)),
