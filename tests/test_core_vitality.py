@@ -23,17 +23,21 @@ def test_reproduction_means_bounded_readiness_not_uncontrolled_spawning():
 
 
 def test_core_failure_is_highest_priority(tmp_path):
-    for name in ["GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json", "CURRENT_TASK.md", "SELF_DEVELOPMENT_POLICY.md"]:
-        source = ROOT / name
-        if source.exists():
-            (tmp_path / name).write_bytes(source.read_bytes())
+    for name in [
+        "GENESIS_CONSTITUTION.md",
+        "GENESIS_BLOCK.json",
+        "CURRENT_TASK.md",
+        "SELF_DEVELOPMENT_POLICY.md",
+        "GENE_IDENTITY.json",
+    ]:
+        (tmp_path / name).write_bytes((ROOT / name).read_bytes())
     (tmp_path / "genesis").mkdir()
     (tmp_path / "config").mkdir()
     (tmp_path / ".github" / "workflows").mkdir(parents=True)
-    # Deliberately omit self-development executor and replication policy/module context.
+    (tmp_path / "config" / "replication.json").write_bytes((ROOT / "config" / "replication.json").read_bytes())
     report = CoreVitalityMonitor(tmp_path).evaluate()
     assert report["operational"] is False
     assert report["repair_priority"] == "highest"
-    assert report["failed_loops"]
+    assert "self_development" in report["failed_loops"]
     repair = json.loads((tmp_path / "runtime" / "core_vitality_repair.json").read_text(encoding="utf-8"))
     assert repair["priority"] == "highest"
