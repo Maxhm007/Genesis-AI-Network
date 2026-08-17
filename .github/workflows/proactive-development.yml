@@ -47,6 +47,7 @@ on:
       - 'scripts/self_learn.py'
       - 'scripts/memory_sync.py'
       - 'scripts/autonomous_engineering.py'
+      - 'scripts/local_reasoning_provider.py'
       - 'scripts/capability_growth_sync.py'
       - 'scripts/genesis_hourly_ops.py'
       - 'scripts/genesis_automation.py'
@@ -94,7 +95,7 @@ env:
 
 concurrency:
   group: genesis-proactive-development
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   develop:
