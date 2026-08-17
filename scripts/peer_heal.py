@@ -1,4 +1,5 @@
 #!/usr/bin/env python3
+# simulation-trigger: node-2-quorum-20260818-0237
 from __future__ import annotations
 import json, os, subprocess, urllib.request
 REQ='[genesis-recovery-request]'; VOTE='[genesis-peer-vote]'
