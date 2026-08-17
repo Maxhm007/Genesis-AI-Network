@@ -92,7 +92,32 @@ def _apply_line_edit(current: str, start: int, end: int, new: str) -> str:
     return "".join(lines[: start - 1]) + replacement + "".join(lines[end:])
 
 
-def _pin_single_target(raw: str, target_path: str | None) -> str:
+def infer_function_target(prompt_text: str, target_path: str | None, source: str) -> tuple[str, int, int] | None:
+    if not target_path:
+        return None
+    payload = _payload(prompt_text)
+    failure = str(payload.get("failure_text", ""))
+    try:
+        tree = ast.parse(source, filename=target_path)
+    except Exception:
+        return None
+    functions = {
+        node.name: node
+        for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)) and getattr(node, "end_lineno", None)
+    }
+    call_names = re.findall(r"\b([A-Za-z_][A-Za-z0-9_]*)\s*\(", failure)
+    matches: list[str] = []
+    for name in call_names:
+        if name in functions and name not in matches:
+            matches.append(name)
+    if len(matches) != 1:
+        return None
+    node = functions[matches[0]]
+    return matches[0], int(node.lineno), int(node.end_lineno)
+
+
+def _pin_target(raw: str, target_path: str | None, target_span: tuple[str, int, int] | None) -> str:
     if not target_path:
         return raw
     block = _balanced_json(raw.strip())
@@ -109,6 +134,10 @@ def _pin_single_target(raw: str, target_path: str | None) -> str:
         edit = proposal["edits"][0]
     if isinstance(edit, dict):
         edit["path"] = target_path
+        if target_span:
+            _, start, end = target_span
+            edit["start_line"] = start
+            edit["end_line"] = end
         proposal["edit"] = edit
         proposal.pop("edits", None)
         return json.dumps(proposal)
@@ -240,46 +269,52 @@ class LocalRepairModel:
         problem = compact_problem(prompt)
         allowed_paths = list(production_files)
         pinned_target = allowed_paths[0] if len(allowed_paths) == 1 else None
+        target_span = infer_function_target(prompt, pinned_target, production_files[pinned_target]) if pinned_target else None
         target_instruction = (
             f"TARGET_FILE is fixed by the repair controller to {pinned_target}. Do not choose a path. "
             if pinned_target
             else "Choose path only from ALLOWED_PRODUCTION_FILES. "
         )
+        if target_span:
+            function_name, start, end = target_span
+            target_instruction += (
+                f"TARGET_FUNCTION is {function_name}, lines {start}-{end}. Rewrite the COMPLETE function only; "
+                "the controller fixes its line range automatically. "
+            )
         system = (
             "You are the bounded software-debugging specialist for Genesis AI. Return JSON only. "
-            "Fix the production root cause of the failing test with exactly ONE smallest line-range edit. "
-            "Preserve all existing passing behavior while satisfying the new failing assertion. "
+            "Fix the production root cause while preserving all existing passing behavior. "
             "Never edit tests. Never change protected identity, workflows, permissions, validation/quorum, signing, secrets, "
-            "or self-development protections. Use 1-based inclusive line numbers exactly from NUMBERED_CONTEXT. "
+            "or self-development protections. "
             + target_instruction
         )
         feedback = ""
         for attempt in range(1, MAX_ATTEMPTS + 1):
-            schema = (
-                '{"title":"repair title","rationale":"root-cause explanation","edit":'
-                + '{"start_line":INTEGER,"end_line":INTEGER,"new":"actual replacement Python code"}}'
-                if pinned_target
-                else '{"title":"repair title","rationale":"root-cause explanation","edit":'
-                + '{"path":"ONE OF ALLOWED_PRODUCTION_FILES","start_line":INTEGER,"end_line":INTEGER,"new":"actual replacement Python code"}}'
-            )
+            if target_span:
+                schema = '{"title":"repair title","rationale":"root-cause explanation","edit":{"new":"COMPLETE corrected function definition"}}'
+            elif pinned_target:
+                schema = '{"title":"repair title","rationale":"root-cause explanation","edit":{"start_line":INTEGER,"end_line":INTEGER,"new":"actual replacement Python code"}}'
+            else:
+                schema = '{"title":"repair title","rationale":"root-cause explanation","edit":{"path":"ONE OF ALLOWED_PRODUCTION_FILES","start_line":INTEGER,"end_line":INTEGER,"new":"actual replacement Python code"}}'
             user = (
                 problem
                 + f"\nALLOWED_PRODUCTION_FILES: {json.dumps(allowed_paths)}"
                 + (f"\nTARGET_FILE: {pinned_target}" if pinned_target else "")
+                + (f"\nTARGET_FUNCTION: {target_span[0]} lines {target_span[1]}-{target_span[2]}" if target_span else "")
                 + "\nNUMBERED_CONTEXT:"
                 + context
-                + "\nReturn a real repair, not placeholders such as file.py, replacement text, TODO, or pass."
-                + "\nDo not hard-code values from the test when the function must remain generally usable."
+                + "\nReturn a real repair, not placeholders, TODO, or pass."
+                + "\nDo not hard-code values from the failing test. Preserve the function's old default behavior while supporting the failing call generically."
                 + "\nOUTPUT_SCHEMA: "
                 + schema
             )
             if feedback:
-                user += "\nPREVIOUS_CANDIDATE_FAILED_VALIDATION:\n" + feedback + "\nRepair the production logic so the FULL test suite passes. JSON only."
+                user += "\nPREVIOUS_CANDIDATE_FAILED_VALIDATION:\n" + feedback + "\nUse the validation failure to produce a different corrected implementation. JSON only."
             raw = self._generate([
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ])
-            raw = _pin_single_target(raw, pinned_target)
+            raw = _pin_target(raw, pinned_target, target_span)
             proposal, error, edit = validate_compact_proposal(raw, production_files)
             if proposal is not None:
                 passed, validation_output = validate_candidate_tests(proposal)
