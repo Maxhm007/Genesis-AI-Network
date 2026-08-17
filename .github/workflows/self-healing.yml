@@ -1,6 +1,14 @@
 name: Genesis Self Healing
 
 on:
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/self-healing.yml
+      - scripts/self_heal.py
+      - scripts/genesis_core_vitality.py
+      - scripts/request_peer_healing.py
   workflow_run:
     workflows:
       - Genesis Independent Validator Gate
