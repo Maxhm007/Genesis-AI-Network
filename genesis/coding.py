@@ -263,8 +263,8 @@ class CodingModule:
             "ROLE: bounded_coding_engineer\n"
             "TASK: Make exactly ONE smallest useful edit toward OBJECTIVE using only NUMBERED_CONTEXT.\n"
             'OUTPUT: JSON only: {"edits":[{"path":"existing allowed path","start_line":1,"end_line":1,"new":"replacement text"}]}\n'
-            "RULES: exactly one edit; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text. "
-            "The local executor resolves those lines against the repository. No title/rationale/markdown/explanation; do not create files. "
+            "RULES: exactly one edit; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text; "
+            "no title/rationale/markdown/explanation; do not create files. The local executor resolves those lines against the repository. "
             "Allowed paths: genesis/, tests/, docs/, config/, desktop/, mobile/. Never change Constitution, Genesis Block, .github, validation/quorum, permissions, secrets, or weaken tests.\n"
             f"OBJECTIVE: {objective}\n"
             f"NUMBERED_CONTEXT: {json.dumps(numbered_context, sort_keys=True)}\n"
