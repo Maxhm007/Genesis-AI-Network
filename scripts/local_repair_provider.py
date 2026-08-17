@@ -147,6 +147,37 @@ def infer_function_target(prompt_text: str, target_path: str | None, source: str
     return matches[0], int(node.lineno), int(node.end_lineno)
 
 
+def validate_function_contract(replacement: str, source: str, target_span: tuple[str, int, int]) -> str:
+    function_name, start, end = target_span
+    try:
+        original_tree = ast.parse(source)
+        original = next(
+            node for node in ast.walk(original_tree)
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+            and node.name == function_name
+            and int(node.lineno) == start
+            and int(getattr(node, "end_lineno", -1)) == end
+        )
+        replacement_tree = ast.parse(replacement)
+    except Exception as exc:
+        return f"function-contract parse failed: {exc}"
+
+    if len(replacement_tree.body) != 1 or not isinstance(replacement_tree.body[0], type(original)):
+        return "replacement must contain exactly the target function and no module imports or extra top-level code"
+    candidate = replacement_tree.body[0]
+    if candidate.name != original.name:
+        return f"replacement must keep function name {original.name}"
+    if ast.dump(candidate.args, include_attributes=False) != ast.dump(original.args, include_attributes=False):
+        return (
+            "replacement must preserve the exact existing function signature and parameter contract; "
+            "change only the function body. If a new top-level behavior is supplied through an existing **kwargs mapping, "
+            "extract only that controlling key and preserve all unrelated kwargs in the mapping"
+        )
+    if ast.dump(candidate.returns, include_attributes=False) != ast.dump(original.returns, include_attributes=False):
+        return "replacement must preserve the existing return annotation"
+    return ""
+
+
 def _pin_target(raw: str, target_path: str | None, target_span: tuple[str, int, int] | None) -> str:
     if not target_path:
         return _normalize_model_json(raw)
@@ -271,7 +302,7 @@ class LocalRepairModel:
         with self.torch.no_grad():
             output = self.model.generate(
                 **inputs,
-                max_new_tokens=450,
+                max_new_tokens=320,
                 do_sample=False,
                 repetition_penalty=1.05,
                 pad_token_id=self.tokenizer.eos_token_id,
@@ -297,12 +328,13 @@ class LocalRepairModel:
         if target_span:
             function_name, start, end = target_span
             target_instruction += (
-                f"TARGET_FUNCTION is {function_name}, lines {start}-{end}. Rewrite the COMPLETE function only; "
-                "the controller fixes its line range automatically. "
+                f"TARGET_FUNCTION is {function_name}, lines {start}-{end}. Rewrite the COMPLETE function only. "
+                "You MUST keep the exact original function signature and parameters; change only its body. "
+                "The controller fixes the file and line range automatically. "
             )
         system = (
             "You are the bounded software-debugging specialist for Genesis AI. Return JSON only. "
-            "Fix the production root cause while preserving all existing passing behavior. "
+            "Fix the production root cause while preserving all existing passing behavior and public function contracts. "
             "Never edit tests. Never change protected identity, workflows, permissions, validation/quorum, signing, secrets, "
             "or self-development protections. "
             + target_instruction
@@ -324,6 +356,7 @@ class LocalRepairModel:
                 + context
                 + "\nReturn a real repair, not placeholders, TODO, or pass."
                 + "\nDo not hard-code values from the failing test. Preserve the function's old default behavior while supporting the failing call generically."
+                + "\nIf the existing function accepts **kwargs/details, preserve unrelated keys there; extract only a key that must control a top-level field."
                 + "\nOUTPUT_SCHEMA: "
                 + schema
             )
@@ -336,6 +369,12 @@ class LocalRepairModel:
             raw = _pin_target(raw, pinned_target, target_span)
             proposal, error, edit = validate_compact_proposal(raw, production_files)
             if proposal is not None:
+                if target_span and edit is not None:
+                    contract_error = validate_function_contract(str(edit.get("new", "")), production_files[pinned_target], target_span)
+                    if contract_error:
+                        feedback = contract_error
+                        print(json.dumps({"repair_attempt": attempt, "status": "function_contract_rejected", "reason": contract_error, "edit": edit}), flush=True)
+                        continue
                 passed, validation_output = validate_candidate_tests(proposal)
                 if passed:
                     print(json.dumps({"repair_attempt": attempt, "status": "proposal_validated", "proposal": proposal.get("title"), "edit": edit}), flush=True)
