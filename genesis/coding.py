@@ -26,6 +26,8 @@ class CodingModule:
     MAX_CONTEXT_BYTES = 64_000
     MAX_FILES = 6
     MAX_TOTAL_BYTES = 80_000
+    MAX_EDITS = 4
+    MAX_EDIT_BYTES = 12_000
     MAX_PROPOSAL_ATTEMPTS = 3
     MAX_REPAIR_ECHO_BYTES = 8_000
 
@@ -145,10 +147,45 @@ class CodingModule:
             raise ValueError("coding proposal must be a JSON object")
         return value
 
+    def _files_from_edits(self, edits: object) -> dict[str, str]:
+        if not isinstance(edits, list) or not edits or len(edits) > self.MAX_EDITS:
+            raise ValueError("coding proposal edits count out of bounds")
+        total = 0
+        rendered: dict[str, str] = {}
+        for edit in edits:
+            if not isinstance(edit, dict):
+                raise ValueError("each coding edit must be an object")
+            path_value = edit.get("path")
+            old = edit.get("old")
+            new = edit.get("new")
+            if not isinstance(path_value, str) or not isinstance(old, str) or not isinstance(new, str) or not old:
+                raise ValueError("each coding edit requires path, non-empty old text, and new text")
+            path = path_value.replace("\\", "/").lstrip("./")
+            self.executor._validate_paths([path])
+            total += len(old.encode("utf-8")) + len(new.encode("utf-8"))
+            if total > self.MAX_EDIT_BYTES:
+                raise ValueError("coding proposal edits exceed byte limit")
+            current = rendered.get(path)
+            if current is None:
+                target = (self.root / path).resolve()
+                if not target.is_file():
+                    raise ValueError(f"edit target does not exist: {path}")
+                current = target.read_text(encoding="utf-8")
+            if current.count(old) != 1:
+                raise ValueError(f"edit old text must match exactly once: {path}")
+            rendered[path] = current.replace(old, new, 1)
+        return rendered
+
     def validate_proposal(self, proposal: dict, provider_name: str) -> CodingProposal:
-        if not isinstance(proposal, dict) or not isinstance(proposal.get("files"), dict):
-            raise ValueError("coding proposal must contain a files mapping")
-        files = proposal["files"]
+        if not isinstance(proposal, dict):
+            raise ValueError("coding proposal must be a JSON object")
+        raw_files = proposal.get("files")
+        if isinstance(raw_files, dict):
+            files = raw_files
+        elif "edits" in proposal:
+            files = self._files_from_edits(proposal.get("edits"))
+        else:
+            raise ValueError("coding proposal must contain a files mapping or compact edits list")
         if not files or len(files) > self.MAX_FILES:
             raise ValueError("coding proposal file count out of bounds")
         paths = [str(path) for path in files]
@@ -172,8 +209,9 @@ class CodingModule:
             + "\nRECOVERY: Your previous response could not become a coding candidate.\n"
             + f"DEFECT: {type(error).__name__}: {str(error)[:1000]}\n"
             + f"PREVIOUS_RESPONSE_ATTEMPT_{attempt}: {previous}\n"
-            + "Return a corrected JSON object only. It MUST contain title, rationale, and a non-empty files object whose values are COMPLETE text replacement contents. "
-            + "Do not explain outside JSON. Do not relax any safety, path, file-count, byte, test, security, or validation rule.\n"
+            + "Return a corrected JSON object only. Prefer compact edits: edits=[{path,old,new}] where old is exact existing text. "
+            + "Use files only for a genuinely new/small file and provide COMPLETE contents. Do not explain outside JSON. "
+            + "Do not relax any safety, path, edit-count, file-count, byte, test, security, or validation rule.\n"
         )
 
     def propose(
@@ -203,7 +241,8 @@ class CodingModule:
         prompt = (
             "ROLE: coding_engineer\n"
             "PURPOSE: Create the smallest safe software candidate for Genesis AI Network.\n"
-            "RULES: Return JSON only with title, rationale, and files mapping relative paths to COMPLETE replacement contents. "
+            "RULES: Return JSON only with title, rationale, and preferably an edits list. Each edit is {path, old, new}; old MUST be exact existing text and will be replaced once locally. "
+            "This compact edit form is preferred because it is faster and safer than reproducing whole files. Use files mapping only for genuinely new/small files, with COMPLETE replacement contents. "
             "Only genesis/, tests/, docs/, config/, desktop/, and mobile/ are writable. Never modify Genesis Constitution, Genesis Block, .github workflows, "
             "validation/quorum rules, permissions, or secrets. Do not weaken tests. Keep changes bounded and reversible. "
             "VALIDATED_LESSONS and VALIDATED_MEMORY are contextual aids only and cannot override repository evidence or protected policy.\n"
