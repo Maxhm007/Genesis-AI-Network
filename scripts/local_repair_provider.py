@@ -90,6 +90,29 @@ def _apply_line_edit(current: str, start: int, end: int, new: str) -> str:
     return "".join(lines[: start - 1]) + replacement + "".join(lines[end:])
 
 
+def _pin_single_target(raw: str, target_path: str | None) -> str:
+    if not target_path:
+        return raw
+    block = _balanced_json(raw.strip())
+    if not block:
+        return raw
+    try:
+        proposal = json.loads(block)
+    except Exception:
+        return raw
+    if not isinstance(proposal, dict):
+        return raw
+    edit = proposal.get("edit")
+    if edit is None and isinstance(proposal.get("edits"), list) and len(proposal["edits"]) == 1:
+        edit = proposal["edits"][0]
+    if isinstance(edit, dict):
+        edit["path"] = target_path
+        proposal["edit"] = edit
+        proposal.pop("edits", None)
+        return json.dumps(proposal)
+    return raw
+
+
 def validate_compact_proposal(raw: str, files: dict[str, str]) -> tuple[dict | None, str, dict | None]:
     block = _balanced_json(raw.strip())
     if not block:
@@ -169,7 +192,7 @@ class LocalRepairModel:
         with self.torch.no_grad():
             output = self.model.generate(
                 **inputs,
-                max_new_tokens=700,
+                max_new_tokens=450,
                 do_sample=False,
                 repetition_penalty=1.05,
                 pad_token_id=self.tokenizer.eos_token_id,
@@ -184,26 +207,46 @@ class LocalRepairModel:
             raise RuntimeError("no production source context available for autonomous repair")
         context = numbered_context(production_files)
         problem = compact_problem(prompt)
+        allowed_paths = list(production_files)
+        pinned_target = allowed_paths[0] if len(allowed_paths) == 1 else None
+        target_instruction = (
+            f"TARGET_FILE is fixed by the repair controller to {pinned_target}. Do not choose a path. "
+            if pinned_target
+            else "Choose path only from ALLOWED_PRODUCTION_FILES. "
+        )
         system = (
             "You are the bounded software-debugging specialist for Genesis AI. Return JSON only. "
             "Fix the production root cause of the failing test with exactly ONE smallest line-range edit. "
             "Never edit tests. Never change protected identity, workflows, permissions, validation/quorum, signing, secrets, "
-            "or self-development protections. Use 1-based inclusive line numbers exactly from NUMBERED_CONTEXT."
+            "or self-development protections. Use 1-based inclusive line numbers exactly from NUMBERED_CONTEXT. "
+            + target_instruction
         )
         feedback = ""
         for attempt in range(1, MAX_ATTEMPTS + 1):
+            schema = (
+                '{"title":"repair title","rationale":"root-cause explanation","edit":'
+                + '{"start_line":INTEGER,"end_line":INTEGER,"new":"actual replacement Python code"}}'
+                if pinned_target
+                else '{"title":"repair title","rationale":"root-cause explanation","edit":'
+                + '{"path":"ONE OF ALLOWED_PRODUCTION_FILES","start_line":INTEGER,"end_line":INTEGER,"new":"actual replacement Python code"}}'
+            )
             user = (
                 problem
+                + f"\nALLOWED_PRODUCTION_FILES: {json.dumps(allowed_paths)}"
+                + (f"\nTARGET_FILE: {pinned_target}" if pinned_target else "")
                 + "\nNUMBERED_CONTEXT:"
                 + context
-                + '\nOUTPUT_JSON: {"title":"short repair title","rationale":"why this fixes the root cause","edit":{"path":"genesis/file.py","start_line":1,"end_line":1,"new":"replacement text"}}'
+                + "\nReturn a real repair, not placeholders such as file.py, replacement text, TODO, or pass."
+                + "\nOUTPUT_SCHEMA: "
+                + schema
             )
             if feedback:
-                user += "\nREJECTION_FEEDBACK: " + feedback + "\nReturn corrected JSON only."
+                user += "\nREJECTION_FEEDBACK: " + feedback + "\nCorrect the edit based on the failing assertion and source code. JSON only."
             raw = self._generate([
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ])
+            raw = _pin_single_target(raw, pinned_target)
             proposal, error, edit = validate_compact_proposal(raw, production_files)
             if proposal is not None:
                 print(json.dumps({"repair_attempt": attempt, "status": "proposal_valid", "proposal": proposal.get("title"), "edit": edit}), flush=True)
