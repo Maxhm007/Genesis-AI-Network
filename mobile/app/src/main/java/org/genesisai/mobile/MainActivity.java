@@ -207,7 +207,8 @@ public class MainActivity extends Activity {
         executor.submit(() -> {
             try {
                 JSONObject candidate = readPrivateJson(RECONCILE_FILE);
-                runOnUiThread(() -> reply.setText(candidate.toString(2)));
+                String rendered = candidate.toString(2);
+                runOnUiThread(() -> reply.setText(rendered));
             } catch (Exception e) { showError("No reconciliation candidate", e); }
         });
     }
