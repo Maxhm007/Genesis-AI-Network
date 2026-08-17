@@ -30,7 +30,9 @@ class AutonomousEngineeringLoop:
     A cycle may try several eligible tasks, but it stops after the first committed
     candidate because each candidate must receive an isolated Security/validator
     decision before more code is proposed. A failed provider/task therefore no
-    longer consumes the entire hourly repair opportunity.
+    longer consumes the entire hourly repair opportunity. Task ownership remains
+    with the module selected by the persistent task router; Coding is the bounded
+    implementation executor rather than the owner of every issue.
     """
 
     MAX_TASK_ATTEMPTS_PER_CYCLE = 3
@@ -67,7 +69,9 @@ class AutonomousEngineeringLoop:
 
     def _select_task(self, attempted: set[str] | None = None):
         attempted = attempted or set()
-        for state in ("new", "blocked"):
+        # The router may pre-assign the highest-priority TODO item. Prefer that
+        # item, then fall back to unrouted new/blocked engineering work.
+        for state in ("assigned", "new", "blocked"):
             for task in self.queue.list(state=state, limit=100):
                 if task.task_id in attempted:
                     continue
@@ -93,15 +97,19 @@ class AutonomousEngineeringLoop:
         started = time.perf_counter()
         provider_name = "unknown"
         task_type = str(task.payload.get("task_type", "coding"))
+        owner_module = task.module_id or "genesis.coding"
         attempt = {
             "task": asdict(task),
+            "owner_module": owner_module,
+            "executor_module": "genesis.coding",
             "coding_status": "started",
             "candidate": None,
             "candidate_security": None,
         }
         try:
-            self.queue.transition(task.task_id, "assigned", module_id="genesis.coding")
-            self.queue.transition(task.task_id, "running", module_id="genesis.coding")
+            if task.state != "assigned":
+                self.queue.transition(task.task_id, "assigned", module_id=owner_module)
+            self.queue.transition(task.task_id, "running", module_id=owner_module)
             context_paths = list(task.payload.get("context_paths", []) or [])
             provider = self.coding._provider()
             if provider is None:
@@ -120,12 +128,12 @@ class AutonomousEngineeringLoop:
                 if candidate_security["status"] != "pass":
                     attempt["coding_status"] = "candidate_rejected_by_security"
                     self._git("checkout", "main")
-                    self.queue.transition(task.task_id, "blocked", module_id="genesis.security")
+                    self.queue.transition(task.task_id, "blocked", module_id=owner_module)
                 else:
-                    self.queue.transition(task.task_id, "review", module_id="genesis.coding")
+                    self.queue.transition(task.task_id, "review", module_id=owner_module)
                     success = True
             else:
-                self.queue.transition(task.task_id, "blocked", module_id="genesis.coding")
+                self.queue.transition(task.task_id, "blocked", module_id=owner_module)
             self._record_efficiency(provider_name, started, success, task_type=task_type)
         except Exception as exc:
             attempt["coding_status"] = "provider_or_candidate_error"
@@ -133,7 +141,7 @@ class AutonomousEngineeringLoop:
             current = self.queue.get(task.task_id)
             if current and current.state in {"assigned", "running"}:
                 try:
-                    self.queue.transition(task.task_id, "blocked", module_id="genesis.coding")
+                    self.queue.transition(task.task_id, "blocked", module_id=owner_module)
                 except Exception:
                     pass
             if provider_name != "unknown":
