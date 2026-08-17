@@ -42,6 +42,7 @@ on:
       - 'scripts/capability_growth_sync.py'
       - 'scripts/genesis_hourly_ops.py'
       - 'scripts/genesis_automation.py'
+      - 'scripts/genesis_github_report.py'
       - 'scripts/system_scorecard.py'
       - 'scripts/competitive_reference_monitor.py'
       - 'tests/test_proactive.py'
@@ -118,6 +119,7 @@ jobs:
             runtime/automation_state.json
             runtime/automation_report.json
             runtime/chatgpt_escalation_sync.json
+            runtime/github_hourly_report_status.json
             runtime/research_reviews/
             runtime/task_reviews/
           key: genesis-runtime-${{ runner.os }}-${{ github.run_id }}
@@ -210,7 +212,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/genesis_automation.py all
-      - name: Send Genesis hourly email from GitHub
+      - name: Publish scheduled Genesis report through GitHub
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/genesis_github_report.py
+      - name: Send optional scheduled SMTP copy
+        if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
         run: python scripts/genesis_hourly_ops.py email
       - name: Preserve scan score task learning memory security coding efficiency operations and automation evidence
         uses: actions/upload-artifact@v4
