@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -173,3 +174,14 @@ def test_failed_candidate_is_revised_from_test_feedback_on_same_issue(tmp_path: 
     assert any("CANDIDATE_TEST_REPAIR" in prompt for prompt in provider.prompts[1:])
     assert any("missing_genesis_module" in prompt for prompt in provider.prompts[1:])
     assert not (tmp_path / "tests" / "test_generated_bad.py").exists()
+
+
+def test_candidate_test_environment_uses_candidate_checkout(monkeypatch, tmp_path: Path):
+    make_repo(tmp_path)
+    foreign = tmp_path.parent / "foreign-pythonpath"
+    foreign.mkdir(exist_ok=True)
+    monkeypatch.setenv("PYTHONPATH", str(foreign))
+    loop = AutonomousEngineeringLoop(tmp_path, ProviderRegistry(include_bootstrap=False))
+    env = loop.coding.executor._candidate_test_env()
+    assert env["PYTHONPATH"] == str(tmp_path.resolve())
+    assert env["PYTHONPATH"] != os.environ["PYTHONPATH"]
