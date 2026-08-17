@@ -40,6 +40,29 @@ class MalformedCodingProvider:
         return '{"title":"truncated"'
 
 
+class TestRepairCodingProvider:
+    name = "test-repair-coder"
+
+    def __init__(self) -> None:
+        self.prompts: list[str] = []
+
+    def available(self) -> bool:
+        return True
+
+    def reason(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        if "CANDIDATE_TEST_REPAIR" not in prompt:
+            return (
+                '{"title":"Bad first candidate","rationale":"force a real test failure",'
+                '"files":{"tests/test_generated_bad.py":"from missing_genesis_module import VALUE\\n"}}'
+            )
+        return (
+            '{"title":"Repair from test evidence","rationale":"use repository evidence",'
+            '"files":{"genesis/repaired.py":"VALUE = 7\\n",'
+            '"tests/test_repaired.py":"from genesis.repaired import VALUE\\n\\ndef test_repaired():\\n    assert VALUE == 7\\n"}}'
+        )
+
+
 def git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
 
@@ -119,3 +142,44 @@ def test_malformed_provider_outputs_still_create_efficiency_evidence(tmp_path: P
     assert all(item["coding_status"] == "provider_or_candidate_error" for item in result["attempted_tasks"])
     assert result["efficiency"]["samples"] == 3
     assert result["efficiency"]["status"] == "measured"
+
+
+def test_module_task_gets_existing_repository_context(tmp_path: Path):
+    make_repo(tmp_path)
+    (tmp_path / "genesis" / "ai_score.py").write_text("SCORE = 37\n", encoding="utf-8")
+    (tmp_path / "tests" / "test_ai_score.py").write_text("from genesis.ai_score import SCORE\n\ndef test_score():\n    assert SCORE == 37\n", encoding="utf-8")
+    git(tmp_path, "add", ".")
+    git(tmp_path, "commit", "-m", "add ai score evidence")
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    task = queue.create("Improve score evidence", module_id="genesis.ai_score", priority=90)
+    loop = AutonomousEngineeringLoop(tmp_path, ProviderRegistry(include_bootstrap=False))
+
+    paths = loop._context_paths_for_task(task)
+
+    assert "genesis/ai_score.py" in paths
+    assert "tests/test_ai_score.py" in paths
+    assert len(paths) <= loop.coding.MAX_CONTEXT_FILES
+
+
+def test_failed_candidate_is_revised_from_test_feedback_on_same_issue(tmp_path: Path):
+    make_repo(tmp_path)
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    task = queue.create("Repair same issue until tests pass", module_id="genesis.coding", priority=100)
+    provider = TestRepairCodingProvider()
+    registry = ProviderRegistry(include_bootstrap=False)
+    registry.register(provider)
+    loop = AutonomousEngineeringLoop(tmp_path, registry)
+
+    result = loop.run_once()
+
+    first = result["attempted_tasks"][0]
+    assert first["task"]["task_id"] == task.task_id
+    assert first["candidate_revisions"] == 1
+    assert first["coding_status"] == "candidate_created"
+    assert first["candidate"]["tests_passed"] is True
+    assert first["candidate"]["committed"] is True
+    assert first["candidate_security"]["status"] == "pass"
+    assert queue.get(task.task_id).state == "review"
+    assert len(provider.prompts) == 2
+    assert "CANDIDATE_TEST_REPAIR" in provider.prompts[1]
+    assert "missing_genesis_module" in provider.prompts[1]
