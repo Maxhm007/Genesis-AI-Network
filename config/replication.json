@@ -1,0 +1,10 @@
+{
+  "enabled": true,
+  "max_generation": 2,
+  "max_total_nodes": 5,
+  "children_per_parent": 1,
+  "authorized_parents": [
+    "gene-node-2",
+    "gene-node-3"
+  ]
+}

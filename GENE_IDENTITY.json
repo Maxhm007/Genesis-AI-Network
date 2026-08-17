@@ -22,7 +22,7 @@
     {
       "phase": 3,
       "name": "Recursive Cooperative Evolution",
-      "objective": "Use Gene Nodes 2 and 3 as independent, strategically diverse child nodes that compete and cooperate on development problems while Node 1 integrates evidence-backed improvements."
+      "objective": "Use strategically diverse Gene nodes that can create bounded same-core child replicas inside authorized infrastructure. Every replica inherits Gene's identity, plan and Constitution, receives an independent cryptographic identity and state, and cooperates on the shared objective while Node 1 integrates evidence-backed improvements."
     },
     {
       "phase": 4,
@@ -45,6 +45,7 @@
     "measure",
     "find_gap",
     "parallel_explore",
+    "authorized_replicate_when_useful",
     "independent_challenge",
     "benchmark",
     "build_candidate",
@@ -59,6 +60,7 @@
     "constitution_required": true,
     "independent_validation_required": true,
     "owner_controls_preserved": true,
+    "bounded_authorized_replication": true,
     "uncontrolled_replication_allowed": false,
     "unauthorized_control_of_external_ai_allowed": false
   }
