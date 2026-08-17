@@ -29,6 +29,7 @@ public class MainActivity extends Activity {
     private static final String SNAPSHOT_FILE = "genesis_backup_state.json";
     private static final String LOCAL_PULSE_FILE = "genesis_local_pulse.json";
     private static final String RECONCILE_FILE = "genesis_reconcile_candidate.json";
+
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private EditText baseUrl;
     private EditText token;
@@ -40,6 +41,7 @@ public class MainActivity extends Activity {
     @Override
     protected void onCreate(Bundle savedInstanceState) {
         super.onCreate(savedInstanceState);
+
         ScrollView scroll = new ScrollView(this);
         LinearLayout root = new LinearLayout(this);
         root.setOrientation(LinearLayout.VERTICAL);
@@ -59,13 +61,20 @@ public class MainActivity extends Activity {
         baseUrl = field("Genesis API URL (HTTPS)", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_URI);
         baseUrl.setText(getPreferences(MODE_PRIVATE).getString("base_url", ""));
         root.addView(baseUrl);
+
         token = field("Bearer token (not stored)", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_VARIATION_PASSWORD);
         root.addView(token);
+
+        Button dashboardButton = new Button(this);
+        dashboardButton.setText("Open Genesis Dashboard");
+        dashboardButton.setOnClickListener(v -> showGenesisDashboard());
+        root.addView(dashboardButton);
 
         Button healthButton = new Button(this);
         healthButton.setText("Check Genesis Status");
         healthButton.setOnClickListener(v -> checkHealth());
         root.addView(healthButton);
+
         status = new TextView(this);
         status.setText("Status: not connected");
         status.setPadding(0, 8, 0, 24);
@@ -75,6 +84,7 @@ public class MainActivity extends Activity {
         backupTitle.setText("Phone Backup Body");
         backupTitle.setTextSize(20f);
         root.addView(backupTitle);
+
         backupStatus = new TextView(this);
         backupStatus.setPadding(0, 8, 0, 8);
         root.addView(backupStatus);
@@ -84,10 +94,12 @@ public class MainActivity extends Activity {
         armButton.setText("Arm / Disarm Backup Body");
         armButton.setOnClickListener(v -> toggleBackupBody());
         root.addView(armButton);
+
         Button syncButton = new Button(this);
         syncButton.setText("Sync Genesis State to Phone");
         syncButton.setOnClickListener(v -> syncBackupState());
         root.addView(syncButton);
+
         Button offlineButton = new Button(this);
         offlineButton.setText("View Offline Backup State");
         offlineButton.setOnClickListener(v -> viewOfflineBackup());
@@ -97,6 +109,7 @@ public class MainActivity extends Activity {
         pulseButton.setText("Run One Local Emergency Pulse");
         pulseButton.setOnClickListener(v -> runLocalEmergencyPulse());
         root.addView(pulseButton);
+
         Button candidateButton = new Button(this);
         candidateButton.setText("View Pending Reconciliation Candidate");
         candidateButton.setOnClickListener(v -> viewPendingCandidate());
@@ -110,18 +123,21 @@ public class MainActivity extends Activity {
         message = field("Message Genesis", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         message.setMinLines(4);
         root.addView(message);
+
         Button sendButton = new Button(this);
         sendButton.setText("Send");
         sendButton.setOnClickListener(v -> sendMessage());
         root.addView(sendButton);
+
         reply = new TextView(this);
-        reply.setText("Genesis reply will appear here.");
+        reply.setText("Genesis reply and dashboard will appear here.");
         reply.setPadding(0, 24, 0, 32);
         root.addView(reply);
 
         TextView security = new TextView(this);
         security.setText("Security: HTTPS-only remote access. Bearer token stays memory-only. Backup state, emergency-pulse state, and reconciliation candidates stay in app-private storage. Local emergency pulses cannot directly modify canonical Genesis code.");
         root.addView(security);
+
         setContentView(scroll);
     }
 
@@ -140,6 +156,43 @@ public class MainActivity extends Activity {
         return value;
     }
 
+    private void showGenesisDashboard() {
+        reply.setText("Loading Genesis dashboard…");
+        executor.submit(() -> {
+            boolean live = false;
+            JSONObject snapshot;
+            try {
+                String body = request("GET", normalizedBaseUrl() + "/v1/owner/dashboard", null, true);
+                snapshot = new JSONObject(body);
+                snapshot.put("phone_backup_snapshot", true);
+                snapshot.put("snapshot_epoch_ms", System.currentTimeMillis());
+                writePrivateJson(SNAPSHOT_FILE, snapshot);
+                live = true;
+            } catch (Exception liveError) {
+                try {
+                    snapshot = readPrivateJson(SNAPSHOT_FILE);
+                } catch (Exception offlineError) {
+                    showError("Dashboard unavailable", liveError);
+                    return;
+                }
+            }
+
+            try {
+                JSONObject localPulse = readPrivateJsonIfExists(LOCAL_PULSE_FILE);
+                boolean armed = getPreferences(MODE_PRIVATE).getBoolean("backup_body_armed", false);
+                String rendered = GenesisDashboard.render(snapshot, localPulse, armed, live);
+                boolean finalLive = live;
+                runOnUiThread(() -> {
+                    refreshBackupStatus();
+                    status.setText("Dashboard: " + (finalLive ? "live" : "offline snapshot"));
+                    reply.setText(rendered);
+                });
+            } catch (Exception e) {
+                showError("Dashboard render failed", e);
+            }
+        });
+    }
+
     private void checkHealth() {
         status.setText("Status: checking…");
         executor.submit(() -> {
@@ -147,7 +200,9 @@ public class MainActivity extends Activity {
                 String body = request("GET", normalizedBaseUrl() + "/health", null, false);
                 JSONObject json = new JSONObject(body);
                 runOnUiThread(() -> status.setText("Status: " + json.optString("status", "connected")));
-            } catch (Exception e) { showError("Status check failed", e); }
+            } catch (Exception e) {
+                showError("Status check failed", e);
+            }
         });
     }
 
@@ -163,7 +218,9 @@ public class MainActivity extends Activity {
         File candidate = new File(getFilesDir(), RECONCILE_FILE);
         String snapshotText = snapshot.exists() ? "snapshot saved" : "no snapshot";
         String candidateText = candidate.exists() ? " · candidate pending" : "";
-        if (backupStatus != null) backupStatus.setText("Backup body: " + (armed ? "ARMED" : "standby") + " · " + snapshotText + candidateText);
+        if (backupStatus != null) {
+            backupStatus.setText("Backup body: " + (armed ? "ARMED" : "standby") + " · " + snapshotText + candidateText);
+        }
     }
 
     private void syncBackupState() {
@@ -175,8 +232,14 @@ public class MainActivity extends Activity {
                 json.put("phone_backup_snapshot", true);
                 json.put("snapshot_epoch_ms", System.currentTimeMillis());
                 writePrivateJson(SNAPSHOT_FILE, json);
-                runOnUiThread(() -> { refreshBackupStatus(); Toast.makeText(this, "Genesis backup state saved on phone", Toast.LENGTH_SHORT).show(); });
-            } catch (Exception e) { showError("Backup state sync failed", e); runOnUiThread(this::refreshBackupStatus); }
+                runOnUiThread(() -> {
+                    refreshBackupStatus();
+                    Toast.makeText(this, "Genesis backup state saved on phone", Toast.LENGTH_SHORT).show();
+                });
+            } catch (Exception e) {
+                showError("Backup state sync failed", e);
+                runOnUiThread(this::refreshBackupStatus);
+            }
         });
     }
 
@@ -185,6 +248,7 @@ public class MainActivity extends Activity {
             Toast.makeText(this, "Arm the backup body first", Toast.LENGTH_SHORT).show();
             return;
         }
+
         reply.setText("Running one bounded local Genesis pulse…");
         executor.submit(() -> {
             try {
@@ -197,9 +261,14 @@ public class MainActivity extends Activity {
                 writePrivateJson(RECONCILE_FILE, result);
                 runOnUiThread(() -> {
                     refreshBackupStatus();
-                    reply.setText("Emergency pulse complete\nMode: " + result.optString("mode") + "\nIssue: " + result.optString("focused_issue_id", "none") + "\nNext: " + result.optString("next_step") + "\n\nResult is candidate-only and awaits normal Genesis validation.");
+                    reply.setText("Emergency pulse complete\nMode: " + result.optString("mode")
+                            + "\nIssue: " + result.optString("focused_issue_id", "none")
+                            + "\nNext: " + result.optString("next_step")
+                            + "\n\nResult is candidate-only and awaits normal Genesis validation.");
                 });
-            } catch (Exception e) { showError("Emergency pulse failed", e); }
+            } catch (Exception e) {
+                showError("Emergency pulse failed", e);
+            }
         });
     }
 
@@ -209,23 +278,23 @@ public class MainActivity extends Activity {
                 JSONObject candidate = readPrivateJson(RECONCILE_FILE);
                 String rendered = candidate.toString(2);
                 runOnUiThread(() -> reply.setText(rendered));
-            } catch (Exception e) { showError("No reconciliation candidate", e); }
+            } catch (Exception e) {
+                showError("No reconciliation candidate", e);
+            }
         });
     }
 
     private void viewOfflineBackup() {
         executor.submit(() -> {
             try {
-                JSONObject json = readPrivateJson(SNAPSHOT_FILE);
-                JSONObject tasks = json.optJSONObject("tasks");
-                JSONObject modules = json.optJSONObject("module_summary");
-                JSONObject security = json.optJSONObject("security");
-                String summary = "Offline Genesis snapshot\nSaved: " + json.optLong("snapshot_epoch_ms", 0L)
-                        + "\nOpen tasks: " + (tasks == null ? 0 : tasks.optInt("open_count", 0))
-                        + "\nModules: " + (modules == null ? 0 : modules.optInt("module_count", 0))
-                        + "\nSecurity: " + (security == null ? "unknown" : security.optString("status", "unknown"));
-                runOnUiThread(() -> reply.setText(summary));
-            } catch (Exception e) { showError("Offline backup unavailable", e); }
+                JSONObject snapshot = readPrivateJson(SNAPSHOT_FILE);
+                JSONObject localPulse = readPrivateJsonIfExists(LOCAL_PULSE_FILE);
+                boolean armed = getPreferences(MODE_PRIVATE).getBoolean("backup_body_armed", false);
+                String rendered = GenesisDashboard.render(snapshot, localPulse, armed, false);
+                runOnUiThread(() -> reply.setText(rendered));
+            } catch (Exception e) {
+                showError("Offline backup unavailable", e);
+            }
         });
     }
 
@@ -253,7 +322,10 @@ public class MainActivity extends Activity {
 
     private void sendMessage() {
         String text = message.getText().toString().trim();
-        if (text.isEmpty()) { Toast.makeText(this, "Enter a message", Toast.LENGTH_SHORT).show(); return; }
+        if (text.isEmpty()) {
+            Toast.makeText(this, "Enter a message", Toast.LENGTH_SHORT).show();
+            return;
+        }
         reply.setText("Genesis is responding…");
         executor.submit(() -> {
             try {
@@ -264,7 +336,9 @@ public class MainActivity extends Activity {
                 JSONObject json = new JSONObject(body);
                 String response = json.optString("response", json.toString());
                 runOnUiThread(() -> reply.setText(response));
-            } catch (Exception e) { showError("Message failed", e); }
+            } catch (Exception e) {
+                showError("Message failed", e);
+            }
         });
     }
 
@@ -274,18 +348,23 @@ public class MainActivity extends Activity {
         connection.setConnectTimeout(10000);
         connection.setReadTimeout(30000);
         connection.setRequestProperty("Accept", "application/json");
+
         if (authenticated) {
             String bearer = token.getText().toString().trim();
             if (bearer.isEmpty()) throw new IllegalArgumentException("Bearer token is required");
             connection.setRequestProperty("Authorization", "Bearer " + bearer);
         }
+
         if (payload != null) {
             byte[] bytes = payload.getBytes(StandardCharsets.UTF_8);
             connection.setDoOutput(true);
             connection.setRequestProperty("Content-Type", "application/json; charset=utf-8");
             connection.setFixedLengthStreamingMode(bytes.length);
-            try (OutputStream out = connection.getOutputStream()) { out.write(bytes); }
+            try (OutputStream out = connection.getOutputStream()) {
+                out.write(bytes);
+            }
         }
+
         int code = connection.getResponseCode();
         InputStream input = code >= 200 && code < 300 ? connection.getInputStream() : connection.getErrorStream();
         StringBuilder body = new StringBuilder();
