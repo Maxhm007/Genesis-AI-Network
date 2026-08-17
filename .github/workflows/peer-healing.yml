@@ -1,0 +1,28 @@
+name: Genesis Peer Healing
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  NODE_ID: genesis-node-0
+  NODE_REPO: Maxhm007/Genesis-AI-Network
+
+jobs:
+  peer_heal:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Process peer recovery requests
+        env:
+          GH_TOKEN: ${{ secrets.GENESIS_NETWORK_TOKEN }}
+        run: python scripts/peer_heal.py
