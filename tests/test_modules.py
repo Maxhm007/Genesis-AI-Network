@@ -4,39 +4,73 @@ import pytest
 
 from genesis.modules.manager import ModuleManager
 from genesis.modules.registry import ModuleRegistry
-from genesis.modules.types import ModuleManifest, ModuleProposal
+from genesis.modules.types import ModuleProposal
 
 
-def test_default_registry_loads_existing_genesis_modules():
+def test_default_registry_loads_consolidated_genesis_architecture():
     root = Path(__file__).resolve().parents[1]
     registry = ModuleRegistry.from_default_config(root)
     ids = {module.module_id for module in registry.all()}
-    assert "genesis.communication" in ids
-    assert "genesis.repair" in ids
-    assert "genesis.self_development" in ids
-    assert "genesis.validation" in ids
+    assert len(ids) == 23
+    assert {
+        "genesis.identity",
+        "genesis.automation",
+        "genesis.task_manager",
+        "genesis.ai_team",
+        "genesis.research",
+        "genesis.knowledge_evidence",
+        "genesis.memory",
+        "genesis.intelligence_provider",
+        "genesis.model_scout",
+        "genesis.router",
+        "genesis.engineering",
+        "genesis.self_development",
+        "genesis.security",
+        "genesis.validation",
+        "genesis.update_version",
+        "genesis.evaluation_lab",
+        "genesis.capability_scorecard",
+        "genesis.resource_efficiency",
+        "genesis.gden_network",
+        "genesis.blockchain",
+        "genesis.peer_compute",
+        "genesis.application",
+        "genesis.communication",
+    } == ids
     assert registry.get("genesis.identity").protected is True
+    assert registry.get("genesis.validation").protected is True
 
 
-def test_default_registry_loads_resource_intelligence_extensions():
+def test_legacy_module_ids_resolve_to_canonical_modules():
     root = Path(__file__).resolve().parents[1]
     registry = ModuleRegistry.from_default_config(root)
-    ids = {module.module_id for module in registry.all()}
-    assert {"genesis.router", "genesis.efficiency", "genesis.scorecard"}.issubset(ids)
-    assert "capability_per_compute" in registry.get("genesis.efficiency").capabilities
+    assert registry.get("genesis.task_queue").module_id == "genesis.task_manager"
+    assert registry.get("genesis.task_router").module_id == "genesis.task_manager"
+    assert registry.get("genesis.coding").module_id == "genesis.engineering"
+    assert registry.get("genesis.repair").module_id == "genesis.engineering"
+    assert registry.get("genesis.provider").module_id == "genesis.intelligence_provider"
+    assert registry.get("genesis.reasoning").module_id == "genesis.intelligence_provider"
+    assert registry.get("genesis.ai_score").module_id == "genesis.capability_scorecard"
+    assert registry.get("genesis.scorecard").module_id == "genesis.capability_scorecard"
+    assert registry.get("genesis.efficiency").module_id == "genesis.resource_efficiency"
+    assert registry.get("genesis.gden").module_id == "genesis.gden_network"
+    assert registry.get("genesis.network").module_id == "genesis.gden_network"
+    assert registry.get("genesis.updater").module_id == "genesis.update_version"
+    assert registry.get("genesis.versioning").module_id == "genesis.update_version"
 
 
-def test_capability_gap_can_propose_reasoning_module_once():
-    registry = ModuleRegistry()
+def test_capability_owners_are_canonical_modules():
+    root = Path(__file__).resolve().parents[1]
+    registry = ModuleRegistry.from_default_config(root)
+    assert registry.capability_owners("capability_per_compute") == ["genesis.resource_efficiency"]
+    assert "genesis.engineering" in registry.capability_owners("debugging")
+
+
+def test_existing_reasoning_provider_prevents_duplicate_reasoning_module():
+    root = Path(__file__).resolve().parents[1]
+    registry = ModuleRegistry.from_default_config(root)
     manager = ModuleManager(registry)
     gap = {"capability": "advanced_reasoning", "score": 4, "max_score": 15}
-    proposal = manager.propose_for_capability_gap(gap)
-    assert proposal is not None
-    assert proposal.action == "add"
-    assert proposal.target_module_id == "genesis.reasoning"
-    assert proposal.status == "candidate"
-
-    registry.register(ModuleManifest(**{**proposal.candidate_manifest, "status": "active"}))
     assert manager.propose_for_capability_gap(gap) is None
 
 
