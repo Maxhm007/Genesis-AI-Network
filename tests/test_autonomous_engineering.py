@@ -30,6 +30,16 @@ class SelectiveCodingProvider:
         return '{"title":"Recover on next task","rationale":"test fallback","files":{"genesis/recovered_helper.py":"VALUE = 2\\n"}}'
 
 
+class MalformedCodingProvider:
+    name = "malformed-coder"
+
+    def available(self) -> bool:
+        return True
+
+    def reason(self, prompt: str) -> str:
+        return '{"title":"truncated"'
+
+
 def git(root: Path, *args: str) -> None:
     subprocess.run(["git", *args], cwd=root, check=True, capture_output=True, text=True)
 
@@ -91,3 +101,21 @@ def test_failed_high_priority_task_does_not_block_next_task(tmp_path: Path):
     assert result["coding_status"] == "candidate_created"
     assert result["candidate_security"]["status"] == "pass"
     assert queue.get(second.task_id).state == "review"
+    assert result["efficiency"]["samples"] == 2
+
+
+def test_malformed_provider_outputs_still_create_efficiency_evidence(tmp_path: Path):
+    make_repo(tmp_path)
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    for priority in (100, 90, 80):
+        queue.create(f"Malformed task {priority}", module_id="genesis.coding", priority=priority)
+    registry = ProviderRegistry(include_bootstrap=False)
+    registry.register(MalformedCodingProvider())
+    loop = AutonomousEngineeringLoop(tmp_path, registry)
+
+    result = loop.run_once()
+
+    assert len(result["attempted_tasks"]) == 3
+    assert all(item["coding_status"] == "provider_or_candidate_error" for item in result["attempted_tasks"])
+    assert result["efficiency"]["samples"] == 3
+    assert result["efficiency"]["status"] == "measured"
