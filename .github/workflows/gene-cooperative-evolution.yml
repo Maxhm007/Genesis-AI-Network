@@ -6,9 +6,12 @@ on:
     paths:
       - 'GENE_IDENTITY.json'
       - 'VISION.md'
+      - 'config/replication.json'
       - 'genesis/identity.py'
       - 'genesis/grce.py'
+      - 'genesis/replication.py'
       - 'genesis/node.py'
+      - 'scripts/gene_replicate.py'
       - 'scripts/grce_cycle.py'
       - '.github/workflows/gene-cooperative-evolution.yml'
   workflow_dispatch:
@@ -44,8 +47,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: runtime/grce
-          key: grce-v2-${{ github.run_id }}
+          key: grce-v3-${{ github.run_id }}
           restore-keys: |
+            grce-v3-
             grce-v2-
             grce-v1-
 
@@ -58,6 +62,9 @@ jobs:
 
       - name: Verify baseline
         run: python -m pytest -q
+
+      - name: Seed bounded recursive Gene replicas
+        run: python scripts/gene_replicate.py | tee runtime/grce/latest_replication_summary.json
 
       - name: Start local reasoning provider
         run: |
@@ -87,19 +94,19 @@ jobs:
             python scripts/grce_cycle.py | tee runtime/grce/latest_cycle_summary.json
           fi
 
-      - name: Verify child evolution ledgers
+      - name: Verify Gene node evolution ledgers
         run: |
           python - <<'PY'
           from pathlib import Path
           from genesis.gden import EvolutionLedger
-          for logical_id in ('gene-node-2', 'gene-node-3'):
+          for logical_id in ('gene-node-2', 'gene-node-3', 'gene-node-4', 'gene-node-5'):
               path = Path('runtime/grce') / logical_id / 'evolution_ledger.jsonl'
               ok, reason = EvolutionLedger(path).verify()
               assert ok, f'{logical_id}: {reason}'
               print(logical_id, 'LEDGER=VALID')
           PY
 
-      - name: Verify Gene identity is embedded in cooperative evidence
+      - name: Verify Gene identity and bounded replication evidence
         run: |
           python - <<'PY'
           import json
@@ -110,7 +117,11 @@ jobs:
           assert payload['gene_identity']['nickname'] == 'Gene'
           assert payload['gene_identity']['system_plan']
           assert payload['competition']['node_2']['strategy'] != payload['competition']['node_3']['strategy']
-          print('GENE_IDENTITY_AND_STRATEGY_DIVERSITY=PASS')
+          registry = json.loads((Path('runtime/grce') / 'replica_registry.json').read_text(encoding='utf-8'))
+          assert set(registry) == {'gene-node-4', 'gene-node-5'}
+          assert {item['parent_id'] for item in registry.values()} == {'gene-node-2', 'gene-node-3'}
+          assert all(item['replication_scope'] == 'authorized_local_runtime_only' for item in registry.values())
+          print('GENE_IDENTITY_STRATEGY_AND_REPLICATION=PASS')
           PY
 
       - name: Upload cooperative evidence
@@ -118,10 +129,16 @@ jobs:
         with:
           name: gene-cooperative-evolution-${{ github.run_id }}
           path: |
+            runtime/grce/latest_replication_summary.json
             runtime/grce/latest_cycle_summary.json
+            runtime/grce/replica_registry.json
             runtime/grce/cycles/*.json
             runtime/grce/gene-node-2/manifest.json
             runtime/grce/gene-node-2/evolution_ledger.jsonl
             runtime/grce/gene-node-3/manifest.json
             runtime/grce/gene-node-3/evolution_ledger.jsonl
+            runtime/grce/gene-node-4/manifest.json
+            runtime/grce/gene-node-4/evolution_ledger.jsonl
+            runtime/grce/gene-node-5/manifest.json
+            runtime/grce/gene-node-5/evolution_ledger.jsonl
           if-no-files-found: error
