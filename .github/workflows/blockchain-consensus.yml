@@ -7,6 +7,7 @@ on:
       - 'GENESIS_BLOCK.json'
       - 'genesis/blockchain.py'
       - 'scripts/blockchain_consensus.py'
+      - 'network/blockchain.jsonl'
       - '.github/workflows/blockchain-consensus.yml'
   workflow_dispatch:
   schedule:
