@@ -10,9 +10,6 @@ class HealthSnapshot:
     details: dict
 
 def build_health_snapshot(**details) -> dict:
-    snap = HealthSnapshot(
-        status='ok',
-        created_at=datetime.now(timezone.utc).isoformat(),
-        details=details,
-    )
+    status = details.pop('status', 'ok')
+    snap = HealthSnapshot(status=status, created_at=datetime.now(timezone.utc).isoformat(), details=details)
     return asdict(snap)
