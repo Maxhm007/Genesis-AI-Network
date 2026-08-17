@@ -6,6 +6,7 @@ import json
 import os
 import re
 import subprocess
+import textwrap
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
@@ -53,6 +54,24 @@ def numbered_context(files: dict[str, str]) -> str:
     return "".join(chunks)
 
 
+def _normalize_model_json(text: str) -> str:
+    normalized = text.strip()
+    normalized = re.sub(r"^```(?:json)?\s*", "", normalized, flags=re.IGNORECASE)
+    normalized = re.sub(r"\s*```\s*$", "", normalized)
+
+    def replace_triple_quoted_new(match: re.Match[str]) -> str:
+        code = textwrap.dedent(match.group(1)).strip("\n")
+        return '"new": ' + json.dumps(code)
+
+    normalized = re.sub(
+        r'"new"\s*:\s*"""(.*?)"""',
+        replace_triple_quoted_new,
+        normalized,
+        flags=re.DOTALL,
+    )
+    return normalized
+
+
 def _balanced_json(text: str) -> str | None:
     start = text.find("{")
     if start < 0:
@@ -79,6 +98,17 @@ def _balanced_json(text: str) -> str | None:
             if depth == 0:
                 return text[start : index + 1]
     return None
+
+
+def _load_model_proposal(raw: str) -> dict:
+    normalized = _normalize_model_json(raw)
+    block = _balanced_json(normalized)
+    if not block:
+        raise ValueError("response did not contain a complete JSON object")
+    proposal = json.loads(block)
+    if not isinstance(proposal, dict):
+        raise ValueError("proposal must be a JSON object")
+    return proposal
 
 
 def _apply_line_edit(current: str, start: int, end: int, new: str) -> str:
@@ -119,16 +149,11 @@ def infer_function_target(prompt_text: str, target_path: str | None, source: str
 
 def _pin_target(raw: str, target_path: str | None, target_span: tuple[str, int, int] | None) -> str:
     if not target_path:
-        return raw
-    block = _balanced_json(raw.strip())
-    if not block:
-        return raw
+        return _normalize_model_json(raw)
     try:
-        proposal = json.loads(block)
+        proposal = _load_model_proposal(raw)
     except Exception:
-        return raw
-    if not isinstance(proposal, dict):
-        return raw
+        return _normalize_model_json(raw)
     edit = proposal.get("edit")
     if edit is None and isinstance(proposal.get("edits"), list) and len(proposal["edits"]) == 1:
         edit = proposal["edits"][0]
@@ -140,20 +165,14 @@ def _pin_target(raw: str, target_path: str | None, target_span: tuple[str, int, 
             edit["end_line"] = end
         proposal["edit"] = edit
         proposal.pop("edits", None)
-        return json.dumps(proposal)
-    return raw
+    return json.dumps(proposal)
 
 
 def validate_compact_proposal(raw: str, files: dict[str, str]) -> tuple[dict | None, str, dict | None]:
-    block = _balanced_json(raw.strip())
-    if not block:
-        return None, "response did not contain a complete JSON object", None
     try:
-        proposal = json.loads(block)
+        proposal = _load_model_proposal(raw)
     except Exception as exc:
         return None, f"response JSON could not be parsed: {exc}", None
-    if not isinstance(proposal, dict):
-        return None, "proposal must be a JSON object", None
 
     edit = proposal.get("edit")
     if edit is None and isinstance(proposal.get("edits"), list) and len(proposal["edits"]) == 1:
@@ -183,7 +202,7 @@ def validate_compact_proposal(raw: str, files: dict[str, str]) -> tuple[dict | N
         return None, str(exc), debug_edit
 
     return {
-        "title": str(proposal.get("title", "Genesis compact autonomous repair")),
+        "title": str(proposal.get("title") or proposal.get("repair_title") or "Genesis compact autonomous repair"),
         "rationale": str(proposal.get("rationale", "Smallest bounded production-code repair")),
         "files": {path: rendered},
     }, "", debug_edit
@@ -291,7 +310,7 @@ class LocalRepairModel:
         feedback = ""
         for attempt in range(1, MAX_ATTEMPTS + 1):
             if target_span:
-                schema = '{"title":"repair title","rationale":"root-cause explanation","edit":{"new":"COMPLETE corrected function definition"}}'
+                schema = '{"title":"repair title","rationale":"root-cause explanation","edit":{"new":"COMPLETE corrected function definition with newline escapes"}}'
             elif pinned_target:
                 schema = '{"title":"repair title","rationale":"root-cause explanation","edit":{"start_line":INTEGER,"end_line":INTEGER,"new":"actual replacement Python code"}}'
             else:
@@ -321,9 +340,8 @@ class LocalRepairModel:
                 if passed:
                     print(json.dumps({"repair_attempt": attempt, "status": "proposal_validated", "proposal": proposal.get("title"), "edit": edit}), flush=True)
                     return json.dumps(proposal, sort_keys=True)
-                error = "candidate failed full test validation"
-                feedback = error + "\n" + validation_output
-                print(json.dumps({"repair_attempt": attempt, "status": "candidate_tests_failed", "reason": error, "edit": edit, "test_output": validation_output[-1800:]}), flush=True)
+                feedback = "candidate failed full test validation\n" + validation_output
+                print(json.dumps({"repair_attempt": attempt, "status": "candidate_tests_failed", "reason": "candidate failed full test validation", "edit": edit, "test_output": validation_output[-1800:]}), flush=True)
                 continue
             print(json.dumps({"repair_attempt": attempt, "status": "proposal_rejected", "reason": error, "edit": edit, "output": raw[:600]}), flush=True)
             feedback = f"{error}. Previous edit: {json.dumps(edit)}. Previous output: {raw[:500]}"
