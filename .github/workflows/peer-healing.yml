@@ -1,21 +1,24 @@
 name: Genesis Peer Healing
 
 on:
-  push:
-    paths:
-      - '.github/workflows/peer-healing.yml'
-      - 'scripts/peer_heal.py'
   workflow_dispatch:
   schedule:
     - cron: '*/15 * * * *'
+  push:
+    paths:
+      - 'scripts/peer_heal.py'
+      - 'scripts/request_peer_healing.py'
+      - '.github/workflows/peer-healing.yml'
 
 permissions:
+  actions: write
   contents: read
   issues: write
 
 env:
   NODE_ID: genesis-node-0
   NODE_REPO: Maxhm007/Genesis-AI-Network
+  PEER_REPOS: Maxhm007/Genesis-Node-2,Maxhm007/Genesis-Node-3
 
 jobs:
   peer_heal:
@@ -26,7 +29,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Process peer recovery requests
+      - name: Process public peer recovery signals
         env:
-          GH_TOKEN: ${{ secrets.GENESIS_NETWORK_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
         run: python scripts/peer_heal.py
