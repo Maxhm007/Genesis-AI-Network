@@ -34,3 +34,34 @@ def test_create_unique_prevents_duplicate_scan_tasks(tmp_path: Path):
     assert created_second is False
     assert first.task_id == second.task_id
     assert len(queue.list()) == 1
+
+
+def test_running_task_can_be_paused_held_and_resumed_with_reason(tmp_path: Path):
+    queue = PersistentTaskQueue(tmp_path / "tasks.sqlite3")
+    task = queue.create("Long running research")
+    queue.transition(task.task_id, "assigned")
+    queue.transition(task.task_id, "running")
+
+    paused = queue.hold(task.task_id, "Waiting for verified source data")
+    assert paused.state == "paused"
+    assert paused.state_reason == "Waiting for verified source data"
+
+    resumed = queue.resume(task.task_id)
+    assert resumed.state == "assigned"
+    assert resumed.state_reason is None
+
+
+def test_cancel_requires_explicit_reason_and_records_it(tmp_path: Path):
+    queue = PersistentTaskQueue(tmp_path / "tasks.sqlite3")
+    task = queue.create("Potentially obsolete task")
+    queue.transition(task.task_id, "assigned")
+    queue.transition(task.task_id, "running")
+
+    with pytest.raises(ValueError, match="cancellation reason is required"):
+        queue.cancel(task.task_id, "")
+    with pytest.raises(ValueError, match="requires cancel"):
+        queue.transition(task.task_id, "cancelled")
+
+    cancelled = queue.cancel(task.task_id, "Superseded by verified owner-approved requirement")
+    assert cancelled.state == "cancelled"
+    assert cancelled.state_reason == "Superseded by verified owner-approved requirement"
