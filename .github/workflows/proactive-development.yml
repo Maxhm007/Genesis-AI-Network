@@ -30,12 +30,14 @@ on:
       - 'genesis/security.py'
       - 'genesis/coding.py'
       - 'genesis/autonomous_engineering.py'
+      - 'genesis/core_vitality.py'
       - 'genesis/modules/**'
       - 'config/modules.json'
       - 'config/modules.d/**'
       - 'config/model_candidates.json'
       - 'config/immortality_sources.json'
       - 'config/competitive_ai_reference.json'
+      - 'config/core_vitality.json'
       - 'scripts/proactive_dev.py'
       - 'scripts/task_router.py'
       - 'scripts/model_scout_worker.py'
@@ -49,6 +51,7 @@ on:
       - 'scripts/genesis_hourly_ops.py'
       - 'scripts/genesis_automation.py'
       - 'scripts/genesis_github_report.py'
+      - 'scripts/genesis_core_vitality.py'
       - 'scripts/system_scorecard.py'
       - 'scripts/competitive_reference_monitor.py'
       - 'tests/test_proactive.py'
@@ -67,6 +70,7 @@ on:
       - 'tests/test_security_module.py'
       - 'tests/test_coding_module.py'
       - 'tests/test_autonomous_engineering.py'
+      - 'tests/test_core_vitality.py'
       - 'tests/test_modules.py'
   workflow_dispatch:
   schedule:
@@ -146,6 +150,8 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Verify stable baseline
         run: python -m pytest -q
+      - name: Verify Genesis core vitality
+        run: python scripts/genesis_core_vitality.py
       - name: Install active local reasoning runtime
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
@@ -231,11 +237,13 @@ jobs:
         run: python scripts/genesis_automation.py all
       - name: Publish scheduled Genesis report through GitHub
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        continue-on-error: true
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/genesis_github_report.py
       - name: Send optional scheduled SMTP copy
         if: github.event_name == 'schedule' || github.event_name == 'workflow_dispatch'
+        continue-on-error: true
         run: python scripts/genesis_hourly_ops.py email
       - name: Preserve scan score task learning memory security coding efficiency operations and automation evidence
         uses: actions/upload-artifact@v4
