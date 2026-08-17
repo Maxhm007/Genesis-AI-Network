@@ -3,6 +3,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 import json
 from pathlib import Path
+import shutil
 import urllib.request
 
 from genesis.blockchain import BlockchainModule
@@ -27,6 +28,14 @@ def fetch_json(url: str) -> dict:
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
+    tracked_chain = root / "network" / "blockchain.jsonl"
+    runtime_chain = root / "runtime" / "blockchain.jsonl"
+    runtime_chain.parent.mkdir(parents=True, exist_ok=True)
+    if tracked_chain.exists():
+        shutil.copyfile(tracked_chain, runtime_chain)
+    elif runtime_chain.exists():
+        runtime_chain.unlink()
+
     chain = BlockchainModule(root, quorum=2)
     verification = chain.verify()
     attestations: list[dict] = []
@@ -46,8 +55,12 @@ def main() -> None:
         "trusted_peers": trusted,
         "peer_errors": peer_errors,
         "attestations": attestations,
-        "attestation_security": "github-repository-authenticated",
-        "persistent_node_key_signatures": False,
+        "attestation_security": "github-repository-authenticated-with-optional-ed25519",
+        "persistent_node_key_signatures": all(
+            bool(item.get("signature")) and item.get("signature_algorithm") == "ed25519"
+            for item in attestations
+        ) if attestations else False,
+        "tracked_ledger": "network/blockchain.jsonl",
     }
 
     runtime = root / "runtime"
@@ -68,6 +81,7 @@ def main() -> None:
         "consensus_active": bool(consensus.get("consensus_active")),
         "matching_independent_peers": consensus.get("matching_independent_peers", 0),
         "required_quorum": consensus.get("required_quorum", 2),
+        "persistent_node_key_signatures": report["persistent_node_key_signatures"],
         "published_at": datetime.now(timezone.utc).isoformat(),
     }
     (network / "blockchain_head.json").write_text(
