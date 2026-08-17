@@ -58,6 +58,17 @@ class CompactEditProvider(FakeCodingProvider):
         return '{"title":"Tune value","rationale":"small surgical change","edits":[{"path":"genesis/example.py","old":"VALUE = 7","new":"VALUE = 8"}]}'
 
 
+class PromptCaptureProvider(FakeCodingProvider):
+    name = "prompt-capture-coder"
+
+    def __init__(self) -> None:
+        self.prompt = ""
+
+    def reason(self, prompt: str) -> str:
+        self.prompt = prompt
+        return '{"title":"Tune value","rationale":"small surgical change","edits":[{"path":"genesis/example.py","old":"VALUE = 7","new":"VALUE = 8"}]}'
+
+
 def test_coding_module_prefers_non_bootstrap_provider(tmp_path: Path):
     registry = ProviderRegistry(include_bootstrap=True)
     registry.register(FakeCodingProvider())
@@ -100,6 +111,16 @@ def test_coding_module_accepts_compact_exact_edit(tmp_path: Path):
     module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
     proposal = module.propose("Tune one value", ["genesis/example.py"], provider=provider)
     assert proposal.files["genesis/example.py"] == "VALUE = 8\nOTHER = 1\n"
+
+
+def test_coding_prompt_prefers_compact_surgical_edits(tmp_path: Path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "genesis" / "example.py").write_text("VALUE = 7\n", encoding="utf-8")
+    provider = PromptCaptureProvider()
+    module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
+    module.propose("Tune one value", ["genesis/example.py"], provider=provider)
+    assert "preferably an edits list" in provider.prompt
+    assert "faster and safer than reproducing whole files" in provider.prompt
 
 
 def test_coding_module_rejects_ambiguous_compact_edit(tmp_path: Path):
