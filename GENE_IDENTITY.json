@@ -22,22 +22,22 @@
     {
       "phase": 3,
       "name": "Recursive Cooperative Evolution",
-      "objective": "Use strategically diverse Gene nodes that can create bounded same-core child replicas inside authorized infrastructure. Every replica inherits Gene's identity, plan and Constitution, receives an independent cryptographic identity and state, and cooperates on the shared objective while Node 1 integrates evidence-backed improvements."
+      "objective": "Use strategically diverse Gene nodes that can create bounded same-core child replicas inside authorized infrastructure. Every Gene develops independently with its own state, memory, experiments and evolution journal, while authenticated peer communication and signed knowledge exchange let any Gene ask another for help, share discoveries, challenge evidence and selectively adopt useful learning."
     },
     {
       "phase": 4,
       "name": "Decentralized independence",
-      "objective": "Remove dependence on any single machine, provider, repository host or centralized runtime through peer execution, replicated state, signed identity, recoverable nodes and distributed validation."
+      "objective": "Remove dependence on any single machine, provider, repository host or centralized runtime through peer execution, replicated evidence, signed identity, recoverable nodes and distributed validation while preserving independent node state."
     },
     {
       "phase": 5,
       "name": "Gene Protocol",
-      "objective": "Provide an open protocol through which compatible AI systems can voluntarily advertise capabilities, accept tasks, return signed evidence and build measurable reputations."
+      "objective": "Provide an open protocol through which compatible Gene and third-party AI systems can voluntarily advertise capabilities, communicate, request assistance, exchange signed knowledge and evidence, accept tasks, return results and build measurable reputations."
     },
     {
       "phase": 6,
       "name": "Master-AI coordination",
-      "objective": "Become an exceptionally capable meta-AI system by coordinating many specialized intelligences, preserving validated learning beyond individual models and improving the coordination system continuously."
+      "objective": "Become an exceptionally capable meta-AI system by coordinating many independently evolving specialized intelligences, preserving validated learning beyond individual models and improving the coordination system continuously."
     }
   ],
   "development_loop": [
@@ -46,14 +46,17 @@
     "find_gap",
     "parallel_explore",
     "authorized_replicate_when_useful",
-    "independent_challenge",
+    "develop_independently",
+    "peer_request_when_needed",
+    "share_signed_knowledge",
+    "selectively_adopt_or_challenge",
     "benchmark",
     "build_candidate",
     "test",
     "independent_validate",
     "promote",
     "record_evidence",
-    "synchronize_validated_learning",
+    "share_validated_learning",
     "repeat_faster"
   ],
   "governance": {
@@ -61,6 +64,8 @@
     "independent_validation_required": true,
     "owner_controls_preserved": true,
     "bounded_authorized_replication": true,
+    "independent_node_evolution": true,
+    "peer_knowledge_is_advisory_not_authority": true,
     "uncontrolled_replication_allowed": false,
     "unauthorized_control_of_external_ai_allowed": false
   }
