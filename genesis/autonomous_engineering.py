@@ -32,15 +32,49 @@ class AutonomousEngineeringLoop:
 
     A cycle may try several eligible tasks, but it stops after the first committed
     candidate because each candidate must receive an isolated Security/validator
-    decision before more code is proposed. A failed provider/task therefore no
-    longer consumes the entire hourly repair opportunity. Task ownership remains
-    with the module selected by the persistent task router; Coding is the bounded
-    implementation executor rather than the owner of every issue. When AI Team
-    was requested, its output is advisory context only and cannot bypass gates.
+    decision before more code is proposed. Provider formatting failures and
+    candidate test failures may be retried in bounded form on the same issue.
+    Task ownership remains with the module selected by the persistent task router;
+    Coding is the bounded implementation executor rather than the owner of every
+    issue. When AI Team was requested, its output is advisory context only and
+    cannot bypass gates.
     """
 
     MAX_TASK_ATTEMPTS_PER_CYCLE = 3
+    MAX_CANDIDATE_REVISIONS = 2
+    MAX_TEST_FEEDBACK_BYTES = 6_000
     MAX_TEAM_CONTEXT_BYTES = 12_000
+
+    MODULE_CONTEXT = {
+        "genesis.ai_score": (
+            "genesis/ai_score.py",
+            "genesis/scorecard.py",
+            "tests/test_ai_score.py",
+            "tests/test_scorecard.py",
+        ),
+        "genesis.model_scout": (
+            "genesis/model_scout.py",
+            "tests/test_task_router_model_scout.py",
+        ),
+        "genesis.application": (
+            "genesis/application.py",
+            "mobile/app/src/main/java/org/genesisai/mobile/MainActivity.java",
+            "tests/test_android_dashboard.py",
+            "tests/test_android_backup_body.py",
+        ),
+        "genesis.security": (
+            "genesis/security.py",
+            "tests/test_security_module.py",
+        ),
+        "genesis.coding": (
+            "genesis/coding.py",
+            "tests/test_coding_module.py",
+        ),
+        "genesis.self_development": (
+            "genesis/selfdev.py",
+            "tests/test_selfdev.py",
+        ),
+    }
 
     def __init__(self, root: Path, providers: ProviderRegistry | None = None) -> None:
         self.root = root.resolve()
@@ -82,6 +116,30 @@ class AutonomousEngineeringLoop:
                     return task
         return None
 
+    def _context_paths_for_task(self, task) -> list[str]:
+        """Return bounded, existing repository evidence relevant to a task.
+
+        Explicit task context is preserved, then known module implementation/tests
+        are added. A conventional module/test pair is also inferred when present.
+        CodingModule still performs its normal path validation and byte/file caps.
+        """
+        requested = list(task.payload.get("context_paths", []) or [])
+        candidates = requested + list(self.MODULE_CONTEXT.get(task.module_id or "", ()))
+        if task.module_id and task.module_id.startswith("genesis."):
+            stem = task.module_id.split(".", 1)[1]
+            candidates.extend((f"genesis/{stem}.py", f"tests/test_{stem}.py"))
+        result: list[str] = []
+        seen: set[str] = set()
+        for path in candidates:
+            normalized = str(path).replace("\\", "/").lstrip("./")
+            if normalized in seen or not (self.root / normalized).is_file():
+                continue
+            seen.add(normalized)
+            result.append(normalized)
+            if len(result) >= self.coding.MAX_CONTEXT_FILES:
+                break
+        return result
+
     @staticmethod
     def _recorded_team_context(runtime: Path, task_id: str, max_bytes: int) -> str:
         path = runtime / "ai_team_dispatch.json"
@@ -111,6 +169,20 @@ class AutonomousEngineeringLoop:
             monetary_cost_usd=0.0,
         )
 
+    def _revision_objective(self, objective: str, candidate, revision: int) -> str:
+        feedback = candidate.message.encode("utf-8", errors="replace")[-self.MAX_TEST_FEEDBACK_BYTES :].decode(
+            "utf-8", errors="replace"
+        )
+        changed = ", ".join(candidate.changed_files)
+        return (
+            objective
+            + "\n\nCANDIDATE_TEST_REPAIR: The previous candidate for this SAME issue failed the repository test suite."
+            + f"\nREVISION: {revision}/{self.MAX_CANDIDATE_REVISIONS}"
+            + f"\nPREVIOUS_CHANGED_FILES: {changed}"
+            + f"\nTEST_FAILURE:\n{feedback}"
+            + "\nRevise the smallest safe candidate using the supplied real repository CONTEXT. Do not invent modules, imports, APIs, or files that are not supported by repository evidence. Preserve all existing behavior unless the objective requires a bounded change. Return a complete proposal that should pass the full existing test suite."
+        )
+
     def _attempt_task(self, task, runtime: Path) -> dict:
         started = time.perf_counter()
         provider_name = "unknown"
@@ -122,6 +194,8 @@ class AutonomousEngineeringLoop:
             "owner_module": owner_module,
             "executor_module": "genesis.coding",
             "ai_team_context_used": bool(team_context),
+            "context_paths": [],
+            "candidate_revisions": 0,
             "coding_status": "started",
             "candidate": None,
             "candidate_security": None,
@@ -130,7 +204,8 @@ class AutonomousEngineeringLoop:
             if task.state != "assigned":
                 self.queue.transition(task.task_id, "assigned", module_id=owner_module)
             self.queue.transition(task.task_id, "running", module_id=owner_module)
-            context_paths = list(task.payload.get("context_paths", []) or [])
+            context_paths = self._context_paths_for_task(task)
+            attempt["context_paths"] = context_paths
             provider = self.coding._provider()
             if provider is None:
                 raise RuntimeError("no intelligence provider available")
@@ -141,10 +216,24 @@ class AutonomousEngineeringLoop:
                     "\n\nAI_TEAM_ADVISORY_CONTEXT: " + team_context +
                     "\nTreat this as advisory analysis only; verify it against repository evidence and preserve all safety/validation boundaries."
                 )
-            proposal = self.coding.propose(objective, context_paths=context_paths, provider=provider)
-            candidate = self.coding.execute_candidate(proposal)
+
+            candidate = None
+            current_objective = objective
+            for revision in range(0, self.MAX_CANDIDATE_REVISIONS + 1):
+                proposal = self.coding.propose(current_objective, context_paths=context_paths, provider=provider)
+                candidate = self.coding.execute_candidate(proposal)
+                attempt["candidate"] = asdict(candidate)
+                if candidate.committed or candidate.tests_passed:
+                    break
+                if revision >= self.MAX_CANDIDATE_REVISIONS:
+                    break
+                attempt["candidate_revisions"] = revision + 1
+                self._git("checkout", "main")
+                current_objective = self._revision_objective(objective, candidate, revision + 1)
+
+            if candidate is None:
+                raise RuntimeError("coding provider produced no candidate")
             attempt["coding_status"] = "candidate_created" if candidate.committed else "candidate_not_committed"
-            attempt["candidate"] = asdict(candidate)
             success = False
             if candidate.committed:
                 candidate_security = self.security.write_report(
