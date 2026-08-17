@@ -1,0 +1,92 @@
+name: Gene Pulse
+
+on:
+  workflow_dispatch:
+    inputs:
+      gene:
+        description: Internal Gene logical id
+        required: false
+        default: gene-node-1
+      continue_chain:
+        description: Request the next pulse when this pulse finishes
+        required: false
+        default: "true"
+  repository_dispatch:
+    types: [gene-pulse]
+  push:
+    branches: [main]
+    paths:
+      - "genesis/**"
+      - "scripts/**"
+      - "config/**"
+      - "GENE_REGISTRY.json"
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: gene-pulse-${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
+  cancel-in-progress: false
+
+jobs:
+  pulse:
+    runs-on: ubuntu-latest
+    env:
+      GENE_ID: ${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
+      CONTINUE_CHAIN: ${{ inputs.continue_chain || github.event.client_payload.continue_chain || 'true' }}
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Restore Gene persistent pulse state
+        uses: actions/cache/restore@v4
+        with:
+          path: runtime
+          key: gene-runtime-${{ env.GENE_ID }}-${{ github.run_id }}
+          restore-keys: |
+            gene-runtime-${{ env.GENE_ID }}-
+
+      - name: Execute one pulse
+        run: python scripts/gene_pulse.py --gene "$GENE_ID" --output runtime/pulse_result.json
+
+      - name: Read pulse decision
+        id: pulse
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          p = json.loads(Path('runtime/pulse_result.json').read_text())
+          with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
+              f.write('continue=' + ('true' if p.get('needs_next_pulse') else 'false') + '\n')
+          PY
+
+      - name: Save Gene persistent pulse state
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: runtime
+          key: gene-runtime-${{ env.GENE_ID }}-${{ github.run_id }}
+
+      - name: Upload pulse evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: gene-pulse-${{ env.GENE_ID }}-${{ github.run_id }}
+          path: runtime/pulse_result.json
+          if-no-files-found: warn
+          retention-days: 14
+
+      - name: Request next pulse
+        if: steps.pulse.outputs.continue == 'true' && env.CONTINUE_CHAIN == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run gene-pulse.yml --ref main -f gene="$GENE_ID" -f continue_chain=true
