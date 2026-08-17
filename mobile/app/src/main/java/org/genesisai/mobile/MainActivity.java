@@ -14,6 +14,9 @@ import android.widget.Toast;
 import org.json.JSONObject;
 
 import java.io.BufferedReader;
+import java.io.File;
+import java.io.FileInputStream;
+import java.io.FileOutputStream;
 import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
@@ -24,12 +27,14 @@ import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
 
 public class MainActivity extends Activity {
+    private static final String SNAPSHOT_FILE = "genesis_backup_state.json";
     private final ExecutorService executor = Executors.newSingleThreadExecutor();
     private EditText baseUrl;
     private EditText token;
     private EditText message;
     private TextView status;
     private TextView reply;
+    private TextView backupStatus;
 
     @Override
     protected void onCreate(Bundle savedInstanceState) {
@@ -47,7 +52,7 @@ public class MainActivity extends Activity {
         root.addView(title);
 
         TextView subtitle = new TextView(this);
-        subtitle.setText("Secure mobile client for Genesis Core");
+        subtitle.setText("Genesis mobile client + secondary backup body");
         subtitle.setPadding(0, 0, 0, 24);
         root.addView(subtitle);
 
@@ -68,6 +73,36 @@ public class MainActivity extends Activity {
         status.setPadding(0, 8, 0, 24);
         root.addView(status);
 
+        TextView backupTitle = new TextView(this);
+        backupTitle.setText("Phone Backup Body");
+        backupTitle.setTextSize(20f);
+        root.addView(backupTitle);
+
+        backupStatus = new TextView(this);
+        backupStatus.setPadding(0, 8, 0, 8);
+        root.addView(backupStatus);
+        refreshBackupStatus();
+
+        Button armButton = new Button(this);
+        armButton.setText("Arm / Disarm Backup Body");
+        armButton.setOnClickListener(v -> toggleBackupBody());
+        root.addView(armButton);
+
+        Button syncButton = new Button(this);
+        syncButton.setText("Sync Genesis State to Phone");
+        syncButton.setOnClickListener(v -> syncBackupState());
+        root.addView(syncButton);
+
+        Button offlineButton = new Button(this);
+        offlineButton.setText("View Offline Backup State");
+        offlineButton.setOnClickListener(v -> viewOfflineBackup());
+        root.addView(offlineButton);
+
+        TextView backupNote = new TextView(this);
+        backupNote.setText("Pulses remain Genesis's primary continuity. This phone is a secondary body for the same Genesis identity, not another Gene.");
+        backupNote.setPadding(0, 8, 0, 24);
+        root.addView(backupNote);
+
         message = field("Message Genesis", InputType.TYPE_CLASS_TEXT | InputType.TYPE_TEXT_FLAG_MULTI_LINE);
         message.setMinLines(4);
         root.addView(message);
@@ -83,7 +118,7 @@ public class MainActivity extends Activity {
         root.addView(reply);
 
         TextView security = new TextView(this);
-        security.setText("Security: remote cleartext HTTP is disabled. Configure an HTTPS Genesis endpoint. The token is kept only in memory for this app session.");
+        security.setText("Security: remote cleartext HTTP is disabled. Configure an HTTPS Genesis endpoint. The bearer token is kept only in memory. Backup snapshots are stored only in this app's private storage.");
         root.addView(security);
 
         setContentView(scroll);
@@ -115,6 +150,66 @@ public class MainActivity extends Activity {
                 runOnUiThread(() -> status.setText("Status: " + json.optString("status", "connected")));
             } catch (Exception e) {
                 showError("Status check failed", e);
+            }
+        });
+    }
+
+    private void toggleBackupBody() {
+        boolean armed = !getPreferences(MODE_PRIVATE).getBoolean("backup_body_armed", false);
+        getPreferences(MODE_PRIVATE).edit().putBoolean("backup_body_armed", armed).apply();
+        refreshBackupStatus();
+    }
+
+    private void refreshBackupStatus() {
+        boolean armed = getPreferences(MODE_PRIVATE).getBoolean("backup_body_armed", false);
+        File snapshot = new File(getFilesDir(), SNAPSHOT_FILE);
+        String snapshotText = snapshot.exists() ? "snapshot saved" : "no snapshot";
+        if (backupStatus != null) {
+            backupStatus.setText("Backup body: " + (armed ? "ARMED" : "standby") + " · " + snapshotText);
+        }
+    }
+
+    private void syncBackupState() {
+        backupStatus.setText("Backup body: syncing Genesis state…");
+        executor.submit(() -> {
+            try {
+                String body = request("GET", normalizedBaseUrl() + "/v1/owner/dashboard", null, true);
+                JSONObject json = new JSONObject(body);
+                json.put("phone_backup_snapshot", true);
+                json.put("snapshot_epoch_ms", System.currentTimeMillis());
+                try (FileOutputStream out = openFileOutput(SNAPSHOT_FILE, MODE_PRIVATE)) {
+                    out.write(json.toString().getBytes(StandardCharsets.UTF_8));
+                }
+                runOnUiThread(() -> {
+                    refreshBackupStatus();
+                    Toast.makeText(this, "Genesis backup state saved on phone", Toast.LENGTH_SHORT).show();
+                });
+            } catch (Exception e) {
+                showError("Backup state sync failed", e);
+                runOnUiThread(this::refreshBackupStatus);
+            }
+        });
+    }
+
+    private void viewOfflineBackup() {
+        executor.submit(() -> {
+            try {
+                File snapshot = new File(getFilesDir(), SNAPSHOT_FILE);
+                if (!snapshot.exists()) throw new IllegalStateException("No backup snapshot saved yet");
+                StringBuilder body = new StringBuilder();
+                try (BufferedReader reader = new BufferedReader(new InputStreamReader(new FileInputStream(snapshot), StandardCharsets.UTF_8))) {
+                    String line;
+                    while ((line = reader.readLine()) != null) body.append(line);
+                }
+                JSONObject json = new JSONObject(body.toString());
+                String summary = "Offline Genesis snapshot\n"
+                        + "Saved: " + json.optLong("snapshot_epoch_ms", 0L) + "\n"
+                        + "Open tasks: " + json.optJSONObject("tasks").optInt("open_count", 0) + "\n"
+                        + "Modules: " + json.optJSONObject("module_summary").optInt("module_count", 0) + "\n"
+                        + "Security: " + json.optJSONObject("security").optString("status", "unknown");
+                runOnUiThread(() -> reply.setText(summary));
+            } catch (Exception e) {
+                showError("Offline backup unavailable", e);
             }
         });
     }

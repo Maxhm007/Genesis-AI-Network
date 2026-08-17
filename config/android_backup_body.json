@@ -1,0 +1,31 @@
+{
+  "schema_version": 1,
+  "identity": "Genesis",
+  "role": "backup_body_runtime",
+  "creates_new_gene": false,
+  "primary_continuity": "gene_pulse_network",
+  "phone_priority": "secondary_failover",
+  "principles": {
+    "pulses_remain_primary": true,
+    "phone_does_not_replace_pulses": true,
+    "phone_does_not_create_separate_genesis_identity": true,
+    "local_state_snapshot_allowed": true,
+    "credentials_must_not_be_persisted": true,
+    "takeover_requires_owner_action_or_verified_primary_unavailability": true,
+    "one_issue_focus_remains_required": true,
+    "independent_validation_remains_required_for_structural_changes": true
+  },
+  "v1_capabilities": [
+    "authenticated_state_snapshot_sync",
+    "private_on_device_snapshot_storage",
+    "offline_snapshot_view",
+    "primary_runtime_health_check",
+    "manual_backup_body_arming"
+  ],
+  "future_capabilities": [
+    "local_emergency_pulse_execution",
+    "signed_checkpoint_restore",
+    "local_model_or_remote_provider fallback",
+    "automatic failback to pulse network after recovery"
+  ]
+}
