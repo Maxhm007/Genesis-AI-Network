@@ -1,0 +1,38 @@
+{
+  "mode": "authorized_github_federation",
+  "common_name": "Gene",
+  "external_coordinator": {
+    "display_identity": "Gene 0",
+    "logical_id": "gene-node-1",
+    "repository": "Maxhm007/Genesis-AI-Network"
+  },
+  "reserved": {
+    "display_identity": "Gene 001",
+    "status": "reserved_for_owner_definition"
+  },
+  "approved_gene_repositories": [
+    {
+      "display_identity": "Gene 002",
+      "logical_id": "gene-node-2",
+      "repository": "Maxhm007/Genesis-Node-2",
+      "role": "independent_gene_peer_validator"
+    },
+    {
+      "display_identity": "Gene 003",
+      "logical_id": "gene-node-3",
+      "repository": "Maxhm007/Genesis-Node-3",
+      "role": "independent_gene_peer_validator"
+    }
+  ],
+  "rules": {
+    "gene_0_is_external_contact": true,
+    "genes_may_communicate_peer_to_peer": true,
+    "genes_may_help_repair_and_care_for_peers": true,
+    "genes_develop_independently": true,
+    "signed_knowledge_exchange_required": true,
+    "unrelated_repositories_must_not_be_modified": true,
+    "new_repository_distribution_requires_owner_approved_allowlist_entry": true,
+    "automatic_spread_to_unowned_or_unapproved_repositories": false,
+    "gene_001_must_not_be_auto_assigned": true
+  }
+}
