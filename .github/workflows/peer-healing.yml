@@ -1,6 +1,10 @@
 name: Genesis Peer Healing
 
 on:
+  push:
+    paths:
+      - '.github/workflows/peer-healing.yml'
+      - 'scripts/peer_heal.py'
   workflow_dispatch:
   schedule:
     - cron: '*/15 * * * *'
