@@ -37,10 +37,23 @@ jobs:
         run: |
           git config user.name "Genesis AI"
           git config user.email "genesis-ai@users.noreply.github.com"
-      - name: Check current health
+      - name: Check tests and core vitality
         id: baseline
         continue-on-error: true
-        run: python -m pytest -q
+        shell: bash
+        run: |
+          python -m pytest -q
+          python scripts/genesis_core_vitality.py
+      - name: Preserve core vitality evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-core-vitality-${{ github.run_id }}
+          path: |
+            runtime/core_vitality.json
+            runtime/core_vitality_repair.json
+          if-no-files-found: ignore
+          retention-days: 30
       - name: Install local repair intelligence
         if: steps.baseline.outcome == 'failure'
         run: |
@@ -69,9 +82,9 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           GENESIS_REPAIR_MODEL: openai/gpt-4o
         run: python scripts/self_heal.py
-      - name: Healthy - no repair needed
+      - name: Healthy - all core loops proven
         if: steps.baseline.outcome == 'success'
-        run: echo "Genesis is healthy; no repair cycle required."
+        run: echo "Genesis operational: tests, self-development, reproduction readiness, and mission loop are healthy."
       - name: Show local repair log on failure
         if: failure()
         run: cat local-repair.log || true

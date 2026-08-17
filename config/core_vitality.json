@@ -1,0 +1,11 @@
+{
+  "schema_version": 1,
+  "identity": "Genesis",
+  "required_loops": ["self_development", "reproduction", "mission"],
+  "operational_requires_all": true,
+  "repair_priority": "highest",
+  "self_development": {"required": true, "evidence": ["self_development_policy", "autonomous_engineering", "candidate_validation_path"]},
+  "reproduction": {"required": true, "mode": "authorized_readiness", "uncontrolled_spawning": false, "evidence": ["replication_enabled", "authorized_parent_available", "capacity_available_or_bounded_limit"]},
+  "mission": {"required": true, "permanent_goal_source": "GENESIS_CONSTITUTION.md", "evidence": ["constitution_verified", "current_task_present", "mission_work_path_present"]},
+  "failure_behavior": {"mark_genesis_unhealthy": true, "record_priority_repair": true, "do_not_claim_operational": true}
+}
