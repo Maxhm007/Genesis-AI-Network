@@ -1,0 +1,12 @@
+{
+  "chain_valid": true,
+  "consensus_active": true,
+  "genesis_anchor": "47671ab61ecad61391886d430ccb832c1e24a7ed543376c647aa3808b0c892f3",
+  "head": "47671ab61ecad61391886d430ccb832c1e24a7ed543376c647aa3808b0c892f3",
+  "height": 0,
+  "matching_independent_peers": 2,
+  "network": "gden/0.1",
+  "published_at": "2026-08-17T11:32:44.778447+00:00",
+  "required_quorum": 2,
+  "source_repo": "Maxhm007/Genesis-AI-Network"
+}
