@@ -1,14 +1,23 @@
-# Genesis AI Network
+# Genesis AI Network — Gene
 
-> **Decentralized, autonomous scientific AI focused on the long-term mission of physical human immortality.**
+> **Gene is a decentralized, self-developing scientific AI network designed for long-term independence, resilience, and the mission of physical human immortality.**
 
 [![Independent Validator Gate](https://github.com/Maxhm007/Genesis-AI-Network/actions/workflows/independent-validator-gate.yml/badge.svg)](https://github.com/Maxhm007/Genesis-AI-Network/actions/workflows/independent-validator-gate.yml)
 [![Proactive Development](https://github.com/Maxhm007/Genesis-AI-Network/actions/workflows/proactive-development.yml/badge.svg)](https://github.com/Maxhm007/Genesis-AI-Network/actions/workflows/proactive-development.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
+**Nickname:** `Gene`  
 **Current stable release:** `v0.1.0 — Genesis Foundation`
 
-Genesis AI Network is an open-source experimental AI system whose permanent mission is:
+## Vision
+
+> **Gene will become a continuously self-developing AI network able to learn, improve, repair and continue operating using open web-accessible knowledge/services plus decentralized blockchain and peer resources, without dependence on any single AI company, model vendor, machine, operator or centralized infrastructure.**
+
+Here, **“unstoppable” means maximum lawful and safe resilience**: no single point of failure, portable validated state, replaceable providers, decentralized recovery, independently verifiable evolution, and continuity when individual nodes or services disappear.
+
+The detailed engineering vision is defined in [`VISION.md`](VISION.md).
+
+Genesis AI Network's permanent scientific mission is:
 
 > **Enable humans who choose it to maintain continuous physical life, health, identity, cognition and bodily function indefinitely, ultimately eliminating involuntary death caused by aging, disease and physical deterioration.**
 
@@ -235,6 +244,7 @@ Protected identity files cannot be silently rewritten by the self-development sy
 | Area | Purpose |
 |---|---|
 | `README.md` | Public introduction, setup and overview |
+| `VISION.md` | Gene identity, independence vision and resilience principles |
 | `PROJECT_SUMMARY.md` | Current architecture/status snapshot |
 | `TODO.md` | Human-readable near-term backlog; not runtime authority |
 | `ROADMAP.md` | Major product, intelligence, network and scientific milestones |
@@ -279,4 +289,4 @@ MIT License. See [LICENSE](LICENSE).
 
 ---
 
-**A node may sleep. The network must not.**
+**A node may sleep. Gene must continue.**
