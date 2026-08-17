@@ -1,0 +1,53 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width,initial-scale=1" />
+<title>Genesis Control Center</title>
+<style>
+:root{color-scheme:dark;--bg:#061018;--panel:#0c1822;--line:#203443;--text:#eaf3f8;--muted:#8da3b5;--ok:#83edac;--warn:#ffd166;--bad:#ff7d8a;--accent:#59d7ff}
+*{box-sizing:border-box}body{margin:0;background:linear-gradient(145deg,#07131d,#04090e);color:var(--text);font:14px Inter,system-ui,sans-serif}.wrap{max-width:1400px;margin:auto;padding:24px}.top{display:flex;justify-content:space-between;align-items:center;gap:16px;margin-bottom:22px}.brand h1{margin:0;font-size:26px}.brand p{margin:6px 0 0;color:var(--muted)}button,input{font:inherit}.actions{display:flex;gap:8px}.btn{border:1px solid var(--line);background:#10202c;color:var(--text);padding:10px 14px;border-radius:10px;cursor:pointer}.status{display:inline-flex;align-items:center;gap:7px}.dot{width:9px;height:9px;border-radius:50%;background:var(--warn)}.dot.ok{background:var(--ok)}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px}.card{background:rgba(12,24,34,.94);border:1px solid var(--line);border-radius:14px;padding:17px}.score{grid-column:span 4}.wide{grid-column:span 8}.half{grid-column:span 6}.full{grid-column:1/-1}.label{font-size:12px;text-transform:uppercase;letter-spacing:.08em;color:var(--muted)}.value{font-size:38px;font-weight:800;margin-top:10px}.sub{color:var(--muted);margin-top:7px;line-height:1.5}.bar{height:7px;background:#152836;border-radius:99px;overflow:hidden;margin-top:13px}.fill{height:100%;background:linear-gradient(90deg,var(--accent),var(--ok))}.kpis{display:grid;grid-template-columns:repeat(3,1fr);gap:10px;margin-top:12px}.kpi{padding:11px;background:#09141d;border-radius:10px;border:1px solid #172a38}.kpi strong{display:block;font-size:20px;margin-top:5px}.table{width:100%;border-collapse:collapse;margin-top:10px}.table th,.table td{text-align:left;padding:9px 8px;border-top:1px solid var(--line);vertical-align:top}.table th{color:var(--muted);font-size:12px}.pill{padding:4px 8px;border-radius:99px;background:#122533;color:#cfe0eb;font-size:12px}.okText{color:var(--ok)}.warnText{color:var(--warn)}.badText{color:var(--bad)}.login{max-width:520px;margin:80px auto;background:var(--panel);border:1px solid var(--line);padding:24px;border-radius:16px}.login input{width:100%;margin:12px 0;padding:12px;border-radius:10px;border:1px solid var(--line);background:#07121a;color:var(--text)}.hidden{display:none}.footer{color:var(--muted);font-size:12px;margin:18px 0 8px}@media(max-width:900px){.score,.wide,.half{grid-column:1/-1}.kpis{grid-template-columns:1fr}.top{align-items:flex-start;flex-direction:column}}
+</style>
+</head>
+<body>
+<div id="login" class="login">
+  <div class="label">Owner authentication</div><h2>Genesis Control Center</h2>
+  <p class="sub">This dashboard is owner-only. On the local loopback server it remains inaccessible from the public internet. Enter the Genesis owner token if your server requires one.</p>
+  <input id="token" type="password" autocomplete="off" placeholder="GENESIS_COMM_TOKEN (leave blank if local server has no token)" />
+  <button id="open" class="btn">Open dashboard</button>
+  <p id="loginError" class="badText"></p>
+</div>
+<div id="app" class="wrap hidden">
+  <div class="top"><div class="brand"><h1>Genesis Control Center</h1><p>Private owner dashboard · live runtime state</p></div><div class="actions"><span class="status"><span id="dot" class="dot"></span><span id="online">Checking…</span></span><button id="refresh" class="btn">Refresh</button><button id="lock" class="btn">Lock</button></div></div>
+  <div class="grid">
+    <section class="card score"><div class="label">AI Capability</div><div id="ai" class="value">—</div><div id="aiSub" class="sub">Unmeasured</div><div class="bar"><div id="aiBar" class="fill" style="width:0"></div></div></section>
+    <section class="card score"><div class="label">Efficiency</div><div id="eff" class="value">—</div><div id="effSub" class="sub">Unmeasured</div><div class="bar"><div id="effBar" class="fill" style="width:0"></div></div></section>
+    <section class="card score"><div class="label">Immortality Research Progress</div><div id="research" class="value">—</div><div id="researchSub" class="sub">Evidence-pipeline maturity, not % immortality achieved.</div><div class="bar"><div id="researchBar" class="fill" style="width:0"></div></div></section>
+    <section class="card wide"><div class="label">Executive KPIs</div><div id="kpis" class="kpis"></div></section>
+    <section class="card score"><div class="label">System Health</div><div id="health" class="value">—</div><div id="healthSub" class="sub"></div></section>
+    <section class="card half"><div class="label">Task Queue</div><table class="table"><thead><tr><th>State</th><th>Count</th></tr></thead><tbody id="taskStates"></tbody></table></section>
+    <section class="card half"><div class="label">Application Status</div><table class="table"><tbody id="apps"></tbody></table></section>
+    <section class="card full"><div class="label">Highest Priority Active Tasks</div><table class="table"><thead><tr><th>Priority</th><th>State</th><th>Module</th><th>Objective</th></tr></thead><tbody id="tasks"></tbody></table></section>
+    <section class="card full"><div class="label">Modules</div><table class="table"><thead><tr><th>Module</th><th>Status</th><th>Version</th></tr></thead><tbody id="modules"></tbody></table></section>
+  </div>
+  <div class="footer">Owner dashboard data is generated by the local Genesis runtime. Sensitive controls should remain on loopback or behind authenticated private access.</div>
+</div>
+<script>
+(()=>{const $=s=>document.querySelector(s);let token=sessionStorage.getItem('genesis_owner_token')||'';$('#token').value=token;
+function headers(){return token?{'Authorization':'Bearer '+token}:{}}
+function pct(v,m=100){return Math.max(0,Math.min(100,(Number(v||0)/Number(m||100))*100))}
+function text(id,v){$(id).textContent=v}
+function kpi(label,value,status=''){return `<div class="kpi"><span class="label">${label}</span><strong>${value}</strong><span class="sub">${status}</span></div>`}
+async function load(){try{const r=await fetch('/v1/owner/dashboard',{headers:headers(),cache:'no-store'});if(r.status===401)throw new Error('Owner token required or incorrect.');if(!r.ok)throw new Error('Dashboard API unavailable.');const d=await r.json();$('#login').classList.add('hidden');$('#app').classList.remove('hidden');$('#dot').className='dot ok';text('#online','Genesis online');render(d)}catch(e){$('#app').classList.add('hidden');$('#login').classList.remove('hidden');text('#loginError',e.message)}}
+function render(d){const s=d.scorecard||{},ai=s.ai_capability_score||{},ef=s.efficiency_score||{},rs=s.immortality_research_progress_score||{};text('#ai',`${ai.score??0}/${ai.max_score??100}`);text('#aiSub',ai.interpretation||'Unmeasured');$('#aiBar').style.width=pct(ai.score,ai.max_score)+'%';text('#eff',`${ef.score??0}/${ef.max_score??100}`);text('#effSub',`${ef.status||'unmeasured'} · samples ${ef.samples??0} · capability/compute ${ef.capability_per_compute??0}`);$('#effBar').style.width=pct(ef.score,ef.max_score)+'%';text('#research',`${rs.score??0}/${rs.max_score??100}`);text('#researchSub',rs.interpretation||'Evidence-pipeline maturity, not % immortality achieved.');$('#researchBar').style.width=pct(rs.score,rs.max_score)+'%';
+const q=d.tasks||{},sec=d.security||{},mem=d.memory||{},apps=d.applications||{};$('#kpis').innerHTML=[kpi('Open tasks',q.open_count??0),kpi('Blocked tasks',q.counts?.blocked??0,(q.counts?.blocked??0)?'⚠ attention':'✅ none'),kpi('Completed tasks',q.counts?.complete??0),kpi('Efficiency samples',ef.samples??0),kpi('Research tasks',rs.research_tasks??0),kpi('Validated research lessons',rs.validated_research_lessons??0),kpi('Security',sec.status||'Unmeasured'),kpi('Memory',mem.status||'Unmeasured'),kpi('Modules',Array.isArray(d.modules)?d.modules.length:0)].join('');
+const unhealthy=(q.counts?.failed??0)+(q.counts?.blocked??0);text('#health',unhealthy?'Attention':'Healthy');$('#health').className='value '+(unhealthy?'warnText':'okText');text('#healthSub',unhealthy?`${unhealthy} blocked/failed task(s) require review.`:'No blocked or failed task is currently reported.');
+$('#taskStates').innerHTML=Object.entries(q.counts||{}).map(([a,b])=>`<tr><td><span class="pill">${a}</span></td><td>${b}</td></tr>`).join('');
+$('#tasks').innerHTML=(q.high_priority||[]).map(t=>`<tr><td>${t.priority}</td><td>${t.state}</td><td>${t.module_id||'—'}</td><td>${escapeHtml(t.objective)}</td></tr>`).join('')||'<tr><td colspan="4">No active tasks.</td></tr>';
+$('#apps').innerHTML=Object.entries(apps).map(([k,v])=>`<tr><th>${k.replaceAll('_',' ')}</th><td>${typeof v==='object'?escapeHtml(JSON.stringify(v)):escapeHtml(String(v))}</td></tr>`).join('')||'<tr><td>Unmeasured</td></tr>';
+$('#modules').innerHTML=(d.modules||[]).map(m=>`<tr><td>${escapeHtml(m.name||m.module_id||'')}</td><td>${escapeHtml(m.status||'')}</td><td>${escapeHtml(m.version||'—')}</td></tr>`).join('')||'<tr><td colspan="3">No module data.</td></tr>'}
+function escapeHtml(x){return String(x).replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+$('#open').onclick=()=>{token=$('#token').value.trim();sessionStorage.setItem('genesis_owner_token',token);load()};$('#refresh').onclick=load;$('#lock').onclick=()=>{sessionStorage.removeItem('genesis_owner_token');token='';location.reload()};load();setInterval(()=>{if(!$('#app').classList.contains('hidden'))load()},60000)})();
+</script>
+</body>
+</html>
