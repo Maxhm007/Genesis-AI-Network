@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "module_id": "genesis.automation",
+      "name": "Genesis Automation Module",
+      "version": "0.1.0",
+      "active": true,
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "dependencies": [
+        "genesis.security",
+        "genesis.coding",
+        "genesis.application",
+        "genesis.validation"
+      ],
+      "permissions": {
+        "task_queue_read": true,
+        "task_queue_write": true,
+        "operations_ledger_read": true,
+        "github_issue_escalation": true,
+        "automatic_promotion": false,
+        "release_authority": false,
+        "secret_access": false,
+        "owner_control_bypass": false
+      },
+      "policy": {
+        "max_autonomous_repair_cycles": 2,
+        "external_escalation": "chatgpt_via_github_issue",
+        "owner_only_actions_are_not_delegated": true,
+        "validation_required_for_repairs": true
+      }
+    }
+  ]
+}
