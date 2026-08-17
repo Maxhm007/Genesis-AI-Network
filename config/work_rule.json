@@ -1,0 +1,29 @@
+{
+  "schema_version": 1,
+  "mode": "continuous_one_issue",
+  "scope": "every_gene",
+  "rules": {
+    "max_active_issues_per_gene": 1,
+    "keep_focus_until_resolved": true,
+    "failure_does_not_release_focus": true,
+    "retry_may_change_method": true,
+    "peer_help_may_be_requested": true,
+    "search_new_evidence_may_be_used": true,
+    "switch_issue_only_when_resolved_or_genuinely_external_blocked": true,
+    "after_resolution_find_next_issue_immediately": true,
+    "idle_mode": "learn_discover_and_reassess",
+    "idle_actions": [
+      "learn_new_topics_relevant_to_gene_goals",
+      "search_web_for_new_evidence_and_unsolved_problems_when_network_access_is_available",
+      "review_prior_unsolved_or_deferred_issues",
+      "inspect_capability_gaps",
+      "run_logical_experiments",
+      "study_peer_validated_learning",
+      "create_new_issue_when_evidence_identifies_a_real_gap"
+    ],
+    "timer_is_not_work_authority": true,
+    "hourly_or_minute_schedule_required": false,
+    "persistent_focus_survives_restart": true,
+    "all_changes_still_require_existing_security_and_validation_gates": true
+  }
+}
