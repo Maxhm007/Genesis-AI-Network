@@ -5,6 +5,7 @@ on:
   push:
     paths:
       - '.github/workflows/autonomy-trial.yml'
+      - 'scripts/local_repair_provider.py'
 
 permissions:
   contents: write
