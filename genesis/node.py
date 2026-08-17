@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .discovery import DiscoveryEngine
 from .evolution import EvolutionManager
+from .identity import GeneIdentity
 from .knowledge import KnowledgeStore
 from .models import ModelEvaluator
 from .peers import PeerClient, PeerStore
@@ -24,6 +25,7 @@ class GenesisNode:
         self.genesis_block_path = self.root / "GENESIS_BLOCK.json"
         self.db_path = db_path or (self.root / "state" / "genesis.db")
         self.providers = providers or ProviderRegistry()
+        self.identity = GeneIdentity.load(self.root)
         self.db_path.parent.mkdir(parents=True, exist_ok=True)
         self.conn = sqlite3.connect(self.db_path)
         self.conn.execute("""CREATE TABLE IF NOT EXISTS audit_log(
@@ -84,6 +86,8 @@ class GenesisNode:
         mode = "active" if available else "maintenance"
         self.set_state("operating_mode", mode)
         self.set_state("available_providers", json.dumps(available, sort_keys=True))
+        self.set_state("gene_nickname", self.identity.nickname)
+        self.set_state("gene_plan", json.dumps(list(self.identity.system_plan), sort_keys=True))
         self.audit("provider_discovery", {
             "mode": mode,
             "providers": [{"name": s.name, "available": s.available} for s in statuses],
@@ -144,10 +148,17 @@ class GenesisNode:
 
     def team_cycle(self, mode: str) -> dict:
         objective = (
-            "Advance scientifically supported physical human immortality. "
-            "Review current candidate knowledge and propose the smallest safe next research or engineering step."
+            "Advance scientifically supported physical human immortality while following Gene's self-development and "
+            "Master-AI coordination plan. Review current candidate knowledge and propose the smallest safe next research "
+            "or engineering step."
         )
-        outputs = self.team.run_task(objective, context=f"operating_mode={mode}; knowledge={self.knowledge.counts()}")
+        outputs = self.team.run_task(
+            objective,
+            context=(
+                f"operating_mode={mode}; knowledge={self.knowledge.counts()}\n"
+                + self.identity.context_text()
+            ),
+        )
         completed = 0
         waiting = 0
         for output in outputs:
@@ -168,12 +179,14 @@ class GenesisNode:
 
     def evolution_cycle(self, research_summary: dict, discovery_summary: dict, team_summary: dict) -> str:
         candidate_id = self.evolution.propose(
-            title="Improve Genesis autonomy from latest cycle",
-            rationale="Record a bounded candidate improvement based on observed research, model discovery, and AI-team availability.",
+            title="Improve Gene autonomy from latest cycle",
+            rationale="Record a bounded candidate improvement based on observed research, model discovery, AI-team availability, and Gene's active plan.",
             changes={
                 "research": research_summary,
                 "model_discovery": discovery_summary,
                 "ai_team": {"completed": team_summary["completed"], "waiting": team_summary["waiting"]},
+                "gene_nickname": self.identity.nickname,
+                "master_ai_objective": self.identity.master_ai_objective,
                 "rule": "Candidate only; no automatic source-code replacement.",
             },
         )
@@ -189,14 +202,17 @@ class GenesisNode:
         self.audit("peer_probe", payload)
         return payload
 
-    def status_payload(self, node_id: str = "genesis-node") -> dict:
+    def status_payload(self, node_id: str = "gene-node-1") -> dict:
         row = self.conn.execute("SELECT value FROM node_state WHERE key='operating_mode'").fetchone()
         return {
-            "network": "Genesis AI Network",
-            "version": "0.1.0",
+            "network": self.identity.canonical_name,
+            "nickname": self.identity.nickname,
+            "version": "0.2.0",
             "node_id": node_id,
             "constitution_sha256": self._sha256(self.constitution_path.read_bytes()),
             "operating_mode": row[0] if row else "unknown",
+            "master_ai_objective": self.identity.master_ai_objective,
+            "system_plan": list(self.identity.system_plan),
             "knowledge": self.knowledge.counts(),
             "evolution": self.evolution.status_counts(),
         }
@@ -219,7 +235,7 @@ class GenesisNode:
             "candidate_id": candidate_id,
         })
         print(
-            f"[{now}] Genesis awake — cycle {cycle} — mode={mode} — "
+            f"[{now}] {self.identity.nickname} awake — cycle {cycle} — mode={mode} — "
             f"research={research_summary['research_items_added']} — "
             f"models={discovery_summary['models_seen']} — team={team_summary['completed']}",
             flush=True,
@@ -228,8 +244,13 @@ class GenesisNode:
     def run(self, interval_seconds: float = 300.0, cycles: int | None = None) -> None:
         constitution_hash = self.verify_constitution()
         print("Genesis Constitution verified:", constitution_hash, flush=True)
-        print("Genesis Node V0.1 is awake.", flush=True)
-        self.audit("node_started", {"version": "0.1.0", "ai_team": self.team.roster()})
+        print(f"{self.identity.nickname} ({self.identity.canonical_name}) is awake.", flush=True)
+        self.audit("node_started", {
+            "version": "0.2.0",
+            "nickname": self.identity.nickname,
+            "master_ai_objective": self.identity.master_ai_objective,
+            "ai_team": self.team.roster(),
+        })
         cycle = 0
         try:
             while cycles is None or cycle < cycles:
