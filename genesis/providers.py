@@ -74,13 +74,7 @@ class BootstrapProvider:
 
 
 class GenesisHTTPProvider:
-    """Optional provider implementing the tiny Genesis Provider Protocol.
-
-    POST {base_url}/reason with JSON {"prompt": "..."}.
-    Expected response: {"response": "..."}.
-    This makes local, remote, distributed or future models pluggable without a
-    dependency on a named vendor/runtime.
-    """
+    """Optional provider implementing the tiny Genesis Provider Protocol."""
 
     def __init__(self, base_url: str, name: str = "genesis-http", timeout: float = 20.0) -> None:
         self.base_url = base_url.rstrip("/")
@@ -121,7 +115,18 @@ class ProviderRegistry:
             self.register(BootstrapProvider())
         provider_url = os.environ.get("GENESIS_PROVIDER_URL", "").strip()
         if provider_url:
-            self.register(GenesisHTTPProvider(provider_url, os.environ.get("GENESIS_PROVIDER_NAME", "genesis-http")))
+            raw_timeout = os.environ.get("GENESIS_PROVIDER_TIMEOUT_SECONDS", "60").strip()
+            try:
+                timeout = max(5.0, min(float(raw_timeout), 180.0))
+            except ValueError:
+                timeout = 60.0
+            self.register(
+                GenesisHTTPProvider(
+                    provider_url,
+                    os.environ.get("GENESIS_PROVIDER_NAME", "genesis-http"),
+                    timeout=timeout,
+                )
+            )
 
     def register(self, provider: IntelligenceProvider) -> None:
         self._providers.append(provider)
