@@ -1,0 +1,75 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "module_id": "genesis.updater",
+      "name": "Genesis Updater Module",
+      "version": "0.1.0",
+      "purpose": "Evaluate and audit Genesis software update candidates before they enter the existing protected promotion path. Updates remain fail-closed and require passing tests, Security review, independent validator quorum, and protected-boundary checks.",
+      "capabilities": [
+        "candidate_update_evaluation",
+        "validator_quorum_check",
+        "protected_boundary_check",
+        "update_audit"
+      ],
+      "permissions": [
+        "runtime.updater.write",
+        "tasks.read",
+        "validation.read",
+        "security.read"
+      ],
+      "dependencies": [
+        "genesis.security",
+        "genesis.validation",
+        "genesis.self_development"
+      ],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.updater",
+      "metadata": {
+        "automatic_unvalidated_update": false,
+        "independent_validator_quorum_required": true,
+        "protected_identity_writable": false,
+        "workflow_boundary_writable": false,
+        "release_authority": false,
+        "may_access_secrets": false
+      }
+    },
+    {
+      "module_id": "genesis.blockchain",
+      "name": "Genesis Blockchain Module",
+      "version": "0.1.0",
+      "purpose": "Maintain a compact tamper-evident append-only chain of Genesis state commitments anchored to the canonical Genesis Block, while explicitly separating a working local chain from future independent-peer consensus.",
+      "capabilities": [
+        "append_only_commitment_chain",
+        "chain_integrity_verification",
+        "genesis_block_anchor",
+        "state_commitment_hashing",
+        "peer_consensus_readiness"
+      ],
+      "permissions": [
+        "runtime.blockchain.write",
+        "network.peer_attestations.read"
+      ],
+      "dependencies": [
+        "genesis.validation"
+      ],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.blockchain",
+      "metadata": {
+        "large_data_on_chain": false,
+        "stores_hashes_and_compact_commitments": true,
+        "canonical_genesis_block_anchor": true,
+        "minimum_independent_peer_quorum": 2,
+        "consensus_currently_claimed": false,
+        "token_required": false,
+        "may_access_secrets": false
+      }
+    }
+  ]
+}
