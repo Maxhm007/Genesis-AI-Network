@@ -28,13 +28,23 @@ def _resolve_main(root: Path) -> str:
 
 
 def _candidate_fork_point(root: Path, main: str, candidate_commit: str) -> str | None:
-    """Return a valid shared main-history base for a concurrent candidate.
+    """Return a valid shared main-history base for a candidate.
 
-    A candidate may have started from an earlier main commit while newer validated
-    work lands in parallel. That must not invalidate the candidate solely because
-    the main tip moved. The candidate still needs a real merge base in main's
-    history and at least one commit of its own.
+    Concurrent candidates may start from an older main commit. A post-merge
+    validator run may also validate the current main tip itself; in that case,
+    compare the integrated commit against its first parent so the validator can
+    verify the newly landed change instead of rejecting it as having no unique
+    commits.
     """
+
+    if candidate_commit == main:
+        parent = _git(root, "rev-parse", f"{candidate_commit}^", check=False)
+        if parent.returncode != 0 or not parent.stdout.strip():
+            return None
+        base = parent.stdout.strip()
+        if _git(root, "merge-base", "--is-ancestor", base, main, check=False).returncode != 0:
+            return None
+        return base
 
     merge_base = _git(root, "merge-base", main, candidate_commit, check=False)
     if merge_base.returncode != 0 or not merge_base.stdout.strip():
