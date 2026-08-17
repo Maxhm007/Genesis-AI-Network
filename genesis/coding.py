@@ -26,6 +26,8 @@ class CodingModule:
     MAX_CONTEXT_BYTES = 64_000
     MAX_FILES = 6
     MAX_TOTAL_BYTES = 80_000
+    MAX_PROPOSAL_ATTEMPTS = 3
+    MAX_REPAIR_ECHO_BYTES = 8_000
 
     def __init__(self, root: Path, providers: ProviderRegistry | None = None) -> None:
         self.root = root.resolve()
@@ -92,7 +94,35 @@ class CodingModule:
         return context
 
     @staticmethod
-    def _extract_json(raw: str) -> dict:
+    def _balanced_json_object(text: str) -> str | None:
+        start = text.find("{")
+        while start >= 0:
+            depth = 0
+            in_string = False
+            escaped = False
+            for index in range(start, len(text)):
+                char = text[index]
+                if in_string:
+                    if escaped:
+                        escaped = False
+                    elif char == "\\":
+                        escaped = True
+                    elif char == '"':
+                        in_string = False
+                    continue
+                if char == '"':
+                    in_string = True
+                elif char == "{":
+                    depth += 1
+                elif char == "}":
+                    depth -= 1
+                    if depth == 0:
+                        return text[start : index + 1]
+            start = text.find("{", start + 1)
+        return None
+
+    @classmethod
+    def _extract_json(cls, raw: str) -> dict:
         text = raw.strip()
         if text.startswith("```"):
             lines = text.splitlines()
@@ -101,7 +131,19 @@ class CodingModule:
             if lines and lines[-1].strip() == "```":
                 lines = lines[:-1]
             text = "\n".join(lines).strip()
-        return json.loads(text)
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError as first_error:
+            candidate = cls._balanced_json_object(text)
+            if candidate is None:
+                raise ValueError(f"provider did not return a complete JSON object: {first_error.msg}") from first_error
+            try:
+                value = json.loads(candidate)
+            except json.JSONDecodeError as nested_error:
+                raise ValueError(f"provider returned malformed JSON: {nested_error.msg}") from nested_error
+        if not isinstance(value, dict):
+            raise ValueError("coding proposal must be a JSON object")
+        return value
 
     def validate_proposal(self, proposal: dict, provider_name: str) -> CodingProposal:
         if not isinstance(proposal, dict) or not isinstance(proposal.get("files"), dict):
@@ -121,6 +163,17 @@ class CodingModule:
             rationale=str(proposal.get("rationale", ""))[:4000],
             files={str(path): content for path, content in files.items()},
             provider=provider_name,
+        )
+
+    def _repair_prompt(self, original_prompt: str, raw: str, error: Exception, attempt: int) -> str:
+        previous = raw.encode("utf-8", errors="replace")[: self.MAX_REPAIR_ECHO_BYTES].decode("utf-8", errors="replace")
+        return (
+            original_prompt
+            + "\nRECOVERY: Your previous response could not become a coding candidate.\n"
+            + f"DEFECT: {type(error).__name__}: {str(error)[:1000]}\n"
+            + f"PREVIOUS_RESPONSE_ATTEMPT_{attempt}: {previous}\n"
+            + "Return a corrected JSON object only. It MUST contain title, rationale, and a non-empty files object whose values are COMPLETE text replacement contents. "
+            + "Do not explain outside JSON. Do not relax any safety, path, file-count, byte, test, security, or validation rule.\n"
         )
 
     def propose(
@@ -159,8 +212,20 @@ class CodingModule:
             f"VALIDATED_MEMORY: {json.dumps(memories, sort_keys=True)}\n"
             f"CONTEXT: {json.dumps(context, sort_keys=True)}\n"
         )
-        raw = provider.reason(prompt)
-        return self.validate_proposal(self._extract_json(raw), provider.name)
+        current_prompt = prompt
+        last_error: Exception | None = None
+        for attempt in range(1, self.MAX_PROPOSAL_ATTEMPTS + 1):
+            raw = provider.reason(current_prompt)
+            try:
+                return self.validate_proposal(self._extract_json(raw), provider.name)
+            except (ValueError, json.JSONDecodeError) as exc:
+                last_error = exc
+                if attempt >= self.MAX_PROPOSAL_ATTEMPTS:
+                    break
+                current_prompt = self._repair_prompt(prompt, raw, exc, attempt)
+        raise ValueError(
+            f"coding provider failed to produce a valid proposal after {self.MAX_PROPOSAL_ATTEMPTS} bounded attempts: {last_error}"
+        )
 
     def execute_candidate(self, proposal: CodingProposal) -> SelfDevResult:
         payload = {
