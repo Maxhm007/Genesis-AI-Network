@@ -7,8 +7,12 @@ from pathlib import Path
 from typing import Any
 
 from .gden import EvolutionLedger, NodeIdentity
-from .gene_names import canonical_gene_name
+from .gene_names import identity_for_logical_id
 from .peer_network import GenePeerNetwork
+
+
+def _gene_name(logical_id: str) -> str:
+    return identity_for_logical_id(logical_id).display_name
 
 
 @dataclass(frozen=True)
@@ -55,7 +59,7 @@ class GeneCareNetwork:
         identity = self._identity(health.logical_id)
         payload = {
             **asdict(health),
-            "gene_name": canonical_gene_name(health.logical_id),
+            "gene_name": _gene_name(health.logical_id),
             "node_id": identity.node_id,
             "created_at": datetime.now(timezone.utc).isoformat(),
         }
@@ -99,13 +103,13 @@ class GeneCareNetwork:
         packet = self.peers.publish_knowledge(
             helper_id,
             topic="gene-care",
-            claim=f"Repair proposal for {canonical_gene_name(target_id)}: {repair}",
+            claim=f"Repair proposal for {_gene_name(target_id)}: {repair}",
             evidence={"problem": problem, **dict(evidence)},
             provenance={
                 "helper_id": helper_id,
-                "helper_name": canonical_gene_name(helper_id),
+                "helper_name": _gene_name(helper_id),
                 "target_id": target_id,
-                "target_name": canonical_gene_name(target_id),
+                "target_name": _gene_name(target_id),
                 "promotion_rule": "candidate_only_until_tests_and_independent_validator_quorum",
             },
         )
@@ -116,9 +120,9 @@ class GeneCareNetwork:
         recovered = not target_health.needs_care() and target_health.status == "healthy"
         payload = {
             "helper_id": helper_id,
-            "helper_name": canonical_gene_name(helper_id),
+            "helper_name": _gene_name(helper_id),
             "target_id": target_health.logical_id,
-            "target_name": canonical_gene_name(target_health.logical_id),
+            "target_name": _gene_name(target_health.logical_id),
             "recovered": recovered,
             "health": asdict(target_health),
             "evidence": dict(evidence),
@@ -139,14 +143,14 @@ class GeneCareNetwork:
         if not target_health.needs_care():
             return {
                 "status": "no_care_needed",
-                "helper": canonical_gene_name(helper_id),
-                "target": canonical_gene_name(target_health.logical_id),
+                "helper": _gene_name(helper_id),
+                "target": _gene_name(target_health.logical_id),
             }
         offer = self.offer_help(helper_id, target_health.logical_id, diagnosis, proposed_action)
         return {
             "status": "care_offered",
-            "helper": canonical_gene_name(helper_id),
-            "target": canonical_gene_name(target_health.logical_id),
+            "helper": _gene_name(helper_id),
+            "target": _gene_name(target_health.logical_id),
             "message_id": offer["message_id"],
             "next": "target independently evaluates help; repair evidence must pass normal validation before structural promotion",
         }
