@@ -10,8 +10,11 @@ on:
       - 'genesis/identity.py'
       - 'genesis/grce.py'
       - 'genesis/replication.py'
+      - 'genesis/peer_network.py'
+      - 'genesis/independent_evolution.py'
       - 'genesis/node.py'
       - 'scripts/gene_replicate.py'
+      - 'scripts/gene_independent_evolution.py'
       - 'scripts/grce_cycle.py'
       - '.github/workflows/gene-cooperative-evolution.yml'
   workflow_dispatch:
@@ -47,8 +50,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: runtime/grce
-          key: grce-v3-${{ github.run_id }}
+          key: grce-v4-${{ github.run_id }}
           restore-keys: |
+            grce-v4-
             grce-v3-
             grce-v2-
             grce-v1-
@@ -84,6 +88,9 @@ jobs:
           raise SystemExit('local reasoning provider did not become ready')
           PY
 
+      - name: Run Nodes 2-5 independent development and peer knowledge sharing
+        run: python scripts/gene_independent_evolution.py | tee runtime/grce/latest_independent_evolution_summary.json
+
       - name: Run Nodes 2 and 3 competitive cooperative development cycle
         env:
           GRCE_OBJECTIVE: ${{ inputs.objective }}
@@ -106,22 +113,34 @@ jobs:
               print(logical_id, 'LEDGER=VALID')
           PY
 
-      - name: Verify Gene identity and bounded replication evidence
+      - name: Verify Gene identity replication and peer knowledge evidence
         run: |
           python - <<'PY'
           import json
           from pathlib import Path
+          from genesis.peer_network import GenePeerNetwork
+
           cycle_files = sorted((Path('runtime/grce') / 'cycles').glob('*.json'))
           assert cycle_files, 'no cooperative cycle evidence found'
           payload = json.loads(cycle_files[-1].read_text(encoding='utf-8'))
           assert payload['gene_identity']['nickname'] == 'Gene'
           assert payload['gene_identity']['system_plan']
           assert payload['competition']['node_2']['strategy'] != payload['competition']['node_3']['strategy']
+
           registry = json.loads((Path('runtime/grce') / 'replica_registry.json').read_text(encoding='utf-8'))
           assert set(registry) == {'gene-node-4', 'gene-node-5'}
           assert {item['parent_id'] for item in registry.values()} == {'gene-node-2', 'gene-node-3'}
           assert all(item['replication_scope'] == 'authorized_local_runtime_only' for item in registry.values())
-          print('GENE_IDENTITY_STRATEGY_AND_REPLICATION=PASS')
+
+          network = GenePeerNetwork(Path('.'))
+          packets = network.knowledge_feed('gene-development')
+          authors = {item['author_logical_id'] for item in packets}
+          assert {'gene-node-2', 'gene-node-3', 'gene-node-4', 'gene-node-5'} <= authors
+          assert all(network.verify_knowledge(item) for item in packets)
+          for logical_id in ('gene-node-2', 'gene-node-3', 'gene-node-4', 'gene-node-5'):
+              journal = Path('runtime/grce') / logical_id / 'independent_evolution.jsonl'
+              assert journal.exists() and journal.read_text(encoding='utf-8').strip(), f'{logical_id}: no independent evolution journal'
+          print('GENE_IDENTITY_REPLICATION_PEER_KNOWLEDGE_AND_INDEPENDENCE=PASS')
           PY
 
       - name: Upload cooperative evidence
@@ -130,15 +149,21 @@ jobs:
           name: gene-cooperative-evolution-${{ github.run_id }}
           path: |
             runtime/grce/latest_replication_summary.json
+            runtime/grce/latest_independent_evolution_summary.json
             runtime/grce/latest_cycle_summary.json
             runtime/grce/replica_registry.json
+            runtime/grce/peer_bus/knowledge.jsonl
             runtime/grce/cycles/*.json
             runtime/grce/gene-node-2/manifest.json
             runtime/grce/gene-node-2/evolution_ledger.jsonl
+            runtime/grce/gene-node-2/independent_evolution.jsonl
             runtime/grce/gene-node-3/manifest.json
             runtime/grce/gene-node-3/evolution_ledger.jsonl
+            runtime/grce/gene-node-3/independent_evolution.jsonl
             runtime/grce/gene-node-4/manifest.json
             runtime/grce/gene-node-4/evolution_ledger.jsonl
+            runtime/grce/gene-node-4/independent_evolution.jsonl
             runtime/grce/gene-node-5/manifest.json
             runtime/grce/gene-node-5/evolution_ledger.jsonl
+            runtime/grce/gene-node-5/independent_evolution.jsonl
           if-no-files-found: error
