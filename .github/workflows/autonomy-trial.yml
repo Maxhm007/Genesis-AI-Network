@@ -35,17 +35,19 @@ jobs:
           git config user.name "Genesis Autonomy Trial"
           git config user.email "genesis-autonomy@users.noreply.github.com"
 
-      - name: Inject reversible unknown capability fault locally only
+      - name: Inject reversible unknown behavioral fault locally only
         run: |
-          cat > tests/test_autonomy_trial_unknown.py <<'PY'
-          from genesis.autonomy_probe import repair_token
+          cat >> tests/test_health.py <<'PY'
 
 
-          def test_autonomy_trial_unknown_capability():
-              assert repair_token("genesis") == "GENESIS-RECOVERED"
+def test_health_snapshot_accepts_explicit_status():
+    result = build_health_snapshot(status='degraded', node='autonomy-trial')
+    assert result['status'] == 'degraded'
+    assert result['details']['node'] == 'autonomy-trial'
+    assert 'status' not in result['details']
           PY
-          git add tests/test_autonomy_trial_unknown.py
-          git commit -m "Autonomy trial: inject local unknown capability failure"
+          git add tests/test_health.py
+          git commit -m "Autonomy trial: inject local behavioral regression requirement"
           echo "Fault commit exists only inside this Actions runner and is never pushed to main."
 
       - name: Prove the injected state is failing
@@ -86,6 +88,14 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/self_heal.py | tee autonomy-result.json
+
+      - name: Require a validated autonomous repair candidate
+        run: |
+          if ! grep -q '"status": "candidate_repaired"' autonomy-result.json; then
+            echo "Genesis did not produce a validated autonomous repair candidate."
+            cat autonomy-result.json
+            exit 1
+          fi
 
       - name: Preserve autonomy evidence
         if: always()
