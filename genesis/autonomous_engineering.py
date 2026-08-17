@@ -27,11 +27,13 @@ ENGINEERING_MODULES = {
 class AutonomousEngineeringLoop:
     """Bounded bridge from persistent engineering gaps to coding candidates.
 
-    This loop may select one persistent engineering task, ask the Coding Module
-    for one bounded patch, and run Security review on the produced candidate.
-    Application work follows exactly the same candidate and validator path.
-    It never promotes or releases code. Independent validators remain mandatory.
+    A cycle may try several eligible tasks, but it stops after the first committed
+    candidate because each candidate must receive an isolated Security/validator
+    decision before more code is proposed. A failed provider/task therefore no
+    longer consumes the entire hourly repair opportunity.
     """
+
+    MAX_TASK_ATTEMPTS_PER_CYCLE = 3
 
     def __init__(self, root: Path, providers: ProviderRegistry | None = None) -> None:
         self.root = root.resolve()
@@ -63,9 +65,12 @@ class AutonomousEngineeringLoop:
                 created.append(task.task_id)
         return created
 
-    def _select_task(self):
+    def _select_task(self, attempted: set[str] | None = None):
+        attempted = attempted or set()
         for state in ("new", "blocked"):
-            for task in self.queue.list(state=state, limit=50):
+            for task in self.queue.list(state=state, limit=100):
+                if task.task_id in attempted:
+                    continue
                 if task.module_id in ENGINEERING_MODULES:
                     return task
         return None
@@ -84,30 +89,16 @@ class AutonomousEngineeringLoop:
             monetary_cost_usd=0.0,
         )
 
-    def run_once(self) -> dict:
-        runtime = self.root / "runtime"
-        runtime.mkdir(parents=True, exist_ok=True)
-        security_report = self.security.write_report(runtime / "security_report.json")
-        created_security_tasks = self._record_security_tasks(security_report)
-        application_tasks = self.application.ensure_development_tasks()
-        task = self._select_task()
-        result = {
-            "security": security_report,
-            "created_security_tasks": created_security_tasks,
-            "application": self.application.inspect(),
-            "application_tasks": application_tasks,
-            "selected_task": asdict(task) if task else None,
-            "coding_status": "idle",
-            "candidate": None,
-            "candidate_security": None,
-        }
-        if task is None:
-            (runtime / "autonomous_engineering.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
-            return result
-
+    def _attempt_task(self, task, runtime: Path) -> dict:
         started = time.perf_counter()
         provider_name = "unknown"
         task_type = str(task.payload.get("task_type", "coding"))
+        attempt = {
+            "task": asdict(task),
+            "coding_status": "started",
+            "candidate": None,
+            "candidate_security": None,
+        }
         try:
             self.queue.transition(task.task_id, "assigned", module_id="genesis.coding")
             self.queue.transition(task.task_id, "running", module_id="genesis.coding")
@@ -115,16 +106,16 @@ class AutonomousEngineeringLoop:
             proposal = self.coding.propose(task.objective, context_paths=context_paths)
             provider_name = proposal.provider
             candidate = self.coding.execute_candidate(proposal)
-            result["coding_status"] = "candidate_created" if candidate.committed else "candidate_not_committed"
-            result["candidate"] = asdict(candidate)
+            attempt["coding_status"] = "candidate_created" if candidate.committed else "candidate_not_committed"
+            attempt["candidate"] = asdict(candidate)
             success = False
             if candidate.committed:
                 candidate_security = self.security.write_report(
                     runtime / "candidate_security_report.json", candidate=True, base_ref="main"
                 )
-                result["candidate_security"] = candidate_security
+                attempt["candidate_security"] = candidate_security
                 if candidate_security["status"] != "pass":
-                    result["coding_status"] = "candidate_rejected_by_security"
+                    attempt["coding_status"] = "candidate_rejected_by_security"
                     self._git("checkout", "main")
                     self.queue.transition(task.task_id, "blocked", module_id="genesis.security")
                 else:
@@ -134,8 +125,8 @@ class AutonomousEngineeringLoop:
                 self.queue.transition(task.task_id, "blocked", module_id="genesis.coding")
             self._record_efficiency(provider_name, started, success, task_type=task_type)
         except Exception as exc:
-            result["coding_status"] = "provider_or_candidate_error"
-            result["error"] = f"{type(exc).__name__}: {exc}"[:2000]
+            attempt["coding_status"] = "provider_or_candidate_error"
+            attempt["error"] = f"{type(exc).__name__}: {exc}"[:2000]
             current = self.queue.get(task.task_id)
             if current and current.state in {"assigned", "running"}:
                 try:
@@ -147,6 +138,44 @@ class AutonomousEngineeringLoop:
                     self._record_efficiency(provider_name, started, False, task_type=task_type)
                 except Exception:
                     pass
+        return attempt
+
+    def run_once(self) -> dict:
+        runtime = self.root / "runtime"
+        runtime.mkdir(parents=True, exist_ok=True)
+        security_report = self.security.write_report(runtime / "security_report.json")
+        created_security_tasks = self._record_security_tasks(security_report)
+        application_tasks = self.application.ensure_development_tasks()
+        result = {
+            "security": security_report,
+            "created_security_tasks": created_security_tasks,
+            "application": self.application.inspect(),
+            "application_tasks": application_tasks,
+            "selected_task": None,
+            "attempted_tasks": [],
+            "coding_status": "idle",
+            "candidate": None,
+            "candidate_security": None,
+        }
+
+        attempted: set[str] = set()
+        for _ in range(self.MAX_TASK_ATTEMPTS_PER_CYCLE):
+            task = self._select_task(attempted)
+            if task is None:
+                break
+            attempted.add(task.task_id)
+            if result["selected_task"] is None:
+                result["selected_task"] = asdict(task)
+            attempt = self._attempt_task(task, runtime)
+            result["attempted_tasks"].append(attempt)
+            result["coding_status"] = attempt["coding_status"]
+            result["candidate"] = attempt.get("candidate")
+            result["candidate_security"] = attempt.get("candidate_security")
+            if attempt["coding_status"] == "candidate_created" and attempt.get("candidate_security", {}).get("status") == "pass":
+                break
+            # Security rejection or provider/candidate failure stays isolated; return
+            # to main before considering a different task in the same cycle.
+            self._git("checkout", "main")
 
         result["efficiency"] = self.efficiency.report()
         (runtime / "autonomous_engineering.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
