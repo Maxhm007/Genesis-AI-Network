@@ -6,6 +6,7 @@ on:
     paths:
       - '.github/workflows/autonomy-trial.yml'
       - 'scripts/local_repair_provider.py'
+      - 'genesis/issue_solver.py'
 
 permissions:
   contents: write
