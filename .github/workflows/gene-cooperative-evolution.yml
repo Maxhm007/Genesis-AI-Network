@@ -4,7 +4,11 @@ on:
   push:
     branches: [main]
     paths:
+      - 'GENE_IDENTITY.json'
+      - 'VISION.md'
+      - 'genesis/identity.py'
       - 'genesis/grce.py'
+      - 'genesis/node.py'
       - 'scripts/grce_cycle.py'
       - '.github/workflows/gene-cooperative-evolution.yml'
   workflow_dispatch:
@@ -40,8 +44,9 @@ jobs:
         uses: actions/cache@v4
         with:
           path: runtime/grce
-          key: grce-v1-${{ github.run_id }}
+          key: grce-v2-${{ github.run_id }}
           restore-keys: |
+            grce-v2-
             grce-v1-
 
       - name: Install Gene runtime
@@ -72,7 +77,7 @@ jobs:
           raise SystemExit('local reasoning provider did not become ready')
           PY
 
-      - name: Run Nodes 2 and 3 cooperative development cycle
+      - name: Run Nodes 2 and 3 competitive cooperative development cycle
         env:
           GRCE_OBJECTIVE: ${{ inputs.objective }}
         run: |
@@ -92,6 +97,20 @@ jobs:
               ok, reason = EvolutionLedger(path).verify()
               assert ok, f'{logical_id}: {reason}'
               print(logical_id, 'LEDGER=VALID')
+          PY
+
+      - name: Verify Gene identity is embedded in cooperative evidence
+        run: |
+          python - <<'PY'
+          import json
+          from pathlib import Path
+          cycle_files = sorted((Path('runtime/grce') / 'cycles').glob('*.json'))
+          assert cycle_files, 'no cooperative cycle evidence found'
+          payload = json.loads(cycle_files[-1].read_text(encoding='utf-8'))
+          assert payload['gene_identity']['nickname'] == 'Gene'
+          assert payload['gene_identity']['system_plan']
+          assert payload['competition']['node_2']['strategy'] != payload['competition']['node_3']['strategy']
+          print('GENE_IDENTITY_AND_STRATEGY_DIVERSITY=PASS')
           PY
 
       - name: Upload cooperative evidence
