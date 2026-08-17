@@ -27,6 +27,51 @@ def _resolve_main(root: Path) -> str:
     raise RuntimeError("cannot resolve main branch")
 
 
+def _candidate_fork_point(root: Path, main: str, candidate_commit: str) -> str | None:
+    """Return a valid shared main-history base for a concurrent candidate.
+
+    A candidate may have started from an earlier main commit while newer validated
+    work lands in parallel. That must not invalidate the candidate solely because
+    the main tip moved. The candidate still needs a real merge base in main's
+    history and at least one commit of its own.
+    """
+
+    merge_base = _git(root, "merge-base", main, candidate_commit, check=False)
+    if merge_base.returncode != 0 or not merge_base.stdout.strip():
+        return None
+    base = merge_base.stdout.strip()
+    if _git(root, "merge-base", "--is-ancestor", base, main, check=False).returncode != 0:
+        return None
+    if _git(root, "merge-base", "--is-ancestor", base, candidate_commit, check=False).returncode != 0:
+        return None
+    unique = _git(root, "rev-list", "--count", f"{base}..{candidate_commit}", check=False)
+    if unique.returncode != 0:
+        return None
+    try:
+        unique_count = int(unique.stdout.strip())
+    except ValueError:
+        return None
+    return base if unique_count > 0 else None
+
+
+def _candidate_changed_paths(root: Path, base: str, candidate_commit: str) -> list[str]:
+    return _git(root, "diff", "--name-only", f"{base}..{candidate_commit}").stdout.splitlines()
+
+
+def _protected_paths_match_current_main(root: Path, main: str, candidate_commit: str) -> bool:
+    result = _git(
+        root,
+        "diff",
+        "--name-only",
+        main,
+        candidate_commit,
+        "--",
+        *sorted(PROTECTED_PATHS),
+        check=False,
+    )
+    return result.returncode == 0 and not result.stdout.strip()
+
+
 def _payload(vote: dict) -> bytes:
     canonical = {
         "validator_id": vote["validator_id"],
@@ -48,12 +93,15 @@ def validate(root: Path, validator_id: str, candidate_commit: str) -> dict:
         reason = "local Constitution does not match Genesis Block"
     else:
         main = _resolve_main(root)
-        descendant = _git(root, "merge-base", "--is-ancestor", main, candidate_commit, check=False).returncode == 0
-        if not descendant:
+        base = _candidate_fork_point(root, main, candidate_commit)
+        if base is None:
             decision = "reject"
-            reason = "candidate is not descended from main"
+            reason = "candidate does not originate from main history or has no unique changes"
+        elif not _protected_paths_match_current_main(root, main, candidate_commit):
+            decision = "reject"
+            reason = "candidate protected Genesis identity files differ from current main"
         else:
-            changed = _git(root, "diff", "--name-only", f"{main}..{candidate_commit}").stdout.splitlines()
+            changed = _candidate_changed_paths(root, base, candidate_commit)
             if any(path in PROTECTED_PATHS for path in changed):
                 decision = "reject"
                 reason = "candidate changes protected Genesis identity files"
@@ -71,7 +119,7 @@ def validate(root: Path, validator_id: str, candidate_commit: str) -> dict:
                     _git(root, "checkout", "--detach", original)
                 if test.returncode == 0:
                     decision = "approve"
-                    reason = "protected files unchanged and full test suite passed"
+                    reason = "candidate originates from main history, protected files match, and full test suite passed"
                 else:
                     decision = "reject"
                     reason = "full test suite failed"
