@@ -69,9 +69,9 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install 'transformers>=4.48,<5' safetensors
 
-      - name: Boot stronger isolated Genesis repair provider
+      - name: Boot fast bounded Genesis repair provider
         run: |
-          nohup python scripts/local_repair_provider.py --model Qwen/Qwen2.5-Coder-1.5B-Instruct --port 8765 > autonomy-repair.log 2>&1 &
+          nohup python scripts/local_repair_provider.py --model Qwen/Qwen2.5-Coder-0.5B-Instruct --port 8765 > autonomy-repair.log 2>&1 &
           for i in $(seq 1 150); do
             if curl -fsS http://127.0.0.1:8765/health >/dev/null 2>&1; then
               echo "GENESIS_REPAIR_PROVIDER_URL=http://127.0.0.1:8765" >> "$GITHUB_ENV"
