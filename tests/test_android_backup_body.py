@@ -17,7 +17,8 @@ def test_backup_body_policy_keeps_pulses_primary():
 def test_android_client_has_private_backup_snapshot_controls():
     source = (ROOT / "mobile" / "app" / "src" / "main" / "java" / "org" / "genesisai" / "mobile" / "MainActivity.java").read_text(encoding="utf-8")
     assert 'SNAPSHOT_FILE = "genesis_backup_state.json"' in source
-    assert 'openFileOutput(SNAPSHOT_FILE, MODE_PRIVATE)' in source
+    assert 'openFileOutput(filename, MODE_PRIVATE)' in source
+    assert 'writePrivateJson(SNAPSHOT_FILE, json)' in source
     assert '"/v1/owner/dashboard"' in source
     assert 'backup_body_armed' in source
     assert 'Bearer token (not stored)' in source
@@ -25,7 +26,10 @@ def test_android_client_has_private_backup_snapshot_controls():
     assert 'putString("token"' not in source
 
 
-def test_backup_body_docs_do_not_claim_full_local_executor_yet():
+def test_backup_body_docs_describe_bounded_phase2_executor():
     text = (ROOT / "docs" / "ANDROID_BACKUP_BODY.md").read_text(encoding="utf-8")
-    assert "not yet a complete local Python Genesis executor" in text
     assert "not a new Gene" in text
+    assert "Gene Pulse Network" in text
+    phase2 = (ROOT / "docs" / "GENESIS_ANDROID_EMERGENCY_PULSES.md").read_text(encoding="utf-8")
+    assert "bounded Android-native emergency pulse engine" in phase2
+    assert "not a full offline replacement" in phase2
