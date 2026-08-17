@@ -9,9 +9,10 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL = "Qwen/Qwen2.5-Coder-0.5B-Instruct"
 MAX_ATTEMPTS = 3
+PROTECTED = {"GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"}
 
 
-def _prompt_payload(prompt_text: str) -> dict:
+def _payload(prompt_text: str) -> dict:
     try:
         value = json.loads(prompt_text)
         return value if isinstance(value, dict) else {}
@@ -19,11 +20,10 @@ def _prompt_payload(prompt_text: str) -> dict:
         return {}
 
 
-def relevant_context(prompt_text: str) -> str:
-    payload = _prompt_payload(prompt_text)
+def context_files(prompt_text: str) -> dict[str, str]:
+    payload = _payload(prompt_text)
     failure = str(payload.get("failure_text", prompt_text))
     provided = payload.get("relevant_files") if isinstance(payload.get("relevant_files"), dict) else {}
-
     candidates: list[str] = []
     for relative in provided:
         normalized = str(relative).replace("\\", "/")
@@ -34,12 +34,19 @@ def relevant_context(prompt_text: str) -> str:
         if normalized not in candidates:
             candidates.append(normalized)
 
-    chunks: list[str] = []
+    result: dict[str, str] = {}
     for relative in candidates[:6]:
         path = ROOT / relative
         if path.exists() and path.is_file():
-            text = path.read_text(encoding="utf-8", errors="replace")
-            chunks.append(f"\n--- FILE {relative} ---\n{text[:9000]}")
+            result[relative] = path.read_text(encoding="utf-8", errors="replace")[:9000]
+    return result
+
+
+def numbered_context(files: dict[str, str]) -> str:
+    chunks: list[str] = []
+    for relative, text in files.items():
+        numbered = "\n".join(f"{i}|{line}" for i, line in enumerate(text.splitlines(), start=1))
+        chunks.append(f"\n--- FILE {relative} ---\n{numbered}")
     return "".join(chunks)
 
 
@@ -71,7 +78,18 @@ def _balanced_json(text: str) -> str | None:
     return None
 
 
-def validate_generated_proposal(raw: str, prompt_text: str) -> tuple[dict | None, str]:
+def _apply_line_edit(current: str, start: int, end: int, new: str) -> str:
+    lines = current.splitlines(keepends=True)
+    if start < 1 or end < start or end > len(lines):
+        raise ValueError("line edit range is invalid")
+    removed = "".join(lines[start - 1 : end])
+    replacement = new
+    if removed.endswith(("\n", "\r")) and replacement and not replacement.endswith(("\n", "\r")):
+        replacement += "\n"
+    return "".join(lines[: start - 1]) + replacement + "".join(lines[end:])
+
+
+def validate_compact_proposal(raw: str, prompt_text: str, files: dict[str, str]) -> tuple[dict | None, str]:
     block = _balanced_json(raw.strip())
     if not block:
         return None, "response did not contain a complete JSON object"
@@ -81,19 +99,35 @@ def validate_generated_proposal(raw: str, prompt_text: str) -> tuple[dict | None
         return None, f"response JSON could not be parsed: {exc}"
     if not isinstance(proposal, dict):
         return None, "proposal must be a JSON object"
-    files = proposal.get("files")
-    if not isinstance(files, dict) or not files:
-        return None, "proposal must contain a non-empty files mapping"
-    if not all(isinstance(path, str) and isinstance(content, str) for path, content in files.items()):
-        return None, "all proposal files must map paths to complete text contents"
 
-    payload = _prompt_payload(prompt_text)
-    diagnosis = payload.get("diagnosis") if isinstance(payload.get("diagnosis"), dict) else {}
-    category = str(diagnosis.get("category", ""))
-    stale_test_categories = {"provider_mode_expectation", "selfdev_catalog_marker_mismatch"}
-    if category not in stale_test_categories and all(path.startswith("tests/") for path in files):
-        return None, "test-only repairs are forbidden for this failure; fix the production root cause"
-    return proposal, ""
+    edit = proposal.get("edit")
+    if edit is None and isinstance(proposal.get("edits"), list) and len(proposal["edits"]) == 1:
+        edit = proposal["edits"][0]
+    if not isinstance(edit, dict):
+        return None, "proposal must contain exactly one edit"
+
+    path = str(edit.get("path", "")).replace("\\", "/").lstrip("./")
+    start = edit.get("start_line")
+    end = edit.get("end_line")
+    new = edit.get("new")
+    if path in PROTECTED or not path.startswith("genesis/"):
+        return None, "repair edit must target production code under genesis/"
+    if path not in files:
+        return None, "repair edit path must be one of the supplied production context files"
+    if not isinstance(start, int) or isinstance(start, bool) or not isinstance(end, int) or isinstance(end, bool):
+        return None, "start_line and end_line must be integers"
+    if not isinstance(new, str) or not new.strip():
+        return None, "replacement text must be non-empty"
+    try:
+        rendered = _apply_line_edit(files[path], start, end, new)
+    except Exception as exc:
+        return None, str(exc)
+
+    return {
+        "title": str(proposal.get("title", "Genesis compact autonomous repair")),
+        "rationale": str(proposal.get("rationale", "Smallest bounded production-code repair")),
+        "files": {path: rendered},
+    }, ""
 
 
 class LocalRepairModel:
@@ -118,7 +152,7 @@ class LocalRepairModel:
         with self.torch.no_grad():
             output = self.model.generate(
                 **inputs,
-                max_new_tokens=1800,
+                max_new_tokens=900,
                 do_sample=False,
                 repetition_penalty=1.05,
                 pad_token_id=self.tokenizer.eos_token_id,
@@ -127,34 +161,33 @@ class LocalRepairModel:
         return self.tokenizer.decode(generated, skip_special_tokens=True).strip()
 
     def reason(self, prompt: str) -> str:
-        context = relevant_context(prompt)
+        files = context_files(prompt)
+        context = numbered_context(files)
         system = (
-            "You are the bounded software-debugging specialist for Genesis AI. "
-            "Return JSON only with exactly these top-level keys: title, rationale, files. "
-            "files maps repository-relative paths to COMPLETE replacement file contents. "
-            "Never modify GENESIS_CONSTITUTION.md, GENESIS_BLOCK.json, workflow permissions, "
-            "validator quorum/signing rules, or self-development protections. Never skip, xfail, "
-            "delete, or weaken tests merely to make them pass. For ordinary failures, repair production code, "
-            "not the test that exposed the defect. Prefer the smallest root-cause fix."
+            "You are the bounded software-debugging specialist for Genesis AI. Return JSON only. "
+            "Make exactly ONE smallest production-code line-range edit. Never edit tests. Never change protected identity, "
+            "workflow permissions, validation/quorum, signing, secrets, or self-development protections. Do not weaken tests. "
+            "Use 1-based inclusive line numbers exactly from NUMBERED_CONTEXT."
         )
         feedback = ""
         for attempt in range(1, MAX_ATTEMPTS + 1):
-            user = prompt + context
+            user = (
+                prompt
+                + "\nNUMBERED_CONTEXT:"
+                + context
+                + '\nOUTPUT SHAPE: {"title":"...","rationale":"...","edit":{"path":"genesis/file.py","start_line":1,"end_line":1,"new":"replacement text"}}'
+            )
             if feedback:
-                user += (
-                    "\n\nPREVIOUS PROPOSAL REJECTED: "
-                    + feedback
-                    + "\nReturn a corrected complete JSON proposal only."
-                )
+                user += "\nPREVIOUS PROPOSAL REJECTED: " + feedback + "\nReturn corrected JSON only."
             raw = self._generate([
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
             ])
-            proposal, error = validate_generated_proposal(raw, prompt)
+            proposal, error = validate_compact_proposal(raw, prompt, files)
             if proposal is not None:
                 return json.dumps(proposal, sort_keys=True)
-            feedback = f"attempt {attempt}: {error}; previous output: {raw[:1200]}"
-        raise RuntimeError(f"repair proposal invalid after {MAX_ATTEMPTS} attempts: {feedback[:1800]}")
+            feedback = f"attempt {attempt}: {error}; previous output: {raw[:1000]}"
+        raise RuntimeError(f"repair proposal invalid after {MAX_ATTEMPTS} attempts: {feedback[:1600]}")
 
 
 class Handler(BaseHTTPRequestHandler):
