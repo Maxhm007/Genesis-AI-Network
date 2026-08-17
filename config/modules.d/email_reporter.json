@@ -1,0 +1,24 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "module_id": "genesis.email_reporter",
+      "name": "Genesis Email Reporter",
+      "version": "0.1.0",
+      "purpose": "Generate and deliver Genesis-owned hourly KPI, score, risk and task summaries from validated runtime evidence.",
+      "capabilities": ["kpi_reporting", "score_dashboard", "email_delivery"],
+      "permissions": ["runtime.read", "email.send"],
+      "dependencies": ["genesis.ai_score", "genesis.efficiency", "genesis.memory", "genesis.security"],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.email_reporter",
+      "metadata": {
+        "credentials_from_environment_only": true,
+        "invent_missing_kpis": false,
+        "chatgpt_sender": false
+      }
+    }
+  ]
+}
