@@ -51,6 +51,13 @@ class AlwaysBrokenCodingProvider(FakeCodingProvider):
         return '{"title":"Broken"'
 
 
+class CompactEditProvider(FakeCodingProvider):
+    name = "compact-edit-coder"
+
+    def reason(self, prompt: str) -> str:
+        return '{"title":"Tune value","rationale":"small surgical change","edits":[{"path":"genesis/example.py","old":"VALUE = 7","new":"VALUE = 8"}]}'
+
+
 def test_coding_module_prefers_non_bootstrap_provider(tmp_path: Path):
     registry = ProviderRegistry(include_bootstrap=True)
     registry.register(FakeCodingProvider())
@@ -75,7 +82,7 @@ def test_coding_module_repairs_parse_and_schema_errors_with_same_provider(tmp_pa
     assert proposal.title == "Recovered"
     assert provider.calls == 3
     assert "RECOVERY:" in provider.prompts[1]
-    assert "files mapping" in provider.prompts[2]
+    assert "files mapping or compact edits list" in provider.prompts[2]
 
 
 def test_coding_module_recovery_is_bounded(tmp_path: Path):
@@ -84,6 +91,29 @@ def test_coding_module_recovery_is_bounded(tmp_path: Path):
     with pytest.raises(ValueError, match="after 3 bounded attempts"):
         module.propose("Never accept malformed output forever", provider=provider)
     assert provider.calls == module.MAX_PROPOSAL_ATTEMPTS
+
+
+def test_coding_module_accepts_compact_exact_edit(tmp_path: Path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "genesis" / "example.py").write_text("VALUE = 7\nOTHER = 1\n", encoding="utf-8")
+    provider = CompactEditProvider()
+    module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
+    proposal = module.propose("Tune one value", ["genesis/example.py"], provider=provider)
+    assert proposal.files["genesis/example.py"] == "VALUE = 8\nOTHER = 1\n"
+
+
+def test_coding_module_rejects_ambiguous_compact_edit(tmp_path: Path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "genesis" / "example.py").write_text("VALUE = 7\nVALUE = 7\n", encoding="utf-8")
+    module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
+    with pytest.raises(ValueError, match="match exactly once"):
+        module.validate_proposal(
+            {
+                "title": "ambiguous",
+                "edits": [{"path": "genesis/example.py", "old": "VALUE = 7", "new": "VALUE = 8"}],
+            },
+            "test",
+        )
 
 
 def test_coding_module_rejects_protected_file(tmp_path: Path):
