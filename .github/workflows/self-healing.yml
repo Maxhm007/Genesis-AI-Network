@@ -86,9 +86,8 @@ jobs:
         if: failure()
         continue-on-error: true
         env:
-          GH_TOKEN: ${{ secrets.GENESIS_NETWORK_TOKEN }}
+          GH_TOKEN: ${{ github.token }}
           NODE_ID: genesis-node-0
-          PEER_REPOS: Maxhm007/Genesis-Node-2,Maxhm007/Genesis-Node-3
         run: python scripts/request_peer_healing.py
       - name: Healthy - all core loops proven
         if: steps.baseline.outcome == 'success'
