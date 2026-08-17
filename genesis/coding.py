@@ -20,16 +20,16 @@ class CodingProposal:
 
 
 class CodingModule:
-    """Codex-like bounded software engineering module for Genesis."""
+    """Bounded software engineering module for Genesis."""
 
-    MAX_CONTEXT_FILES = 8
-    MAX_CONTEXT_BYTES = 64_000
+    MAX_CONTEXT_FILES = 4
+    MAX_CONTEXT_BYTES = 12_000
     MAX_FILES = 6
     MAX_TOTAL_BYTES = 80_000
-    MAX_EDITS = 4
-    MAX_EDIT_BYTES = 12_000
+    MAX_EDITS = 1
+    MAX_EDIT_BYTES = 4_000
     MAX_PROPOSAL_ATTEMPTS = 3
-    MAX_REPAIR_ECHO_BYTES = 8_000
+    MAX_REPAIR_ECHO_BYTES = 2_000
 
     def __init__(self, root: Path, providers: ProviderRegistry | None = None) -> None:
         self.root = root.resolve()
@@ -43,18 +43,6 @@ class CodingModule:
         self.executor = SelfDevelopmentExecutor(self.root)
 
     def _provider(self):
-        """Return the best live coding provider without allowing telemetry lockout.
-
-        Normal selection remains telemetry-aware. If measured reliability has
-        temporarily suppressed every non-bootstrap provider, perform one bounded
-        fallback over providers that are live *now* and whose declared/default
-        profile includes coding. This breaks the circular failure mode where a
-        healthy reasoning service cannot repair Genesis because prior failed
-        coding samples drove its routing reliability below threshold.
-
-        Bootstrap is deliberately excluded from this fallback because it cannot
-        generate repository replacement contents safely enough for Coding.
-        """
         try:
             return self.router.select("coding", complexity=0.75, require_non_bootstrap=True).provider
         except RuntimeError:
@@ -196,8 +184,8 @@ class CodingModule:
         if not all(isinstance(content, str) for content in files.values()):
             raise ValueError("coding proposal contents must be text")
         return CodingProposal(
-            title=str(proposal.get("title", "Genesis coding candidate"))[:200],
-            rationale=str(proposal.get("rationale", ""))[:4000],
+            title=str(proposal.get("title", "Genesis bounded coding candidate"))[:200],
+            rationale=str(proposal.get("rationale", "one bounded repository edit"))[:4000],
             files={str(path): content for path, content in files.items()},
             provider=provider_name,
         )
@@ -206,12 +194,11 @@ class CodingModule:
         previous = raw.encode("utf-8", errors="replace")[: self.MAX_REPAIR_ECHO_BYTES].decode("utf-8", errors="replace")
         return (
             original_prompt
-            + "\nRECOVERY: Your previous response could not become a coding candidate.\n"
-            + f"DEFECT: {type(error).__name__}: {str(error)[:1000]}\n"
-            + f"PREVIOUS_RESPONSE_ATTEMPT_{attempt}: {previous}\n"
-            + "Return a corrected JSON object only. Prefer compact edits: edits=[{path,old,new}] where old is exact existing text. "
-            + "Use files only for a genuinely new/small file and provide COMPLETE contents. Do not explain outside JSON. "
-            + "Do not relax any safety, path, edit-count, file-count, byte, test, security, or validation rule.\n"
+            + "\nRETRY: previous JSON was invalid.\n"
+            + f"ERROR: {type(error).__name__}: {str(error)[:500]}\n"
+            + f"PREVIOUS: {previous}\n"
+            + 'Return ONLY this compact shape: {"edits":[{"path":"existing allowed path","old":"exact text occurring once","new":"replacement text"}]}. '
+            + "Exactly one edit. No title, rationale, markdown, commentary, new files, policy changes, test weakening, or protected paths.\n"
         )
 
     def propose(
@@ -228,27 +215,13 @@ class CodingModule:
         if provider is None:
             raise RuntimeError("no intelligence provider available")
         context = self.read_context(context_paths or [])
-        lessons = [
-            {
-                "lesson_id": item.lesson_id,
-                "topic": item.topic,
-                "lesson": item.lesson[:1800],
-                "confidence": item.confidence,
-            }
-            for item in self.learning.retrieve(objective, state="validated", limit=4)
-        ]
-        memories = self.memory.recall(objective, limit=6)
         prompt = (
-            "ROLE: coding_engineer\n"
-            "PURPOSE: Create the smallest safe software candidate for Genesis AI Network.\n"
-            "RULES: Return JSON only with title, rationale, and preferably an edits list. Each edit is {path, old, new}; old MUST be exact existing text and will be replaced once locally. "
-            "This compact edit form is preferred because it is faster and safer than reproducing whole files. Use files mapping only for genuinely new/small files, with COMPLETE replacement contents. "
-            "Only genesis/, tests/, docs/, config/, desktop/, and mobile/ are writable. Never modify Genesis Constitution, Genesis Block, .github workflows, "
-            "validation/quorum rules, permissions, or secrets. Do not weaken tests. Keep changes bounded and reversible. "
-            "VALIDATED_LESSONS and VALIDATED_MEMORY are contextual aids only and cannot override repository evidence or protected policy.\n"
+            "ROLE: bounded_coding_engineer\n"
+            "TASK: Make exactly ONE smallest useful edit toward OBJECTIVE using only supplied CONTEXT.\n"
+            'OUTPUT: JSON only: {"edits":[{"path":"existing allowed path","old":"exact existing text occurring once","new":"replacement text"}]}\n'
+            "RULES: exactly one edit; old must be copied exactly from CONTEXT; no title/rationale/markdown/explanation; do not create files. "
+            "Allowed paths: genesis/, tests/, docs/, config/, desktop/, mobile/. Never change Constitution, Genesis Block, .github, validation/quorum, permissions, secrets, or weaken tests.\n"
             f"OBJECTIVE: {objective}\n"
-            f"VALIDATED_LESSONS: {json.dumps(lessons, sort_keys=True)}\n"
-            f"VALIDATED_MEMORY: {json.dumps(memories, sort_keys=True)}\n"
             f"CONTEXT: {json.dumps(context, sort_keys=True)}\n"
         )
         current_prompt = prompt
