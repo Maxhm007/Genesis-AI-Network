@@ -30,7 +30,9 @@ TEAM_HINTS = (
     "unknown root cause",
 )
 
-PENDING_STATES = ("new", "assigned", "running", "blocked", "review", "failed", "quarantined")
+PENDING_STATES = ("new", "assigned", "running", "paused", "blocked", "review", "failed", "quarantined")
+ACTIVE_STATES = ("assigned", "running", "review")
+ACTIVE_TASK_LIMIT = 3
 
 
 @dataclass(frozen=True)
@@ -45,11 +47,10 @@ class RouteDecision:
 
 
 class TaskRouterModule:
-    """Assign one durable Genesis task at a time to the most relevant module.
+    """Maintain up to three durable Genesis work slots without cancelling active work.
 
-    Unresolved tasks remain in the persistent SQLite task queue and are exposed
-    as a TODO snapshot. Failed tasks obey durable retry timing and use Job
-    Failure Intelligence to change recovery strategy after repeated failures.
+    Each slot keeps its task until completion, pause/hold, blocking, or explicit
+    reasoned cancellation. New tasks are assigned only when an active slot is free.
     """
 
     def __init__(self, root: Path) -> None:
@@ -96,14 +97,22 @@ class TaskRouterModule:
         tasks = self.queue.list(limit=limit)
         return [task for task in tasks if task.state in PENDING_STATES]
 
+    def active(self) -> list[GenesisTask]:
+        return [task for task in self.pending() if task.state in ACTIVE_STATES]
+
     def write_todo(self) -> dict:
         tasks = self.pending()
+        active = [task for task in tasks if task.state in ACTIVE_STATES]
         payload = {
             "pending": len(tasks),
+            "active": len(active),
+            "active_limit": ACTIVE_TASK_LIMIT,
+            "active_task_ids": [task.task_id for task in active],
             "tasks": [asdict(task) for task in tasks],
             "rule": (
-                "Pending issues remain durable until explicitly completed. Failed jobs retry only after their backoff window; "
-                "repeated failures switch to diagnosis/specialist recovery; exhausted jobs are quarantined for bounded safety."
+                "Keep at most three persistent active tasks. Running work is never auto-cancelled. "
+                "Paused/held work remains durable and resumable. Cancellation requires an explicit recorded reason. "
+                "Failed jobs retry only after backoff; repeated failures switch recovery strategy; exhausted jobs are quarantined."
             ),
         }
         self.todo_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -111,12 +120,29 @@ class TaskRouterModule:
 
     def assign_next(self) -> dict:
         self.write_todo()
+        active = self.active()
+        if len(active) >= ACTIVE_TASK_LIMIT:
+            result = {
+                "status": "active_slots_full",
+                "decision": None,
+                "active": len(active),
+                "active_limit": ACTIVE_TASK_LIMIT,
+                "active_task_ids": [task.task_id for task in active],
+            }
+            self.last_route_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+            return result
+
         candidates = [
             task for task in self.pending()
             if task.state == "new" or self.queue.retryable(task)
         ]
         if not candidates:
-            result = {"status": "idle", "decision": None}
+            result = {
+                "status": "idle",
+                "decision": None,
+                "active": len(active),
+                "active_limit": ACTIVE_TASK_LIMIT,
+            }
             self.last_route_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             return result
 
@@ -128,6 +154,8 @@ class TaskRouterModule:
             "status": "assigned",
             "decision": decision.as_dict(),
             "task": asdict(assigned),
+            "active": len(active) + 1,
+            "active_limit": ACTIVE_TASK_LIMIT,
             "ai_team_module": "genesis.ai_team" if decision.use_ai_team else None,
             "recovery_plan": recovery.as_dict() if recovery else None,
         }
