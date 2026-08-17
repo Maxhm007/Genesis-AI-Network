@@ -6,7 +6,8 @@
   "height": 0,
   "matching_independent_peers": 2,
   "network": "gden/0.1",
-  "published_at": "2026-08-17T11:32:44.778447+00:00",
+  "persistent_node_key_signatures": false,
+  "published_at": "2026-08-17T11:41:04.763801+00:00",
   "required_quorum": 2,
   "source_repo": "Maxhm007/Genesis-AI-Network"
 }
