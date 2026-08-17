@@ -3,13 +3,15 @@ from __future__ import annotations
 import argparse
 import ast
 import json
+import os
 import re
+import subprocess
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
 
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULT_MODEL = "Qwen/Qwen2.5-Coder-0.5B-Instruct"
-MAX_ATTEMPTS = 3
+MAX_ATTEMPTS = 4
 PROTECTED = {"GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"}
 
 
@@ -158,6 +160,35 @@ def validate_compact_proposal(raw: str, files: dict[str, str]) -> tuple[dict | N
     }, "", debug_edit
 
 
+def validate_candidate_tests(proposal: dict) -> tuple[bool, str]:
+    files = proposal.get("files") if isinstance(proposal, dict) else None
+    if not isinstance(files, dict) or not files:
+        return False, "candidate contains no rendered production files"
+    originals: dict[str, str] = {}
+    try:
+        for relative, rendered in files.items():
+            path = ROOT / relative
+            originals[relative] = path.read_text(encoding="utf-8")
+            path.write_text(str(rendered), encoding="utf-8")
+        env = dict(os.environ)
+        env["PYTHONPATH"] = str(ROOT)
+        proc = subprocess.run(
+            [os.environ.get("PYTHON", "python"), "-m", "pytest", "-q"],
+            cwd=ROOT,
+            text=True,
+            capture_output=True,
+            env=env,
+            timeout=90,
+        )
+        output = (proc.stdout + "\n" + proc.stderr)[-6000:]
+        return proc.returncode == 0, output
+    except Exception as exc:
+        return False, f"candidate validation error: {exc}"
+    finally:
+        for relative, original in originals.items():
+            (ROOT / relative).write_text(original, encoding="utf-8")
+
+
 def compact_problem(prompt_text: str) -> str:
     payload = _payload(prompt_text)
     diagnosis = payload.get("diagnosis") if isinstance(payload.get("diagnosis"), dict) else {}
@@ -217,6 +248,7 @@ class LocalRepairModel:
         system = (
             "You are the bounded software-debugging specialist for Genesis AI. Return JSON only. "
             "Fix the production root cause of the failing test with exactly ONE smallest line-range edit. "
+            "Preserve all existing passing behavior while satisfying the new failing assertion. "
             "Never edit tests. Never change protected identity, workflows, permissions, validation/quorum, signing, secrets, "
             "or self-development protections. Use 1-based inclusive line numbers exactly from NUMBERED_CONTEXT. "
             + target_instruction
@@ -237,11 +269,12 @@ class LocalRepairModel:
                 + "\nNUMBERED_CONTEXT:"
                 + context
                 + "\nReturn a real repair, not placeholders such as file.py, replacement text, TODO, or pass."
+                + "\nDo not hard-code values from the test when the function must remain generally usable."
                 + "\nOUTPUT_SCHEMA: "
                 + schema
             )
             if feedback:
-                user += "\nREJECTION_FEEDBACK: " + feedback + "\nCorrect the edit based on the failing assertion and source code. JSON only."
+                user += "\nPREVIOUS_CANDIDATE_FAILED_VALIDATION:\n" + feedback + "\nRepair the production logic so the FULL test suite passes. JSON only."
             raw = self._generate([
                 {"role": "system", "content": system},
                 {"role": "user", "content": user},
@@ -249,8 +282,14 @@ class LocalRepairModel:
             raw = _pin_single_target(raw, pinned_target)
             proposal, error, edit = validate_compact_proposal(raw, production_files)
             if proposal is not None:
-                print(json.dumps({"repair_attempt": attempt, "status": "proposal_valid", "proposal": proposal.get("title"), "edit": edit}), flush=True)
-                return json.dumps(proposal, sort_keys=True)
+                passed, validation_output = validate_candidate_tests(proposal)
+                if passed:
+                    print(json.dumps({"repair_attempt": attempt, "status": "proposal_validated", "proposal": proposal.get("title"), "edit": edit}), flush=True)
+                    return json.dumps(proposal, sort_keys=True)
+                error = "candidate failed full test validation"
+                feedback = error + "\n" + validation_output
+                print(json.dumps({"repair_attempt": attempt, "status": "candidate_tests_failed", "reason": error, "edit": edit, "test_output": validation_output[-1800:]}), flush=True)
+                continue
             print(json.dumps({"repair_attempt": attempt, "status": "proposal_rejected", "reason": error, "edit": edit, "output": raw[:600]}), flush=True)
             feedback = f"{error}. Previous edit: {json.dumps(edit)}. Previous output: {raw[:500]}"
         raise RuntimeError(f"repair proposal invalid after {MAX_ATTEMPTS} attempts: {feedback[:1200]}")
