@@ -9,16 +9,18 @@ import sqlite3
 import uuid
 
 
-VALID_STATES = {"new", "assigned", "running", "blocked", "review", "complete", "failed", "quarantined"}
+VALID_STATES = {"new", "assigned", "running", "paused", "blocked", "review", "complete", "failed", "quarantined", "cancelled"}
 VALID_TRANSITIONS = {
-    "new": {"assigned", "blocked", "failed"},
-    "assigned": {"running", "blocked", "failed"},
-    "running": {"review", "blocked", "failed"},
-    "blocked": {"assigned", "running", "failed"},
-    "review": {"complete", "running", "failed"},
+    "new": {"assigned", "paused", "blocked", "failed"},
+    "assigned": {"running", "paused", "blocked", "failed"},
+    "running": {"review", "paused", "blocked", "failed"},
+    "paused": {"assigned", "running", "failed"},
+    "blocked": {"assigned", "running", "paused", "failed"},
+    "review": {"complete", "running", "paused", "failed"},
     "complete": set(),
-    "failed": {"assigned", "quarantined"},
-    "quarantined": {"assigned"},
+    "failed": {"assigned", "paused", "quarantined"},
+    "quarantined": {"assigned", "paused"},
+    "cancelled": set(),
 }
 
 
@@ -50,6 +52,7 @@ class GenesisTask:
     next_retry_at: str | None = None
     last_error: str | None = None
     failure_history: tuple[dict, ...] = ()
+    state_reason: str | None = None
 
 
 class PersistentTaskQueue:
@@ -82,7 +85,8 @@ class PersistentTaskQueue:
                     max_attempts INTEGER NOT NULL DEFAULT 3,
                     next_retry_at TEXT,
                     last_error TEXT,
-                    failure_history_json TEXT NOT NULL DEFAULT '[]'
+                    failure_history_json TEXT NOT NULL DEFAULT '[]',
+                    state_reason TEXT
                 )
                 """
             )
@@ -93,6 +97,7 @@ class PersistentTaskQueue:
                 "next_retry_at": "ALTER TABLE genesis_tasks ADD COLUMN next_retry_at TEXT",
                 "last_error": "ALTER TABLE genesis_tasks ADD COLUMN last_error TEXT",
                 "failure_history_json": "ALTER TABLE genesis_tasks ADD COLUMN failure_history_json TEXT NOT NULL DEFAULT '[]'",
+                "state_reason": "ALTER TABLE genesis_tasks ADD COLUMN state_reason TEXT",
             }
             for column, statement in migrations.items():
                 if column not in columns:
@@ -105,8 +110,8 @@ class PersistentTaskQueue:
                 INSERT INTO genesis_tasks (
                     task_id, objective, module_id, state, priority, payload_json,
                     created_at, updated_at, attempt_count, max_attempts,
-                    next_retry_at, last_error, failure_history_json
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                    next_retry_at, last_error, failure_history_json, state_reason
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
                 (
                     task.task_id,
@@ -122,6 +127,7 @@ class PersistentTaskQueue:
                     task.next_retry_at,
                     task.last_error,
                     json.dumps(list(task.failure_history), sort_keys=True),
+                    task.state_reason,
                 ),
             )
         return task
@@ -224,6 +230,8 @@ class PersistentTaskQueue:
     def transition(self, task_id: str, new_state: str, *, module_id: str | None = None) -> GenesisTask:
         if new_state not in VALID_STATES:
             raise ValueError("invalid task state")
+        if new_state == "cancelled":
+            raise ValueError("cancellation requires cancel(task_id, reason)")
         current = self.get(task_id)
         if current is None:
             raise KeyError(task_id)
@@ -232,10 +240,70 @@ class PersistentTaskQueue:
         assigned_module = module_id if module_id is not None else current.module_id
         now = utc_now()
         next_retry_at = None if new_state == "assigned" else current.next_retry_at
+        state_reason = None if new_state not in {"paused", "blocked"} else current.state_reason
         with self._connect() as db:
             db.execute(
-                "UPDATE genesis_tasks SET state = ?, module_id = ?, updated_at = ?, next_retry_at = ? WHERE task_id = ?",
-                (new_state, assigned_module, now, next_retry_at, task_id),
+                "UPDATE genesis_tasks SET state = ?, module_id = ?, updated_at = ?, next_retry_at = ?, state_reason = ? WHERE task_id = ?",
+                (new_state, assigned_module, now, next_retry_at, state_reason, task_id),
+            )
+        updated = self.get(task_id)
+        assert updated is not None
+        return updated
+
+    def pause(self, task_id: str, reason: str) -> GenesisTask:
+        reason = reason.strip()
+        if not reason:
+            raise ValueError("pause reason is required")
+        current = self.get(task_id)
+        if current is None:
+            raise KeyError(task_id)
+        if "paused" not in VALID_TRANSITIONS[current.state]:
+            raise ValueError(f"invalid transition: {current.state} -> paused")
+        now = utc_now()
+        with self._connect() as db:
+            db.execute(
+                "UPDATE genesis_tasks SET state = 'paused', updated_at = ?, state_reason = ? WHERE task_id = ?",
+                (now, reason, task_id),
+            )
+        updated = self.get(task_id)
+        assert updated is not None
+        return updated
+
+    def hold(self, task_id: str, reason: str) -> GenesisTask:
+        """Human-friendly alias for pause; held work remains durable and resumable."""
+        return self.pause(task_id, reason)
+
+    def resume(self, task_id: str, *, module_id: str | None = None) -> GenesisTask:
+        current = self.get(task_id)
+        if current is None:
+            raise KeyError(task_id)
+        if current.state != "paused":
+            raise ValueError("only paused tasks can be resumed")
+        assigned_module = module_id if module_id is not None else current.module_id
+        now = utc_now()
+        with self._connect() as db:
+            db.execute(
+                "UPDATE genesis_tasks SET state = 'assigned', module_id = ?, updated_at = ?, state_reason = NULL WHERE task_id = ?",
+                (assigned_module, now, task_id),
+            )
+        updated = self.get(task_id)
+        assert updated is not None
+        return updated
+
+    def cancel(self, task_id: str, reason: str) -> GenesisTask:
+        reason = reason.strip()
+        if not reason:
+            raise ValueError("cancellation reason is required")
+        current = self.get(task_id)
+        if current is None:
+            raise KeyError(task_id)
+        if current.state in {"complete", "cancelled"}:
+            raise ValueError(f"cannot cancel task from state {current.state}")
+        now = utc_now()
+        with self._connect() as db:
+            db.execute(
+                "UPDATE genesis_tasks SET state = 'cancelled', updated_at = ?, next_retry_at = NULL, state_reason = ? WHERE task_id = ?",
+                (now, reason, task_id),
             )
         updated = self.get(task_id)
         assert updated is not None
@@ -250,16 +318,11 @@ class PersistentTaskQueue:
         retry_after_seconds: int | None = None,
         module_id: str | None = None,
     ) -> GenesisTask:
-        """Persist a failure and schedule bounded recovery or quarantine it.
-
-        The attempt count is incremented for every recorded execution failure.
-        When max_attempts is reached the task is quarantined instead of being
-        retried forever. Failure history remains durable across restarts.
-        """
+        """Persist a failure and schedule bounded recovery or quarantine it."""
         current = self.get(task_id)
         if current is None:
             raise KeyError(task_id)
-        if current.state in {"complete", "quarantined"}:
+        if current.state in {"complete", "quarantined", "cancelled"}:
             raise ValueError(f"cannot record failure from state {current.state}")
         error = error.strip() or "unspecified failure"
         classification = classification.strip() or "unknown"
@@ -291,7 +354,7 @@ class PersistentTaskQueue:
                 """
                 UPDATE genesis_tasks
                 SET state = ?, module_id = ?, updated_at = ?, attempt_count = ?,
-                    next_retry_at = ?, last_error = ?, failure_history_json = ?
+                    next_retry_at = ?, last_error = ?, failure_history_json = ?, state_reason = NULL
                 WHERE task_id = ?
                 """,
                 (
@@ -335,4 +398,5 @@ class PersistentTaskQueue:
             next_retry_at=row["next_retry_at"] if "next_retry_at" in row.keys() else None,
             last_error=row["last_error"] if "last_error" in row.keys() else None,
             failure_history=tuple(json.loads(history_raw or "[]")),
+            state_reason=row["state_reason"] if "state_reason" in row.keys() else None,
         )
