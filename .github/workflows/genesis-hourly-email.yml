@@ -1,0 +1,81 @@
+name: Genesis Hourly Email
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '20 * * * *'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+
+concurrency:
+  group: genesis-hourly-email
+  cancel-in-progress: true
+
+jobs:
+  send-genesis-report:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Restore latest Genesis runtime state
+        uses: actions/cache@v4
+        with:
+          path: |
+            runtime/genesis_tasks.sqlite3
+            runtime/self_learning.sqlite3
+            runtime/self_learning_status.json
+            runtime/memory.sqlite3
+            runtime/memory_status.json
+            runtime/ai_score_history.jsonl
+            runtime/efficiency.jsonl
+            runtime/provider_telemetry.json
+            runtime/capability_growth_sync.json
+            runtime/research_reviews/
+            runtime/task_reviews/
+          key: genesis-email-${{ runner.os }}-${{ github.run_id }}
+          restore-keys: |
+            genesis-runtime-${{ runner.os }}-
+
+      - run: pip install -r requirements.txt
+
+      - name: Generate fresh Genesis scorecard from restored state
+        run: python scripts/system_scorecard.py
+
+      - name: Verify Genesis email credentials are configured
+        id: email_config
+        shell: bash
+        env:
+          GENESIS_SMTP_HOST: ${{ secrets.GENESIS_SMTP_HOST }}
+          GENESIS_SMTP_USERNAME: ${{ secrets.GENESIS_SMTP_USERNAME }}
+          GENESIS_SMTP_PASSWORD: ${{ secrets.GENESIS_SMTP_PASSWORD }}
+          GENESIS_EMAIL_TO: ${{ secrets.GENESIS_EMAIL_TO }}
+        run: |
+          if [[ -n "$GENESIS_SMTP_HOST" && -n "$GENESIS_SMTP_USERNAME" && -n "$GENESIS_SMTP_PASSWORD" && -n "$GENESIS_EMAIL_TO" ]]; then
+            echo 'configured=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'configured=false' >> "$GITHUB_OUTPUT"
+            echo 'Genesis email delivery is waiting for repository SMTP secrets.' >&2
+          fi
+
+      - name: Genesis sends hourly KPI dashboard
+        if: steps.email_config.outputs.configured == 'true'
+        env:
+          GENESIS_SMTP_HOST: ${{ secrets.GENESIS_SMTP_HOST }}
+          GENESIS_SMTP_PORT: ${{ secrets.GENESIS_SMTP_PORT }}
+          GENESIS_SMTP_USERNAME: ${{ secrets.GENESIS_SMTP_USERNAME }}
+          GENESIS_SMTP_PASSWORD: ${{ secrets.GENESIS_SMTP_PASSWORD }}
+          GENESIS_EMAIL_FROM: ${{ secrets.GENESIS_EMAIL_FROM }}
+          GENESIS_EMAIL_TO: ${{ secrets.GENESIS_EMAIL_TO }}
+          GENESIS_SMTP_SSL: 'true'
+        run: python scripts/send_genesis_email.py
