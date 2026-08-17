@@ -109,14 +109,11 @@ def _load_model_proposal(raw: str) -> dict:
     if not isinstance(proposal, dict):
         raise ValueError("proposal must be a JSON object")
 
-    # Small local models often wrap the requested JSON in one or more semantic
-    # envelopes. Unwrap only dictionaries until the actual repair object is
-    # reached; all normal proposal validation still happens afterward.
     for _ in range(5):
         if any(key in proposal for key in ("edit", "edits", "files")):
             break
         nested = None
-        for key in ("proposal", "repair", "output", "result", "response"):
+        for key in ("proposal", "repair", "output", "result", "response", "schema"):
             value = proposal.get(key)
             if isinstance(value, dict):
                 nested = value
@@ -163,17 +160,101 @@ def infer_function_target(prompt_text: str, target_path: str | None, source: str
     return matches[0], int(node.lineno), int(node.end_lineno)
 
 
-def validate_function_contract(replacement: str, source: str, target_span: tuple[str, int, int]) -> str:
+def implicated_result_keys(prompt_text: str) -> set[str]:
+    failure = str(_payload(prompt_text).get("failure_text", ""))
+    keys = set(re.findall(r"result\[['\"]([A-Za-z_][A-Za-z0-9_]*)['\"]\]", failure))
+    return keys
+
+
+def _find_target_function(source: str, target_span: tuple[str, int, int]):
     function_name, start, end = target_span
+    tree = ast.parse(source)
+    return next(
+        node for node in ast.walk(tree)
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        and node.name == function_name
+        and int(node.lineno) == start
+        and int(getattr(node, "end_lineno", -1)) == end
+    )
+
+
+def reconcile_function_contract(
+    replacement: str,
+    source: str,
+    target_span: tuple[str, int, int],
+    promoted_keys: set[str],
+) -> tuple[str, str]:
     try:
-        original_tree = ast.parse(source)
-        original = next(
-            node for node in ast.walk(original_tree)
-            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
-            and node.name == function_name
-            and int(node.lineno) == start
-            and int(getattr(node, "end_lineno", -1)) == end
+        original = _find_target_function(source, target_span)
+        replacement_tree = ast.parse(replacement)
+    except Exception as exc:
+        return replacement, f"function-contract parse failed: {exc}"
+
+    if len(replacement_tree.body) != 1 or not isinstance(replacement_tree.body[0], type(original)):
+        return replacement, "replacement must contain exactly the target function and no module imports or extra top-level code"
+    candidate = replacement_tree.body[0]
+    if candidate.name != original.name:
+        return replacement, f"replacement must keep function name {original.name}"
+    if ast.dump(candidate.args, include_attributes=False) == ast.dump(original.args, include_attributes=False):
+        candidate.returns = original.returns
+        ast.fix_missing_locations(candidate)
+        return ast.unparse(candidate), ""
+
+    original_kwargs = original.args.kwarg.arg if original.args.kwarg else None
+    candidate_kwargs = candidate.args.kwarg.arg if candidate.args.kwarg else None
+    if not original_kwargs or candidate_kwargs != original_kwargs:
+        return replacement, "replacement must preserve the existing function signature and **kwargs contract"
+
+    original_pos = [arg.arg for arg in (*original.args.posonlyargs, *original.args.args)]
+    candidate_pos_nodes = [*candidate.args.posonlyargs, *candidate.args.args]
+    candidate_pos = [arg.arg for arg in candidate_pos_nodes]
+    retained = [name for name in candidate_pos if name in original_pos]
+    if retained != original_pos:
+        return replacement, "replacement may not remove or reorder existing positional parameters"
+    if original.args.vararg and (not candidate.args.vararg or candidate.args.vararg.arg != original.args.vararg.arg):
+        return replacement, "replacement must preserve the existing variadic positional parameter"
+    if not original.args.vararg and candidate.args.vararg:
+        return replacement, "replacement may not add a variadic positional parameter"
+    if [arg.arg for arg in candidate.args.kwonlyargs] != [arg.arg for arg in original.args.kwonlyargs]:
+        return replacement, "replacement must preserve keyword-only parameters"
+
+    defaults_start = len(candidate_pos_nodes) - len(candidate.args.defaults)
+    default_by_name: dict[str, ast.expr] = {}
+    for index, arg in enumerate(candidate_pos_nodes):
+        if index >= defaults_start:
+            default_by_name[arg.arg] = candidate.args.defaults[index - defaults_start]
+
+    added = [name for name in candidate_pos if name not in original_pos]
+    promotion_statements: list[ast.stmt] = []
+    for name in added:
+        if name not in promoted_keys:
+            continue
+        default = default_by_name.get(name)
+        if default is None:
+            return replacement, f"cannot safely promote new parameter {name} without a default"
+        promotion_statements.append(
+            ast.Assign(
+                targets=[ast.Name(id=name, ctx=ast.Store())],
+                value=ast.Call(
+                    func=ast.Attribute(value=ast.Name(id=original_kwargs, ctx=ast.Load()), attr="pop", ctx=ast.Load()),
+                    args=[ast.Constant(value=name), default],
+                    keywords=[],
+                ),
+            )
         )
+
+    candidate.args = original.args
+    candidate.returns = original.returns
+    candidate.decorator_list = original.decorator_list
+    candidate.body = promotion_statements + candidate.body
+    ast.fix_missing_locations(candidate)
+    reconciled = ast.unparse(candidate)
+    return reconciled, "reconciled added model parameters back into the existing **kwargs API contract"
+
+
+def validate_function_contract(replacement: str, source: str, target_span: tuple[str, int, int]) -> str:
+    try:
+        original = _find_target_function(source, target_span)
         replacement_tree = ast.parse(replacement)
     except Exception as exc:
         return f"function-contract parse failed: {exc}"
@@ -184,11 +265,7 @@ def validate_function_contract(replacement: str, source: str, target_span: tuple
     if candidate.name != original.name:
         return f"replacement must keep function name {original.name}"
     if ast.dump(candidate.args, include_attributes=False) != ast.dump(original.args, include_attributes=False):
-        return (
-            "replacement must preserve the exact existing function signature and parameter contract; "
-            "change only the function body. If a new top-level behavior is supplied through an existing **kwargs mapping, "
-            "extract only that controlling key and preserve all unrelated kwargs in the mapping"
-        )
+        return "replacement must preserve the exact existing function signature and parameter contract"
     if ast.dump(candidate.returns, include_attributes=False) != ast.dump(original.returns, include_attributes=False):
         return "replacement must preserve the existing return annotation"
     return ""
@@ -336,6 +413,7 @@ class LocalRepairModel:
         allowed_paths = list(production_files)
         pinned_target = allowed_paths[0] if len(allowed_paths) == 1 else None
         target_span = infer_function_target(prompt, pinned_target, production_files[pinned_target]) if pinned_target else None
+        promoted_keys = implicated_result_keys(prompt)
         target_instruction = (
             f"TARGET_FILE is fixed by the repair controller to {pinned_target}. Do not choose a path. "
             if pinned_target
@@ -345,7 +423,7 @@ class LocalRepairModel:
             function_name, start, end = target_span
             target_instruction += (
                 f"TARGET_FUNCTION is {function_name}, lines {start}-{end}. Rewrite the COMPLETE function only. "
-                "You MUST keep the exact original function signature and parameters; change only its body. "
+                "Prefer keeping the exact original function signature; the controller will reject or reconcile API-breaking parameter changes. "
                 "The controller fixes the file and line range automatically. "
             )
         system = (
@@ -386,6 +464,24 @@ class LocalRepairModel:
             proposal, error, edit = validate_compact_proposal(raw, production_files)
             if proposal is not None:
                 if target_span and edit is not None:
+                    reconciled, reconcile_note = reconcile_function_contract(
+                        str(edit.get("new", "")),
+                        production_files[pinned_target],
+                        target_span,
+                        promoted_keys,
+                    )
+                    if reconciled != str(edit.get("new", "")):
+                        edit["new"] = reconciled
+                        _, start, end = target_span
+                        try:
+                            rendered = _apply_line_edit(production_files[pinned_target], start, end, reconciled)
+                            ast.parse(rendered, filename=pinned_target)
+                        except Exception as exc:
+                            feedback = f"contract reconciliation produced invalid Python: {exc}"
+                            print(json.dumps({"repair_attempt": attempt, "status": "reconciliation_rejected", "reason": feedback}), flush=True)
+                            continue
+                        proposal["files"] = {pinned_target: rendered}
+                        print(json.dumps({"repair_attempt": attempt, "status": "contract_reconciled", "note": reconcile_note, "edit": edit}), flush=True)
                     contract_error = validate_function_contract(str(edit.get("new", "")), production_files[pinned_target], target_span)
                     if contract_error:
                         feedback = contract_error
