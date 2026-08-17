@@ -20,6 +20,7 @@ on:
       - "scripts/**"
       - "config/**"
       - "GENE_REGISTRY.json"
+      - ".github/workflows/gene-pulse.yml"
 
 permissions:
   contents: read
