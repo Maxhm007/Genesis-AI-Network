@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 
 from .ai_score import GenesisAIScorer
@@ -11,6 +12,7 @@ from .modules.task_queue import PersistentTaskQueue
 from .providers import ProviderRegistry
 from .selfdev import SelfDevelopmentExecutor, SelfDevResult
 from .team import AITeam
+from .velocity import GeneVelocity
 
 
 @dataclass(frozen=True)
@@ -23,8 +25,9 @@ class DevelopmentPlan:
 class ProactiveDevelopmentLoop:
     """Choose and execute one bounded improvement at a time.
 
-    A low competitive AI score must create persistent improvement work. Code
-    changes still require bounded candidate generation and independent validation.
+    A low competitive AI score must create persistent improvement work. Slow
+    validated evolution must also create acceleration work. Code changes still
+    require bounded candidate generation and independent validation.
     """
 
     def __init__(self, root: Path) -> None:
@@ -33,6 +36,7 @@ class ProactiveDevelopmentLoop:
         self.providers = ProviderRegistry()
         self.team = AITeam(self.providers)
         self.tasks = PersistentTaskQueue(self.root / "runtime" / "genesis_tasks.sqlite3")
+        self.velocity = GeneVelocity(self.root)
 
     def capability_report(self) -> dict:
         return CapabilityEvaluator(self.root, self.providers, self.team).report()
@@ -61,6 +65,28 @@ class ProactiveDevelopmentLoop:
         )
         return {"task_id": task.task_id, "created": created, "dimension": gap["name"], "priority": task.priority}
 
+    def ensure_velocity_work(self) -> dict | None:
+        report = self.velocity.report()
+        objective = self.velocity.improvement_objective()
+        if objective is None:
+            return None
+        day = datetime.now(timezone.utc).date().isoformat()
+        task, created = self.tasks.create_unique(
+            f"gene-velocity:{day}",
+            objective,
+            module_id="genesis.capability",
+            priority=112,
+            payload={
+                "task_type": "gene_velocity_improvement",
+                "velocity": report,
+                "required_outcome": (
+                    "Reduce validated development, benchmark-refresh, or provider-evaluation latency while preserving "
+                    "tests, security, provenance, owner authorization, Constitution constraints and independent quorum."
+                ),
+            },
+        )
+        return {"task_id": task.task_id, "created": created, "priority": task.priority, "velocity": report}
+
     def _scan_summary(self) -> dict:
         path = self.root / "runtime" / "immortality_scan.json"
         if not path.exists():
@@ -78,7 +104,9 @@ class ProactiveDevelopmentLoop:
 
     def inspect(self) -> list[dict]:
         self.ensure_score_work()
+        self.ensure_velocity_work()
         score = self.ai_score_report()
+        velocity = self.velocity.report()
         checks = [
             {
                 "capability": "genesis_competitive_ai_score",
@@ -90,6 +118,16 @@ class ProactiveDevelopmentLoop:
                 "status": score["urgency"],
                 "reference_as_of": score.get("reference_as_of"),
                 "improvement_hint": score["priority_gaps"][0]["improvement_hint"] if score["priority_gaps"] else None,
+            },
+            {
+                "capability": "gene_validated_evolution_velocity",
+                "present": velocity["status"] == "on_target",
+                "priority": 112,
+                "status": velocity["status"],
+                "validated_updates_24h": velocity["validated_updates_24h"],
+                "latest_validated_update_age_minutes": velocity["latest_validated_update_age_minutes"],
+                "mean_inter_update_minutes_24h": velocity["mean_inter_update_minutes_24h"],
+                "improvement_hint": self.velocity.improvement_objective(),
             },
             {"capability": "runtime_health_snapshot", "present": (self.root / "genesis" / "health.py").exists(), "priority": 100},
             {"capability": "bounded_cycle_budget", "present": (self.root / "genesis" / "budget.py").exists(), "priority": 90},
@@ -146,6 +184,7 @@ class ProactiveDevelopmentLoop:
 
     def plan_next(self) -> DevelopmentPlan | None:
         self.ensure_score_work()
+        self.ensure_velocity_work()
         proposal = self.executor.next_builtin_improvement()
         title = str(proposal.get("title", ""))
         if title != "Record self-development idle state":
