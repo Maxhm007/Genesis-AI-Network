@@ -103,8 +103,11 @@ class AutonomousEngineeringLoop:
             self.queue.transition(task.task_id, "assigned", module_id="genesis.coding")
             self.queue.transition(task.task_id, "running", module_id="genesis.coding")
             context_paths = list(task.payload.get("context_paths", []) or [])
-            proposal = self.coding.propose(task.objective, context_paths=context_paths)
-            provider_name = proposal.provider
+            provider = self.coding._provider()
+            if provider is None:
+                raise RuntimeError("no intelligence provider available")
+            provider_name = provider.name
+            proposal = self.coding.propose(task.objective, context_paths=context_paths, provider=provider)
             candidate = self.coding.execute_candidate(proposal)
             attempt["coding_status"] = "candidate_created" if candidate.committed else "candidate_not_committed"
             attempt["candidate"] = asdict(candidate)
@@ -173,8 +176,6 @@ class AutonomousEngineeringLoop:
             result["candidate_security"] = attempt.get("candidate_security")
             if attempt["coding_status"] == "candidate_created" and attempt.get("candidate_security", {}).get("status") == "pass":
                 break
-            # Security rejection or provider/candidate failure stays isolated; return
-            # to main before considering a different task in the same cycle.
             self._git("checkout", "main")
 
         result["efficiency"] = self.efficiency.report()
