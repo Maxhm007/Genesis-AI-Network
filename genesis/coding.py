@@ -84,6 +84,11 @@ class CodingModule:
         return context
 
     @staticmethod
+    def _number_context(text: str) -> str:
+        """Expose stable 1-based repository line locators without asking the model to copy source."""
+        return "\n".join(f"{index}|{line}" for index, line in enumerate(text.splitlines(), start=1))
+
+    @staticmethod
     def _balanced_json_object(text: str) -> str | None:
         start = text.find("{")
         while start >= 0:
@@ -135,6 +140,30 @@ class CodingModule:
             raise ValueError("coding proposal must be a JSON object")
         return value
 
+    def _apply_line_edit(self, path: str, start_line: object, end_line: object, new: object) -> str:
+        if not isinstance(start_line, int) or isinstance(start_line, bool):
+            raise ValueError("line edit start_line must be an integer")
+        if not isinstance(end_line, int) or isinstance(end_line, bool):
+            raise ValueError("line edit end_line must be an integer")
+        if not isinstance(new, str):
+            raise ValueError("line edit new text must be a string")
+        if start_line < 1 or end_line < start_line:
+            raise ValueError("line edit range is invalid")
+
+        target = (self.root / path).resolve()
+        if not target.is_file():
+            raise ValueError(f"edit target does not exist: {path}")
+        current = target.read_text(encoding="utf-8")
+        lines = current.splitlines(keepends=True)
+        if end_line > len(lines):
+            raise ValueError(f"line edit range exceeds file length: {path}")
+
+        removed = "".join(lines[start_line - 1 : end_line])
+        replacement = new
+        if removed.endswith(("\n", "\r")) and replacement and not replacement.endswith(("\n", "\r")):
+            replacement += "\n"
+        return "".join(lines[: start_line - 1]) + replacement + "".join(lines[end_line:])
+
     def _files_from_edits(self, edits: object) -> dict[str, str]:
         if not isinstance(edits, list) or not edits or len(edits) > self.MAX_EDITS:
             raise ValueError("coding proposal edits count out of bounds")
@@ -144,12 +173,25 @@ class CodingModule:
             if not isinstance(edit, dict):
                 raise ValueError("each coding edit must be an object")
             path_value = edit.get("path")
-            old = edit.get("old")
-            new = edit.get("new")
-            if not isinstance(path_value, str) or not isinstance(old, str) or not isinstance(new, str) or not old:
-                raise ValueError("each coding edit requires path, non-empty old text, and new text")
+            if not isinstance(path_value, str):
+                raise ValueError("each coding edit requires a path")
             path = path_value.replace("\\", "/").lstrip("./")
             self.executor._validate_paths([path])
+
+            if "start_line" in edit or "end_line" in edit:
+                new = edit.get("new")
+                if isinstance(new, str):
+                    total += len(new.encode("utf-8"))
+                if total > self.MAX_EDIT_BYTES:
+                    raise ValueError("coding proposal edits exceed byte limit")
+                rendered[path] = self._apply_line_edit(path, edit.get("start_line"), edit.get("end_line"), new)
+                continue
+
+            # Backward-compatible exact-text form for trusted callers. Autonomous prompts use line ranges.
+            old = edit.get("old")
+            new = edit.get("new")
+            if not isinstance(old, str) or not isinstance(new, str) or not old:
+                raise ValueError("coding edit requires start_line/end_line/new or legacy old/new text")
             total += len(old.encode("utf-8")) + len(new.encode("utf-8"))
             if total > self.MAX_EDIT_BYTES:
                 raise ValueError("coding proposal edits exceed byte limit")
@@ -197,8 +239,9 @@ class CodingModule:
             + "\nRETRY: previous JSON was invalid.\n"
             + f"ERROR: {type(error).__name__}: {str(error)[:500]}\n"
             + f"PREVIOUS: {previous}\n"
-            + 'Return ONLY this compact shape: {"edits":[{"path":"existing allowed path","old":"exact text occurring once","new":"replacement text"}]}. '
-            + "Exactly one edit. No title, rationale, markdown, commentary, new files, policy changes, test weakening, or protected paths.\n"
+            + 'Return ONLY: {"edits":[{"path":"existing allowed path","start_line":1,"end_line":1,"new":"replacement text"}]}. '
+            + "Choose line numbers exactly from NUMBERED_CONTEXT. Exactly one edit. Do not copy old source text. "
+            + "No title, rationale, markdown, commentary, new files, policy changes, test weakening, or protected paths.\n"
         )
 
     def propose(
@@ -215,14 +258,16 @@ class CodingModule:
         if provider is None:
             raise RuntimeError("no intelligence provider available")
         context = self.read_context(context_paths or [])
+        numbered_context = {path: self._number_context(text) for path, text in context.items()}
         prompt = (
             "ROLE: bounded_coding_engineer\n"
-            "TASK: Make exactly ONE smallest useful edit toward OBJECTIVE using only supplied CONTEXT.\n"
-            'OUTPUT: JSON only: {"edits":[{"path":"existing allowed path","old":"exact existing text occurring once","new":"replacement text"}]}\n'
-            "RULES: exactly one edit; old must be copied exactly from CONTEXT; no title/rationale/markdown/explanation; do not create files. "
+            "TASK: Make exactly ONE smallest useful edit toward OBJECTIVE using only NUMBERED_CONTEXT.\n"
+            'OUTPUT: JSON only: {"edits":[{"path":"existing allowed path","start_line":1,"end_line":1,"new":"replacement text"}]}\n'
+            "RULES: exactly one edit; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text. "
+            "The local executor resolves those lines against the repository. No title/rationale/markdown/explanation; do not create files. "
             "Allowed paths: genesis/, tests/, docs/, config/, desktop/, mobile/. Never change Constitution, Genesis Block, .github, validation/quorum, permissions, secrets, or weaken tests.\n"
             f"OBJECTIVE: {objective}\n"
-            f"CONTEXT: {json.dumps(context, sort_keys=True)}\n"
+            f"NUMBERED_CONTEXT: {json.dumps(numbered_context, sort_keys=True)}\n"
         )
         current_prompt = prompt
         last_error: Exception | None = None
