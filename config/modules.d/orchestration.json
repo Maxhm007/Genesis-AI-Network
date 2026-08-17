@@ -1,0 +1,70 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "module_id": "genesis.task_router",
+      "name": "Genesis Task Router Module",
+      "version": "0.1.0",
+      "purpose": "Maintain the durable TODO backlog and assign the next unresolved task to the most relevant Genesis module while preserving explicit ownership and priority order.",
+      "capabilities": [
+        "todo_backlog",
+        "task_routing",
+        "module_assignment",
+        "priority_ordering",
+        "cross_module_detection"
+      ],
+      "permissions": [
+        "tasks.read",
+        "tasks.assign",
+        "runtime.todo.write"
+      ],
+      "dependencies": [
+        "genesis.task_queue"
+      ],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.task_router",
+      "metadata": {
+        "solve_tasks_individually": true,
+        "pending_tasks_remain_durable": true,
+        "highest_priority_first": true,
+        "ai_team_is_optional_for_complex_tasks": true
+      }
+    },
+    {
+      "module_id": "genesis.ai_team",
+      "name": "Genesis AI Team Module",
+      "version": "0.1.0",
+      "purpose": "Coordinate bounded specialist AI roles only when a task is complex, cross-module, high-risk, disputed, or benefits from independent planning/review; normal tasks remain owned by their relative module.",
+      "capabilities": [
+        "specialist_orchestration",
+        "cross_module_reasoning",
+        "bounded_team_expansion",
+        "independent_review_roles"
+      ],
+      "permissions": [
+        "provider.use",
+        "tasks.read",
+        "knowledge.read",
+        "knowledge.propose"
+      ],
+      "dependencies": [
+        "genesis.provider"
+      ],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.team",
+      "metadata": {
+        "default_direct_module_assignment": true,
+        "max_roles_per_task": 4,
+        "self_promotion_allowed": false,
+        "validation_authority": false,
+        "constitution_write": false
+      }
+    }
+  ]
+}
