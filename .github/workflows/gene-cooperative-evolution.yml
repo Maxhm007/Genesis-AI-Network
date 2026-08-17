@@ -1,0 +1,102 @@
+name: Gene Cooperative Evolution
+
+on:
+  workflow_dispatch:
+    inputs:
+      objective:
+        description: Cooperative Gene development objective
+        required: false
+        type: string
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  contents: read
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_NAME: qwen3-0.6b-local
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '90'
+
+jobs:
+  cooperate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Restore GRCE child-node state
+        uses: actions/cache@v4
+        with:
+          path: runtime/grce
+          key: grce-v1-${{ github.run_id }}
+          restore-keys: |
+            grce-v1-
+
+      - name: Install Gene runtime
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors
+
+      - name: Verify baseline
+        run: python -m pytest -q
+
+      - name: Start local reasoning provider
+        run: |
+          python scripts/local_reasoning_provider.py --host 127.0.0.1 --port 8766 > /tmp/gene-grce-provider.log 2>&1 &
+          echo $! > /tmp/gene-grce-provider.pid
+          python - <<'PY'
+          import time, urllib.request
+          for _ in range(120):
+              try:
+                  with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=2) as r:
+                      if r.status == 200:
+                          print('GENE_GRCE_PROVIDER=READY')
+                          raise SystemExit(0)
+              except Exception:
+                  time.sleep(2)
+          print(open('/tmp/gene-grce-provider.log').read())
+          raise SystemExit('local reasoning provider did not become ready')
+          PY
+
+      - name: Run Nodes 2 and 3 cooperative development cycle
+        env:
+          GRCE_OBJECTIVE: ${{ inputs.objective }}
+        run: |
+          if [ -n "$GRCE_OBJECTIVE" ]; then
+            python scripts/grce_cycle.py --objective "$GRCE_OBJECTIVE" | tee runtime/grce/latest_cycle_summary.json
+          else
+            python scripts/grce_cycle.py | tee runtime/grce/latest_cycle_summary.json
+          fi
+
+      - name: Verify child evolution ledgers
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from genesis.gden import EvolutionLedger
+          for logical_id in ('gene-node-2', 'gene-node-3'):
+              path = Path('runtime/grce') / logical_id / 'evolution_ledger.jsonl'
+              ok, reason = EvolutionLedger(path).verify()
+              assert ok, f'{logical_id}: {reason}'
+              print(logical_id, 'LEDGER=VALID')
+          PY
+
+      - name: Upload cooperative evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: gene-cooperative-evolution-${{ github.run_id }}
+          path: |
+            runtime/grce/latest_cycle_summary.json
+            runtime/grce/cycles/*.json
+            runtime/grce/gene-node-2/manifest.json
+            runtime/grce/gene-node-2/evolution_ledger.jsonl
+            runtime/grce/gene-node-3/manifest.json
+            runtime/grce/gene-node-3/evolution_ledger.jsonl
+          if-no-files-found: error
