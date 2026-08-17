@@ -19,6 +19,7 @@ on:
       - 'genesis/peer_compute.py'
       - 'genesis/memory.py'
       - 'genesis/operations.py'
+      - 'genesis/automation.py'
       - 'genesis/competitive_reference.py'
       - 'genesis/immortality_scan.py'
       - 'genesis/research_tasks.py'
@@ -40,6 +41,7 @@ on:
       - 'scripts/autonomous_engineering.py'
       - 'scripts/capability_growth_sync.py'
       - 'scripts/genesis_hourly_ops.py'
+      - 'scripts/genesis_automation.py'
       - 'scripts/system_scorecard.py'
       - 'scripts/competitive_reference_monitor.py'
       - 'tests/test_proactive.py'
@@ -50,6 +52,7 @@ on:
       - 'tests/test_capability_integration.py'
       - 'tests/test_memory.py'
       - 'tests/test_operations.py'
+      - 'tests/test_automation_module.py'
       - 'tests/test_immortality_scan.py'
       - 'tests/test_task_queue.py'
       - 'tests/test_self_learning.py'
@@ -112,6 +115,9 @@ jobs:
             runtime/operations_issues.jsonl
             runtime/github_issue_sync.json
             runtime/email_delivery_status.json
+            runtime/automation_state.json
+            runtime/automation_report.json
+            runtime/chatgpt_escalation_sync.json
             runtime/research_reviews/
             runtime/task_reviews/
           key: genesis-runtime-${{ runner.os }}-${{ github.run_id }}
@@ -200,9 +206,13 @@ jobs:
         run: |
           python scripts/genesis_hourly_ops.py collect
           python scripts/genesis_hourly_ops.py sync-issues
+      - name: Evaluate repair budget and escalate unresolved issues to ChatGPT
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/genesis_automation.py all
       - name: Send Genesis hourly email from GitHub
         run: python scripts/genesis_hourly_ops.py email
-      - name: Preserve scan score task learning memory security coding efficiency and operations evidence
+      - name: Preserve scan score task learning memory security coding efficiency operations and automation evidence
         uses: actions/upload-artifact@v4
         with:
           name: genesis-autonomous-evidence-${{ github.run_id }}
