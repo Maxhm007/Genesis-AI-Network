@@ -1,6 +1,12 @@
 name: Gene Cooperative Evolution
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - 'genesis/grce.py'
+      - 'scripts/grce_cycle.py'
+      - '.github/workflows/gene-cooperative-evolution.yml'
   workflow_dispatch:
     inputs:
       objective:
