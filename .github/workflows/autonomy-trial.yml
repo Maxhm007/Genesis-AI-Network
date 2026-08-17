@@ -14,7 +14,7 @@ permissions:
 jobs:
   autonomy_trial:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 40
     steps:
       - name: Checkout clean main
         uses: actions/checkout@v4
@@ -68,10 +68,10 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install 'transformers>=4.48,<5' safetensors
 
-      - name: Boot Genesis local repair provider
+      - name: Boot stronger isolated Genesis repair provider
         run: |
-          nohup python scripts/local_repair_provider.py --port 8765 > autonomy-repair.log 2>&1 &
-          for i in $(seq 1 120); do
+          nohup python scripts/local_repair_provider.py --model Qwen/Qwen2.5-Coder-1.5B-Instruct --port 8765 > autonomy-repair.log 2>&1 &
+          for i in $(seq 1 150); do
             if curl -fsS http://127.0.0.1:8765/health >/dev/null 2>&1; then
               echo "GENESIS_REPAIR_PROVIDER_URL=http://127.0.0.1:8765" >> "$GITHUB_ENV"
               exit 0
@@ -88,10 +88,15 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/self_heal.py | tee autonomy-result.json
 
-      - name: Require a validated autonomous repair candidate
+      - name: Require a validated production-code repair candidate
         run: |
           if ! grep -q '"status": "candidate_repaired"' autonomy-result.json; then
             echo "Genesis did not produce a validated autonomous repair candidate."
+            cat autonomy-result.json
+            exit 1
+          fi
+          if ! grep -q '"genesis/' autonomy-result.json; then
+            echo "Genesis candidate did not repair production code; test-only repair is rejected."
             cat autonomy-result.json
             exit 1
           fi
