@@ -75,7 +75,7 @@ class ProactiveDevelopmentLoop:
             f"gene-velocity:{day}",
             objective,
             module_id="genesis.capability",
-            priority=112,
+            priority=100,
             payload={
                 "task_type": "gene_velocity_improvement",
                 "velocity": report,
