@@ -51,8 +51,12 @@ if __name__ == "__main__":
                     preferences_path=runtime / "learning_preferences.json",
                 )
                 context = build_team_context(task)
-                plan = team.plan_task(task.objective, context=context)
                 outputs = team.run_task(task.objective, context=context)
+                selected_roles = [str(item.get("agent")) for item in outputs if item.get("agent")]
+                composition_reason = next(
+                    (str(item.get("orchestration_reason")) for item in outputs if item.get("orchestration_reason")),
+                    "no executed orchestration reason available",
+                )
                 report = {
                     "status": "completed",
                     "task_id": task.task_id,
@@ -60,8 +64,8 @@ if __name__ == "__main__":
                     "owner_module": task.module_id,
                     "outputs": outputs,
                     "learning_domain": team._current_domain,
-                    "selected_roles": list(plan.role_names),
-                    "composition_reason": plan.reason,
+                    "selected_roles": selected_roles,
+                    "composition_reason": composition_reason,
                     "rule": (
                         "AI Team provides bounded specialist analysis. The owning module remains responsible for execution and normal "
                         "Security/validation gates still apply. Historical agent and provider preferences are based only on repeated "
