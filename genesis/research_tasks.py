@@ -18,11 +18,11 @@ SUPPORTED_TASK_TYPES = {
 
 
 class ImmortalityResearchWorker:
-    """Advance one high-priority Genesis mission task to candidate review.
+    """Advance one high-priority Genesis mission task to a preserved review artifact.
 
-    Despite the historical class name, this worker handles immortality research
-    and competitive-AI maintenance tasks. Outputs remain candidate evidence and
-    cannot promote scientific claims, benchmark targets, or protected code.
+    Completion means the requested review artifact was produced. It does not mean
+    that a scientific claim, benchmark value, or capability assertion was promoted.
+    Those still require their separate evidence/validation path.
     """
 
     def __init__(self, root: Path, providers: ProviderRegistry | None = None) -> None:
@@ -55,30 +55,32 @@ class ImmortalityResearchWorker:
 
     def run_one(self) -> dict:
         candidates = [
-            task for task in self.queue.list(state="new", limit=100)
-            if task.payload.get("task_type") in SUPPORTED_TASK_TYPES
+            task for task in self.queue.list(limit=200)
+            if task.state in {"new", "assigned"} and task.payload.get("task_type") in SUPPORTED_TASK_TYPES
         ]
         if not candidates:
-            return {"status": "idle", "reason": "no_supported_new_task"}
+            return {"status": "idle", "reason": "no_supported_runnable_task"}
         task = candidates[0]
         task_type = str(task.payload.get("task_type"))
         module_id = "genesis.research" if task_type == "immortality_research" else "genesis.capability"
-        self.queue.transition(task.task_id, "assigned", module_id=module_id)
-        self.queue.transition(task.task_id, "running")
+        if task.state == "new":
+            self.queue.transition(task.task_id, "assigned", module_id=module_id)
+        self.queue.transition(task.task_id, "running", module_id=module_id)
         outputs = self.team.run_task(task.objective, context=self._context(task))
         review = {
             "task": asdict(task),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "status": "candidate_review",
             "team_outputs": outputs,
-            "rule": "Candidate review only. Evidence/benchmark claims require verification before knowledge, reference, score, or code promotion.",
+            "rule": "Candidate evidence only. Completion of this work item does not promote evidence, benchmark claims, knowledge, scores, or protected code.",
         }
         out_dir = self.root / "runtime" / "task_reviews"
         out_dir.mkdir(parents=True, exist_ok=True)
         (out_dir / f"{task.task_id}.json").write_text(json.dumps(review, indent=2) + "\n", encoding="utf-8")
-        updated = self.queue.transition(task.task_id, "review")
+        self.queue.transition(task.task_id, "review", module_id=module_id)
+        updated = self.queue.transition(task.task_id, "complete", module_id=module_id)
         return {
-            "status": "review_ready",
+            "status": "review_completed",
             "task_id": task.task_id,
             "task_type": task_type,
             "priority": task.priority,
