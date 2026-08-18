@@ -1,13 +1,13 @@
 {
   "chain_valid": true,
-  "consensus_active": true,
+  "consensus_active": false,
   "genesis_anchor": "47671ab61ecad61391886d430ccb832c1e24a7ed543376c647aa3808b0c892f3",
-  "head": "83366b0821cc6f15ff99c639a03fa55df4d353eff0745382f01b48d29e0bc549",
-  "height": 138,
-  "matching_independent_peers": 2,
+  "head": "3d65b3d69434f97ede9c1b6166df10106270bdb76bc2be1daaea790a7d0b73b8",
+  "height": 139,
+  "matching_independent_peers": 0,
   "network": "gden/0.1",
   "persistent_node_key_signatures": false,
-  "published_at": "2026-08-18T11:51:30.853416+00:00",
+  "published_at": "2026-08-18T13:23:26.528320+00:00",
   "required_quorum": 2,
   "source_repo": "Maxhm007/Genesis-AI-Network"
 }
