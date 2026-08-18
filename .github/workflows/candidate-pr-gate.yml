@@ -1,0 +1,137 @@
+name: Genesis Candidate PR Gate
+
+on:
+  pull_request:
+    branches:
+      - main
+    types: [opened, synchronize, reopened, ready_for_review]
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  validator_a:
+    if: startsWith(github.head_ref, 'genesis/candidate-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite A
+        run: python -m pytest -q
+      - name: Protect Genesis identity and workflow boundary A
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if git diff --name-only origin/main...HEAD | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
+            echo 'Protected Genesis identity/workflow boundary changed' >&2
+            exit 1
+          fi
+      - name: Security review candidate A
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('origin/main')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
+      - name: Sign validator A approval
+        run: python genesis/ephemeral_validator.py --validator-id candidate-pr-validator-a --candidate ${{ github.event.pull_request.head.sha }} --output validator-a.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-pr-validator-a-${{ github.event.pull_request.number }}
+          path: validator-a.json
+
+  validator_b:
+    if: startsWith(github.head_ref, 'genesis/candidate-')
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite B
+        run: python -m pytest -q
+      - name: Protect Genesis identity and workflow boundary B
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          if git diff --name-only origin/main...HEAD | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
+            echo 'Protected Genesis identity/workflow boundary changed' >&2
+            exit 1
+          fi
+      - name: Security review candidate B
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('origin/main')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
+      - name: Sign validator B approval
+        run: python genesis/ephemeral_validator.py --validator-id candidate-pr-validator-b --candidate ${{ github.event.pull_request.head.sha }} --output validator-b.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: candidate-pr-validator-b-${{ github.event.pull_request.number }}
+          path: validator-b.json
+
+  merge_exact_candidate:
+    if: startsWith(github.head_ref, 'genesis/candidate-')
+    needs: [validator_a, validator_b]
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-pr-validator-a-${{ github.event.pull_request.number }}
+          path: votes/a
+      - uses: actions/download-artifact@v4
+        with:
+          name: candidate-pr-validator-b-${{ github.event.pull_request.number }}
+          path: votes/b
+      - name: Verify independent signed quorum
+        run: python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
+      - name: Recheck exact candidate and protected boundary
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate='${{ github.event.pull_request.head.sha }}'
+          test "$(git rev-parse HEAD)" = "$candidate"
+          git fetch origin main
+          git merge-base --is-ancestor origin/main "$candidate"
+          if git diff --name-only origin/main..."$candidate" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
+            echo 'Protected Genesis identity/workflow boundary changed' >&2
+            exit 1
+          fi
+      - name: Merge exact validated candidate through PR
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_URL: ${{ github.event.pull_request.html_url }}
+          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh pr merge "$PR_URL" --repo "$GITHUB_REPOSITORY" --merge --delete-branch --match-head-commit "$CANDIDATE_SHA"
