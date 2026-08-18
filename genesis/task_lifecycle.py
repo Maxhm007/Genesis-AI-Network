@@ -14,9 +14,22 @@ REVIEW_ARTIFACT_TASK_TYPES = {
     "competitive_reference_refresh",
 }
 
+BOUNDED_BLOCKED_TASK_TYPES = {
+    "operational_issue",
+    "benchmark_runner_integration",
+}
+
 
 class TaskLifecycleReconciler:
-    """Close promoted reviews and recover reviews that never reached completion."""
+    """Close promoted reviews and recover bounded autonomous work safely.
+
+    Review-state work is reconciled against durable completion evidence. Autonomous
+    implementation tasks that remain blocked are counted as failed attempts instead
+    of being retried forever without consuming their configured retry budget. A
+    retryable failure is immediately reassigned for the next engineering pass; once
+    the budget is exhausted the task is quarantined so an owning planner may create
+    a fresh work generation rather than looping on the same failed attempt.
+    """
 
     STALE_REVIEW_HOURS = 3
 
@@ -78,12 +91,35 @@ class TaskLifecycleReconciler:
             return False
         return review.get("status") == "candidate_review"
 
+    def _reconcile_blocked(self) -> tuple[list[str], list[str]]:
+        retried: list[str] = []
+        quarantined: list[str] = []
+        for task in self.queue.list(state="blocked", limit=1000):
+            task_type = str(task.payload.get("task_type", ""))
+            if task_type not in BOUNDED_BLOCKED_TASK_TYPES:
+                continue
+            reason = task.state_reason or task.last_error or "autonomous implementation attempt remained blocked"
+            updated = self.queue.record_failure(
+                task.task_id,
+                reason,
+                classification="blocked_autonomous_repair",
+                retry_after_seconds=0,
+                module_id=task.module_id,
+            )
+            if updated.state == "failed" and self.queue.retryable(updated):
+                self.queue.transition(updated.task_id, "assigned", module_id=updated.module_id)
+                retried.append(updated.task_id)
+            elif updated.state == "quarantined":
+                quarantined.append(updated.task_id)
+        return retried, quarantined
+
     def reconcile(self) -> dict:
         evidence = self._candidate_evidence()
         now = datetime.now(timezone.utc)
         completed: list[str] = []
         retried: list[str] = []
         waiting: list[str] = []
+        blocked_retried, blocked_quarantined = self._reconcile_blocked()
 
         for task in self.queue.list(state="review", limit=1000):
             if self._has_completed_review_artifact(task):
@@ -115,6 +151,8 @@ class TaskLifecycleReconciler:
             "completed": completed,
             "retried": retried,
             "waiting": waiting,
+            "blocked_retried": blocked_retried,
+            "blocked_quarantined": blocked_quarantined,
             "review_count": len(completed) + len(retried) + len(waiting),
         }
         (self.runtime / "task_lifecycle_reconcile.json").write_text(
