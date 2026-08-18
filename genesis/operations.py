@@ -52,8 +52,8 @@ class GenesisOperations:
         self.history_path = self.runtime / "operations_issue_history.jsonl"
 
     @staticmethod
-    def _stable_key(title: str, evidence: str) -> str:
-        raw = f"{title.strip()}\n{evidence.strip()}".encode("utf-8")
+    def _stable_key(title: str, identity: str) -> str:
+        raw = f"{title.strip()}\n{identity.strip()}".encode("utf-8")
         return hashlib.sha256(raw).hexdigest()[:20]
 
     def _append_history(self, event: str, issue_key: str, **payload) -> dict:
@@ -122,7 +122,7 @@ class GenesisOperations:
 
         if int(ai.get("score", 0)) < 50:
             issues.append(OperationalIssue(
-                self._stable_key("AI capability below target", str(ai)),
+                self._stable_key("AI capability below target", "ai_capability_score_below_50"),
                 "AI capability below target",
                 "high",
                 "genesis.ai_score",
@@ -134,7 +134,7 @@ class GenesisOperations:
         samples = int(eff.get("samples", 0) or 0)
         if samples < 3:
             issues.append(OperationalIssue(
-                self._stable_key("Efficiency telemetry insufficient", f"samples={samples}"),
+                self._stable_key("Efficiency telemetry insufficient", "efficiency_samples_below_3"),
                 "Efficiency telemetry insufficient",
                 "medium",
                 "genesis.coding",
@@ -145,7 +145,7 @@ class GenesisOperations:
 
         if not bool(mission.get("fresh_scan_24h", False)):
             issues.append(OperationalIssue(
-                self._stable_key("Immortality research scan stale", str(mission.get('fresh_scan_24h'))),
+                self._stable_key("Immortality research scan stale", "immortality_scan_not_fresh_24h"),
                 "Immortality research scan stale",
                 "high",
                 "genesis.ai_score",
