@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Genesis Live Status</title>
+<style>
+:root{color-scheme:dark;--bg:#08111f;--panel:#111c2d;--line:#23324a;--text:#e8eef8;--muted:#92a2ba;--good:#3ddc97;--warn:#ffcc66;--bad:#ff6b6b;--accent:#6ea8fe}
+*{box-sizing:border-box}body{margin:0;font-family:Inter,ui-sans-serif,system-ui,-apple-system,Segoe UI,Roboto,sans-serif;background:linear-gradient(180deg,#07101d,#0b1422 55%,#08111f);color:var(--text)}
+main{max-width:1180px;margin:auto;padding:28px 18px 50px}.top{display:flex;gap:18px;align-items:center;justify-content:space-between;flex-wrap:wrap}.title h1{margin:0;font-size:clamp(28px,5vw,44px)}.title p{margin:8px 0 0;color:var(--muted)}button{background:#162640;border:1px solid #31517d;color:white;border-radius:10px;padding:10px 14px;cursor:pointer}.grid{display:grid;grid-template-columns:repeat(12,1fr);gap:14px;margin-top:22px}.card{background:rgba(17,28,45,.92);border:1px solid var(--line);border-radius:16px;padding:17px;box-shadow:0 12px 32px #0004}.span3{grid-column:span 3}.span4{grid-column:span 4}.span6{grid-column:span 6}.span12{grid-column:span 12}.label{font-size:12px;text-transform:uppercase;letter-spacing:.1em;color:var(--muted)}.big{font-size:34px;font-weight:750;margin-top:6px}.status{display:inline-flex;align-items:center;gap:7px}.dot{width:9px;height:9px;border-radius:50%;background:var(--muted)}.good .dot{background:var(--good);box-shadow:0 0 14px var(--good)}.warn .dot{background:var(--warn)}.bad .dot{background:var(--bad)}.muted{color:var(--muted)}.bar{height:9px;background:#0a1322;border-radius:999px;overflow:hidden;margin-top:12px}.bar>i{height:100%;display:block;background:linear-gradient(90deg,#4f8cff,#58d3ff);width:0}.nodes{display:grid;grid-template-columns:repeat(3,1fr);gap:12px;margin-top:12px}.node{border:1px solid var(--line);border-radius:12px;padding:13px}.node strong{font-size:18px}.list{display:grid;gap:9px;margin-top:12px}.item{padding:11px 12px;border:1px solid var(--line);border-radius:11px;background:#0c1728}.item a{color:#9bc1ff;text-decoration:none}.kvs{display:grid;grid-template-columns:auto 1fr;gap:7px 12px;margin-top:12px}.kvs b{color:#cbd8eb}.mono{font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:12px;white-space:pre-wrap}.footer{margin-top:18px;color:var(--muted);font-size:13px}.error{color:#ff9b9b}.pill{display:inline-block;border:1px solid var(--line);border-radius:999px;padding:4px 8px;margin:3px 5px 0 0;font-size:12px}.right{text-align:right}
+@media(max-width:850px){.span3,.span4,.span6{grid-column:span 12}.nodes{grid-template-columns:1fr}.right{text-align:left}}
+</style>
+</head>
+<body><main>
+<div class="top"><div class="title"><h1>Genesis Live Status</h1><p>Gene 0 operational view · Node 0 / 2 / 3 · public GitHub evidence</p></div><div class="right"><button onclick="loadAll()">Refresh now</button><div id="updated" class="muted" style="margin-top:8px">Loading…</div></div></div>
+<div class="grid">
+<section class="card span3"><div class="label">AI capability</div><div class="big" id="ai">—</div><div class="bar"><i id="aibar"></i></div></section>
+<section class="card span3"><div class="label">Open issues</div><div class="big" id="open">—</div><div id="blocked" class="muted">Blocked —</div></section>
+<section class="card span3"><div class="label">Current work</div><div class="big" id="running">—</div><div id="tasksummary" class="muted">Loading task state…</div></section>
+<section class="card span3"><div class="label">Last solution</div><div id="solution" style="margin-top:9px">Loading…</div></section>
+<section class="card span12"><div class="label">Network health</div><div class="nodes" id="nodes"></div></section>
+<section class="card span6"><div class="label">Current / next target</div><div id="target" style="margin-top:12px">Loading…</div></section>
+<section class="card span6"><div class="label">Persistent task state</div><div id="tasks" class="kvs"></div></section>
+<section class="card span6"><div class="label">Recent autonomous activity</div><div id="commits" class="list"></div></section>
+<section class="card span6"><div class="label">Candidate / audit PRs</div><div id="prs" class="list"></div></section>
+<section class="card span12"><div class="label">Latest hourly report</div><div id="report" class="mono muted" style="margin-top:12px;max-height:280px;overflow:auto"></div></section>
+</div>
+<div class="footer">Auto-refreshes every 60 seconds. Data comes directly from GitHub's public API; no Genesis secret or backend is exposed.</div>
+</main>
+<script>
+const owner='Maxhm007';
+const repos={0:'Genesis-AI-Network',2:'Genesis-Node-2',3:'Genesis-Node-3'};
+const api='https://api.github.com';
+async function get(path){const r=await fetch(api+path,{headers:{Accept:'application/vnd.github+json'}});if(!r.ok)throw new Error(`${r.status} ${r.statusText}`);return r.json()}
+function esc(s){return String(s??'').replace(/[&<>"']/g,c=>({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'}[c]))}
+function age(iso){if(!iso)return 'unknown';const s=Math.max(0,(Date.now()-new Date(iso))/1000);if(s<90)return `${Math.round(s)}s ago`;if(s<5400)return `${Math.round(s/60)}m ago`;if(s<129600)return `${Math.round(s/3600)}h ago`;return `${Math.round(s/86400)}d ago`}
+function reportText(body){const m=String(body||'').match(/```text\n([\s\S]*?)```/);return m?m[1]:String(body||'')}
+function parseHourly(t){
+ const ai=+(t.match(/AI Capability:\s*(\d+)\/100/i)||[])[1]||0;
+ const issue=(t.match(/ISSUES:\s*open=(\d+)\s+blocked=(\d+)\s+resolved=(\d+)/i)||[]);
+ const tasksRaw=(t.match(/Persistent tasks:\s*(\{[^\n]+\})/i)||[])[1];let tasks={};try{tasks=JSON.parse(tasksRaw)}catch{}
+ const targets=[...t.matchAll(/- \[(\w+)\] ([^|\n]+) \| ([^|\n]+) \| module=([^|\n]+)(?: \| work_generation=(\d+))?/g)].map(m=>({severity:m[1],title:m[2].trim(),status:m[3].trim(),module:m[4].trim(),generation:m[5]}));
+ return {ai,open:+issue[1]||0,blocked:+issue[2]||0,resolved:+issue[3]||0,tasks,targets};
+}
+function nodeState(run){if(!run)return ['warn','No workflow evidence'];if(run.status!=='completed')return ['warn',`${run.name}: ${run.status}`];return run.conclusion==='success'?['good',`${run.name}: healthy`]:['bad',`${run.name}: ${run.conclusion}`]}
+async function loadNode(n,repo){try{const x=await get(`/repos/${owner}/${repo}/actions/runs?per_page=8`);const preferred=x.workflow_runs.find(r=>/Self Healing|Peer Healing|Gene Pulse|Proactive Development/i.test(r.name))||x.workflow_runs[0];const [cls,label]=nodeState(preferred);return `<div class="node ${cls}"><div class="status"><span class="dot"></span><strong>Node ${n}</strong></div><div style="margin-top:9px">${esc(label)}</div><div class="muted" style="margin-top:5px">${preferred?age(preferred.updated_at):'No run found'}</div>${preferred?`<a href="${preferred.html_url}" target="_blank" style="color:#9bc1ff;font-size:12px">Open run ↗</a>`:''}</div>`}catch(e){return `<div class="node bad"><strong>Node ${n}</strong><div class="error">${esc(e.message)}</div></div>`}}
+async function loadAll(){
+ document.getElementById('updated').textContent='Refreshing…';
+ try{
+  const [comments,commits,prs,n0,n2,n3]=await Promise.all([
+   get(`/repos/${owner}/${repos[0]}/issues/4/comments?per_page=100`),
+   get(`/repos/${owner}/${repos[0]}/commits?per_page=30`),
+   get(`/repos/${owner}/${repos[0]}/pulls?state=all&sort=updated&direction=desc&per_page=12`),
+   loadNode(0,repos[0]),loadNode(2,repos[2]),loadNode(3,repos[3])
+  ]);
+  const hourly=[...comments].reverse().find(c=>/Genesis Hourly Update/.test(c.body))||comments.at(-1);const text=reportText(hourly?.body);const p=parseHourly(text);
+  document.getElementById('ai').textContent=`${p.ai}/100`;document.getElementById('aibar').style.width=`${Math.max(0,Math.min(100,p.ai))}%`;
+  document.getElementById('open').textContent=p.open;document.getElementById('blocked').textContent=`Blocked ${p.blocked} · Resolved ${p.resolved}`;
+  const running=p.tasks.running||0,active=(p.tasks.assigned||0)+(p.tasks.running||0)+(p.tasks.review||0);document.getElementById('running').textContent=running;document.getElementById('tasksummary').textContent=`${active} active-slot states · ${(p.tasks.complete||0)} complete`;
+  document.getElementById('tasks').innerHTML=Object.entries(p.tasks).sort().map(([k,v])=>`<b>${esc(k)}</b><span>${esc(v)}</span>`).join('');
+  document.getElementById('target').innerHTML=p.targets.length?p.targets.map(x=>`<div class="item"><strong>${esc(x.title)}</strong><div class="muted">${esc(x.severity)} · ${esc(x.status)} · ${esc(x.module)}${x.generation?` · generation ${esc(x.generation)}`:''}</div></div>`).join(''):'<span class="status good"><span class="dot"></span>No unresolved target parsed from latest report.</span>';
+  document.getElementById('nodes').innerHTML=n0+n2+n3;
+  const autonomous=commits.filter(c=>/Genesis self-development candidate|Publish Genesis blockchain consensus status|Record validated Genesis update on blockchain/i.test(c.commit.message)).slice(0,8);
+  document.getElementById('commits').innerHTML=autonomous.map(c=>`<div class="item"><a href="${c.html_url}" target="_blank"><strong>${esc(c.commit.message.split('\n')[0])}</strong></a><div class="muted">${age(c.commit.author?.date)}</div></div>`).join('')||'<span class="muted">No recent autonomous commit found.</span>';
+  const candidatePrs=prs.filter(p=>/^genesis\/candidate-|Genesis autonomous candidate/i.test(p.head?.ref||'')||/Genesis autonomous candidate/i.test(p.title)).slice(0,6);
+  document.getElementById('prs').innerHTML=candidatePrs.map(p=>`<div class="item"><a href="${p.html_url}" target="_blank"><strong>#${p.number} ${esc(p.title)}</strong></a><div class="muted">${esc(p.state)} · ${esc(p.head?.ref)} · updated ${age(p.updated_at)}</div></div>`).join('')||'<span class="muted">No current autonomous candidate PRs.</span>';
+  const solved=commits.find(c=>/Genesis self-development candidate/i.test(c.commit.message));document.getElementById('solution').innerHTML=solved?`<a href="${solved.html_url}" target="_blank" style="color:#9bc1ff"><strong>${esc(solved.commit.message.split('\n')[0].replace('Genesis self-development candidate: ',''))}</strong></a><div class="muted" style="margin-top:5px">${age(solved.commit.author?.date)}</div>`:'<span class="muted">No recent autonomous solution found.</span>';
+  document.getElementById('report').textContent=text||'No hourly report found.';
+  document.getElementById('updated').textContent=`Updated ${new Date().toLocaleTimeString()} · report ${hourly?age(hourly.updated_at||hourly.created_at):'unknown'}`;
+ }catch(e){document.getElementById('updated').innerHTML=`<span class="error">${esc(e.message)}</span>`}
+}
+loadAll();setInterval(loadAll,60000);
+</script></body></html>
