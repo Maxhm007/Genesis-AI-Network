@@ -19,6 +19,13 @@ def make_task(root: Path, benchmark_id: str = "terminal_bench_2_1"):
     )
 
 
+def quarantine(queue: PersistentTaskQueue, task_id: str) -> None:
+    queue.transition(task_id, "assigned", module_id="genesis.coding")
+    queue.transition(task_id, "running", module_id="genesis.coding")
+    queue.transition(task_id, "failed", module_id="genesis.coding")
+    queue.transition(task_id, "quarantined", module_id="genesis.coding")
+
+
 def test_missing_real_result_creates_one_runner_task(tmp_path: Path) -> None:
     task = make_task(tmp_path)
     planner = BenchmarkExecutionPlanner(tmp_path)
@@ -46,6 +53,28 @@ def test_terminal_runner_context_prioritizes_executable_files(tmp_path: Path) ->
         "genesis/benchmark_execution.py",
         "tests/test_terminal_bench_evidence.py",
     ]
+
+
+def test_exhausted_terminal_runner_work_surfaces_execution_readiness_blocker(tmp_path: Path, monkeypatch) -> None:
+    for name in BenchmarkExecutionPlanner.TERMINAL_BENCH_ENV:
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr("genesis.benchmark_execution.shutil.which", lambda _: None)
+
+    task = make_task(tmp_path)
+    planner = BenchmarkExecutionPlanner(tmp_path)
+    first = planner.advance(task)
+    quarantine(planner.queue, first["task_id"])
+    second = planner.advance(task)
+    assert second["work_generation"] == 2
+    quarantine(planner.queue, second["task_id"])
+
+    result = planner.advance(task)
+    assert result["status"] == "external_execution_required"
+    assert result["owner_action_required"] is True
+    assert result["last_work_generation"] == 2
+    assert "harbor_cli" in result["missing"]
+    assert "GENESIS_BENCHMARK_MODEL" in result["missing"]
+    assert len(planner._runner_tasks("terminal_bench_2_1")) == 2
 
 
 def test_unknown_benchmark_still_queues_bounded_runner_work(tmp_path: Path) -> None:
