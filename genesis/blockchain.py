@@ -1,11 +1,15 @@
 from __future__ import annotations
 
+import base64
 from dataclasses import asdict, dataclass
 from datetime import datetime, timezone
 import hashlib
 import json
 from pathlib import Path
 from typing import Any
+
+from cryptography.exceptions import InvalidSignature
+from cryptography.hazmat.primitives.asymmetric.ed25519 import Ed25519PublicKey
 
 
 def utc_now() -> str:
@@ -18,6 +22,68 @@ def canonical_json(value: Any) -> str:
 
 def sha256_text(value: str) -> str:
     return hashlib.sha256(value.encode("utf-8")).hexdigest()
+
+
+def attestation_material(attestation: dict) -> dict:
+    """Canonical signed GDEN attestation payload.
+
+    Signature metadata is intentionally excluded. Every field that establishes
+    peer identity, network membership and the claimed chain state is covered.
+    """
+    return {
+        "network": str(attestation.get("network", "")).strip(),
+        "peer_id": str(attestation.get("peer_id", "")).strip(),
+        "repository": str(attestation.get("repository", "")).strip(),
+        "genesis_anchor": str(attestation.get("genesis_anchor", "")).strip(),
+        "height": int(attestation.get("height", -1)),
+        "head": str(attestation.get("head", "")).strip(),
+        "observed_at": str(attestation.get("observed_at", "")).strip(),
+    }
+
+
+def _parse_time(value: str) -> datetime:
+    parsed = datetime.fromisoformat(value.replace("Z", "+00:00"))
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    return parsed.astimezone(timezone.utc)
+
+
+def verify_ed25519_attestation(
+    attestation: dict,
+    public_key_b64: str,
+    *,
+    max_age_seconds: int = 7200,
+    now: datetime | None = None,
+) -> tuple[bool, str]:
+    """Verify one persistent-key attestation and return a stable rejection reason."""
+    if attestation.get("signature_algorithm") != "ed25519":
+        return False, "missing_or_wrong_signature_algorithm"
+    signature_b64 = str(attestation.get("signature", "")).strip()
+    if not signature_b64:
+        return False, "missing_signature"
+    try:
+        material = attestation_material(attestation)
+    except (TypeError, ValueError):
+        return False, "malformed_attestation"
+    if not material["observed_at"]:
+        return False, "missing_observed_at"
+    try:
+        observed = _parse_time(material["observed_at"])
+    except ValueError:
+        return False, "invalid_observed_at"
+    current = (now or datetime.now(timezone.utc)).astimezone(timezone.utc)
+    age = (current - observed).total_seconds()
+    if age < -300:
+        return False, "attestation_from_future"
+    if max_age_seconds >= 0 and age > max_age_seconds:
+        return False, "stale_attestation"
+    try:
+        public_key = Ed25519PublicKey.from_public_bytes(base64.b64decode(public_key_b64, validate=True))
+        signature = base64.b64decode(signature_b64, validate=True)
+        public_key.verify(signature, canonical_json(material).encode("utf-8"))
+    except (ValueError, InvalidSignature):
+        return False, "invalid_signature"
+    return True, "verified"
 
 
 @dataclass(frozen=True)
@@ -38,9 +104,8 @@ class BlockchainModule:
     """Compact tamper-evident Genesis commitment chain.
 
     Large data stays off-chain. This module stores hashes and compact state
-    commitments only. The local append-only chain is independently verifiable.
-    Distributed consensus becomes active only after the configured quorum of
-    trusted independent peers attests to the exact same chain head.
+    commitments only. Repository agreement and persistent-key cryptographic
+    quorum are reported separately so Genesis cannot overstate decentralization.
     """
 
     def __init__(self, root: Path, quorum: int = 2) -> None:
@@ -125,50 +190,99 @@ class BlockchainModule:
         peer_attestations: list[dict] | None = None,
         *,
         trusted_peers: dict[str, str] | None = None,
+        trusted_peer_keys: dict[str, str] | None = None,
+        max_attestation_age_seconds: int = 7200,
+        now: datetime | None = None,
     ) -> dict:
-        """Return quorum status for the local head.
+        """Return local-chain, repository-agreement and cryptographic quorum state.
 
-        When ``trusted_peers`` is supplied, only attestations whose peer ID maps
-        to the expected repository are counted. The attestation must also name
-        the same Genesis anchor and GDEN network. This prevents arbitrary caller
-        input from being treated as an independent repository vote.
+        `trusted_peer_keys is None` preserves legacy repository-quorum semantics for
+        internal callers. Supplying a mapping, including an empty mapping, makes
+        persistent Ed25519 verification mandatory for `consensus_active`.
         """
         verification = self.verify()
         head = verification.get("head")
         genesis_anchor = verification.get("genesis_anchor")
+        height = int(verification.get("height", 0))
         unique_peers: set[str] = set()
-        matching = 0
-        rejected = 0
+        repository_matching = 0
+        cryptographic_matching = 0
+        rejected: list[dict[str, str]] = []
+
         for attestation in peer_attestations or []:
             peer_id = str(attestation.get("peer_id", "")).strip()
             peer_head = str(attestation.get("head", "")).strip()
             repository = str(attestation.get("repository", "")).strip()
             network = str(attestation.get("network", "")).strip()
             attested_anchor = str(attestation.get("genesis_anchor", "")).strip()
+            try:
+                attested_height = int(attestation.get("height", -1))
+            except (TypeError, ValueError):
+                attested_height = -1
 
-            if not peer_id or peer_id in unique_peers or peer_head != head:
-                rejected += 1
-                continue
-            if trusted_peers is not None:
+            reason = None
+            if not peer_id:
+                reason = "missing_peer_id"
+            elif peer_id in unique_peers:
+                reason = "duplicate_peer"
+            elif peer_head != head:
+                reason = "wrong_head"
+            elif attested_height != height:
+                reason = "wrong_height"
+            elif trusted_peers is not None:
                 expected_repository = trusted_peers.get(peer_id)
                 if not expected_repository or repository != expected_repository:
-                    rejected += 1
-                    continue
-                if network != "gden/0.1" or attested_anchor != genesis_anchor:
-                    rejected += 1
-                    continue
-            unique_peers.add(peer_id)
-            matching += 1
+                    reason = "wrong_repository"
+                elif network != "gden/0.1":
+                    reason = "wrong_network"
+                elif attested_anchor != genesis_anchor:
+                    reason = "wrong_genesis_anchor"
 
-        active = bool(verification.get("valid")) and matching >= self.quorum
+            if reason:
+                rejected.append({"peer_id": peer_id or "unknown", "reason": reason})
+                continue
+
+            unique_peers.add(peer_id)
+            repository_matching += 1
+
+            if trusted_peer_keys is None:
+                cryptographic_matching += 1
+                continue
+
+            public_key = trusted_peer_keys.get(peer_id)
+            if not public_key:
+                rejected.append({"peer_id": peer_id, "reason": "untrusted_or_missing_public_key"})
+                continue
+            valid_signature, signature_reason = verify_ed25519_attestation(
+                attestation,
+                public_key,
+                max_age_seconds=max_attestation_age_seconds,
+                now=now,
+            )
+            if not valid_signature:
+                rejected.append({"peer_id": peer_id, "reason": signature_reason})
+                continue
+            cryptographic_matching += 1
+
+        chain_valid = bool(verification.get("valid"))
+        repository_active = chain_valid and repository_matching >= self.quorum
+        cryptographic_required = trusted_peer_keys is not None
+        active = chain_valid and (
+            cryptographic_matching >= self.quorum if cryptographic_required else repository_active
+        )
         return {
             "module": "genesis.blockchain",
-            "chain_valid": bool(verification.get("valid")),
-            "height": verification.get("height", 0),
+            "chain_valid": chain_valid,
+            "height": height,
             "head": head,
             "genesis_anchor": genesis_anchor,
-            "matching_independent_peers": matching,
-            "rejected_attestations": rejected,
+            "repository_matching_peers": repository_matching,
+            "repository_consensus_active": repository_active,
+            "matching_independent_peers": cryptographic_matching if cryptographic_required else repository_matching,
+            "cryptographic_matching_peers": cryptographic_matching if cryptographic_required else 0,
+            "cryptographic_verification_required": cryptographic_required,
+            "rejected_attestations": len(rejected),
+            "rejection_details": rejected,
             "required_quorum": self.quorum,
             "consensus_active": active,
             "status": "consensus_active" if active else "local_chain_active_consensus_pending",
