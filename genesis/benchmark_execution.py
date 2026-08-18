@@ -47,20 +47,41 @@ class BenchmarkExecutionPlanner:
         except Exception:
             return 1
 
-    def _runner_task(self, task: GenesisTask, benchmark_id: str) -> dict[str, Any]:
-        context = [
-            "genesis/competitive_benchmarks.py",
+    @staticmethod
+    def _runner_context(benchmark_id: str) -> list[str]:
+        """Order context by execution value because autonomous Coding is bounded.
+
+        Coding intentionally reads only a small number of files/bytes. Put the
+        benchmark-specific adapter, execution bridge, worker, and closest tests
+        first so a runner-integration task does not spend its context budget on
+        broader planning files while missing the code it actually needs to edit.
+        """
+        if benchmark_id == "terminal_bench_2_1":
+            return [
+                "scripts/benchmark_task_worker.py",
+                "genesis/terminal_bench_evidence.py",
+                "genesis/benchmark_execution.py",
+                "tests/test_terminal_bench_evidence.py",
+                "tests/test_benchmark_execution.py",
+                "genesis/benchmark_evidence.py",
+                "genesis/competitive_benchmarks.py",
+                "genesis/evaluation.py",
+                "tests/test_benchmark_evidence.py",
+                "tests/test_competitive_benchmarks.py",
+            ]
+        return [
+            "scripts/benchmark_task_worker.py",
             "genesis/benchmark_execution.py",
             "genesis/benchmark_evidence.py",
-            "genesis/evaluation.py",
-            "scripts/benchmark_task_worker.py",
-            "tests/test_competitive_benchmarks.py",
             "tests/test_benchmark_execution.py",
+            "genesis/competitive_benchmarks.py",
+            "genesis/evaluation.py",
             "tests/test_benchmark_evidence.py",
+            "tests/test_competitive_benchmarks.py",
         ]
-        if benchmark_id == "terminal_bench_2_1":
-            context += ["genesis/terminal_bench_evidence.py", "tests/test_terminal_bench_evidence.py"]
 
+    def _runner_task(self, task: GenesisTask, benchmark_id: str) -> dict[str, Any]:
+        context = self._runner_context(benchmark_id)
         existing = self._runner_tasks(benchmark_id)
         latest = max(existing, key=self._runner_generation) if existing else None
         if latest is not None and latest.state not in self.TERMINAL_RUNNER_STATES:
