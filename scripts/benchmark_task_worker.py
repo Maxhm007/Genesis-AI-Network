@@ -51,6 +51,12 @@ def main() -> None:
             task.task_id,
             f"Waiting for benchmark runner task {result['task_id']} generation {result.get('work_generation', 1)} to produce real comparable evidence",
         )
+    elif result["status"] == "external_execution_required":
+        missing = ", ".join(result.get("missing", [])) or "external benchmark execution prerequisites"
+        queue.pause(
+            task.task_id,
+            f"External authority required for real benchmark execution: {missing}. No score may change until validated evidence is staged.",
+        )
     else:
         queue.record_failure(task.task_id, result.get("reason", "benchmark execution failed"), classification="evaluation")
     print(json.dumps({"status": result["status"], "task_id": task.task_id, "result": result}, indent=2, sort_keys=True))
