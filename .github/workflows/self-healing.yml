@@ -7,11 +7,14 @@ on:
     paths:
       - .github/workflows/self-healing.yml
       - scripts/self_heal.py
+      - scripts/ingest_workflow_failure.py
       - scripts/genesis_core_vitality.py
       - scripts/request_peer_healing.py
   workflow_run:
     workflows:
       - Genesis Independent Validator Gate
+      - Genesis Candidate PR Gate
+      - Genesis Secret Guard
       - Genesis Proactive Development
     types:
       - completed
@@ -20,6 +23,7 @@ on:
     - cron: "37 * * * *"
 
 permissions:
+  actions: read
   contents: write
   pull-requests: write
   issues: write
@@ -52,6 +56,19 @@ jobs:
         if: ${{ env.GENESIS_SKIP_REPAIR != 'true' }}
         run: pip install -r requirements.txt
 
+      - name: Ingest upstream workflow failure into GAPS
+        if: ${{ env.GENESIS_SKIP_REPAIR != 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GENESIS_UPSTREAM_RUN_ID: ${{ github.event.workflow_run.id }}
+          GENESIS_UPSTREAM_WORKFLOW: ${{ github.event.workflow_run.name }}
+          GENESIS_UPSTREAM_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
+          GENESIS_UPSTREAM_HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          GENESIS_UPSTREAM_HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/ingest_workflow_failure.py
+
       - name: Configure Genesis Git identity
         if: ${{ env.GENESIS_SKIP_REPAIR != 'true' }}
         run: |
@@ -76,6 +93,8 @@ jobs:
           path: |
             runtime/core_vitality.json
             runtime/core_vitality_repair.json
+            runtime/workflow_failure_diagnosis.json
+            runtime/problem_solver_history.jsonl
           if-no-files-found: ignore
           retention-days: 30
 
@@ -94,7 +113,7 @@ jobs:
           for i in $(seq 1 120); do
             if curl -fsS http://127.0.0.1:8765/health >/dev/null 2>&1; then
               echo "GENESIS_REPAIR_PROVIDER_URL=http://127.0.0.1:8765" >> "$GITHUB_ENV"
-              echo "Genesis local repair model is ready"
+              echo "Genesis local repair provider is ready"
               exit 0
             fi
             sleep 2
@@ -107,7 +126,6 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
-          GENESIS_REPAIR_MODEL: openai/gpt-4o
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/self_heal.py
 
