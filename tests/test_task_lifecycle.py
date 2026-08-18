@@ -5,12 +5,12 @@ from pathlib import Path
 from genesis.task_lifecycle import TaskLifecycleReconciler
 
 
-def _make_review_task(root: Path):
+def _make_review_task(root: Path, *, task_type: str = "operational_issue"):
     reconciler = TaskLifecycleReconciler(root)
     task = reconciler.queue.create(
         "repair measured operational issue",
         module_id="genesis.ai_score",
-        payload={"task_type": "operational_issue"},
+        payload={"task_type": task_type},
     )
     reconciler.queue.transition(task.task_id, "assigned")
     reconciler.queue.transition(task.task_id, "running")
@@ -31,6 +31,20 @@ def test_promoted_review_becomes_complete(tmp_path: Path, monkeypatch):
     )
     reconciler = TaskLifecycleReconciler(tmp_path)
     monkeypatch.setattr(reconciler, "_is_ancestor", lambda sha: sha == "abc123")
+    result = reconciler.reconcile()
+    assert task.task_id in result["completed"]
+    assert reconciler.queue.get(task.task_id).state == "complete"
+
+
+def test_existing_research_review_artifact_becomes_complete(tmp_path: Path):
+    task = _make_review_task(tmp_path, task_type="immortality_research")
+    review_dir = tmp_path / "runtime" / "task_reviews"
+    review_dir.mkdir(parents=True, exist_ok=True)
+    (review_dir / f"{task.task_id}.json").write_text(
+        json.dumps({"status": "candidate_review", "task_id": task.task_id}),
+        encoding="utf-8",
+    )
+    reconciler = TaskLifecycleReconciler(tmp_path)
     result = reconciler.reconcile()
     assert task.task_id in result["completed"]
     assert reconciler.queue.get(task.task_id).state == "complete"
