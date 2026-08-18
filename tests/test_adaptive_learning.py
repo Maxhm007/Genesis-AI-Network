@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from genesis.adaptive_learning import AdaptiveLearningEngine, LearningAwareAITeam, OutcomeLearningStore
+from genesis.adaptive_team import PerformanceAdaptiveAITeam
 
 
 class DummyProvider:
@@ -105,3 +106,71 @@ def test_learning_aware_team_prefers_ranked_provider(tmp_path: Path):
     team._current_domain = "engineering"
     ordered = team._preferred_providers([DummyProvider("p1"), DummyProvider("p2")])
     assert [provider.name for provider in ordered] == ["p2", "p1"]
+
+
+def test_performance_team_preserves_engineering_safety_roles(tmp_path: Path):
+    preferences = tmp_path / "learning_preferences.json"
+    preferences.write_text(
+        json.dumps(
+            {
+                "domains": {
+                    "engineering": {
+                        "agents": [
+                            {"agent": "scientist", "score": 0.99, "samples": 20},
+                            {"agent": "engineer", "score": 0.20, "samples": 20},
+                            {"agent": "reviewer", "score": 0.10, "samples": 20},
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    team = PerformanceAdaptiveAITeam(DummyRegistry(), preferences_path=preferences, max_roles_per_task=4)
+    plan = team.plan_task("fix failing code")
+    assert plan.role_names[:3] == ("planner", "engineer", "reviewer")
+    assert "scientist" in plan.role_names
+
+
+def test_performance_team_ignores_single_sample_agent_rank(tmp_path: Path):
+    preferences = tmp_path / "learning_preferences.json"
+    preferences.write_text(
+        json.dumps(
+            {
+                "domains": {
+                    "engineering": {
+                        "agents": [
+                            {"agent": "scientist", "score": 1.0, "samples": 1}
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    team = PerformanceAdaptiveAITeam(DummyRegistry(), preferences_path=preferences, max_roles_per_task=4)
+    plan = team.plan_task("fix failing code")
+    assert plan.role_names == ("planner", "engineer", "reviewer")
+    assert "insufficient repeated agent evidence" in plan.reason
+
+
+def test_performance_team_keeps_validator_even_if_ranked_low(tmp_path: Path):
+    preferences = tmp_path / "learning_preferences.json"
+    preferences.write_text(
+        json.dumps(
+            {
+                "domains": {
+                    "validation": {
+                        "agents": [
+                            {"agent": "scientist", "score": 0.99, "samples": 10},
+                            {"agent": "validator", "score": 0.01, "samples": 10}
+                        ]
+                    }
+                }
+            }
+        ),
+        encoding="utf-8",
+    )
+    team = PerformanceAdaptiveAITeam(DummyRegistry(), preferences_path=preferences, max_roles_per_task=4)
+    plan = team.plan_task("validate candidate promotion")
+    assert plan.role_names[:3] == ("planner", "validator", "reviewer")
