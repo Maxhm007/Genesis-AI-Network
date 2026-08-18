@@ -5,6 +5,8 @@ import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from .autonomy_guard import AutonomyGuard
+
 
 @dataclass(frozen=True)
 class SecurityFinding:
@@ -34,7 +36,8 @@ class SecurityModule:
 
     Security observes and reviews. It never silently modifies code or approves
     its own remediation. Candidate changes still require tests and independent
-    validation before promotion.
+    validation before promotion. Privileged workflow changes are allowed only
+    through the safeguarded privileged-candidate lane.
     """
 
     SENSITIVE_SUFFIXES = (".key", ".pem", ".p12", ".pfx")
@@ -115,19 +118,41 @@ class SecurityModule:
                 {"candidate_diff_resolved": False},
             )
         changed = [line.strip() for line in proc.stdout.splitlines() if line.strip()]
-        forbidden = [p for p in changed if p in self.PROTECTED_PATHS or p.startswith(".github/")]
+        immutable = [p for p in changed if p in self.PROTECTED_PATHS]
+        workflow_changes = [p for p in changed if p.startswith(".github/")]
+        branch = self._git("branch", "--show-current").stdout.strip()
+        privileged_lane = branch.startswith("genesis/privileged-candidate-")
+
+        if immutable:
+            findings.append(SecurityFinding(
+                "candidate-forbidden-path", "critical",
+                "Candidate modifies an immutable Genesis identity boundary",
+                ", ".join(immutable),
+                "Reject the candidate; immutable Genesis identity requires explicit owner governance.",
+            ))
+
+        if workflow_changes and not privileged_lane:
+            findings.append(SecurityFinding(
+                "candidate-workflow-outside-privileged-lane", "critical",
+                "Workflow/security change is outside the privileged autonomy lane",
+                ", ".join(workflow_changes),
+                "Recreate the change on a genesis/privileged-candidate-* branch for risk-gated validation.",
+            ))
+        elif workflow_changes:
+            decision = AutonomyGuard(self.root).analyze_git_candidate(base_ref)
+            if not decision.autonomous_allowed:
+                findings.append(SecurityFinding(
+                    "candidate-privileged-risk-escalation", "critical",
+                    "Privileged candidate exceeds autonomous risk threshold",
+                    "; ".join(decision.reasons),
+                    "Pause autonomous promotion and escalate to the owner with the exact risk evidence.",
+                ))
+
         sensitive = [
             p for p in changed
             if Path(p).name.lower() in self.SENSITIVE_NAMES
             or Path(p).suffix.lower() in self.SENSITIVE_SUFFIXES
         ]
-        if forbidden:
-            findings.append(SecurityFinding(
-                "candidate-forbidden-path", "critical",
-                "Candidate modifies a protected security boundary",
-                ", ".join(forbidden),
-                "Reject the candidate and recreate it within the bounded coding sandbox.",
-            ))
         if sensitive:
             findings.append(SecurityFinding(
                 "candidate-sensitive-file", "critical",
@@ -153,7 +178,8 @@ class SecurityModule:
             ))
         checks = {
             "candidate_diff_resolved": True,
-            "protected_paths_unchanged": not forbidden,
+            "protected_paths_unchanged": not immutable,
+            "workflow_change_safeguarded": not workflow_changes or privileged_lane,
             "no_sensitive_files_changed": not sensitive,
             "bounded_file_count": len(changed) <= self.MAX_CANDIDATE_FILES,
         }
