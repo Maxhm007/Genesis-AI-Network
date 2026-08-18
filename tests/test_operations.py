@@ -34,6 +34,23 @@ def test_resolves_issue_when_condition_disappears(tmp_path: Path):
     assert events.count("resolved") == 2
 
 
+def test_resolved_issue_remains_visible_in_later_collection_cycles(tmp_path: Path):
+    ops = GenesisOperations(tmp_path)
+    ops.persist_and_queue(ops.detect(scorecard(ai=37, samples=0)))
+    ops.persist_and_queue(ops.detect(scorecard(ai=75, samples=4)))
+    assert ops.report()["resolved"] == 2
+
+    # A later healthy collection must not erase historical resolutions.
+    ops.persist_and_queue(ops.detect(scorecard(ai=75, samples=4)))
+    report = ops.report()
+    assert report["open"] == 0
+    assert report["resolved"] == 2
+    assert {row["title"] for row in report["issues"] if row["status"] == "resolved"} == {
+        "AI capability below target",
+        "Efficiency telemetry insufficient",
+    }
+
+
 def test_issue_identity_survives_metric_improvement_while_still_open(tmp_path: Path):
     ops = GenesisOperations(tmp_path)
     first = ops.detect(scorecard(ai=37, samples=4))[0]
