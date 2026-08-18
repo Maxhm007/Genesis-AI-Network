@@ -8,7 +8,6 @@ on:
 
 permissions:
   contents: read
-  pull-requests: write
 
 jobs:
   validator_a:
@@ -88,50 +87,3 @@ jobs:
         with:
           name: candidate-pr-validator-b-${{ github.event.pull_request.number }}
           path: validator-b.json
-
-  merge_exact_candidate:
-    if: startsWith(github.head_ref, 'genesis/candidate-')
-    needs: [validator_a, validator_b]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write
-      pull-requests: write
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ github.event.pull_request.head.sha }}
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - uses: actions/download-artifact@v4
-        with:
-          name: candidate-pr-validator-a-${{ github.event.pull_request.number }}
-          path: votes/a
-      - uses: actions/download-artifact@v4
-        with:
-          name: candidate-pr-validator-b-${{ github.event.pull_request.number }}
-          path: votes/b
-      - name: Verify independent signed quorum
-        run: python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
-      - name: Recheck exact candidate and protected boundary
-        shell: bash
-        run: |
-          set -euo pipefail
-          candidate='${{ github.event.pull_request.head.sha }}'
-          test "$(git rev-parse HEAD)" = "$candidate"
-          git fetch origin main
-          git merge-base --is-ancestor origin/main "$candidate"
-          if git diff --name-only origin/main..."$candidate" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
-            echo 'Protected Genesis identity/workflow boundary changed' >&2
-            exit 1
-          fi
-      - name: Merge exact validated candidate through PR
-        env:
-          GH_TOKEN: ${{ github.token }}
-          PR_URL: ${{ github.event.pull_request.html_url }}
-          CANDIDATE_SHA: ${{ github.event.pull_request.head.sha }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh pr merge "$PR_URL" --repo "$GITHUB_REPOSITORY" --merge --delete-branch --match-head-commit "$CANDIDATE_SHA"
