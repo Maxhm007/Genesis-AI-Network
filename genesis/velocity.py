@@ -5,6 +5,8 @@ from dataclasses import dataclass
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
+from .autonomy_proof import AutonomyProofLedger
+
 
 @dataclass(frozen=True)
 class VelocityTargets:
@@ -14,11 +16,7 @@ class VelocityTargets:
 
 
 class GeneVelocity:
-    """Measure Gene's validated evolution speed from blockchain evidence.
-
-    Velocity is intentionally based on independently validated updates rather than
-    raw commits. Faster unsafe or unvalidated changes do not improve this score.
-    """
+    """Measure validated evolution speed; unsafe/unvalidated changes earn no credit."""
 
     def __init__(self, root: Path, targets: VelocityTargets | None = None) -> None:
         self.root = root.resolve()
@@ -61,15 +59,9 @@ class GeneVelocity:
         timestamps = self._validated_timestamps()
         cutoff = now - timedelta(hours=24)
         recent = [item for item in timestamps if cutoff <= item <= now]
-
-        intervals = [
-            (right - left).total_seconds() / 60.0
-            for left, right in zip(recent, recent[1:])
-            if right >= left
-        ]
+        intervals = [(right-left).total_seconds()/60.0 for left, right in zip(recent, recent[1:]) if right >= left]
         mean_interval = sum(intervals) / len(intervals) if intervals else None
-        latest_age = (now - timestamps[-1]).total_seconds() / 60.0 if timestamps else None
-
+        latest_age = (now - timestamps[-1]).total_seconds()/60.0 if timestamps else None
         failures: list[str] = []
         if len(recent) < self.targets.min_validated_updates_24h:
             failures.append("validated_updates_24h_below_target")
@@ -77,7 +69,6 @@ class GeneVelocity:
             failures.append("latest_validated_update_too_old")
         if mean_interval is None or mean_interval > self.targets.max_mean_inter_update_minutes:
             failures.append("validated_cycle_time_above_target")
-
         return {
             "status": "accelerate" if failures else "on_target",
             "validated_updates_24h": len(recent),
@@ -100,6 +91,51 @@ class GeneVelocity:
         return (
             "Increase Gene's validated development velocity without weakening tests, security, provenance, independent validator "
             "quorum, owner authorization, or Constitution constraints. "
-            f"Current velocity gaps: {gaps}. Prefer changes that reduce gap-to-task, task-to-candidate, "
-            "candidate-to-validation, benchmark-refresh, and provider-evaluation latency while improving real capability."
+            f"Current velocity gaps: {gaps}. Prefer changes that reduce gap-to-task, task-to-candidate, candidate-to-validation, "
+            "benchmark-refresh, and provider-evaluation latency while improving real capability."
         )
+
+
+class AdaptiveVelocityController:
+    """Safely increases development throughput as Genesis proves reliable autonomy."""
+
+    def __init__(self, root: Path) -> None:
+        self.root = Path(root).resolve()
+        self.proof = AutonomyProofLedger(self.root)
+
+    def policy(self) -> dict:
+        rows = [r for r in self.proof.events(200) if r.get("stage") == "cycle_complete"][-20:]
+        total = len(rows)
+        successes = [r for r in rows if r.get("outcome") == "success"]
+        autonomous = [r for r in rows if r.get("classification") == "genesis_autonomous"]
+        risky = [r for r in rows if r.get("outcome") in {"security_rejected", "rollback", "owner_escalation", "failed"}]
+        success_rate = len(successes) / total if total else 0.0
+        autonomy_rate = len(autonomous) / total if total else 0.0
+
+        level = 1
+        if total >= 3 and success_rate >= 0.80 and autonomy_rate >= 0.60:
+            level = 2
+        if total >= 6 and success_rate >= 0.85 and autonomy_rate >= 0.70:
+            level = 3
+        if total >= 10 and success_rate >= 0.90 and autonomy_rate >= 0.80:
+            level = 4
+        if total >= 15 and success_rate >= 0.95 and autonomy_rate >= 0.90:
+            level = 5
+        if risky:
+            level = max(1, level - min(2, len(risky)))
+
+        burst_by_level = {1: 1, 2: 2, 3: 3, 4: 4, 5: 5}
+        parallel_by_level = {1: 1, 2: 1, 3: 2, 4: 3, 5: 4}
+        interval_multiplier = {1: 1.0, 2: 0.8, 3: 0.65, 4: 0.5, 5: 0.35}
+        return {
+            "acceleration_level": level,
+            "recent_cycles": total,
+            "success_rate": round(success_rate, 4),
+            "autonomy_rate": round(autonomy_rate, 4),
+            "recent_risk_events": len(risky),
+            "max_development_burst": burst_by_level[level],
+            "recommended_parallel_candidates": parallel_by_level[level],
+            "cycle_interval_multiplier": interval_multiplier[level],
+            "can_accelerate": len(risky) == 0 and level > 1,
+            "rule": "Speed increases only after repeated validated autonomous success and falls immediately after risk/failure evidence.",
+        }
