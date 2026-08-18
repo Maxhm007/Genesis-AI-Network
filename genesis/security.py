@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import asdict, dataclass
 from pathlib import Path
@@ -121,7 +122,11 @@ class SecurityModule:
         immutable = [p for p in changed if p in self.PROTECTED_PATHS]
         workflow_changes = [p for p in changed if p.startswith(".github/")]
         branch = self._git("branch", "--show-current").stdout.strip()
-        privileged_lane = branch.startswith("genesis/privileged-candidate-")
+        privileged_lane = (
+            os.environ.get("GENESIS_CANDIDATE_LANE", "").strip().lower() == "privileged"
+            or os.environ.get("GITHUB_HEAD_REF", "").startswith("genesis/privileged-candidate-")
+            or branch.startswith("genesis/privileged-candidate-")
+        )
 
         if immutable:
             findings.append(SecurityFinding(
