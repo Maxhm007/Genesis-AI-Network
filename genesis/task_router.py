@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .job_failure import JobFailureIntelligence
 from .modules.task_queue import GenesisTask, PersistentTaskQueue
+from .problem_solver import AutonomousProblemSolver
 
 
 MODULE_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
@@ -51,6 +52,7 @@ class TaskRouterModule:
 
     Each slot keeps its task until completion, pause/hold, blocking, or explicit
     reasoned cancellation. New tasks are assigned only when an active slot is free.
+    Failed work is diagnosed by the autonomous problem solver before reassignment.
     """
 
     def __init__(self, root: Path) -> None:
@@ -58,6 +60,7 @@ class TaskRouterModule:
         self.runtime = self.root / "runtime"
         self.runtime.mkdir(parents=True, exist_ok=True)
         self.queue = PersistentTaskQueue(self.runtime / "genesis_tasks.sqlite3")
+        self.problem_solver = AutonomousProblemSolver(self.root)
         self.todo_path = self.runtime / "todo.json"
         self.last_route_path = self.runtime / "task_route.json"
 
@@ -112,7 +115,8 @@ class TaskRouterModule:
             "rule": (
                 "Keep at most three persistent active tasks. Running work is never auto-cancelled. "
                 "Paused/held work remains durable and resumable. Cancellation requires an explicit recorded reason. "
-                "Failed jobs retry only after backoff; repeated failures switch recovery strategy; exhausted jobs are quarantined."
+                "Failed jobs are diagnosed before retry; repeated non-transient failures must change strategy; "
+                "external-authority blockers pause for minimal owner action; exhausted jobs are quarantined."
             ),
         }
         self.todo_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -149,6 +153,40 @@ class TaskRouterModule:
         task = candidates[0]
         decision = self.route(task)
         recovery = JobFailureIntelligence.plan(task) if task.state == "failed" else None
+        problem_step = None
+
+        if task.state == "failed":
+            evidence = [str(row.get("error", "")) for row in task.failure_history[-3:]]
+            problem_step = self.problem_solver.solve_step(task, evidence=evidence)
+            diagnosis = problem_step["diagnosis"]
+            if diagnosis["owner_action_required"]:
+                paused = self.queue.pause(
+                    task.task_id,
+                    f"External authority required: {diagnosis['root_cause']} Next action: {diagnosis['repair_strategy']}",
+                )
+                result = {
+                    "status": "blocked_external_authority",
+                    "decision": None,
+                    "task": asdict(paused),
+                    "active": len(active),
+                    "active_limit": ACTIVE_TASK_LIMIT,
+                    "problem_solver": problem_step,
+                    "recovery_plan": recovery.as_dict() if recovery else None,
+                }
+                self.last_route_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+                self.write_todo()
+                return result
+
+            decision = RouteDecision(
+                task.task_id,
+                diagnosis["next_module"],
+                True if diagnosis["classification"] != "transient" else decision.use_ai_team,
+                (
+                    f"autonomous problem solver diagnosed {diagnosis['classification']}; "
+                    f"strategy={diagnosis['repair_strategy']}"
+                ),
+            )
+
         assigned = self.queue.transition(task.task_id, "assigned", module_id=decision.module_id)
         result = {
             "status": "assigned",
@@ -158,6 +196,7 @@ class TaskRouterModule:
             "active_limit": ACTIVE_TASK_LIMIT,
             "ai_team_module": "genesis.ai_team" if decision.use_ai_team else None,
             "recovery_plan": recovery.as_dict() if recovery else None,
+            "problem_solver": problem_step,
         }
         self.last_route_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         self.write_todo()
