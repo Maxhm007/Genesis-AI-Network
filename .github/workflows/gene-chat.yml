@@ -1,0 +1,76 @@
+name: Genesis Gene Chat
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_NAME: qwen3-0.6b-local
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '512'
+  HF_HOME: ~/.cache/huggingface
+  PIP_CACHE_DIR: ~/.cache/pip
+
+jobs:
+  reply:
+    if: >-
+      github.event_name == 'workflow_dispatch' ||
+      (github.event.issue.number == 52 &&
+       github.event.comment.user.login == 'Maxhm007' &&
+       github.event.comment.user.type != 'Bot')
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restore local reasoning caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/pip
+          key: genesis-gene-chat-qwen3-0.6b-${{ runner.os }}-py312-v1
+          restore-keys: |
+            genesis-gene-chat-qwen3-0.6b-${{ runner.os }}-py312-
+      - run: pip install -r requirements.txt
+      - name: Install local reasoning runtime
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors
+      - name: Start Gene reasoning provider
+        shell: bash
+        run: |
+          nohup python scripts/local_reasoning_provider.py --host 127.0.0.1 --port 8766 > /tmp/gene-chat-provider.log 2>&1 &
+          ready=false
+          for i in {1..60}; do
+            if python - <<'PY'
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=2) as response:
+                  raise SystemExit(0 if response.status == 200 else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ready" != true ]]; then
+            echo 'Gene reasoning provider did not become ready.' >&2
+            cat /tmp/gene-chat-provider.log || true
+            exit 1
+          fi
+      - name: Reply as Gene 0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/gene_chat_reply.py
