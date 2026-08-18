@@ -34,6 +34,19 @@ def test_resolves_issue_when_condition_disappears(tmp_path: Path):
     assert events.count("resolved") == 2
 
 
+def test_issue_identity_survives_metric_improvement_while_still_open(tmp_path: Path):
+    ops = GenesisOperations(tmp_path)
+    first = ops.detect(scorecard(ai=37, samples=4))[0]
+    second = ops.detect(scorecard(ai=42, samples=4))[0]
+    assert first.issue_key == second.issue_key
+    ops.persist_and_queue([first])
+    ops.persist_and_queue([second])
+    report = ops.report()
+    assert report["open"] == 1
+    assert report["resolved"] == 0
+    assert report["issues"][0]["evidence"] == "AI Capability Score=42/100"
+
+
 def test_stale_research_scan_becomes_persistent_task(tmp_path: Path):
     ops = GenesisOperations(tmp_path)
     issues = ops.detect(scorecard(ai=80, samples=4, fresh=False))
