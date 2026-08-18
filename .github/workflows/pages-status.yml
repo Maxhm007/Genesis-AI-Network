@@ -6,6 +6,9 @@ on:
     paths:
       - 'docs/status/**'
       - 'scripts/build_live_status.py'
+      - 'scripts/build_gene_chat.py'
+      - 'scripts/gene_chat_reply.py'
+      - '.github/workflows/gene-chat.yml'
       - '.github/workflows/pages-status.yml'
   workflow_dispatch:
   schedule:
@@ -31,10 +34,12 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build authenticated Genesis status snapshot
+      - name: Build authenticated Genesis status and chat snapshots
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/build_live_status.py
+        run: |
+          python scripts/build_live_status.py
+          python scripts/build_gene_chat.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
