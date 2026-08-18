@@ -5,11 +5,17 @@ on:
     branches: [main]
     paths:
       - 'docs/status/**'
+      - 'scripts/build_live_status.py'
       - '.github/workflows/pages-status.yml'
   workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
 
 permissions:
   contents: read
+  actions: read
+  issues: read
+  pull-requests: read
   pages: write
   id-token: write
 
@@ -25,6 +31,10 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
+      - name: Build authenticated Genesis status snapshot
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/build_live_status.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
