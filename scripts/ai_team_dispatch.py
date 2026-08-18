@@ -3,7 +3,7 @@ from __future__ import annotations
 import json
 from pathlib import Path
 
-from genesis.adaptive_learning import LearningAwareAITeam
+from genesis.adaptive_team import PerformanceAdaptiveAITeam
 from genesis.modules.task_queue import GenesisTask, PersistentTaskQueue
 from genesis.providers import ProviderRegistry
 
@@ -46,12 +46,17 @@ if __name__ == "__main__":
             queue = PersistentTaskQueue(runtime / "genesis_tasks.sqlite3")
             task = queue.get(task_id)
             if task is not None:
-                team = LearningAwareAITeam(
+                team = PerformanceAdaptiveAITeam(
                     ProviderRegistry(),
                     preferences_path=runtime / "learning_preferences.json",
                 )
                 context = build_team_context(task)
                 outputs = team.run_task(task.objective, context=context)
+                selected_roles = [str(item.get("agent")) for item in outputs if item.get("agent")]
+                composition_reason = next(
+                    (str(item.get("orchestration_reason")) for item in outputs if item.get("orchestration_reason")),
+                    "no executed orchestration reason available",
+                )
                 report = {
                     "status": "completed",
                     "task_id": task.task_id,
@@ -59,10 +64,13 @@ if __name__ == "__main__":
                     "owner_module": task.module_id,
                     "outputs": outputs,
                     "learning_domain": team._current_domain,
+                    "selected_roles": selected_roles,
+                    "composition_reason": composition_reason,
                     "rule": (
                         "AI Team provides bounded specialist analysis. The owning module remains responsible for execution and normal "
-                        "Security/validation gates still apply. Historical provider preference is based only on measured operational "
-                        "outcomes and never converts candidate knowledge into validated fact. Benchmark reference scores are never "
+                        "Security/validation gates still apply. Historical agent and provider preferences are based only on repeated "
+                        "measured operational outcomes. Learning cannot remove required planner, domain-owner, reviewer, or validator "
+                        "roles and never converts candidate knowledge into validated fact. Benchmark reference scores are never "
                         "treated as measured Genesis results."
                     ),
                 }
