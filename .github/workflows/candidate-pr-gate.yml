@@ -11,8 +11,10 @@ permissions:
 
 jobs:
   validator_a:
-    if: startsWith(github.head_ref, 'genesis/candidate-')
+    if: startsWith(github.head_ref, 'genesis/candidate-') || startsWith(github.head_ref, 'genesis/privileged-candidate-')
     runs-on: ubuntu-latest
+    env:
+      GENESIS_CANDIDATE_LANE: ${{ startsWith(github.head_ref, 'genesis/privileged-candidate-') && 'privileged' || 'normal' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -24,14 +26,21 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Independent full test suite A
         run: python -m pytest -q
-      - name: Protect Genesis identity and workflow boundary A
+      - name: Enforce autonomy boundary A
         shell: bash
         run: |
           set -euo pipefail
           git fetch origin main
-          if git diff --name-only origin/main...HEAD | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
-            echo 'Protected Genesis identity/workflow boundary changed' >&2
+          if git diff --name-only origin/main...HEAD | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
+            echo 'Immutable Genesis identity boundary changed' >&2
             exit 1
+          fi
+          if [[ "$GENESIS_CANDIDATE_LANE" == "normal" ]] && git diff --name-only origin/main...HEAD | grep -Eq '^\.github/'; then
+            echo 'Workflow changes require genesis/privileged-candidate-* lane' >&2
+            exit 1
+          fi
+          if [[ "$GENESIS_CANDIDATE_LANE" == "privileged" ]]; then
+            python scripts/privileged_change_gate.py origin/main
           fi
       - name: Security review candidate A
         run: |
@@ -50,8 +59,10 @@ jobs:
           path: validator-a.json
 
   validator_b:
-    if: startsWith(github.head_ref, 'genesis/candidate-')
+    if: startsWith(github.head_ref, 'genesis/candidate-') || startsWith(github.head_ref, 'genesis/privileged-candidate-')
     runs-on: ubuntu-latest
+    env:
+      GENESIS_CANDIDATE_LANE: ${{ startsWith(github.head_ref, 'genesis/privileged-candidate-') && 'privileged' || 'normal' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -63,14 +74,21 @@ jobs:
       - run: pip install -r requirements.txt
       - name: Independent full test suite B
         run: python -m pytest -q
-      - name: Protect Genesis identity and workflow boundary B
+      - name: Enforce autonomy boundary B
         shell: bash
         run: |
           set -euo pipefail
           git fetch origin main
-          if git diff --name-only origin/main...HEAD | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
-            echo 'Protected Genesis identity/workflow boundary changed' >&2
+          if git diff --name-only origin/main...HEAD | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
+            echo 'Immutable Genesis identity boundary changed' >&2
             exit 1
+          fi
+          if [[ "$GENESIS_CANDIDATE_LANE" == "normal" ]] && git diff --name-only origin/main...HEAD | grep -Eq '^\.github/'; then
+            echo 'Workflow changes require genesis/privileged-candidate-* lane' >&2
+            exit 1
+          fi
+          if [[ "$GENESIS_CANDIDATE_LANE" == "privileged" ]]; then
+            python scripts/privileged_change_gate.py origin/main
           fi
       - name: Security review candidate B
         run: |
