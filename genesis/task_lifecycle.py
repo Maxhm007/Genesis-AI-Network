@@ -91,7 +91,7 @@ class TaskLifecycleReconciler:
             return False
         return review.get("status") == "candidate_review"
 
-    def _reconcile_blocked(self, now: datetime) -> tuple[list[str], list[str]]:
+    def _reconcile_blocked(self) -> tuple[list[str], list[str]]:
         retried: list[str] = []
         quarantined: list[str] = []
         for task in self.queue.list(state="blocked", limit=1000):
@@ -106,7 +106,7 @@ class TaskLifecycleReconciler:
                 retry_after_seconds=0,
                 module_id=task.module_id,
             )
-            if updated.state == "failed" and self.queue.retryable(updated, at=now):
+            if updated.state == "failed" and self.queue.retryable(updated):
                 self.queue.transition(updated.task_id, "assigned", module_id=updated.module_id)
                 retried.append(updated.task_id)
             elif updated.state == "quarantined":
@@ -119,7 +119,7 @@ class TaskLifecycleReconciler:
         completed: list[str] = []
         retried: list[str] = []
         waiting: list[str] = []
-        blocked_retried, blocked_quarantined = self._reconcile_blocked(now)
+        blocked_retried, blocked_quarantined = self._reconcile_blocked()
 
         for task in self.queue.list(state="review", limit=1000):
             if self._has_completed_review_artifact(task):
