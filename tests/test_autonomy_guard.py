@@ -43,7 +43,16 @@ def test_constitution_and_genesis_block_remain_immutable(tmp_path: Path):
     assert decision.owner_escalation_required is True
 
 
-def test_selfdev_path_parser_allows_privileged_lane_paths_but_not_immutable(tmp_path: Path):
-    assert normalize_selfdev_path(tmp_path, ".github/workflows/self-healing.yml") == ".github/workflows/self-healing.yml"
+def test_selfdev_path_parser_requires_explicit_privileged_opt_in(tmp_path: Path):
+    with pytest.raises(RuntimeError, match="privileged autonomy lane"):
+        normalize_selfdev_path(tmp_path, ".github/workflows/self-healing.yml")
+    assert (
+        normalize_selfdev_path(
+            tmp_path,
+            ".github/workflows/self-healing.yml",
+            allow_privileged=True,
+        )
+        == ".github/workflows/self-healing.yml"
+    )
     with pytest.raises(RuntimeError, match="protected path"):
-        normalize_selfdev_path(tmp_path, "GENESIS_BLOCK.json")
+        normalize_selfdev_path(tmp_path, "GENESIS_BLOCK.json", allow_privileged=True)
