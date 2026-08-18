@@ -5,6 +5,7 @@ from email.message import EmailMessage
 import json
 import os
 from pathlib import Path
+import re
 import smtplib
 import ssl
 import urllib.error
@@ -68,6 +69,89 @@ def _github_request(method: str, path: str, payload: dict | None = None):
         return None
 
 
+def _body_field(body: str, label: str, default: str = "") -> str:
+    match = re.search(rf"^- \*\*{re.escape(label)}:\*\*\s*(.*)$", body, re.MULTILINE)
+    return match.group(1).strip() if match else default
+
+
+def _recover_resolved_github_history(existing_github_issues: list[dict], operations_report: dict) -> int:
+    """Recover lost resolved tombstones from the durable GitHub issue mirror.
+
+    Older runtime caches did not retain resolved rows. GitHub operational issues are
+    durable external evidence, so a closed/resolved issue can safely seed a missing
+    resolved tombstone. A title already present in the current ledger is never
+    imported, preventing superseded key migrations from being counted as a second
+    solution.
+    """
+    operations = GenesisOperations(ROOT)
+    ledger: dict[str, dict] = {}
+    if operations.ledger_path.exists():
+        for line in operations.ledger_path.read_text(encoding="utf-8").splitlines():
+            try:
+                row = json.loads(line)
+                ledger[str(row["issue_key"])] = row
+            except Exception:
+                continue
+
+    ledger_titles = {str(row.get("title", "")).strip() for row in ledger.values()}
+    active_titles = {
+        str(row.get("title", "")).strip()
+        for row in operations_report.get("issues", [])
+        if row.get("status") in {"open", "blocked"}
+    }
+    recovered = 0
+
+    for issue in existing_github_issues:
+        if "pull_request" in issue:
+            continue
+        body = str(issue.get("body") or "")
+        marker_match = re.search(r"<!-- genesis-ops:([^ ]+) -->", body)
+        if not marker_match or _body_field(body, "Status").lower() != "resolved":
+            continue
+        key = marker_match.group(1).strip()
+        title = str(issue.get("title") or "").removeprefix("[Genesis Ops] ").strip()
+        if key in ledger or title in ledger_titles or title in active_titles:
+            continue
+
+        resolved_at = str(issue.get("closed_at") or issue.get("updated_at") or issue.get("created_at") or "")
+        row = {
+            "issue_key": key,
+            "title": title or "Recovered Genesis operational issue",
+            "severity": _body_field(body, "Severity", "unknown"),
+            "module_id": _body_field(body, "Module", "genesis.operations").strip("`"),
+            "status": "resolved",
+            "evidence": _body_field(body, "Evidence", "Recovered from durable GitHub issue history."),
+            "remediation": _body_field(body, "Remediation", ""),
+            "owner_action_required": _body_field(body, "Owner action required", "False").lower() == "true",
+            "first_seen_at": _body_field(body, "First seen", ""),
+            "last_seen_at": _body_field(body, "Last seen", ""),
+            "resolved_at": resolved_at,
+            "recovered_from_github_issue": issue.get("number"),
+        }
+        operations._append_history(
+            "recovered_resolved",
+            key,
+            title=row["title"],
+            github_issue=issue.get("number"),
+            resolved_at=resolved_at,
+        )
+        row["history_snapshot"] = operations.history(key, limit=operations.EMBEDDED_HISTORY_LIMIT)
+        ledger[key] = row
+        ledger_titles.add(row["title"])
+        recovered += 1
+
+    if recovered:
+        ordered = sorted(
+            ledger.values(),
+            key=lambda row: (row.get("status") == "resolved", row.get("severity", ""), row.get("first_seen_at", "")),
+        )
+        operations.ledger_path.write_text(
+            "".join(json.dumps(row, sort_keys=True) + "\n" for row in ordered),
+            encoding="utf-8",
+        )
+    return recovered
+
+
 def sync_github_issues(operations_report: dict) -> dict:
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
@@ -75,6 +159,10 @@ def sync_github_issues(operations_report: dict) -> dict:
         return {"status": "skipped", "reason": "GitHub token/repository unavailable"}
 
     existing = _github_request("GET", "/issues?state=all&per_page=100") or []
+    recovered = _recover_resolved_github_history(existing, operations_report)
+    if recovered:
+        operations_report = GenesisOperations(ROOT).report()
+
     by_key = {}
     for issue in existing:
         if "pull_request" in issue:
@@ -122,7 +210,7 @@ def sync_github_issues(operations_report: dict) -> dict:
             if changed:
                 (closed if desired_state == "closed" else updated).append(current["number"])
 
-    result = {"status": "ok", "created": created, "updated": updated, "closed": closed}
+    result = {"status": "ok", "created": created, "updated": updated, "closed": closed, "recovered_resolved": recovered}
     (RUNTIME / "github_issue_sync.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result
 
