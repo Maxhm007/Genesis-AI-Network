@@ -1,0 +1,33 @@
+name: Genesis Candidate PR Opener
+
+on:
+  push:
+    branches:
+      - 'genesis/candidate-*'
+
+permissions:
+  contents: read
+  pull-requests: write
+
+jobs:
+  open_pr:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Open one PR for exact Genesis candidate branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch='${{ github.ref_name }}'
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base main --state open --json number --jq '.[0].number // empty')
+          if [[ -n "$existing" ]]; then
+            echo "Candidate PR already open: #$existing"
+            exit 0
+          fi
+          gh pr create \
+            --repo "$GITHUB_REPOSITORY" \
+            --head "$branch" \
+            --base main \
+            --title "Genesis autonomous candidate: $branch" \
+            --body "Autonomous Genesis candidate. Promotion requires the Genesis Candidate PR Gate: two independent full-test + Security validators, signed quorum verification, protected-boundary verification, and exact-head merge."
