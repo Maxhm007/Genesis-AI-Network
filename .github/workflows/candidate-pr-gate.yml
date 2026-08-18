@@ -40,7 +40,7 @@ jobs:
             exit 1
           fi
           if [[ "$GENESIS_CANDIDATE_LANE" == "privileged" ]]; then
-            python scripts/privileged_change_gate.py origin/main
+            PYTHONPATH=. python scripts/privileged_change_gate.py origin/main
           fi
       - name: Security review candidate A
         run: |
@@ -88,7 +88,7 @@ jobs:
             exit 1
           fi
           if [[ "$GENESIS_CANDIDATE_LANE" == "privileged" ]]; then
-            python scripts/privileged_change_gate.py origin/main
+            PYTHONPATH=. python scripts/privileged_change_gate.py origin/main
           fi
       - name: Security review candidate B
         run: |
