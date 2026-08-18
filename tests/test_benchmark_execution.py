@@ -35,6 +35,19 @@ def test_missing_real_result_creates_one_runner_task(tmp_path: Path) -> None:
     assert "genesis/terminal_bench_evidence.py" in child.payload["context_paths"]
 
 
+def test_terminal_runner_context_prioritizes_executable_files(tmp_path: Path) -> None:
+    task = make_task(tmp_path)
+    result = BenchmarkExecutionPlanner(tmp_path).advance(task)
+    child = BenchmarkExecutionPlanner(tmp_path).queue.get(result["task_id"])
+    assert child is not None
+    assert child.payload["context_paths"][:4] == [
+        "scripts/benchmark_task_worker.py",
+        "genesis/terminal_bench_evidence.py",
+        "genesis/benchmark_execution.py",
+        "tests/test_terminal_bench_evidence.py",
+    ]
+
+
 def test_unknown_benchmark_still_queues_bounded_runner_work(tmp_path: Path) -> None:
     task = make_task(tmp_path, "new_frontier_benchmark")
     result = BenchmarkExecutionPlanner(tmp_path).advance(task)
@@ -43,6 +56,12 @@ def test_unknown_benchmark_still_queues_bounded_runner_work(tmp_path: Path) -> N
     assert child is not None
     assert child.payload["benchmark_id"] == "new_frontier_benchmark"
     assert child.payload["requires_independent_validation"] is True
+    assert child.payload["context_paths"][:4] == [
+        "scripts/benchmark_task_worker.py",
+        "genesis/benchmark_execution.py",
+        "genesis/benchmark_evidence.py",
+        "tests/test_benchmark_execution.py",
+    ]
 
 
 def test_invalid_evaluation_task_does_not_create_work(tmp_path: Path) -> None:
