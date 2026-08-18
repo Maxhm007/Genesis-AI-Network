@@ -8,8 +8,15 @@ import subprocess
 from .modules.task_queue import PersistentTaskQueue
 
 
+REVIEW_ARTIFACT_TASK_TYPES = {
+    "immortality_research",
+    "competitive_ai_improvement",
+    "competitive_reference_refresh",
+}
+
+
 class TaskLifecycleReconciler:
-    """Close promoted reviews and recover reviews that never reached main."""
+    """Close promoted reviews and recover reviews that never reached completion."""
 
     STALE_REVIEW_HOURS = 3
 
@@ -58,6 +65,19 @@ class TaskLifecycleReconciler:
                 result[task_id] = commit_sha
         return result
 
+    def _has_completed_review_artifact(self, task) -> bool:
+        task_type = str(task.payload.get("task_type", ""))
+        if task_type not in REVIEW_ARTIFACT_TASK_TYPES:
+            return False
+        path = self.runtime / "task_reviews" / f"{task.task_id}.json"
+        if not path.is_file():
+            return False
+        try:
+            review = json.loads(path.read_text(encoding="utf-8"))
+        except Exception:
+            return False
+        return review.get("status") == "candidate_review"
+
     def reconcile(self) -> dict:
         evidence = self._candidate_evidence()
         now = datetime.now(timezone.utc)
@@ -66,6 +86,11 @@ class TaskLifecycleReconciler:
         waiting: list[str] = []
 
         for task in self.queue.list(state="review", limit=1000):
+            if self._has_completed_review_artifact(task):
+                self.queue.transition(task.task_id, "complete", module_id=task.module_id)
+                completed.append(task.task_id)
+                continue
+
             commit_sha = evidence.get(task.task_id, "")
             if commit_sha and self._is_ancestor(commit_sha):
                 self.queue.transition(task.task_id, "complete", module_id=task.module_id)
@@ -76,7 +101,7 @@ class TaskLifecycleReconciler:
             if age >= timedelta(hours=self.STALE_REVIEW_HOURS):
                 updated = self.queue.record_failure(
                     task.task_id,
-                    "review candidate was not observed on main within bounded review window",
+                    "review candidate was not observed as completed within bounded review window",
                     classification="stale_review",
                     retry_after_seconds=0,
                     module_id=task.module_id,
