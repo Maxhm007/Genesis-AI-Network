@@ -8,6 +8,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from .autonomy_guard import AutonomyGuard
+
 
 PROTECTED_PATHS = {
     "GENESIS_CONSTITUTION.md",
@@ -21,6 +23,7 @@ ALLOWED_PREFIXES = (
     "config/",
     "desktop/",
     "mobile/",
+    ".github/",
 )
 
 
@@ -39,8 +42,6 @@ def normalize_selfdev_path(root: Path, path: str) -> str:
         raise RuntimeError(f"protected path cannot be changed: {normalized}")
     if normalized == ".git" or normalized.startswith(".git/"):
         raise RuntimeError("self-development may not modify Git metadata")
-    if normalized.startswith(".github/"):
-        raise RuntimeError("self-development may not modify GitHub workflow permissions")
     if not normalized.startswith(ALLOWED_PREFIXES):
         raise RuntimeError(f"path outside self-development sandbox: {normalized}")
     target = root.joinpath(*candidate.parts).resolve()
@@ -65,6 +66,7 @@ class SelfDevResult:
 class SelfDevelopmentExecutor:
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
+        self.autonomy_guard = AutonomyGuard(self.root)
 
     def _git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["git", *args], cwd=self.root, text=True, capture_output=True, check=check)
@@ -141,7 +143,9 @@ class SelfDevelopmentExecutor:
         safe_proposal["files"] = files
         payload = json.dumps(safe_proposal, sort_keys=True, separators=(",", ":"))
         candidate_id = hashlib.sha256(f"{base_sha}|{payload}".encode("utf-8")).hexdigest()[:12]
-        branch = f"genesis/candidate-{candidate_id}"
+        privileged = self.autonomy_guard.proposal_requires_privileged_lane(paths)
+        branch_prefix = "genesis/privileged-candidate-" if privileged else "genesis/candidate-"
+        branch = f"{branch_prefix}{candidate_id}"
         self._git("checkout", "-b", branch)
         try:
             for relative, content in files.items():
@@ -149,6 +153,17 @@ class SelfDevelopmentExecutor:
                 path = self.root / normalized
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(str(content), encoding="utf-8")
+
+            diff_text = self._git("diff", "--", *paths).stdout
+            decision = self.autonomy_guard.analyze(paths, diff_text)
+            if not decision.autonomous_allowed:
+                self._git("reset", "--hard", "HEAD")
+                self._cleanup_new_paths(existed_before)
+                raise RuntimeError(
+                    "owner escalation required for high-risk self-development: "
+                    + "; ".join(decision.reasons)
+                )
+
             test = subprocess.run(
                 [os.environ.get("PYTHON", "python"), "-m", "pytest", "-q"],
                 cwd=self.root,
