@@ -196,14 +196,15 @@ class BlockchainModule:
     ) -> dict:
         """Return local-chain, repository-agreement and cryptographic quorum state.
 
-        `trusted_peer_keys is None` preserves legacy repository-quorum semantics for
-        internal callers. Supplying a mapping, including an empty mapping, makes
-        persistent Ed25519 verification mandatory for `consensus_active`.
+        ``trusted_peer_keys is None`` preserves legacy repository-quorum semantics
+        for internal callers. Supplying a mapping, including an empty mapping,
+        makes persistent Ed25519 verification mandatory for ``consensus_active``.
         """
         verification = self.verify()
         head = verification.get("head")
         genesis_anchor = verification.get("genesis_anchor")
         height = int(verification.get("height", 0))
+        cryptographic_required = trusted_peer_keys is not None
         unique_peers: set[str] = set()
         repository_matching = 0
         cryptographic_matching = 0
@@ -227,7 +228,7 @@ class BlockchainModule:
                 reason = "duplicate_peer"
             elif peer_head != head:
                 reason = "wrong_head"
-            elif attested_height != height:
+            elif cryptographic_required and attested_height != height:
                 reason = "wrong_height"
             elif trusted_peers is not None:
                 expected_repository = trusted_peers.get(peer_id)
@@ -245,8 +246,7 @@ class BlockchainModule:
             unique_peers.add(peer_id)
             repository_matching += 1
 
-            if trusted_peer_keys is None:
-                cryptographic_matching += 1
+            if not cryptographic_required:
                 continue
 
             public_key = trusted_peer_keys.get(peer_id)
@@ -266,7 +266,6 @@ class BlockchainModule:
 
         chain_valid = bool(verification.get("valid"))
         repository_active = chain_valid and repository_matching >= self.quorum
-        cryptographic_required = trusted_peer_keys is not None
         active = chain_valid and (
             cryptographic_matching >= self.quorum if cryptographic_required else repository_active
         )
