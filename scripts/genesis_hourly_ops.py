@@ -13,6 +13,7 @@ import urllib.request
 from genesis.operations import GenesisOperations
 from genesis.scorecard import GenesisScorecard
 from genesis.modules.task_queue import PersistentTaskQueue
+from genesis.task_lifecycle import TaskLifecycleReconciler
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -27,6 +28,7 @@ def _load_json(path: Path, default):
 
 
 def collect() -> dict:
+    lifecycle = TaskLifecycleReconciler(ROOT).reconcile()
     scorecard_path = RUNTIME / "system_scorecard.json"
     if scorecard_path.exists():
         scorecard = _load_json(scorecard_path, {})
@@ -35,7 +37,7 @@ def collect() -> dict:
     operations = GenesisOperations(ROOT)
     detected = operations.detect(scorecard)
     result = operations.persist_and_queue(detected)
-    output = {"scorecard": scorecard, **result}
+    output = {"scorecard": scorecard, "task_lifecycle": lifecycle, **result}
     (RUNTIME / "hourly_operations.json").write_text(json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return output
 
@@ -194,7 +196,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Genesis GitHub-native hourly operations")
     parser.add_argument("action", choices=("collect", "sync-issues", "email", "all")); args = parser.parse_args()
     if args.action in {"collect", "all"}:
-        report = collect(); print(json.dumps({"detected": len(report.get("issues", [])), "created_tasks": report.get("created_tasks", []), "history_events": report.get("history_events", 0)}, sort_keys=True))
+        report = collect(); print(json.dumps({"detected": len(report.get("issues", [])), "created_tasks": report.get("created_tasks", []), "history_events": report.get("history_events", 0), "task_lifecycle": report.get("task_lifecycle", {})}, sort_keys=True))
     if args.action in {"sync-issues", "all"}:
         print(json.dumps(sync_github_issues(GenesisOperations(ROOT).report()), sort_keys=True))
     if args.action in {"email", "all"}:
