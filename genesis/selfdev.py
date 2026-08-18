@@ -8,6 +8,8 @@ import subprocess
 from dataclasses import dataclass
 from pathlib import Path, PurePosixPath
 
+from .autonomy_guard import AutonomyGuard
+
 
 PROTECTED_PATHS = {
     "GENESIS_CONSTITUTION.md",
@@ -21,10 +23,11 @@ ALLOWED_PREFIXES = (
     "config/",
     "desktop/",
     "mobile/",
+    ".github/",
 )
 
 
-def normalize_selfdev_path(root: Path, path: str) -> str:
+def normalize_selfdev_path(root: Path, path: str, *, allow_privileged: bool = False) -> str:
     root = root.resolve()
     raw = str(path).replace("\\", "/")
     if not raw or "\x00" in raw:
@@ -39,8 +42,8 @@ def normalize_selfdev_path(root: Path, path: str) -> str:
         raise RuntimeError(f"protected path cannot be changed: {normalized}")
     if normalized == ".git" or normalized.startswith(".git/"):
         raise RuntimeError("self-development may not modify Git metadata")
-    if normalized.startswith(".github/"):
-        raise RuntimeError("self-development may not modify GitHub workflow permissions")
+    if normalized.startswith(".github/") and not allow_privileged:
+        raise RuntimeError("workflow changes require the privileged autonomy lane")
     if not normalized.startswith(ALLOWED_PREFIXES):
         raise RuntimeError(f"path outside self-development sandbox: {normalized}")
     target = root.joinpath(*candidate.parts).resolve()
@@ -65,23 +68,24 @@ class SelfDevResult:
 class SelfDevelopmentExecutor:
     def __init__(self, root: Path) -> None:
         self.root = root.resolve()
+        self.autonomy_guard = AutonomyGuard(self.root)
 
     def _git(self, *args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["git", *args], cwd=self.root, text=True, capture_output=True, check=check)
 
-    def _validate_paths(self, paths: list[str]) -> None:
+    def _validate_paths(self, paths: list[str], *, allow_privileged: bool = False) -> None:
         for path in paths:
-            normalize_selfdev_path(self.root, path)
+            normalize_selfdev_path(self.root, path, allow_privileged=allow_privileged)
 
     def _tracked_tree_clean(self) -> bool:
         return self._git("diff", "--quiet", check=False).returncode == 0 and self._git("diff", "--cached", "--quiet", check=False).returncode == 0
 
-    def _cleanup_new_paths(self, existed_before: dict[str, bool]) -> None:
+    def _cleanup_new_paths(self, existed_before: dict[str, bool], *, allow_privileged: bool = False) -> None:
         """Remove only candidate paths that did not exist before an attempt."""
         for relative, existed in existed_before.items():
             if existed:
                 continue
-            normalized = normalize_selfdev_path(self.root, relative)
+            normalized = normalize_selfdev_path(self.root, relative, allow_privileged=allow_privileged)
             target = self.root / normalized
             if target.is_symlink() or target.is_file():
                 target.unlink(missing_ok=True)
@@ -121,14 +125,17 @@ class SelfDevelopmentExecutor:
         raw_files = dict(proposal.get("files", {}))
         if not raw_files:
             raise RuntimeError("proposal contains no files")
+
+        raw_paths = [str(relative).replace("\\", "/") for relative in raw_files]
+        privileged = self.autonomy_guard.proposal_requires_privileged_lane(raw_paths)
         files: dict[str, object] = {}
         for relative, content in raw_files.items():
-            normalized = normalize_selfdev_path(self.root, str(relative))
+            normalized = normalize_selfdev_path(self.root, str(relative), allow_privileged=privileged)
             if normalized in files:
                 raise RuntimeError(f"duplicate self-development path: {normalized}")
             files[normalized] = content
         paths = list(files)
-        self._validate_paths(paths)
+        self._validate_paths(paths, allow_privileged=privileged)
         current_branch = self._git("branch", "--show-current").stdout.strip()
         if current_branch != "main":
             raise RuntimeError(f"self-development must start from main, got {current_branch or 'detached'}")
@@ -141,14 +148,26 @@ class SelfDevelopmentExecutor:
         safe_proposal["files"] = files
         payload = json.dumps(safe_proposal, sort_keys=True, separators=(",", ":"))
         candidate_id = hashlib.sha256(f"{base_sha}|{payload}".encode("utf-8")).hexdigest()[:12]
-        branch = f"genesis/candidate-{candidate_id}"
+        branch_prefix = "genesis/privileged-candidate-" if privileged else "genesis/candidate-"
+        branch = f"{branch_prefix}{candidate_id}"
         self._git("checkout", "-b", branch)
         try:
             for relative, content in files.items():
-                normalized = normalize_selfdev_path(self.root, relative)
+                normalized = normalize_selfdev_path(self.root, relative, allow_privileged=privileged)
                 path = self.root / normalized
                 path.parent.mkdir(parents=True, exist_ok=True)
                 path.write_text(str(content), encoding="utf-8")
+
+            diff_text = self._git("diff", "--", *paths).stdout
+            decision = self.autonomy_guard.analyze(paths, diff_text)
+            if not decision.autonomous_allowed:
+                self._git("reset", "--hard", "HEAD")
+                self._cleanup_new_paths(existed_before, allow_privileged=privileged)
+                raise RuntimeError(
+                    "owner escalation required for high-risk self-development: "
+                    + "; ".join(decision.reasons)
+                )
+
             test = subprocess.run(
                 [os.environ.get("PYTHON", "python"), "-m", "pytest", "-q"],
                 cwd=self.root,
@@ -158,11 +177,11 @@ class SelfDevelopmentExecutor:
             )
             if test.returncode != 0:
                 self._git("reset", "--hard", "HEAD")
-                self._cleanup_new_paths(existed_before)
+                self._cleanup_new_paths(existed_before, allow_privileged=privileged)
                 return SelfDevResult(branch, candidate_id, False, False, tuple(paths), None, (test.stdout + "\n" + test.stderr)[-4000:])
             self._git("add", "--", *paths)
             staged = self._git("diff", "--cached", "--name-only").stdout.splitlines()
-            self._validate_paths(staged)
+            self._validate_paths(staged, allow_privileged=privileged)
             if not staged:
                 return SelfDevResult(branch, candidate_id, True, False, tuple(), None, "no changes")
             message = f"Genesis self-development candidate: {proposal.get('title','bounded improvement')}"
@@ -171,5 +190,5 @@ class SelfDevelopmentExecutor:
             return SelfDevResult(branch, candidate_id, True, True, tuple(staged), commit_sha, message)
         except Exception:
             self._git("reset", "--hard", "HEAD", check=False)
-            self._cleanup_new_paths(existed_before)
+            self._cleanup_new_paths(existed_before, allow_privileged=privileged)
             raise
