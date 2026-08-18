@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import json
+import os
+import shutil
 from dataclasses import asdict
 from pathlib import Path
 from typing import Any
@@ -13,13 +15,18 @@ class BenchmarkExecutionPlanner:
     """Advance frontier benchmark tasks without fabricating capability evidence.
 
     Real benchmark output may be staged only through a benchmark-specific evidence
-    adapter. If no real result is available, the planner creates one durable coding
-    task for the missing runner/integration instead of repeatedly asking the AI score
-    module to edit its own scoring logic. Exhausted runner work may advance to a new
-    bounded generation, preserving auditability without looping forever on one task.
+    adapter. If no real result is available, the planner creates bounded coding
+    work for missing runner integration. Once that bounded lane is exhausted, an
+    execution/readiness blocker is surfaced instead of endlessly generating code.
     """
 
     TERMINAL_RUNNER_STATES = {"complete", "quarantined", "cancelled"}
+    MAX_RUNNER_INTEGRATION_GENERATIONS = 2
+    TERMINAL_BENCH_ENV = (
+        "GENESIS_BENCHMARK_AGENT",
+        "GENESIS_BENCHMARK_MODEL",
+        "GENESIS_BENCHMARK_SANDBOX",
+    )
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root).resolve()
@@ -47,15 +54,28 @@ class BenchmarkExecutionPlanner:
         except Exception:
             return 1
 
+    @classmethod
+    def _execution_readiness(cls, benchmark_id: str) -> dict[str, Any]:
+        if benchmark_id != "terminal_bench_2_1":
+            return {"ready": True, "missing": [], "benchmark_id": benchmark_id}
+        missing: list[str] = []
+        if shutil.which("harbor") is None:
+            missing.append("harbor_cli")
+        for name in cls.TERMINAL_BENCH_ENV:
+            if not str(os.environ.get(name, "")).strip():
+                missing.append(name)
+        return {
+            "ready": not missing,
+            "missing": missing,
+            "benchmark_id": benchmark_id,
+            "provider_independent": True,
+            "required_trials_per_task": 5,
+            "dataset": "terminal-bench/terminal-bench-2-1",
+        }
+
     @staticmethod
     def _runner_context(benchmark_id: str) -> list[str]:
-        """Order context by execution value because autonomous Coding is bounded.
-
-        Coding intentionally reads only a small number of files/bytes. Put the
-        benchmark-specific adapter, execution bridge, worker, and closest tests
-        first so a runner-integration task does not spend its context budget on
-        broader planning files while missing the code it actually needs to edit.
-        """
+        """Order context by execution value because autonomous Coding is bounded."""
         if benchmark_id == "terminal_bench_2_1":
             return [
                 "scripts/benchmark_task_worker.py",
@@ -94,11 +114,31 @@ class BenchmarkExecutionPlanner:
                 "runner_state": latest.state,
             }
 
+        readiness = self._execution_readiness(benchmark_id)
+        if (
+            latest is not None
+            and self._runner_generation(latest) >= self.MAX_RUNNER_INTEGRATION_GENERATIONS
+            and not readiness["ready"]
+        ):
+            return {
+                "status": "external_execution_required",
+                "benchmark_id": benchmark_id,
+                "reason": (
+                    "bounded runner-integration work is exhausted; real benchmark execution prerequisites are missing"
+                ),
+                "missing": readiness["missing"],
+                "readiness": readiness,
+                "last_runner_task_id": latest.task_id,
+                "last_work_generation": self._runner_generation(latest),
+                "owner_action_required": True,
+            }
+
         generation = self._runner_generation(latest) + 1 if latest is not None else 1
         objective = (
             f"Make benchmark {benchmark_id} executable for Genesis using the official/comparable benchmark runner and pinned dataset. "
             "Produce real raw benchmark output with provenance; never invent, estimate, hard-code or self-award a score. "
-            "Integrate the smallest reproducible runner/adapter needed so BenchmarkExecutionPlanner can stage independently validated evidence."
+            "Integrate the smallest reproducible runner/adapter needed so BenchmarkExecutionPlanner can stage independently validated evidence. "
+            "Do not embed provider credentials or lock Genesis identity to a model/provider."
         )
         dedupe_key = f"benchmark-runner:{benchmark_id}" if generation == 1 else f"benchmark-runner:{benchmark_id}:generation:{generation}"
         child, created = self.queue.create_unique(
