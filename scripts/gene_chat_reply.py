@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 import os
-import urllib.error
+import re
 import urllib.request
 from pathlib import Path
 
@@ -56,6 +56,26 @@ def latest_hourly_context() -> str:
     return "No current hourly report was available."
 
 
+def operational_facts(report: str) -> str:
+    ai = re.search(r"AI Capability:\s*(\d+)\/100", report, re.I)
+    eff = re.search(r"Efficiency:\s*(\d+)\/100", report, re.I)
+    issues = re.search(r"ISSUES:\s*open=(\d+)\s+blocked=(\d+)\s+resolved=(\d+)", report, re.I)
+    target = re.search(r"- \[(\w+)\] ([^|\n]+) \| ([^|\n]+) \| module=([^|\n]+)", report)
+    facts = []
+    if ai:
+        facts.append(f"AI capability: {ai.group(1)}/100")
+    if eff:
+        facts.append(f"Efficiency: {eff.group(1)}/100")
+    if issues:
+        facts.append(f"Operational issues: open={issues.group(1)}, blocked={issues.group(2)}, resolved={issues.group(3)}")
+    if target:
+        facts.append(
+            f"Current top target: {target.group(2).strip()} | severity={target.group(1)} | "
+            f"status={target.group(3).strip()} | module={target.group(4).strip()}"
+        )
+    return "\n".join(facts) or "No structured operational facts were parsed."
+
+
 def recent_chat_context() -> str:
     comments = github("GET", f"/issues/{CHAT_ISSUE}/comments?per_page=30") or []
     rows = []
@@ -86,16 +106,22 @@ def main() -> None:
         print("Ignoring Genesis reply marker")
         return
 
+    report = latest_hourly_context()
+    facts = operational_facts(report)
     prompt = f"""
 You are Gene 0, the coordinator of Genesis AI Network, replying to the repository owner in the dedicated Gene Chat thread.
-Use only the evidence below plus the user's message. Be concise, operational, and transparent.
+Use the structured facts below as authoritative for current operational state. Use the full report only for supporting detail.
+Be concise, operational, and transparent. Never invent a current target, score, solved issue, or task state.
 Never claim a task is complete unless the evidence shows it. If the user asks for a change, explain what Genesis can do through its normal bounded task -> candidate -> tests -> Security -> independent validators path. Do not imply you can bypass protected files, secrets, permissions, or validation.
 
 USER MESSAGE:
 {body[:5000]}
 
+CURRENT OPERATIONAL FACTS:
+{facts}
+
 LATEST GENESIS OPERATIONS REPORT:
-{latest_hourly_context()}
+{report}
 
 RECENT GENE CHAT:
 {recent_chat_context()}
