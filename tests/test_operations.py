@@ -47,6 +47,17 @@ def test_issue_identity_survives_metric_improvement_while_still_open(tmp_path: P
     assert report["issues"][0]["evidence"] == "AI Capability Score=42/100"
 
 
+def test_history_rebuilds_from_cached_ledger_snapshot(tmp_path: Path):
+    ops = GenesisOperations(tmp_path)
+    issue = ops.detect(scorecard(ai=37, samples=4))[0]
+    ops.persist_and_queue([issue])
+    expected = ops.history(issue.issue_key)
+    assert expected
+    ops.history_path.unlink()
+    restored = GenesisOperations(tmp_path)
+    assert restored.history(issue.issue_key) == expected
+
+
 def test_stale_research_scan_becomes_persistent_task(tmp_path: Path):
     ops = GenesisOperations(tmp_path)
     issues = ops.detect(scorecard(ai=80, samples=4, fresh=False))
