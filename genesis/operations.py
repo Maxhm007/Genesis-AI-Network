@@ -212,12 +212,19 @@ class GenesisOperations:
         current_keys = {issue.issue_key for issue in issues}
 
         for key, old in existing.items():
-            if key not in current_keys and old.get("status") in {"open", "blocked"}:
+            if key in current_keys:
+                continue
+            if old.get("status") in {"open", "blocked"}:
                 resolved = dict(old)
                 resolved["status"] = "resolved"
                 resolved["resolved_at"] = now
                 rows.append(resolved)
                 self._append_history("resolved", key, title=old.get("title"), previous_status=old.get("status"))
+            elif old.get("status") == "resolved":
+                # Resolved issues are historical evidence, not transient output. Keep the
+                # tombstone indefinitely so later hourly reports and dashboards cannot
+                # forget a resolution simply because another collection cycle ran.
+                rows.append(dict(old))
 
         for issue in issues:
             row = issue.as_dict()
