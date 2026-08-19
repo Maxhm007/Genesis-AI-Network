@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 from pathlib import Path
 
 from genesis.modules.task_queue import PersistentTaskQueue
@@ -46,12 +47,44 @@ def test_owner_marked_issue_becomes_devlab_task(monkeypatch, tmp_path: Path) -> 
     task = queue.get(created[0])
     assert task is not None
     assert task.module_id == "genesis.coding"
+    assert task.priority == 95
+    assert task.max_attempts == 5
     assert task.payload["executor"] == "genesis.devlab"
     assert task.payload["target_path"] == "genesis/budget.py"
     assert task.payload["attribution"] == "owner_initiated"
+    assert task.payload["golden_path"] is True
 
 
 def test_unmarked_issue_is_not_ingested(monkeypatch, tmp_path: Path) -> None:
     script = _load_script()
     monkeypatch.setattr(script, "_github_open_issues", lambda: [{"number": 91, "title": "x", "body": "plain issue"}])
     assert script.ingest_devlab_issues(tmp_path) == []
+
+
+def test_public_issue_intake_does_not_require_github_token(monkeypatch) -> None:
+    script = _load_script()
+    monkeypatch.setenv("GITHUB_REPOSITORY", "Maxhm007/Genesis-AI-Network")
+    monkeypatch.delenv("GITHUB_TOKEN", raising=False)
+    observed = {}
+
+    class Response:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *_args):
+            return False
+
+        def read(self):
+            return json.dumps([{"number": 91, "body": "ok"}]).encode("utf-8")
+
+    def fake_urlopen(request, timeout=0):
+        observed["authorization"] = request.get_header("Authorization")
+        observed["url"] = request.full_url
+        observed["timeout"] = timeout
+        return Response()
+
+    monkeypatch.setattr(script.urllib.request, "urlopen", fake_urlopen)
+    issues = script._github_open_issues()
+    assert issues == [{"number": 91, "body": "ok"}]
+    assert observed["authorization"] is None
+    assert observed["url"].endswith("/repos/Maxhm007/Genesis-AI-Network/issues?state=open&per_page=100")
