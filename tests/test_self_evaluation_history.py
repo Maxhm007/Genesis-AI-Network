@@ -24,7 +24,7 @@ def complete_engineering_task(tmp_path: Path, objective: str = "Improve autonomo
     queue.transition(task.task_id, "complete")
 
 
-def record_cycle(tmp_path: Path, cycle_id: str, actor: str, title: str) -> None:
+def record_cycle(tmp_path: Path, cycle_id: str, actor: str, title: str, *, promoted: bool = False) -> None:
     ledger = AutonomyProofLedger(tmp_path)
     ledger.record(
         cycle_id=cycle_id,
@@ -40,6 +40,14 @@ def record_cycle(tmp_path: Path, cycle_id: str, actor: str, title: str) -> None:
         outcome="success",
         details={"branch": f"genesis/candidate-{cycle_id}", "commit_sha": cycle_id},
     )
+    if promoted:
+        ledger.record(
+            cycle_id=cycle_id,
+            stage="promotion_confirmed",
+            actor=actor,
+            outcome="success",
+            details={"commit_sha": cycle_id},
+        )
     ledger.record(cycle_id=cycle_id, stage="cycle_complete", actor=actor, outcome="success")
 
 
@@ -51,8 +59,15 @@ def test_completed_task_without_autonomy_proof_gets_no_self_development_credit(t
     assert report["recent_completed_tasks"][0]["credit"] == "engineering_memory_only"
 
 
+def test_genesis_candidate_without_confirmed_promotion_gets_no_autonomous_credit(tmp_path: Path) -> None:
+    record_cycle(tmp_path, "auto", "genesis.coding", "Genesis improvement", promoted=False)
+    report = GenesisSelfEvaluation(tmp_path).report()
+    assert report["completed_self_development_tasks"] == 0
+    assert report["recent_autonomous_improvements"] == []
+
+
 def test_genesis_sees_three_way_attribution(tmp_path: Path) -> None:
-    record_cycle(tmp_path, "auto", "genesis.coding", "Genesis improvement")
+    record_cycle(tmp_path, "auto", "genesis.coding", "Genesis improvement", promoted=True)
     record_cycle(tmp_path, "assist", "chatgpt", "Assisted improvement")
     record_cycle(tmp_path, "owner", "owner", "Owner improvement")
 
