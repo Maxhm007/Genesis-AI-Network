@@ -32,6 +32,7 @@ on:
       - 'genesis/autonomous_engineering.py'
       - 'genesis/core_vitality.py'
       - 'genesis/modules/**'
+      - 'genesis/devlab/**'
       - 'config/modules.json'
       - 'config/modules.d/**'
       - 'config/model_candidates.json'
