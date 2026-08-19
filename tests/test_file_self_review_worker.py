@@ -35,24 +35,30 @@ class _FakeDevLab:
         return _FakeAttempt()
 
 
-def _write_challenge(root: Path, *, status: str = "active") -> None:
+def _write_challenge(root: Path, *, status: str = "active", with_ephemeral: bool = False) -> None:
     (root / "genesis").mkdir(parents=True, exist_ok=True)
     (root / "config").mkdir(parents=True, exist_ok=True)
     (root / "genesis" / "sample.py").write_text("VALUE = 1\n", encoding="utf-8")
+    ephemeral = (
+        ',\n  "ephemeral_acceptance_files": {"tests/test_sample_acceptance.py": "def test_acceptance():\\n    assert True\\n"}'
+        if with_ephemeral
+        else ""
+    )
     (root / "config" / "genesis_challenge.json").write_text(
         "{\n"
         f'  "status": "{status}",\n'
         '  "target": "genesis/sample.py",\n'
         '  "problem": "VALUE should satisfy the assigned behavior",\n'
         '  "acceptance": "The assigned behavior is satisfied",\n'
-        '  "method": "correctness_first"\n'
+        '  "method": "correctness_first"'
+        f"{ephemeral}\n"
         "}\n",
         encoding="utf-8",
     )
 
 
 def test_active_assigned_challenge_routes_through_iterative_devlab(tmp_path, monkeypatch):
-    _write_challenge(tmp_path)
+    _write_challenge(tmp_path, with_ephemeral=True)
     monkeypatch.setattr(worker, "CodingModule", _FakeCoding)
     monkeypatch.setattr(worker, "IterativeGenesisDevLab", _FakeDevLab)
 
@@ -69,6 +75,9 @@ def test_active_assigned_challenge_routes_through_iterative_devlab(tmp_path, mon
     assert _FakeDevLab.last_call["provenance"]["designer"] == "genesis.devlab"
     assert _FakeDevLab.last_call["provenance"]["executor"] == "genesis.devlab"
     assert _FakeDevLab.last_call["provenance"]["attribution"] == "owner_initiated"
+    assert _FakeDevLab.last_call["ephemeral_files"] == {
+        "tests/test_sample_acceptance.py": "def test_acceptance():\n    assert True\n"
+    }
 
 
 def test_inactive_assigned_challenge_does_not_run_devlab(tmp_path, monkeypatch):
