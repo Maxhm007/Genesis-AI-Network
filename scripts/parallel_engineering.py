@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import shutil
 from pathlib import Path
 
 from genesis.efficient_engineering import EfficientAutonomousEngineeringLoop
@@ -36,6 +37,7 @@ def cmd_worker(task_id: str) -> int:
     branch = str(candidate.get("branch") or "")
     sha = str(candidate.get("commit_sha") or "")
     has_candidate = bool(result.get("coding_status") == "candidate_created" and branch and sha)
+    result["parallel_rank"] = int(os.environ.get("GENESIS_PARALLEL_RANK", "999"))
     result["has_candidate"] = has_candidate
     result["candidate_branch"] = branch
     result["candidate_sha"] = sha
@@ -70,28 +72,31 @@ def cmd_select(artifacts: Path) -> int:
         task_id = str(task.get("task_id") or "")
         if not result.get("has_candidate") or task_id not in votes_a or task_id not in votes_b:
             continue
-        rank = int(result.get("parallel_rank", task.get("parallel_rank", 999)) or 999)
+        rank = int(result.get("parallel_rank", 999) or 999)
         eligible.append((rank, task_id, result, votes_a[task_id], votes_b[task_id]))
     eligible.sort(key=lambda row: (row[0], row[1]))
     selection = {}
+    runtime = root() / "runtime"
+    runtime.mkdir(parents=True, exist_ok=True)
     if eligible:
         _, task_id, result, vote_a, vote_b = eligible[0]
+        chosen_a = runtime / "selected_validator_a.json"
+        chosen_b = runtime / "selected_validator_b.json"
+        shutil.copyfile(vote_a, chosen_a)
+        shutil.copyfile(vote_b, chosen_b)
         selection = {
             "task_id": task_id,
             "candidate_branch": result.get("candidate_branch"),
             "candidate_sha": result.get("candidate_sha"),
-            "validator_a": str(vote_a),
-            "validator_b": str(vote_b),
+            "validator_a": str(chosen_a),
+            "validator_b": str(chosen_b),
         }
-    path = root() / "runtime" / "parallel_promotion.json"
-    path.parent.mkdir(parents=True, exist_ok=True)
+    path = runtime / "parallel_promotion.json"
     path.write_text(json.dumps(selection, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     _write_output("has_candidate", "true" if selection else "false")
     _write_output("task_id", str(selection.get("task_id") or ""))
     _write_output("candidate_branch", str(selection.get("candidate_branch") or ""))
     _write_output("candidate_sha", str(selection.get("candidate_sha") or ""))
-    _write_output("validator_a", str(selection.get("validator_a") or ""))
-    _write_output("validator_b", str(selection.get("validator_b") or ""))
     print(json.dumps(selection, indent=2, sort_keys=True))
     return 0
 
