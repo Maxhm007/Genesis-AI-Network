@@ -6,7 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from genesis.autonomy_proof import AutonomyProofLedger
-from genesis.file_self_review import FileSelfReviewLoop
+from genesis.file_self_review_policy import QuorumFileSelfReviewLoop
 from genesis.proactive import DevelopmentPlan, ProactiveDevelopmentLoop
 from genesis.velocity import AdaptiveVelocityController
 
@@ -14,7 +14,7 @@ from genesis.velocity import AdaptiveVelocityController
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     loop = ProactiveDevelopmentLoop(root)
-    review_loop = FileSelfReviewLoop(root, loop.providers)
+    review_loop = QuorumFileSelfReviewLoop(root, loop.providers)
     score = loop.ai_score_report()
     proof_before = AutonomyProofLedger(root).report()
     velocity_policy = AdaptiveVelocityController(root).policy()
@@ -22,7 +22,8 @@ def main() -> None:
     # The workflow reaches this script only after the main autonomous engineering
     # lane failed to produce a candidate. At that point Genesis's intrinsic
     # behavior is to review exactly one source file before falling back to the
-    # older bootstrap/module catalog planner.
+    # older bootstrap/module catalog planner. A no-change decision requires two
+    # distinct review methods before the file is considered complete.
     plan = None
     result = None
     development_source = "file_by_file_self_review"
