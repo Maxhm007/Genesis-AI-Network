@@ -6,7 +6,7 @@ import re
 import urllib.request
 from pathlib import Path
 
-from genesis.efficient_engineering import EfficientAutonomousEngineeringLoop
+from genesis.iterative_engineering import IterativeAutonomousEngineeringLoop
 from genesis.modules.task_queue import PersistentTaskQueue
 
 
@@ -102,7 +102,7 @@ def ingest_devlab_issues(root: Path) -> list[str]:
 if __name__ == "__main__":
     root = Path(__file__).resolve().parents[1]
     created = ingest_devlab_issues(root)
-    result = EfficientAutonomousEngineeringLoop(root).run_once()
+    result = IterativeAutonomousEngineeringLoop(root).run_once()
     result["devlab_issue_intake"] = {"created_tasks": created, "count": len(created)}
     runtime_path = root / "runtime" / "autonomous_engineering.json"
     runtime_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
