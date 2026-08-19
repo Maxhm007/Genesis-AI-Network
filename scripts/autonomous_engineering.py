@@ -104,4 +104,6 @@ if __name__ == "__main__":
     created = ingest_devlab_issues(root)
     result = EfficientAutonomousEngineeringLoop(root).run_once()
     result["devlab_issue_intake"] = {"created_tasks": created, "count": len(created)}
+    runtime_path = root / "runtime" / "autonomous_engineering.json"
+    runtime_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     print(json.dumps(result, indent=2, sort_keys=True))
