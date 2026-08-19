@@ -26,7 +26,7 @@ env:
   PIP_CACHE_DIR: ~/.cache/pip
 
 concurrency:
-  group: genesis-file-self-review
+  group: genesis-file-self-review-qwen17-v1
   cancel-in-progress: false
 
 jobs:
