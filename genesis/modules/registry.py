@@ -63,12 +63,20 @@ class ModuleRegistry:
         consolidated = config_root / "module_architecture.json"
         if consolidated.exists():
             registry.load_file(consolidated)
-            return registry
+        else:
+            # Legacy fallback for repositories predating the consolidated
+            # architecture. This remains intentionally supported for compatibility.
+            registry.load_file(config_root / "modules.json")
+            legacy_extension_dir = config_root / "modules.d"
+            if legacy_extension_dir.exists():
+                for path in sorted(legacy_extension_dir.glob("*.json")):
+                    registry.load_file(path)
 
-        # Legacy fallback for repositories predating the consolidated
-        # architecture. This remains intentionally supported for compatibility.
-        registry.load_file(config_root / "modules.json")
-        extension_dir = config_root / "modules.d"
+        # New first-class optional modules extend the consolidated architecture
+        # through a dedicated directory. Keeping this separate from legacy
+        # ``modules.d`` prevents old compatibility manifests from overriding the
+        # canonical consolidated module definitions.
+        extension_dir = config_root / "module_extensions.d"
         if extension_dir.exists():
             for path in sorted(extension_dir.glob("*.json")):
                 registry.load_file(path)

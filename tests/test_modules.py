@@ -11,7 +11,7 @@ def test_default_registry_loads_consolidated_genesis_architecture():
     root = Path(__file__).resolve().parents[1]
     registry = ModuleRegistry.from_default_config(root)
     ids = {module.module_id for module in registry.all()}
-    assert len(ids) == 23
+    assert len(ids) == 24
     assert {
         "genesis.identity",
         "genesis.automation",
@@ -36,6 +36,7 @@ def test_default_registry_loads_consolidated_genesis_architecture():
         "genesis.peer_compute",
         "genesis.application",
         "genesis.communication",
+        "genesis.devlab",
     } == ids
     assert registry.get("genesis.identity").protected is True
     assert registry.get("genesis.validation").protected is True
@@ -64,6 +65,7 @@ def test_capability_owners_are_canonical_modules():
     registry = ModuleRegistry.from_default_config(root)
     assert registry.capability_owners("capability_per_compute") == ["genesis.resource_efficiency"]
     assert "genesis.engineering" in registry.capability_owners("debugging")
+    assert registry.capability_owners("development_workspace") == ["genesis.devlab"]
 
 
 def test_existing_reasoning_provider_prevents_duplicate_reasoning_module():
