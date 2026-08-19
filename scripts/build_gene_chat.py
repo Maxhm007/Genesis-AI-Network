@@ -6,6 +6,8 @@ import urllib.request
 from datetime import datetime, timezone
 from pathlib import Path
 
+from self_evaluation_dashboard import build as build_self_evaluation
+
 OWNER = "Maxhm007"
 REPO = "Genesis-AI-Network"
 CHAT_ISSUE = 52
@@ -73,7 +75,8 @@ def main() -> None:
     }
     OUT.parent.mkdir(parents=True, exist_ok=True)
     OUT.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    print(f"Wrote {OUT} with {len(messages)} messages")
+    self_eval = build_self_evaluation()
+    print(f"Wrote {OUT} with {len(messages)} messages; self-development completed={self_eval['completed_self_development_tasks']}")
 
 
 if __name__ == "__main__":
