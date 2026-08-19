@@ -113,3 +113,75 @@ def test_unresolved_issue_gets_new_work_generation_after_previous_task_ends(tmp_
     assert {task.payload.get("work_generation") for task in tasks} == {1, 2}
     events = [row for row in ops.history(issue.issue_key) if row["event"] == "repair_task_created"]
     assert [row["work_generation"] for row in events] == [1, 2]
+
+
+def test_external_benchmark_blocker_stops_duplicate_ai_repair_generations(tmp_path: Path):
+    ops = GenesisOperations(tmp_path)
+    issue = ops.detect(scorecard(ai=37, samples=4))[0]
+    first = ops.persist_and_queue([issue])
+    first_task_id = first["created_tasks"][0]
+    ops.queue.transition(first_task_id, "assigned")
+    ops.queue.transition(first_task_id, "running")
+    ops.queue.transition(first_task_id, "review")
+    ops.queue.transition(first_task_id, "complete")
+
+    benchmark = ops.queue.create(
+        "Measure Terminal-Bench with real provenance.",
+        module_id="genesis.evaluation",
+        priority=92,
+        payload={
+            "task_type": "frontier_benchmark_measurement",
+            "benchmark": {"benchmark_id": "terminal_bench_2_1"},
+        },
+    )
+    ops.queue.transition(benchmark.task_id, "assigned")
+    ops.queue.transition(benchmark.task_id, "running")
+    blocker_reason = (
+        "External authority required for real benchmark execution: harbor_cli, GENESIS_BENCHMARK_AGENT. "
+        "No score may change until validated evidence is staged."
+    )
+    ops.queue.pause(benchmark.task_id, blocker_reason)
+
+    blocked = ops.persist_and_queue([issue])
+    assert blocked["created_tasks"] == []
+    row = ops.report()["issues"][0]
+    assert row["status"] == "blocked"
+    assert row["owner_action_required"] is True
+    assert row["delegated_task_id"] == benchmark.task_id
+    assert row["blocker_reason"] == blocker_reason
+    assert row["work_generation"] == 1
+    assert any(event["event"] == "delegated_external_blocker" for event in ops.history(issue.issue_key))
+
+
+def test_ai_repair_eligibility_returns_when_delegated_blocker_clears(tmp_path: Path):
+    ops = GenesisOperations(tmp_path)
+    issue = ops.detect(scorecard(ai=37, samples=4))[0]
+    first = ops.persist_and_queue([issue])
+    first_task_id = first["created_tasks"][0]
+    ops.queue.transition(first_task_id, "assigned")
+    ops.queue.transition(first_task_id, "running")
+    ops.queue.transition(first_task_id, "review")
+    ops.queue.transition(first_task_id, "complete")
+
+    benchmark = ops.queue.create(
+        "Measure Terminal-Bench with real provenance.",
+        module_id="genesis.evaluation",
+        priority=92,
+        payload={"task_type": "frontier_benchmark_measurement"},
+    )
+    ops.queue.transition(benchmark.task_id, "assigned")
+    ops.queue.transition(benchmark.task_id, "running")
+    ops.queue.pause(
+        benchmark.task_id,
+        "External authority required for real benchmark execution: harbor_cli. No score may change until validated evidence is staged.",
+    )
+    ops.persist_and_queue([issue])
+    ops.queue.resume(benchmark.task_id)
+
+    resumed = ops.persist_and_queue([issue])
+    assert len(resumed["created_tasks"]) == 1
+    row = ops.report()["issues"][0]
+    assert row["status"] == "open"
+    assert row["owner_action_required"] is False
+    assert row["work_generation"] == 2
+    assert any(event["event"] == "delegated_blocker_cleared" for event in ops.history(issue.issue_key))
