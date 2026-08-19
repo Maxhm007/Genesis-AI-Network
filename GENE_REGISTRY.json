@@ -1,5 +1,5 @@
 {
-  "schema_version": 2,
+  "schema_version": 3,
   "registry_authority": "Gene 0",
   "canonical_collective_identity": "Genesis",
   "common_instance_name": "Gene",
@@ -10,14 +10,17 @@
     {"display_identity":"Gene 001","serial":1,"status":"reserved_for_owner_definition"}
   ],
   "genes": [
-    {"display_identity":"Gene 0","serial":0,"logical_id":"gene-node-1","repository":"Maxhm007/Genesis-AI-Network","role":"main_core_external_coordinator","status":"active","identity":"Genesis","capabilities":["coordination","issue_lifecycle","knowledge_routing","peer_care","validation_coordination","independent_learning","continuous_one_issue_focus","pulse_execution"]},
-    {"display_identity":"Gene 002","serial":2,"logical_id":"gene-node-2","repository":"Maxhm007/Genesis-Node-2","role":"independent_research_validation_gene","status":"active","identity":"Genesis","capabilities":["independent_development","independent_learning","research","validation","peer_communication","validated_learning_exchange","knowledge_exchange","peer_care","continuous_one_issue_focus","pulse_execution"]},
-    {"display_identity":"Gene 003","serial":3,"logical_id":"gene-node-3","repository":"Maxhm007/Genesis-Node-3","role":"independent_engineering_repair_gene","status":"active","identity":"Genesis","capabilities":["independent_development","independent_learning","engineering","repair","challenge","peer_communication","validated_learning_exchange","knowledge_exchange","peer_care","continuous_one_issue_focus","pulse_execution"]}
+    {"display_identity":"Gene 0","serial":0,"logical_id":"gene-node-1","repository":"Maxhm007/Genesis-AI-Network","role":"main_core_external_coordinator","status":"active","identity":"Genesis","core_processor":"genesis.core_processor","model_policy":"coordinator_model_is_replaceable_and_not_identity","capabilities":["coordination","issue_lifecycle","knowledge_routing","peer_care","validation_coordination","independent_learning","continuous_one_issue_focus","pulse_execution","gene_compute_routing"]},
+    {"display_identity":"Gene 002","serial":2,"logical_id":"gene-node-2","repository":"Maxhm007/Genesis-Node-2","role":"independent_research_validation_gene","status":"active","identity":"Genesis","model_profile":{"model":"Qwen/Qwen3-1.7B","license":"Apache-2.0","specialization":["reasoning","research","validation","review"],"identity_binding":false,"replaceable":true},"capabilities":["independent_development","independent_learning","research","validation","peer_communication","validated_learning_exchange","knowledge_exchange","peer_care","continuous_one_issue_focus","pulse_execution"]},
+    {"display_identity":"Gene 003","serial":3,"logical_id":"gene-node-3","repository":"Maxhm007/Genesis-Node-3","role":"independent_engineering_repair_gene","status":"active","identity":"Genesis","model_profile":{"model":"deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B","license":"MIT","specialization":["reasoning","engineering","coding","repair","challenge"],"identity_binding":false,"replaceable":true},"capabilities":["independent_development","independent_learning","engineering","repair","challenge","peer_communication","validated_learning_exchange","knowledge_exchange","peer_care","continuous_one_issue_focus","pulse_execution"]}
   ],
   "rules": {
     "all_genes_share_genesis_identity": true,
     "collective_and_individual_identity_are_genesis": true,
     "numbered_gene_names_are_instance_addresses_not_separate_systems": true,
+    "models_are_replaceable_compute_not_identity": true,
+    "gene_0_routes_work_through_core_processor": true,
+    "gene_2_and_gene_3_use_distinct_models": true,
     "every_gene_keeps_local_registry_copy": true,
     "gene_0_is_registry_authority": true,
     "registry_updates_when_gene_membership_or_status_changes": true,

@@ -24,7 +24,25 @@ def test_core_processor_routes_normal_task_and_publishes_state(tmp_path: Path) -
     assert result["dispatch"]["task_id"] == task.task_id
     assert result["dispatch"]["module_id"] == "genesis.coding"
     assert result["dispatch"]["lane"] == "normal"
+    assert result["dispatch"]["target_gene_id"] == "gene-node-3"
+    assert result["dispatch"]["model"] == "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
+    assert result["coordinator"]["logical_id"] == "gene-node-1"
     assert (tmp_path / "runtime" / "core_processor.json").is_file()
+
+
+def test_core_processor_routes_research_to_gene_2(tmp_path: Path) -> None:
+    processor = GenesisCoreProcessor(tmp_path)
+    processor.queue.create(
+        "Research current evidence for a bounded hypothesis",
+        module_id="genesis.research",
+        priority=70,
+    )
+
+    result = processor.cycle()
+
+    assert result["dispatch"]["target_gene_id"] == "gene-node-2"
+    assert result["dispatch"]["model"] == "Qwen/Qwen3-1.7B"
+    assert result["dispatch"]["model_license"] == "Apache-2.0"
 
 
 def test_core_processor_marks_protected_target_privileged(tmp_path: Path) -> None:

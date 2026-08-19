@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "coordinator": {
+    "gene": "Gene 0",
+    "logical_id": "gene-node-1",
+    "repository": "Maxhm007/Genesis-AI-Network",
+    "role": "coordinator",
+    "model_policy": "coordinator_does_not_require_peer_model_identity"
+  },
+  "workers": [
+    {
+      "gene": "Gene 002",
+      "logical_id": "gene-node-2",
+      "repository": "Maxhm007/Genesis-Node-2",
+      "role": "research_validation",
+      "model": "Qwen/Qwen3-1.7B",
+      "license": "Apache-2.0",
+      "capabilities": ["reasoning", "research", "validation", "review"]
+    },
+    {
+      "gene": "Gene 003",
+      "logical_id": "gene-node-3",
+      "repository": "Maxhm007/Genesis-Node-3",
+      "role": "engineering_repair",
+      "model": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+      "license": "MIT",
+      "capabilities": ["reasoning", "engineering", "coding", "repair", "challenge"]
+    }
+  ],
+  "rules": {
+    "models_must_be_free_to_run": true,
+    "models_must_have_open_source_or_permissive_open_weight_license": true,
+    "model_is_not_gene_identity": true,
+    "gene_0_coordinates": true,
+    "core_processor_routes": true,
+    "worker_results_require_existing_security_and_validation_boundaries": true,
+    "model_replacement_is_benchmark_driven": true
+  }
+}
