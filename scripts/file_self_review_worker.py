@@ -26,6 +26,10 @@ def _challenge_spec(root: Path) -> dict | None:
     problem = str(payload.get("problem", "")).strip()
     acceptance = str(payload.get("acceptance", "")).strip()
     method = str(payload.get("method", "minimal_correctness_fix")).strip()
+    ephemeral_files = payload.get("ephemeral_acceptance_files", {})
+    if not isinstance(ephemeral_files, dict):
+        raise ValueError("ephemeral_acceptance_files must be a mapping of test path to source")
+    ephemeral_files = {str(path): str(content) for path, content in ephemeral_files.items()}
     if not target or not problem or not (root / target).is_file():
         raise ValueError("active Genesis challenge requires an existing target and a problem statement")
 
@@ -34,6 +38,7 @@ def _challenge_spec(root: Path) -> dict | None:
         "problem": problem,
         "acceptance": acceptance or problem,
         "method": method,
+        "ephemeral_acceptance_files": ephemeral_files,
     }
 
 
@@ -44,6 +49,10 @@ def _run_assigned_challenge(root: Path):
     responsible for diagnosis, implementation, test-feedback repair, and candidate
     creation. This path deliberately reuses the same isolated iterative DevLab
     loop as the golden engineering path instead of performing a single proposal.
+
+    Optional executable acceptance tests are challenge evidence only: DevLab
+    installs them into its disposable worktree, but they never become candidate
+    files and therefore cannot place a known failing suite on ``main``.
     """
     spec = _challenge_spec(root)
     if spec is None:
@@ -73,6 +82,7 @@ def _run_assigned_challenge(root: Path):
             "executor": "genesis.devlab",
             "attribution": "owner_initiated",
         },
+        ephemeral_files=spec["ephemeral_acceptance_files"],
     )
     return spec, attempt
 
@@ -103,6 +113,7 @@ def main() -> None:
                 "title": f"Genesis assigned challenge: {spec['target']}",
                 "rationale": spec["problem"],
                 "method": spec["method"],
+                "ephemeral_acceptance_files": sorted(spec["ephemeral_acceptance_files"]),
             },
             "devlab": attempt.as_dict(),
             "file_self_review": loop.status(),
