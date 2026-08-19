@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import ast
+import json
+import re
 import subprocess
 import sys
 from dataclasses import asdict, dataclass
@@ -20,6 +22,39 @@ RETRY_METHODS = (
     "simplification",
     "fresh_approach",
 )
+
+
+class TargetGroundedProvider:
+    """Constrain one provider call to DevLab's already-authorized target path.
+
+    Small/local models sometimes copy the generic CodingModule schema placeholder
+    ``existing allowed path`` literally. DevLab already permits exactly one target,
+    so replacing only that non-path placeholder with the assigned target does not
+    expand authority. All other provider output remains unchanged and still passes
+    CodingModule validation plus DevLab's exact-target check.
+    """
+
+    PLACEHOLDER_RE = re.compile(r'("path"\s*:\s*)"existing allowed path"')
+
+    def __init__(self, provider: IntelligenceProvider, target_path: str) -> None:
+        self.provider = provider
+        self.target_path = target_path.replace("\\", "/").lstrip("./")
+        self.name = provider.name
+
+    def available(self) -> bool:
+        return self.provider.available()
+
+    def reason(self, prompt: str) -> str:
+        grounded_prompt = (
+            prompt
+            + "\nDEVLAB_EXACT_TARGET_PATH: "
+            + self.target_path
+            + "\nFor the JSON edit path, use exactly DEVLAB_EXACT_TARGET_PATH. "
+            + "Never return the schema placeholder 'existing allowed path'.\n"
+        )
+        raw = self.provider.reason(grounded_prompt)
+        replacement = r'\1' + json.dumps(self.target_path)
+        return self.PLACEHOLDER_RE.sub(replacement, raw)
 
 
 @dataclass(frozen=True)
@@ -196,8 +231,9 @@ class GenesisDevLab:
             "Diagnose the target and make exactly one smallest useful edit to that target only. "
             "Do not weaken tests, security, validation, governance, or promotion boundaries."
         )
+        grounded_provider = TargetGroundedProvider(provider, target_path) if provider is not None else None
         try:
-            proposal = self.coding.propose(objective, context_paths=[target_path], provider=provider)
+            proposal = self.coding.propose(objective, context_paths=[target_path], provider=grounded_provider)
         except Exception as exc:
             feedback = ValidationFeedback(False, False, None, "", f"proposal failed: {type(exc).__name__}: {exc}"[-2000:])
             return DevLabAttempt(target_path, problem, acceptance, inspection, snapshot, retry, None, feedback, "proposal_failed")
