@@ -62,7 +62,9 @@ class DevelopmentEfficiencyGovernor:
         if task.module_id == "genesis.security":
             score += 25.0
 
-        score -= 14.0 * task.attempt_count
+        # A failed attempt is expensive evidence. Penalize it enough that a clean,
+        # slightly lower-priority task can proceed instead of recycling the same path.
+        score -= 22.0 * task.attempt_count
         repeated_failures = max(0, len(task.failure_history) - len({item.get("classification") for item in task.failure_history}))
         score -= 8.0 * repeated_failures
 
