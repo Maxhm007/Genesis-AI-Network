@@ -49,6 +49,7 @@ on:
       - 'scripts/memory_sync.py'
       - 'scripts/autonomous_engineering.py'
       - 'scripts/local_reasoning_provider.py'
+      - 'scripts/anthropic_reasoning_provider.py'
       - 'scripts/capability_growth_sync.py'
       - 'scripts/genesis_hourly_ops.py'
       - 'scripts/genesis_automation.py'
@@ -61,6 +62,7 @@ on:
       - 'tests/test_scorecard.py'
       - 'tests/test_efficiency.py'
       - 'tests/test_intelligence_router.py'
+      - 'tests/test_anthropic_provider.py'
       - 'tests/test_capability_integration.py'
       - 'tests/test_memory.py'
       - 'tests/test_operations.py'
@@ -87,6 +89,9 @@ env:
   GENESIS_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_NAME: qwen3-0.6b-local
   GENESIS_PROVIDER_TIMEOUT_SECONDS: '180'
+  GENESIS_PROVIDER_ENDPOINTS: '[{"url":"http://127.0.0.1:8767","name":"claude-sonnet","timeout_seconds":180}]'
+  ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
+  ANTHROPIC_MODEL: ${{ vars.ANTHROPIC_MODEL }}
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
   GENESIS_EMAIL_FROM: ${{ secrets.GENESIS_EMAIL_FROM }}
@@ -184,6 +189,33 @@ jobs:
           else
             echo 'Validated reasoning provider unavailable; Genesis will degrade to bootstrap mode.' >&2
             cat /tmp/genesis-reasoning.log || true
+          fi
+      - name: Start optional Claude reasoning provider
+        if: env.ANTHROPIC_API_KEY != ''
+        shell: bash
+        run: |
+          nohup python scripts/anthropic_reasoning_provider.py --host 127.0.0.1 --port 8767 > /tmp/genesis-claude.log 2>&1 &
+          ready=false
+          for i in {1..20}; do
+            if python - <<'PY'
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:8767/health', timeout=2) as response:
+                  raise SystemExit(0 if response.status == 200 else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then
+              ready=true
+              break
+            fi
+            sleep 1
+          done
+          if [[ "$ready" == true ]]; then
+            echo 'GENESIS_CLAUDE_PROVIDER=READY'
+          else
+            echo 'Claude provider unavailable; Genesis will continue with local providers.' >&2
+            cat /tmp/genesis-claude.log || true
           fi
       - name: Check moving competitive AI reference
         run: python scripts/competitive_reference_monitor.py
