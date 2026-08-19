@@ -187,7 +187,6 @@ class CodingModule:
                 rendered[path] = self._apply_line_edit(path, edit.get("start_line"), edit.get("end_line"), new)
                 continue
 
-            # Backward-compatible exact-text form for trusted callers. Autonomous prompts use line ranges.
             old = edit.get("old")
             new = edit.get("new")
             if not isinstance(old, str) or not isinstance(new, str) or not old:
@@ -253,7 +252,7 @@ class CodingModule:
             + f"PREVIOUS: {previous}\n"
             + f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
             + f"Return ONLY: {example}. "
-            + "The path must be copied exactly from VALID_PATHS/NUMBERED_CONTEXT; never emit placeholder text such as 'existing allowed path'. "
+            + "Copy the path exactly from VALID_PATHS/NUMBERED_CONTEXT. Do not invent, summarize, rename, or substitute the path. "
             + "Choose line numbers exactly from NUMBERED_CONTEXT. Exactly one edit. Do not copy old source text. "
             + "No title, rationale, markdown, commentary, new files, policy changes, test weakening, or protected paths.\n"
         )
