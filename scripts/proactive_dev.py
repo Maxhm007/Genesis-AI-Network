@@ -14,33 +14,35 @@ from genesis.velocity import AdaptiveVelocityController
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     loop = ProactiveDevelopmentLoop(root)
+    review_loop = FileSelfReviewLoop(root, loop.providers)
     score = loop.ai_score_report()
     proof_before = AutonomyProofLedger(root).report()
     velocity_policy = AdaptiveVelocityController(root).policy()
-    plan, result = loop.develop_once()
-    review_loop = FileSelfReviewLoop(root, loop.providers)
-    development_source = "task_or_capability_driven"
 
-    # Intrinsic self-development fallback: when normal issue/task/capability work
-    # did not create a candidate, Genesis reviews exactly one of its own source
-    # files. The review cursor and lab survive hosted-run turnover under
-    # runtime/task_reviews, which is already part of the persistent runtime
-    # cache. A failed file stays focused and is retried by another method later.
-    if plan is None or result is None:
-        review_plan = review_loop.plan_next()
-        if review_plan is not None:
-            development_source = "file_by_file_self_review"
-            plan = DevelopmentPlan(
-                title=str(review_plan["title"]),
-                rationale=str(review_plan["rationale"]),
-                proposal=dict(review_plan["proposal"]),
-            )
-            result = loop.executor.execute(plan.proposal)
-            review_loop.observe_execution(plan.proposal, result)
+    # The workflow reaches this script only after the main autonomous engineering
+    # lane failed to produce a candidate. At that point Genesis's intrinsic
+    # behavior is to review exactly one source file before falling back to the
+    # older bootstrap/module catalog planner.
+    plan = None
+    result = None
+    development_source = "file_by_file_self_review"
+    review_plan = review_loop.plan_next()
+    if review_plan is not None:
+        plan = DevelopmentPlan(
+            title=str(review_plan["title"]),
+            rationale=str(review_plan["rationale"]),
+            proposal=dict(review_plan["proposal"]),
+        )
+        result = loop.executor.execute(plan.proposal)
+        review_loop.observe_execution(plan.proposal, result)
+    else:
+        development_source = "legacy_task_or_capability_fallback"
+        plan, result = loop.develop_once()
 
     if plan is None or result is None:
         print(json.dumps({
             "status": "no_candidate_this_cycle",
+            "development_source": development_source,
             "ai_score": score,
             "update_pressure": score["urgency"],
             "autonomy_proof": proof_before,
