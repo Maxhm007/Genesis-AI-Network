@@ -24,6 +24,35 @@ class PlaceholderProvider:
         return '{"edits":[{"path":"existing allowed path","start_line":1,"end_line":1,"new":"VALUE = 2"}]}'
 
 
+class RecoveringContentProvider(PlaceholderProvider):
+    name = "recovering-content-provider"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+        self.prompts: list[str] = []
+
+    def reason(self, prompt: str) -> str:
+        self.calls += 1
+        self.prompts.append(prompt)
+        if self.calls == 1:
+            return '{"edits":[{"path":"existing allowed path","start_line":1,"end_line":1,"new":"replacement text"}]}'
+        return '{"edits":[{"path":"existing allowed path","start_line":1,"end_line":1,"new":"VALUE = 2"}]}'
+
+
+class StuckContentProvider(PlaceholderProvider):
+    name = "stuck-content-provider"
+
+    def __init__(self) -> None:
+        super().__init__()
+        self.calls = 0
+
+    def reason(self, prompt: str) -> str:
+        self.calls += 1
+        self.prompt = prompt
+        return '{"edits":[{"path":"existing allowed path","start_line":1,"end_line":1,"new":"replacement text"}]}'
+
+
 def test_devlab_is_registered_without_direct_authority() -> None:
     registry = ModuleRegistry.from_default_config(ROOT)
     module = registry.get("genesis.devlab")
@@ -106,3 +135,23 @@ def test_target_grounded_provider_does_not_rewrite_real_cross_file_path() -> Non
     raw = grounded.reason("BASE PROMPT")
     assert '"path":"genesis/other.py"' in raw
     assert '"path":"genesis/budget.py"' not in raw
+
+
+def test_target_grounded_provider_reprompts_copied_content_placeholder() -> None:
+    provider = RecoveringContentProvider()
+    grounded = TargetGroundedProvider(provider, "genesis/budget.py")
+    raw = grounded.reason('OUTPUT: {"edits":[{"path":"genesis/budget.py","start_line":1,"end_line":1,"new":"replacement text"}]}')
+    assert provider.calls == 2
+    assert '"path":"genesis/budget.py"' in raw
+    assert '"new":"VALUE = 2"' in raw
+    assert "replacement text" not in provider.prompts[0]
+    assert "DEVLAB_CONTENT_RETRY" in provider.prompts[1]
+
+
+def test_target_grounded_provider_never_returns_literal_content_placeholder() -> None:
+    provider = StuckContentProvider()
+    grounded = TargetGroundedProvider(provider, "genesis/budget.py")
+    raw = grounded.reason('OUTPUT: {"new":"replacement text"}')
+    assert provider.calls == grounded.MAX_CONTENT_REPROMPTS + 1
+    assert '"new":null' in raw
+    assert '"new":"replacement text"' not in raw
