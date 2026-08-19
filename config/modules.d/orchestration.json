@@ -2,6 +2,44 @@
   "version": 1,
   "modules": [
     {
+      "module_id": "genesis.core_processor",
+      "name": "Genesis Core Processor",
+      "version": "0.1.0",
+      "purpose": "Act as Genesis's central coordination kernel: observe durable system state, apply bounded resource scheduling, delegate task routing, classify normal versus privileged execution lanes, and publish one processor-level status snapshot without becoming an intelligence provider or promotion authority.",
+      "capabilities": [
+        "central_scheduling",
+        "resource_coordination",
+        "task_dispatch",
+        "risk_lane_classification",
+        "system_state_aggregation",
+        "failure_state_aggregation"
+      ],
+      "permissions": [
+        "tasks.read",
+        "tasks.assign",
+        "runtime.status.write",
+        "resource.read"
+      ],
+      "dependencies": [
+        "genesis.task_queue",
+        "genesis.task_router",
+        "genesis.resource"
+      ],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.core_processor",
+      "metadata": {
+        "intelligence_provider": false,
+        "direct_code_promotion": false,
+        "validation_authority": false,
+        "constitution_write": false,
+        "specialist_execution_remains_delegated": true,
+        "single_system_coordination_snapshot": true
+      }
+    },
+    {
       "module_id": "genesis.task_router",
       "name": "Genesis Task Router Module",
       "version": "0.1.0",
