@@ -186,9 +186,14 @@ def patch_dashboard() -> None:
 def build() -> dict:
     pulls = safe_api(f"/repos/{OWNER}/{REPO}/pulls?state=closed&sort=updated&direction=desc&per_page=100", [])
     history = attributed_development_prs(pulls if isinstance(pulls, list) else [])
+    counts = summarize(history)
     enrich_status(history)
     patch_dashboard()
-    return {"attribution": summarize(history), "recent_improvements": history[:30]}
+    return {
+        "completed_self_development_tasks": counts["genesis_autonomous"],
+        "attribution": counts,
+        "recent_improvements": history[:30],
+    }
 
 
 if __name__ == "__main__":
