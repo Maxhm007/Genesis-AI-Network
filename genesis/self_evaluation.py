@@ -28,8 +28,9 @@ class GenesisSelfEvaluation:
 
     Genesis must be able to distinguish its own successful development from
     owner-initiated and assisted engineering. Generic completed engineering is
-    still retained as advisory memory, but it never receives autonomous credit
-    without an Autonomy Proof cycle classified ``genesis_autonomous``.
+    still retained as advisory memory. Autonomous credit is stricter: a
+    Genesis-authored cycle must also contain a successful ``promotion_confirmed``
+    event so merely creating a candidate never counts as completed evolution.
     """
 
     def __init__(self, root: Path) -> None:
@@ -85,11 +86,26 @@ class GenesisSelfEvaluation:
             actor = str(completed.get("actor") or "unknown").strip().lower()
             classification = str(completed.get("classification") or "external")
             if classification == "genesis_autonomous":
+                promoted = next(
+                    (
+                        event
+                        for event in reversed(cycle)
+                        if event.get("stage") == "promotion_confirmed" and event.get("outcome") == "success"
+                    ),
+                    None,
+                )
+                if promoted is None:
+                    # A Genesis candidate is still an experiment until the
+                    # independently validated exact commit is observed on main.
+                    continue
                 attribution = "genesis_autonomous"
+                completed_at = promoted.get("recorded_at") or completed.get("recorded_at")
             elif actor in OWNER_ACTORS:
                 attribution = "owner"
+                completed_at = completed.get("recorded_at")
             else:
                 attribution = "assisted"
+                completed_at = completed.get("recorded_at")
             rows.append(
                 {
                     "cycle_id": cycle_id,
@@ -97,7 +113,7 @@ class GenesisSelfEvaluation:
                     "files": detail.get("files") or [],
                     "branch": candidate_detail.get("branch"),
                     "commit_sha": candidate_detail.get("commit_sha"),
-                    "completed_at": completed.get("recorded_at"),
+                    "completed_at": completed_at,
                     "actor": completed.get("actor"),
                     "classification": classification,
                     "attribution": attribution,
@@ -130,12 +146,12 @@ class GenesisSelfEvaluation:
             "completed_engineering_tasks_observed": len(engineering),
             "autonomy_proof": proof,
             "interpretation": (
-                "Genesis Autonomous means Genesis initiated/completed a successful proven cycle. "
-                "Assisted means an external assistant or unowned external actor drove the cycle. "
-                "Owner means the owner/user/human drove the cycle. Completed engineering is retained as advisory memory."
+                "Genesis Autonomous means Genesis initiated the development and its exact candidate was independently "
+                "validated and confirmed on main. Assisted means an external assistant or unowned external actor drove "
+                "the cycle. Owner means the owner/user/human drove the cycle."
             ),
             "rule": (
                 "Owner and assisted work must never increase Genesis autonomous self-development credit. "
-                "Every proven completed cycle belongs to exactly one attribution bucket."
+                "Candidate creation alone never earns autonomous credit; promotion must be confirmed."
             ),
         }
