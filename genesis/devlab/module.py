@@ -27,14 +27,15 @@ RETRY_METHODS = (
 class TargetGroundedProvider:
     """Constrain one provider call to DevLab's already-authorized target path.
 
-    Small/local models sometimes copy the generic CodingModule schema placeholder
-    ``existing allowed path`` literally. DevLab already permits exactly one target,
-    so replacing only that non-path placeholder with the assigned target does not
-    expand authority. All other provider output remains unchanged and still passes
-    CodingModule validation plus DevLab's exact-target check.
+    The adapter grounds only schema placeholders already present in the coding
+    contract and gives a bounded second chance when a small model copies example
+    content instead of designing code. It never invents the source change itself,
+    expands allowed paths, or bypasses CodingModule/DevLab validation.
     """
 
-    PLACEHOLDER_RE = re.compile(r'("path"\s*:\s*)"existing allowed path"')
+    PATH_PLACEHOLDER_RE = re.compile(r'("path"\s*:\s*)"existing allowed path"')
+    CONTENT_PLACEHOLDER_RE = re.compile(r'("new"\s*:\s*)"replacement text"')
+    MAX_CONTENT_REPROMPTS = 2
 
     def __init__(self, provider: IntelligenceProvider, target_path: str) -> None:
         self.provider = provider
@@ -44,17 +45,42 @@ class TargetGroundedProvider:
     def available(self) -> bool:
         return self.provider.available()
 
-    def reason(self, prompt: str) -> str:
-        grounded_prompt = (
+    def _prepare_prompt(self, prompt: str) -> str:
+        # A schema-only null is intentionally invalid as a final edit value. If a
+        # provider copies it, CodingModule rejects it and uses its bounded repair
+        # cycle instead of executing meaningless source text.
+        prompt = self.CONTENT_PLACEHOLDER_RE.sub(r"\1null", prompt)
+        return (
             prompt
             + "\nDEVLAB_EXACT_TARGET_PATH: "
             + self.target_path
             + "\nFor the JSON edit path, use exactly DEVLAB_EXACT_TARGET_PATH. "
-            + "Never return the schema placeholder 'existing allowed path'.\n"
+            + "The JSON field new MUST be a non-empty string containing the actual source code you design to solve OBJECTIVE. "
+            + "Do not copy schema labels or example content into new.\n"
         )
-        raw = self.provider.reason(grounded_prompt)
-        replacement = r'\1' + json.dumps(self.target_path)
-        return self.PLACEHOLDER_RE.sub(replacement, raw)
+
+    def _ground_path(self, raw: str) -> str:
+        replacement = r"\1" + json.dumps(self.target_path)
+        return self.PATH_PLACEHOLDER_RE.sub(replacement, raw)
+
+    def reason(self, prompt: str) -> str:
+        grounded_prompt = self._prepare_prompt(prompt)
+        raw = ""
+        for content_attempt in range(self.MAX_CONTENT_REPROMPTS + 1):
+            retry_note = ""
+            if content_attempt:
+                retry_note = (
+                    "\nDEVLAB_CONTENT_RETRY: The previous response copied schema/example content instead of solving the task. "
+                    "Re-read OBJECTIVE and NUMBERED_CONTEXT. Return actual replacement source code in new; keep exactly one bounded edit.\n"
+                )
+            raw = self._ground_path(self.provider.reason(grounded_prompt + retry_note))
+            if not self.CONTENT_PLACEHOLDER_RE.search(raw):
+                return raw
+
+        # Never let literal schema content reach the source tree. Converting only
+        # the known placeholder to null makes the normal CodingModule validator
+        # reject it and enter its own bounded repair path.
+        return self.CONTENT_PLACEHOLDER_RE.sub(r"\1null", raw)
 
 
 @dataclass(frozen=True)
