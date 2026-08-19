@@ -41,6 +41,8 @@ class IntelligenceRouter:
         lowered = name.lower()
         if name == "genesis-bootstrap":
             return ProviderProfile(name, 0.05, 0.35, ("planning", "review", "routing"))
+        if "claude" in lowered or "anthropic" in lowered:
+            return ProviderProfile(name, 1.1, 0.96, ("reasoning", "coding", "research", "planning", "review"))
         if "qwen3-0.6b" in lowered:
             return ProviderProfile(name, 1.0, 0.72, ("reasoning", "coding", "research", "planning"))
         return ProviderProfile(name, 2.0, 0.75, ("reasoning", "coding", "research", "planning", "review"))
