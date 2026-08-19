@@ -1,0 +1,221 @@
+name: Genesis Issue Discovery Trial
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/issue-discovery-trial.yml'
+
+permissions:
+  contents: write
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_NAME: qwen3-1.7b-discovery-trial
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '240'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '768'
+  HF_HOME: ~/.cache/huggingface
+  PIP_CACHE_DIR: ~/.cache/pip
+
+concurrency:
+  group: genesis-issue-discovery-trial
+  cancel-in-progress: false
+
+jobs:
+  discover_and_solve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    outputs:
+      has_candidate: ${{ steps.candidate.outputs.has_candidate }}
+      candidate_branch: ${{ steps.candidate.outputs.candidate_branch }}
+      candidate_sha: ${{ steps.candidate.outputs.candidate_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Restore open-model caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/pip
+          key: genesis-qwen3-1.7b-${{ runner.os }}-py312-v1
+          restore-keys: |
+            genesis-qwen3-1.7b-${{ runner.os }}-py312-
+
+      - run: pip install -r requirements.txt
+
+      - name: Verify stable baseline
+        run: python -m pytest -q
+
+      - name: Install free local reasoning runtime
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors
+
+      - name: Start Gene discovery reasoning provider
+        shell: bash
+        run: |
+          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen3-1.7B --host 127.0.0.1 --port 8766 --max-new-tokens 768 > /tmp/genesis-issue-discovery.log 2>&1 &
+          ready=false
+          for i in {1..120}; do
+            if python - <<'PY'
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=2) as response:
+                  raise SystemExit(0 if response.status == 200 else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ready" != true ]]; then
+            cat /tmp/genesis-issue-discovery.log || true
+            exit 1
+          fi
+
+      - name: Configure Genesis Git identity
+        run: |
+          git config user.name "Genesis AI"
+          git config user.email "genesis-ai@users.noreply.github.com"
+
+      - name: Find one additional issue and let Genesis solve it
+        run: python scripts/issue_discovery_trial.py
+
+      - name: Preserve discovery and solution evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-issue-discovery-trial-${{ github.run_id }}
+          path: |
+            runtime/issue_discovery_trial.json
+            /tmp/genesis-issue-discovery.log
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Resolve generated candidate
+        id: candidate
+        shell: bash
+        run: |
+          branch=$(git branch --show-current)
+          if [[ "$branch" != genesis/candidate-* ]]; then
+            echo 'has_candidate=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo 'has_candidate=true' >> "$GITHUB_OUTPUT"
+          echo "candidate_branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  validator_a:
+    needs: discover_and_solve
+    if: needs.discover_and_solve.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.discover_and_solve.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite A
+        run: python -m pytest -q
+      - name: Security review A
+        run: python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('${{ needs.discover_and_solve.outputs.candidate_sha }}^')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
+      - name: Sign validator A approval
+        run: python genesis/ephemeral_validator.py --validator-id issue-discovery-validator-a --candidate ${{ needs.discover_and_solve.outputs.candidate_sha }} --output validator-a.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue-discovery-validator-a
+          path: validator-a.json
+
+  validator_b:
+    needs: discover_and_solve
+    if: needs.discover_and_solve.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.discover_and_solve.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite B
+        run: python -m pytest -q
+      - name: Security review B
+        run: python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('${{ needs.discover_and_solve.outputs.candidate_sha }}^')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
+      - name: Sign validator B approval
+        run: python genesis/ephemeral_validator.py --validator-id issue-discovery-validator-b --candidate ${{ needs.discover_and_solve.outputs.candidate_sha }} --output validator-b.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: issue-discovery-validator-b
+          path: validator-b.json
+
+  promote:
+    needs: [discover_and_solve, validator_a, validator_b]
+    if: needs.discover_and_solve.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: issue-discovery-validator-a
+          path: votes/a
+      - uses: actions/download-artifact@v4
+        with:
+          name: issue-discovery-validator-b
+          path: votes/b
+      - name: Verify independent signed quorum
+        run: python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
+      - name: Promote exact validated discovery candidate
+        shell: bash
+        run: |
+          candidate='${{ needs.discover_and_solve.outputs.candidate_sha }}'
+          branch='${{ needs.discover_and_solve.outputs.candidate_branch }}'
+          git fetch origin main "$branch"
+          main_sha=$(git rev-parse origin/main)
+          test "$(git rev-parse origin/$branch)" = "$candidate"
+          git merge-base --is-ancestor "$main_sha" "$candidate"
+          if git diff --name-only "$main_sha..$candidate" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
+            echo 'Protected Genesis identity/workflow boundary changed' >&2
+            exit 1
+          fi
+          git push origin "$candidate:refs/heads/main"
+
+# Intentionally no schedule. If this one-shot trial proves issue discovery,
+# Genesis-authored repair, independent validation, and exact promotion, a
+# recurring schedule can be added in a separate validated change.
