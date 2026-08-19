@@ -13,12 +13,13 @@ TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 STATUS = Path("docs/status/status.json")
 DASHBOARD = Path("docs/status/index.html")
 
-OLD_EVOLUTION_SECTION = '''<section class="view" id="v-evolution"><div class="head"><div><h2>Self Evolution</h2><p>Measured evidence of learning, healing and development.</p></div></div><div class="grid"><div class="card s7"><div id="evoMetrics" class="metrics"></div></div><div class="card s5"><div class="stats"><div class="stat"><b id="wfSamples">—</b><span>Workflow samples</span></div><div class="stat"><b id="healSamples">—</b><span>Healing samples</span></div><div class="stat"><b id="devSamples">—</b><span>Development samples</span></div></div></div><div class="card s12"><div class="label">Recent Evolution Activity</div><div id="evoActivity" class="stack" style="margin-top:10px"></div></div></div></section>'''
+AUTO_TITLE_PREFIX = "Genesis autonomous candidate:"
+AUTO_BODY_MARKER = "Autonomous Genesis candidate. Promotion requires the Genesis Candidate PR Gate"
+PROOF_MARKER = "<!-- genesis-autonomy-proof:genesis_autonomous -->"
 
-NEW_EVOLUTION_SECTION = '''<section class="view" id="v-evolution"><div class="head"><div><h2>Self Evolution</h2><p>Measured evidence of learning, healing and development.</p></div></div><div class="grid"><div class="card s7"><div id="evoMetrics" class="metrics"></div></div><div class="card s5"><div class="stats"><div class="stat"><b id="wfSamples">—</b><span>Workflow samples</span></div><div class="stat"><b id="healSamples">—</b><span>Healing samples</span></div><div class="stat"><b id="devSamples">—</b><span>Development samples</span></div></div></div><div class="card s4"><div class="label">Completed Self-Development Tasks</div><div id="selfDevDone" class="value">—</div><div class="cap">Merged, validated Genesis candidate improvements</div></div><div class="card s8"><div class="label">What Genesis Improved</div><div id="selfDevHistory" class="stack" style="margin-top:10px"></div></div><div class="card s12"><div class="label">Recent Evolution Activity</div><div id="evoActivity" class="stack" style="margin-top:10px"></div></div></div></section>'''
+OLD_EVOLUTION_SECTION = '''<section class="view" id="v-evolution"><div class="head"><div><h2>Self Evolution</h2><p>Measured evidence of learning, healing and development.</p></div></div><div class="grid"><div class="card s7"><div id="evoMetrics" class="metrics"></div></div><div class="card s5"><div class="stats"><div class="stat"><b id="wfSamples">—</b><span>Workflow samples</span></div><div class="stat"><b id="healSamples">—</b><span>Healing samples</span></div><div class="stat"><b id="devSamples">—</b><span>Development samples</span></div></div></div><div class="card s4"><div class="label">Completed Self-Development Tasks</div><div id="selfDevDone" class="value">—</div><div class="cap">Merged, validated Genesis candidate improvements</div></div><div class="card s8"><div class="label">What Genesis Improved</div><div id="selfDevHistory" class="stack" style="margin-top:10px"></div></div><div class="card s12"><div class="label">Recent Evolution Activity</div><div id="evoActivity" class="stack" style="margin-top:10px"></div></div></div></section>'''
 
-OLD_RENDER = "$('#wfSamples').textContent=k.workflow_samples??0;$('#healSamples').textContent=k.healing_samples??0;$('#devSamples').textContent=k.development_samples??0;const act="
-NEW_RENDER = "$('#wfSamples').textContent=k.workflow_samples??0;$('#healSamples').textContent=k.healing_samples??0;$('#devSamples').textContent=k.development_samples??0;$('#selfDevDone').textContent=k.completed_self_development_tasks??0;const devhist=(g.self_development_history||[]).map(x=>item(`#${x.number} ${x.title}`,`${x.improvement} · ${age(x.merged_at)}`,x.url)).join('')||'<div class=\"empty\">No completed self-development task found in this snapshot.</div>';$('#selfDevHistory').innerHTML=devhist;const act="
+NEW_EVOLUTION_SECTION = '''<section class="view" id="v-evolution"><div class="head"><div><h2>Self Evolution</h2><p>Measured evidence of learning, healing and development.</p></div></div><div class="grid"><div class="card s7"><div id="evoMetrics" class="metrics"></div></div><div class="card s5"><div class="stats"><div class="stat"><b id="wfSamples">—</b><span>Workflow samples</span></div><div class="stat"><b id="healSamples">—</b><span>Healing samples</span></div><div class="stat"><b id="devSamples">—</b><span>Development samples</span></div></div></div><div class="card s4"><div class="label">Verified Autonomous Self-Development</div><div id="selfDevDone" class="value">—</div><div class="cap">Only Genesis-initiated work with autonomous provenance</div></div><div class="card s8"><div class="label">What Genesis Autonomously Improved</div><div id="selfDevHistory" class="stack" style="margin-top:10px"></div></div><div class="card s12"><div class="label">Recent Evolution Activity</div><div id="evoActivity" class="stack" style="margin-top:10px"></div></div></div></section>'''
 
 
 def api(path: str):
@@ -59,6 +60,21 @@ def improvement_from_pr(pr: dict) -> str:
     return str(pr.get("title") or "Validated Genesis self-development improvement")[:420]
 
 
+def has_autonomous_provenance(pr: dict) -> bool:
+    """Credit only PRs that carry evidence they came from Genesis itself.
+
+    The ordinary autonomous PR opener emits a fixed title/body contract. A
+    privileged lane may instead provide the explicit proof marker. Manually
+    created candidate branches/PRs do not receive self-development credit just
+    because their branch starts with ``genesis/candidate-``.
+    """
+    title = str(pr.get("title") or "")
+    body = str(pr.get("body") or "")
+    ordinary = title.startswith(AUTO_TITLE_PREFIX) and AUTO_BODY_MARKER in body
+    explicit = PROOF_MARKER in body
+    return ordinary or explicit
+
+
 def merged_self_development_prs(pulls: list[dict]) -> list[dict]:
     rows = []
     for pr in pulls:
@@ -66,6 +82,8 @@ def merged_self_development_prs(pulls: list[dict]) -> list[dict]:
         if not pr.get("merged_at"):
             continue
         if not (head.startswith("genesis/candidate-") or head.startswith("genesis/privileged-candidate-")):
+            continue
+        if not has_autonomous_provenance(pr):
             continue
         rows.append(
             {
@@ -76,7 +94,8 @@ def merged_self_development_prs(pulls: list[dict]) -> list[dict]:
                 "lane": "privileged" if head.startswith("genesis/privileged-candidate-") else "normal",
                 "merged_at": pr.get("merged_at"),
                 "url": pr.get("html_url"),
-                "evidence": "merged validated Genesis candidate PR",
+                "classification": "genesis_autonomous",
+                "evidence": "merged candidate with Genesis-autonomous provenance",
             }
         )
     rows.sort(key=lambda row: str(row.get("merged_at") or ""), reverse=True)
@@ -95,7 +114,10 @@ def enrich_status(history: list[dict]) -> None:
     payload["self_development_evaluation"] = {
         "completed_tasks": len(history),
         "recent_improvements": history[:20],
-        "definition": "Merged Genesis candidate PRs that passed the repository validation/promotion path.",
+        "definition": (
+            "Merged Genesis candidate PRs with explicit Genesis-autonomous provenance. "
+            "Owner-, assistant-, and manually initiated candidate PRs are excluded."
+        ),
     }
     STATUS.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
@@ -104,14 +126,12 @@ def patch_dashboard() -> None:
     if not DASHBOARD.is_file():
         return
     html = DASHBOARD.read_text(encoding="utf-8")
-    if "id=\"selfDevDone\"" not in html:
-        if OLD_EVOLUTION_SECTION not in html:
-            raise RuntimeError("Self Evolution dashboard contract changed; refusing blind patch")
+    if OLD_EVOLUTION_SECTION in html:
         html = html.replace(OLD_EVOLUTION_SECTION, NEW_EVOLUTION_SECTION, 1)
-    if "completed_self_development_tasks??0" not in html:
-        if OLD_RENDER not in html:
-            raise RuntimeError("Self Evolution render contract changed; refusing blind patch")
-        html = html.replace(OLD_RENDER, NEW_RENDER, 1)
+    else:
+        html = html.replace("Completed Self-Development Tasks", "Verified Autonomous Self-Development")
+        html = html.replace("Merged, validated Genesis candidate improvements", "Only Genesis-initiated work with autonomous provenance")
+        html = html.replace("What Genesis Improved", "What Genesis Autonomously Improved")
     DASHBOARD.write_text(html, encoding="utf-8")
 
 
