@@ -1,10 +1,12 @@
 from __future__ import annotations
 
 import json
+import time
 from dataclasses import asdict, replace
 
 from .autonomous_engineering import ENGINEERING_MODULES, AutonomousEngineeringLoop
 from .development_efficiency import DevelopmentEfficiencyGovernor
+from .devlab.module import GenesisDevLab
 from .self_evaluation import GenesisSelfEvaluation
 from .velocity import AdaptiveVelocityController
 
@@ -20,6 +22,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
         super().__init__(root, providers)
         self.governor = DevelopmentEfficiencyGovernor(self.queue)
         self.velocity_policy = AdaptiveVelocityController(self.root).policy()
+        self.devlab = GenesisDevLab(self.root, self.providers)
         earned = int(self.velocity_policy.get("max_development_burst", 1) or 1)
         self.MAX_TASK_ATTEMPTS_PER_CYCLE = max(1, min(self.MAX_SAFE_BURST, earned))
         self._selection_trace: list[dict] = []
@@ -65,7 +68,99 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
         encoded = json.dumps(compact, sort_keys=True).encode("utf-8")[: self.MAX_SELF_EVALUATION_CONTEXT_BYTES]
         return encoded.decode("utf-8", errors="ignore")
 
+    def _attempt_devlab_task(self, task, runtime) -> dict:
+        """Execute an explicitly marked task through DevLab without self-approval."""
+        started = time.perf_counter()
+        owner_module = task.module_id or "genesis.coding"
+        target_path = str(task.payload.get("target_path") or "").replace("\\", "/").lstrip("./")
+        attempt = {
+            "task": asdict(task),
+            "owner_module": owner_module,
+            "executor_module": "genesis.devlab",
+            "ai_team_context_used": False,
+            "context_paths": [target_path] if target_path else [],
+            "candidate_revisions": 0,
+            "coding_status": "started",
+            "candidate": None,
+            "candidate_security": None,
+            "self_evaluation_context_used": False,
+            "self_evaluation_context_bytes": 0,
+        }
+        provider_name = "unknown"
+        try:
+            if not target_path or not (self.root / target_path).is_file():
+                raise RuntimeError("DevLab task requires an existing target_path")
+            if task.state != "assigned":
+                self.queue.transition(task.task_id, "assigned", module_id=owner_module)
+            self.queue.transition(task.task_id, "running", module_id=owner_module)
+            provider = self.coding._provider()
+            if provider is None:
+                raise RuntimeError("no intelligence provider available")
+            provider_name = provider.name
+            result = self.devlab.attempt_problem(
+                target_path=target_path,
+                problem=task.objective,
+                acceptance=str(task.payload.get("acceptance") or task.objective),
+                provider=provider,
+                provenance={
+                    "initiator": "owner",
+                    "designer": "genesis.devlab",
+                    "executor": "genesis.devlab",
+                    "source_task_id": task.task_id,
+                    "attribution": "owner_initiated",
+                },
+            )
+            feedback = result.feedback
+            attempt["devlab"] = result.as_dict()
+            attempt["candidate"] = {
+                "committed": bool(feedback and feedback.candidate_created),
+                "tests_passed": bool(feedback and feedback.tests_passed),
+                "commit_sha": feedback.commit_sha if feedback else None,
+                "branch": feedback.branch if feedback else "",
+                "changed_files": [target_path] if feedback and feedback.candidate_created else [],
+                "message": feedback.failure if feedback else result.status,
+            }
+            if not feedback or not feedback.candidate_created or not feedback.tests_passed:
+                attempt["coding_status"] = "candidate_not_committed"
+                self.queue.transition(task.task_id, "blocked", module_id=owner_module)
+                self._record_efficiency(provider_name, started, False, task_type="devlab_issue")
+                return attempt
+
+            candidate_security = self.security.write_report(
+                runtime / "candidate_security_report.json", candidate=True, base_ref="main"
+            )
+            attempt["candidate_security"] = candidate_security
+            if candidate_security["status"] != "pass":
+                attempt["coding_status"] = "candidate_rejected_by_security"
+                self._git("checkout", "main")
+                self.queue.transition(task.task_id, "blocked", module_id=owner_module)
+                self._record_efficiency(provider_name, started, False, task_type="devlab_issue")
+                return attempt
+
+            attempt["coding_status"] = "candidate_created"
+            self.queue.transition(task.task_id, "review", module_id=owner_module)
+            self._record_efficiency(provider_name, started, True, task_type="devlab_issue")
+            return attempt
+        except Exception as exc:
+            attempt["coding_status"] = "provider_or_candidate_error"
+            attempt["error"] = f"{type(exc).__name__}: {exc}"[:2000]
+            current = self.queue.get(task.task_id)
+            if current and current.state in {"assigned", "running"}:
+                try:
+                    self.queue.transition(task.task_id, "blocked", module_id=owner_module)
+                except Exception:
+                    pass
+            if provider_name != "unknown":
+                try:
+                    self._record_efficiency(provider_name, started, False, task_type="devlab_issue")
+                except Exception:
+                    pass
+            return attempt
+
     def _attempt_task(self, task, runtime) -> dict:
+        if str(task.payload.get("executor") or "") == "genesis.devlab":
+            return self._attempt_devlab_task(task, runtime)
+
         learning_context = self._self_evaluation_context()
         learned_task = task
         if learning_context:
