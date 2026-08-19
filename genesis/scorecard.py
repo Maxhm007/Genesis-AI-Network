@@ -8,16 +8,12 @@ from .ai_score import GenesisAIScorer
 from .efficiency import EfficiencyTracker
 from .modules.task_queue import PersistentTaskQueue
 from .providers import ProviderRegistry
+from .self_evaluation import GenesisSelfEvaluation
 from .self_learning import SelfLearningStore
 
 
 class GenesisScorecard:
-    """Expose distinct capability, efficiency, and mission-research scores.
-
-    The immortality score measures research-system progress and evidence
-    maturity. It is explicitly not a percentage of biological immortality
-    achieved. Missing evidence receives no credit.
-    """
+    """Expose distinct capability, efficiency, mission-research and self-development evidence."""
 
     def __init__(self, root: Path, providers: ProviderRegistry | None = None) -> None:
         self.root = Path(root).resolve()
@@ -39,14 +35,10 @@ class GenesisScorecard:
             except Exception:
                 fresh_scan = False
 
-        research_tasks = [
-            task for task in queue.list(limit=1000)
-            if task.payload.get("task_type") == "immortality_research"
-        ]
+        research_tasks = [task for task in queue.list(limit=1000) if task.payload.get("task_type") == "immortality_research"]
         reviews = list(task_dir.glob("*.json")) if task_dir.exists() else []
         validated_research_lessons = [
-            item for item in lessons.list(state="validated", limit=1000)
-            if item.source_type == "research_review"
+            item for item in lessons.list(state="validated", limit=1000) if item.source_type == "research_review"
         ]
 
         discovery_credit = 25 if fresh_scan else 0
@@ -68,6 +60,7 @@ class GenesisScorecard:
         ai = GenesisAIScorer(self.root, self.providers).report()
         efficiency = EfficiencyTracker(self.root / "runtime" / "efficiency.jsonl").report()
         mission = self._immortality_progress()
+        self_development = GenesisSelfEvaluation(self.root).report()
         return {
             "created_at": datetime.now(timezone.utc).isoformat(),
             "ai_capability_score": {
@@ -77,12 +70,15 @@ class GenesisScorecard:
                 "interpretation": ai["interpretation"],
             },
             "efficiency_score": efficiency,
+            "self_development_evaluation": self_development,
             "immortality_research_progress_score": mission,
-            "rule": "Scores are separate. Genesis may not trade scientific integrity or safety for a higher capability or efficiency score.",
+            "rule": "Scores are separate. Self-development history is evidence, not permission to self-award capability or benchmark credit.",
         }
 
     def write(self, path: Path) -> dict:
         report = self.report()
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(json.dumps(report, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        self_eval_path = path.parent / "self_evaluation.json"
+        self_eval_path.write_text(json.dumps(report["self_development_evaluation"], indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return report
