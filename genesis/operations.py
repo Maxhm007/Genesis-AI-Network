@@ -6,7 +6,7 @@ import hashlib
 import json
 from pathlib import Path
 
-from .modules.task_queue import PersistentTaskQueue
+from .modules.task_queue import GenesisTask, PersistentTaskQueue
 
 
 def utc_now() -> str:
@@ -34,6 +34,7 @@ class GenesisOperations:
     VALID_SEVERITY = {"info", "low", "medium", "high", "critical"}
     ACTIVE_TASK_STATES = {"new", "assigned", "running", "blocked", "review"}
     EMBEDDED_HISTORY_LIMIT = 50
+    EXTERNAL_BENCHMARK_BLOCKER_PREFIX = "External authority required for real benchmark execution:"
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root).resolve()
@@ -95,6 +96,28 @@ class GenesisOperations:
 
     def _tasks_for_issue(self, issue_key: str):
         return [task for task in self.queue.list(limit=5000) if task.payload.get("issue_key") == issue_key]
+
+    def _delegated_external_blocker(self, issue: OperationalIssue) -> GenesisTask | None:
+        """Return the durable benchmark blocker that already owns an AI capability gap.
+
+        Gene 0 should not create generic repair generations while a frontier benchmark
+        evaluation is explicitly paused at an external authority boundary. The issue
+        stays visible and becomes autonomously eligible again as soon as the delegated
+        evaluation leaves that paused blocker state.
+        """
+        if issue.title != "AI capability below target":
+            return None
+        blockers = [
+            task
+            for task in self.queue.list(limit=5000)
+            if task.module_id == "genesis.evaluation"
+            and task.payload.get("task_type") == "frontier_benchmark_measurement"
+            and task.state == "paused"
+            and str(task.state_reason or "").startswith(self.EXTERNAL_BENCHMARK_BLOCKER_PREFIX)
+        ]
+        if not blockers:
+            return None
+        return max(blockers, key=lambda task: task.updated_at)
 
     def _ensure_issue_work(self, issue: OperationalIssue) -> tuple[str | None, int]:
         tasks = self._tasks_for_issue(issue.issue_key)
@@ -231,15 +254,37 @@ class GenesisOperations:
             prior = existing.get(issue.issue_key, {})
             row["first_seen_at"] = prior.get("first_seen_at", now)
             row["last_seen_at"] = now
+            blocker = self._delegated_external_blocker(issue)
+
             if prior.get("status") == "resolved":
                 row["reopened_at"] = now
                 self._append_history("reopened", issue.issue_key, title=issue.title, evidence=issue.evidence)
             elif not prior:
                 self._append_history("detected", issue.issue_key, title=issue.title, severity=issue.severity, evidence=issue.evidence)
-            else:
+            elif blocker is None and prior.get("status") == "blocked" and prior.get("delegated_task_id"):
+                self._append_history(
+                    "delegated_blocker_cleared",
+                    issue.issue_key,
+                    title=issue.title,
+                    delegated_task_id=prior.get("delegated_task_id"),
+                )
+            elif blocker is None:
                 self._append_history("observed_open", issue.issue_key, title=issue.title, evidence=issue.evidence)
 
-            if not issue.owner_action_required:
+            if blocker is not None:
+                row["status"] = "blocked"
+                row["owner_action_required"] = True
+                row["delegated_task_id"] = blocker.task_id
+                row["blocker_reason"] = blocker.state_reason
+                row["work_generation"] = len(self._tasks_for_issue(issue.issue_key))
+                self._append_history(
+                    "delegated_external_blocker",
+                    issue.issue_key,
+                    title=issue.title,
+                    delegated_task_id=blocker.task_id,
+                    blocker_reason=blocker.state_reason,
+                )
+            elif not issue.owner_action_required:
                 task_id, generation = self._ensure_issue_work(issue)
                 if task_id:
                     created_tasks.append(task_id)
