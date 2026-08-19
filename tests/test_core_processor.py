@@ -41,7 +41,7 @@ def test_core_processor_routes_research_to_gene_2(tmp_path: Path) -> None:
     result = processor.cycle()
 
     assert result["dispatch"]["target_gene_id"] == "gene-node-2"
-    assert result["dispatch"]["model"] == "Qwen/Qwen3-4B-Instruct-2507"
+    assert result["dispatch"]["model"] == "Qwen/Qwen3-1.7B"
     assert result["dispatch"]["model_license"] == "Apache-2.0"
 
 
