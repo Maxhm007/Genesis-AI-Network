@@ -16,18 +16,28 @@ MODULE_RE = re.compile(r"^DevLab-Module:\s*(genesis\.[\w.]+)\s*$", re.I | re.M)
 
 
 def _github_open_issues() -> list[dict]:
+    """Read open issues even when a workflow forgot to export GITHUB_TOKEN.
+
+    Genesis-AI-Network is public, so read-only issue intake can safely use the
+    public GitHub API without authentication. When a token is available it is
+    used to gain the normal authenticated rate limit. GITHUB_REPOSITORY is a
+    standard Actions environment variable and remains required so Genesis never
+    guesses which repository should feed engineering work.
+    """
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
-    if not token or not repo:
+    if not repo:
         return []
+    headers = {
+        "Accept": "application/vnd.github+json",
+        "X-GitHub-Api-Version": "2022-11-28",
+        "User-Agent": "Genesis-DevLab-Intake",
+    }
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
     request = urllib.request.Request(
         f"https://api.github.com/repos/{repo}/issues?state=open&per_page=100",
-        headers={
-            "Authorization": f"Bearer {token}",
-            "Accept": "application/vnd.github+json",
-            "X-GitHub-Api-Version": "2022-11-28",
-            "User-Agent": "Genesis-DevLab-Intake",
-        },
+        headers=headers,
     )
     with urllib.request.urlopen(request, timeout=30) as response:
         payload = json.loads(response.read().decode("utf-8"))
@@ -70,7 +80,8 @@ def ingest_devlab_issues(root: Path) -> list[str]:
             f"github-devlab-issue:{number}",
             objective,
             module_id=module_id,
-            priority=88,
+            priority=95,
+            max_attempts=5,
             payload={
                 "task_type": "devlab_issue",
                 "executor": "genesis.devlab",
@@ -80,6 +91,7 @@ def ingest_devlab_issues(root: Path) -> list[str]:
                 "github_issue_number": number,
                 "source": "owner_marked_github_issue",
                 "attribution": "owner_initiated",
+                "golden_path": True,
             },
         )
         if was_created:
