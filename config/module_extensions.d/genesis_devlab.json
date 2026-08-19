@@ -1,0 +1,25 @@
+{
+  "modules": [
+    {
+      "module_id": "genesis.devlab",
+      "name": "Genesis DevLab",
+      "version": "0.1.0",
+      "purpose": "Provide a bounded headless development workbench for isolated code inspection, experimentation, testing, retry planning, candidate preparation, and validation feedback.",
+      "capabilities": ["development_workspace", "code_inspection", "isolated_editing", "test_execution", "failure_feedback", "retry_planning", "candidate_preparation"],
+      "permissions": ["code.read", "code.write_candidate", "tests.run", "audit.read", "provider.use"],
+      "dependencies": ["genesis.engineering", "genesis.self_development", "genesis.security", "genesis.validation"],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.devlab",
+      "metadata": {
+        "aliases": [],
+        "components": ["genesis.devlab.workspace", "genesis.devlab.inspection", "genesis.devlab.module"],
+        "direct_main_write": false,
+        "validation_authority": false,
+        "protected_file_bypass": false
+      }
+    }
+  ]
+}
