@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-from dataclasses import asdict
 from pathlib import Path
 
 from .autonomy_proof import AutonomyProofLedger
@@ -22,11 +21,12 @@ SELF_DEVELOPMENT_MODULES = {
 
 
 class GenesisSelfEvaluation:
-    """Machine-readable history of what Genesis has actually improved.
+    """Machine-readable history of what Genesis itself has actually improved.
 
-    Runtime task completions are the source of truth for completed work. The
-    autonomy proof ledger supplies provenance/candidate evidence. This report is
-    deliberately descriptive and does not award capability score by itself.
+    Autonomous credit is intentionally stricter than generic engineering-task
+    completion. A task may be complete without being self-development if an
+    owner, assistant, or other external actor initiated or completed the cycle.
+    Only successful ``genesis_autonomous`` Autonomy Proof cycles count here.
     """
 
     def __init__(self, root: Path) -> None:
@@ -35,7 +35,7 @@ class GenesisSelfEvaluation:
         self.queue = PersistentTaskQueue(self.runtime / "genesis_tasks.sqlite3")
         self.proof = AutonomyProofLedger(self.root)
 
-    def _completed_tasks(self, limit: int = 100) -> list[dict]:
+    def _completed_engineering_tasks(self, limit: int = 100) -> list[dict]:
         tasks = [
             task
             for task in self.queue.list(state="complete", limit=max(1, limit))
@@ -95,17 +95,22 @@ class GenesisSelfEvaluation:
         return improvements[:limit]
 
     def report(self, limit: int = 20) -> dict:
-        completed = self._completed_tasks(limit=1000)
+        engineering = self._completed_engineering_tasks(limit=1000)
         autonomous = self._autonomous_improvements(limit=limit)
         proof = self.proof.report(limit=1000)
         return {
-            "completed_self_development_tasks": len(completed),
-            "recent_completed_tasks": completed[:limit],
+            "completed_self_development_tasks": len(autonomous),
+            "recent_completed_tasks": autonomous,
             "recent_autonomous_improvements": autonomous,
+            "completed_engineering_tasks_observed": len(engineering),
             "autonomy_proof": proof,
             "interpretation": (
-                "Completed task count comes from persistent tasks in complete state. "
-                "Autonomous improvement details come from Genesis's provenance ledger."
+                "Self-development credit requires a successful cycle classified as genesis_autonomous "
+                "by the Autonomy Proof Ledger. Generic completed engineering tasks are observed separately "
+                "and receive no self-development credit without autonomous provenance."
             ),
-            "rule": "Self-development evidence is descriptive; it cannot self-award benchmark or capability credit.",
+            "rule": (
+                "Owner-, assistant-, and externally initiated work must never be counted as Genesis self-development. "
+                "Self-development evidence is descriptive and cannot self-award benchmark or capability credit."
+            ),
         }
