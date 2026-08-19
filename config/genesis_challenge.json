@@ -1,0 +1,7 @@
+{
+  "status": "active",
+  "target": "genesis/budget.py",
+  "problem": "CycleBudget.validate currently accepts Python boolean values as if they were numeric budget limits. Boolean values must not be accepted as valid cycle budgets.",
+  "acceptance": "Existing integer budgets from 0 through 100 remain valid; values outside that range remain invalid; True and False are rejected cleanly instead of being treated as 1 and 0.",
+  "method": "minimal_correctness_fix"
+}
