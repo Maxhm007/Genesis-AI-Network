@@ -7,6 +7,7 @@ on:
       - 'docs/status/**'
       - 'scripts/build_live_status.py'
       - 'scripts/build_gene_chat.py'
+      - 'scripts/self_evaluation_dashboard.py'
       - 'scripts/gene_chat_reply.py'
       - '.github/workflows/gene-chat.yml'
       - '.github/workflows/pages-status.yml'
@@ -37,12 +38,16 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Build authenticated Genesis status and chat snapshots
+      - name: Build authenticated Genesis status and self-evaluation
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: |
           python scripts/build_live_status.py
-          python scripts/build_gene_chat.py
+          python scripts/self_evaluation_dashboard.py
+      - name: Build Genesis chat snapshot
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/build_gene_chat.py
       - uses: actions/configure-pages@v5
       - uses: actions/upload-pages-artifact@v3
         with:
