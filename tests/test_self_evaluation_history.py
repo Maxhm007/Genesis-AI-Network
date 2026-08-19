@@ -26,7 +26,9 @@ def test_completed_task_without_autonomy_proof_gets_no_self_development_credit(t
     report = GenesisSelfEvaluation(tmp_path).report()
     assert report["completed_self_development_tasks"] == 0
     assert report["completed_engineering_tasks_observed"] == 1
-    assert report["recent_completed_tasks"] == []
+    assert report["recent_completed_tasks"][0]["improved"] == "Improve autonomous task selection"
+    assert report["recent_completed_tasks"][0]["credit"] == "engineering_memory_only"
+    assert report["recent_autonomous_improvements"] == []
 
 
 def test_genesis_autonomous_cycle_gets_self_development_credit(tmp_path: Path) -> None:
@@ -50,8 +52,8 @@ def test_genesis_autonomous_cycle_gets_self_development_credit(tmp_path: Path) -
 
     report = GenesisSelfEvaluation(tmp_path).report()
     assert report["completed_self_development_tasks"] == 1
-    assert report["recent_completed_tasks"][0]["classification"] == "genesis_autonomous"
-    assert report["recent_completed_tasks"][0]["improved"] == "Improve autonomous task selection"
+    assert report["recent_autonomous_improvements"][0]["classification"] == "genesis_autonomous"
+    assert report["recent_autonomous_improvements"][0]["improved"] == "Improve autonomous task selection"
 
 
 def test_dashboard_excludes_manual_or_assistant_candidate_prs() -> None:
