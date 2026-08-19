@@ -6,6 +6,7 @@ from dataclasses import asdict
 from pathlib import Path
 
 from genesis.coding import CodingModule
+from genesis.devlab.iterative import IterativeGenesisDevLab
 from genesis.file_self_review_policy import QuorumFileSelfReviewLoop
 from genesis.selfdev import SelfDevelopmentExecutor
 
@@ -13,7 +14,7 @@ from genesis.selfdev import SelfDevelopmentExecutor
 CHALLENGE_PATH = "config/genesis_challenge.json"
 
 
-def _challenge_plan(root: Path) -> dict | None:
+def _challenge_spec(root: Path) -> dict | None:
     path = root / CHALLENGE_PATH
     if not path.is_file():
         return None
@@ -28,67 +29,105 @@ def _challenge_plan(root: Path) -> dict | None:
     if not target or not problem or not (root / target).is_file():
         raise ValueError("active Genesis challenge requires an existing target and a problem statement")
 
+    return {
+        "target": target,
+        "problem": problem,
+        "acceptance": acceptance or problem,
+        "method": method,
+    }
+
+
+def _run_assigned_challenge(root: Path):
+    """Execute an owner-assigned challenge through Genesis's iterative DevLab.
+
+    The owner supplies the problem and acceptance criteria only. Genesis remains
+    responsible for diagnosis, implementation, test-feedback repair, and candidate
+    creation. This path deliberately reuses the same isolated iterative DevLab
+    loop as the golden engineering path instead of performing a single proposal.
+    """
+    spec = _challenge_spec(root)
+    if spec is None:
+        return None
+
     coding = CodingModule(root)
     provider = coding._provider()
     if provider is None:
         raise RuntimeError("no intelligence provider available for assigned Genesis challenge")
 
-    objective = (
-        f"ASSIGNED_SELF_REVIEW_CHALLENGE. Target exactly {target}. "
-        f"Problem to solve: {problem} Acceptance criteria: {acceptance} "
-        f"Approach: {method}. Diagnose the source yourself and make the smallest correct edit. "
-        "Do not edit any other file and do not weaken validation or tests."
+    problem = (
+        f"{spec['problem']} Approach guidance: {spec['method']}. "
+        "Diagnose the current source yourself and make the smallest correct edit."
     )
-    context = [target]
-    test_path = f"tests/test_{Path(target).stem}.py"
-    if (root / test_path).is_file():
-        context.append(test_path)
-    proposal = coding.propose(objective, context_paths=context, provider=provider)
-    if set(proposal.files) != {target}:
-        raise ValueError("assigned challenge proposal attempted to modify a non-target file")
-
-    return {
-        "title": f"Genesis assigned challenge: {target}",
-        "rationale": problem,
-        "proposal": {
-            "title": f"Solve assigned review challenge for {target}",
-            "rationale": proposal.rationale,
-            "files": proposal.files,
-            "provenance": {
-                "initiator": "owner.assigned_challenge",
-                "discovery": "owner.assigned_challenge",
-                "designer": "genesis.coding",
-            },
-            "assigned_challenge": {
-                "target": target,
-                "problem": problem,
-                "acceptance": acceptance,
-                "method": method,
-            },
+    devlab = IterativeGenesisDevLab(root, coding.providers)
+    attempt = devlab.attempt_problem(
+        target_path=spec["target"],
+        problem=problem,
+        acceptance=spec["acceptance"],
+        attempt=0,
+        previous_error="",
+        provider=provider,
+        provenance={
+            "initiator": "owner.assigned_challenge",
+            "discovery": "owner.assigned_challenge",
+            "designer": "genesis.devlab",
+            "executor": "genesis.devlab",
+            "attribution": "owner_initiated",
         },
-    }
+    )
+    return spec, attempt
+
+
+def _push_candidate(root: Path, branch: str) -> None:
+    subprocess.run(["git", "push", "--set-upstream", "origin", branch], cwd=root, check=True)
 
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
     loop = QuorumFileSelfReviewLoop(root)
-    plan = _challenge_plan(root)
-    source = "assigned_challenge" if plan is not None else "intrinsic_file_review"
-    if plan is None:
-        plan = loop.plan_next()
 
+    challenge = _run_assigned_challenge(root)
+    if challenge is not None:
+        spec, attempt = challenge
+        feedback = attempt.feedback
+        candidate_created = bool(
+            feedback
+            and feedback.candidate_created
+            and feedback.tests_passed
+            and feedback.commit_sha
+            and feedback.branch
+        )
+        payload = {
+            "status": "candidate_created" if candidate_created else "candidate_failed",
+            "source": "assigned_challenge",
+            "plan": {
+                "title": f"Genesis assigned challenge: {spec['target']}",
+                "rationale": spec["problem"],
+                "method": spec["method"],
+            },
+            "devlab": attempt.as_dict(),
+            "file_self_review": loop.status(),
+        }
+        print(json.dumps(payload, indent=2, sort_keys=True))
+
+        if candidate_created:
+            _push_candidate(root, feedback.branch)
+            return
+
+        subprocess.run(["git", "checkout", "main"], cwd=root, check=False, capture_output=True, text=True)
+        return
+
+    plan = loop.plan_next()
     if plan is None:
-        print(json.dumps({"status": "review_recorded_or_retry_pending", "source": source, "file_self_review": loop.status()}, indent=2, sort_keys=True))
+        print(json.dumps({"status": "review_recorded_or_retry_pending", "source": "intrinsic_file_review", "file_self_review": loop.status()}, indent=2, sort_keys=True))
         return
 
     executor = SelfDevelopmentExecutor(root)
     result = executor.execute(dict(plan["proposal"]))
-    if source == "intrinsic_file_review":
-        loop.observe_execution(dict(plan["proposal"]), result)
+    loop.observe_execution(dict(plan["proposal"]), result)
 
     payload = {
         "status": "candidate_created" if result.tests_passed and result.committed else "candidate_failed",
-        "source": source,
+        "source": "intrinsic_file_review",
         "plan": {"title": plan["title"], "rationale": plan["rationale"]},
         "result": asdict(result),
         "file_self_review": loop.status(),
@@ -96,7 +135,7 @@ def main() -> None:
     print(json.dumps(payload, indent=2, sort_keys=True))
 
     if result.tests_passed and result.committed and result.commit_sha:
-        subprocess.run(["git", "push", "--set-upstream", "origin", result.branch], cwd=root, check=True)
+        _push_candidate(root, result.branch)
         return
 
     subprocess.run(["git", "checkout", "main"], cwd=root, check=False, capture_output=True, text=True)
