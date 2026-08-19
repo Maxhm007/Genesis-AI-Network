@@ -12,7 +12,12 @@ from .velocity import AdaptiveVelocityController
 
 
 class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
-    """Autonomous engineering with yield-aware task selection and earned burst size."""
+    """Autonomous engineering with one preferred software-development path.
+
+    Explicit DevLab tasks are selected before generic engineering work and retain
+    failure/retry evidence across cycles. All successful candidates still leave
+    DevLab and pass through the existing Security and independent-validator path.
+    """
 
     MAX_SAFE_BURST = 5
     MAX_SELF_EVALUATION_CONTEXT_BYTES = 6_000
@@ -27,14 +32,39 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
         self.MAX_TASK_ATTEMPTS_PER_CYCLE = max(1, min(self.MAX_SAFE_BURST, earned))
         self._selection_trace: list[dict] = []
 
+    @staticmethod
+    def _is_devlab_task(task) -> bool:
+        return str(task.payload.get("executor") or "") == "genesis.devlab"
+
+    def _eligible_task(self, task, attempted: set[str]) -> bool:
+        if task.task_id in attempted or task.module_id not in ENGINEERING_MODULES:
+            return False
+        if task.state == "failed" and not self.queue.retryable(task):
+            return False
+        return task.state in {"assigned", "new", "failed", "blocked"}
+
     def _select_task(self, attempted: set[str] | None = None):
         attempted = attempted or set()
         candidates = []
         for state in ("assigned", "new", "failed", "blocked"):
             for task in self.queue.list(state=state, limit=100):
-                if task.task_id in attempted or task.module_id not in ENGINEERING_MODULES:
-                    continue
-                candidates.append(task)
+                if self._eligible_task(task, attempted):
+                    candidates.append(task)
+
+        # Golden path: an explicit bounded DevLab task must not be starved by
+        # recurring score/capability work. Priority remains deterministic inside
+        # this class, while generic work still uses the efficiency governor.
+        devlab_candidates = [task for task in candidates if self._is_devlab_task(task)]
+        if devlab_candidates:
+            task = sorted(devlab_candidates, key=lambda item: (-item.priority, item.created_at, item.task_id))[0]
+            self._selection_trace.append({
+                "selected": task.task_id,
+                "score": None,
+                "reason": "golden_path_devlab_priority",
+                "eligible": len(devlab_candidates),
+                "considered": len(candidates),
+            })
+            return task
 
         ranked = self.governor.rank(candidates)
         if not ranked:
@@ -52,12 +82,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
         return task
 
     def _self_evaluation_context(self) -> str:
-        """Return bounded descriptive learning memory for the next engineering attempt.
-
-        This history is advisory evidence only. It may help Genesis avoid repeating
-        completed work and build on successful prior changes, but it cannot change
-        benchmark scores, permissions, validation, or promotion authority.
-        """
+        """Return bounded descriptive learning memory for the next engineering attempt."""
         report = GenesisSelfEvaluation(self.root).report(limit=self.SELF_EVALUATION_ITEMS)
         compact = {
             "completed_self_development_tasks": report.get("completed_self_development_tasks", 0),
@@ -68,8 +93,17 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
         encoded = json.dumps(compact, sort_keys=True).encode("utf-8")[: self.MAX_SELF_EVALUATION_CONTEXT_BYTES]
         return encoded.decode("utf-8", errors="ignore")
 
+    def _record_devlab_failure(self, task, owner_module: str, error: str, classification: str) -> None:
+        self.queue.record_failure(
+            task.task_id,
+            error or classification,
+            classification=classification,
+            retry_after_seconds=0,
+            module_id=owner_module,
+        )
+
     def _attempt_devlab_task(self, task, runtime) -> dict:
-        """Execute an explicitly marked task through DevLab without self-approval."""
+        """Execute one persistent DevLab method and preserve failure evidence."""
         started = time.perf_counter()
         owner_module = task.module_id or "genesis.coding"
         target_path = str(task.payload.get("target_path") or "").replace("\\", "/").lstrip("./")
@@ -77,9 +111,10 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
             "task": asdict(task),
             "owner_module": owner_module,
             "executor_module": "genesis.devlab",
+            "development_path": "task -> DevLab -> candidate -> Security -> validators -> promotion",
             "ai_team_context_used": False,
             "context_paths": [target_path] if target_path else [],
-            "candidate_revisions": 0,
+            "candidate_revisions": task.attempt_count,
             "coding_status": "started",
             "candidate": None,
             "candidate_security": None,
@@ -101,13 +136,15 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
                 target_path=target_path,
                 problem=task.objective,
                 acceptance=str(task.payload.get("acceptance") or task.objective),
+                attempt=task.attempt_count,
+                previous_error=str(task.last_error or ""),
                 provider=provider,
                 provenance={
-                    "initiator": "owner",
+                    "initiator": "owner" if task.payload.get("attribution") == "owner_initiated" else "genesis",
                     "designer": "genesis.devlab",
                     "executor": "genesis.devlab",
                     "source_task_id": task.task_id,
-                    "attribution": "owner_initiated",
+                    "attribution": str(task.payload.get("attribution") or "genesis_autonomous"),
                 },
             )
             feedback = result.feedback
@@ -121,8 +158,9 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
                 "message": feedback.failure if feedback else result.status,
             }
             if not feedback or not feedback.candidate_created or not feedback.tests_passed:
+                error = feedback.failure if feedback else result.status
                 attempt["coding_status"] = "candidate_not_committed"
-                self.queue.transition(task.task_id, "blocked", module_id=owner_module)
+                self._record_devlab_failure(task, owner_module, error, result.status)
                 self._record_efficiency(provider_name, started, False, task_type="devlab_issue")
                 return attempt
 
@@ -133,7 +171,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
             if candidate_security["status"] != "pass":
                 attempt["coding_status"] = "candidate_rejected_by_security"
                 self._git("checkout", "main")
-                self.queue.transition(task.task_id, "blocked", module_id=owner_module)
+                self._record_devlab_failure(task, owner_module, "candidate rejected by Security", "security_rejection")
                 self._record_efficiency(provider_name, started, False, task_type="devlab_issue")
                 return attempt
 
@@ -142,12 +180,13 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
             self._record_efficiency(provider_name, started, True, task_type="devlab_issue")
             return attempt
         except Exception as exc:
+            error = f"{type(exc).__name__}: {exc}"[:2000]
             attempt["coding_status"] = "provider_or_candidate_error"
-            attempt["error"] = f"{type(exc).__name__}: {exc}"[:2000]
+            attempt["error"] = error
             current = self.queue.get(task.task_id)
-            if current and current.state in {"assigned", "running"}:
+            if current and current.state not in {"complete", "quarantined", "cancelled"}:
                 try:
-                    self.queue.transition(task.task_id, "blocked", module_id=owner_module)
+                    self._record_devlab_failure(current, owner_module, error, "provider_or_candidate_error")
                 except Exception:
                     pass
             if provider_name != "unknown":
@@ -158,7 +197,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
             return attempt
 
     def _attempt_task(self, task, runtime) -> dict:
-        if str(task.payload.get("executor") or "") == "genesis.devlab":
+        if self._is_devlab_task(task):
             return self._attempt_devlab_task(task, runtime)
 
         learning_context = self._self_evaluation_context()
@@ -186,7 +225,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
         if task.module_id not in ENGINEERING_MODULES:
             raise RuntimeError(f"task is not owned by an engineering module: {task.module_id}")
         decision = self.governor.score(task)
-        if not decision.eligible:
+        if not decision.eligible and not self._is_devlab_task(task):
             raise RuntimeError(f"task is not eligible for isolated execution: {decision.reason}")
 
         runtime = self.root / "runtime"
@@ -194,7 +233,10 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
         attempt = self._attempt_task(task, runtime)
         result = {
             "selected_task": asdict(task),
-            "selection": {"score": decision.score, "reason": decision.reason},
+            "selection": {
+                "score": decision.score,
+                "reason": "golden_path_devlab_priority" if self._is_devlab_task(task) else decision.reason,
+            },
             "coding_status": attempt.get("coding_status"),
             "candidate": attempt.get("candidate"),
             "candidate_security": attempt.get("candidate_security"),
@@ -213,13 +255,19 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
             "task_attempt_budget": self.MAX_TASK_ATTEMPTS_PER_CYCLE,
             "velocity_policy": self.velocity_policy,
             "selection_trace": list(self._selection_trace),
+            "golden_path": {
+                "enabled": True,
+                "path": "task -> DevLab -> candidate -> Security -> Validator A/B -> promotion -> verify -> learn",
+                "devlab_tasks_have_priority": True,
+                "failed_methods_persist_across_cycles": True,
+            },
             "self_evaluation_memory": {
                 "enabled": True,
                 "max_bytes": self.MAX_SELF_EVALUATION_CONTEXT_BYTES,
                 "max_items": self.SELF_EVALUATION_ITEMS,
                 "principle": "Use validated self-development history as advisory memory; never as self-awarded capability evidence.",
             },
-            "principle": "Spend bounded engineering cycles on the work most likely to produce validated capability growth; cool down or skip known low-yield blockers.",
+            "principle": "Prefer completed validated outcomes over workflow activity; recurring background gaps must not starve concrete bounded development work.",
         }
         runtime = self.root / "runtime"
         (runtime / "autonomous_engineering.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
