@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+from dataclasses import asdict
 
 from .autonomous_engineering import ENGINEERING_MODULES, AutonomousEngineeringLoop
 from .development_efficiency import DevelopmentEfficiencyGovernor
@@ -43,6 +44,35 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
             "considered": len(candidates),
         })
         return task
+
+    def run_selected(self, task_id: str) -> dict:
+        """Run exactly one pre-selected task in an isolated parallel worker checkout."""
+        task = self.queue.get(task_id)
+        if task is None:
+            raise KeyError(task_id)
+        if task.module_id not in ENGINEERING_MODULES:
+            raise RuntimeError(f"task is not owned by an engineering module: {task.module_id}")
+        decision = self.governor.score(task)
+        if not decision.eligible:
+            raise RuntimeError(f"task is not eligible for isolated execution: {decision.reason}")
+
+        runtime = self.root / "runtime"
+        runtime.mkdir(parents=True, exist_ok=True)
+        attempt = self._attempt_task(task, runtime)
+        result = {
+            "selected_task": asdict(task),
+            "selection": {"score": decision.score, "reason": decision.reason},
+            "coding_status": attempt.get("coding_status"),
+            "candidate": attempt.get("candidate"),
+            "candidate_security": attempt.get("candidate_security"),
+            "attempt": attempt,
+            "velocity_policy": self.velocity_policy,
+            "parallel_worker": True,
+        }
+        (runtime / f"parallel_result_{task_id}.json").write_text(
+            json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+        )
+        return result
 
     def run_once(self) -> dict:
         result = super().run_once()
