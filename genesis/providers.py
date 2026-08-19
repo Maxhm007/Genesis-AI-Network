@@ -108,25 +108,70 @@ class GenesisHTTPProvider:
         return value
 
 
+def _bounded_timeout(value: object, default: float = 60.0) -> float:
+    try:
+        return max(5.0, min(float(value), 180.0))
+    except (TypeError, ValueError):
+        return default
+
+
+def _configured_http_providers() -> list[GenesisHTTPProvider]:
+    """Load any number of replaceable HTTP providers from bounded public config.
+
+    `GENESIS_PROVIDER_ENDPOINTS` is an optional JSON list of objects with `url`,
+    optional `name`, and optional `timeout_seconds`. Credentials do not belong in
+    this configuration; provider authentication, if required, remains outside
+    the repository/provider protocol boundary.
+
+    The legacy single-provider environment variables remain supported so an
+    existing deployment does not need to migrate atomically.
+    """
+    configured: list[GenesisHTTPProvider] = []
+    seen: set[tuple[str, str]] = set()
+
+    raw = os.environ.get("GENESIS_PROVIDER_ENDPOINTS", "").strip()
+    if raw:
+        try:
+            entries = json.loads(raw)
+        except json.JSONDecodeError:
+            entries = []
+        if isinstance(entries, list):
+            for index, entry in enumerate(entries, 1):
+                if not isinstance(entry, dict):
+                    continue
+                url = str(entry.get("url") or "").strip()
+                if not url:
+                    continue
+                name = str(entry.get("name") or f"genesis-http-{index}").strip() or f"genesis-http-{index}"
+                timeout = _bounded_timeout(entry.get("timeout_seconds"), 60.0)
+                key = (name, url.rstrip("/"))
+                if key in seen:
+                    continue
+                seen.add(key)
+                configured.append(GenesisHTTPProvider(url, name, timeout=timeout))
+
+    legacy_url = os.environ.get("GENESIS_PROVIDER_URL", "").strip()
+    if legacy_url:
+        legacy_name = os.environ.get("GENESIS_PROVIDER_NAME", "genesis-http").strip() or "genesis-http"
+        key = (legacy_name, legacy_url.rstrip("/"))
+        if key not in seen:
+            configured.append(
+                GenesisHTTPProvider(
+                    legacy_url,
+                    legacy_name,
+                    timeout=_bounded_timeout(os.environ.get("GENESIS_PROVIDER_TIMEOUT_SECONDS", "60"), 60.0),
+                )
+            )
+    return configured
+
+
 class ProviderRegistry:
     def __init__(self, include_bootstrap: bool = True) -> None:
         self._providers: list[IntelligenceProvider] = []
         if include_bootstrap:
             self.register(BootstrapProvider())
-        provider_url = os.environ.get("GENESIS_PROVIDER_URL", "").strip()
-        if provider_url:
-            raw_timeout = os.environ.get("GENESIS_PROVIDER_TIMEOUT_SECONDS", "60").strip()
-            try:
-                timeout = max(5.0, min(float(raw_timeout), 180.0))
-            except ValueError:
-                timeout = 60.0
-            self.register(
-                GenesisHTTPProvider(
-                    provider_url,
-                    os.environ.get("GENESIS_PROVIDER_NAME", "genesis-http"),
-                    timeout=timeout,
-                )
-            )
+        for provider in _configured_http_providers():
+            self.register(provider)
 
     def register(self, provider: IntelligenceProvider) -> None:
         self._providers.append(provider)
