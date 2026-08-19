@@ -1,0 +1,218 @@
+name: Genesis File Self Review
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/file-self-review.yml'
+      - 'scripts/file_self_review_worker.py'
+      - 'genesis/file_self_review.py'
+      - 'genesis/file_self_review_policy.py'
+  workflow_dispatch:
+  schedule:
+    - cron: '2,22,42 * * * *'
+
+permissions:
+  contents: write
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_NAME: qwen3-0.6b-local
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '180'
+  HF_HOME: ~/.cache/huggingface
+  PIP_CACHE_DIR: ~/.cache/pip
+
+concurrency:
+  group: genesis-file-self-review
+  cancel-in-progress: false
+
+jobs:
+  review:
+    runs-on: ubuntu-latest
+    timeout-minutes: 35
+    outputs:
+      has_candidate: ${{ steps.candidate.outputs.has_candidate }}
+      candidate_branch: ${{ steps.candidate.outputs.candidate_branch }}
+      candidate_sha: ${{ steps.candidate.outputs.candidate_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Restore shared Genesis runtime state
+        uses: actions/cache@v4
+        with:
+          path: |
+            runtime/genesis_tasks.sqlite3
+            runtime/self_learning.sqlite3
+            runtime/memory.sqlite3
+            runtime/efficiency.jsonl
+            runtime/provider_telemetry.json
+            runtime/task_reviews/
+          key: genesis-runtime-${{ runner.os }}-file-review-${{ github.run_id }}
+          restore-keys: |
+            genesis-runtime-${{ runner.os }}-
+      - name: Restore reasoning caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/pip
+          key: genesis-qwen3-0.6b-${{ runner.os }}-py312-v1
+      - run: pip install -r requirements.txt
+      - name: Verify stable baseline
+        run: python -m pytest -q
+      - name: Install local reasoning runtime
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors
+      - name: Start validated reasoning provider
+        shell: bash
+        run: |
+          nohup python scripts/local_reasoning_provider.py --host 127.0.0.1 --port 8766 > /tmp/genesis-file-review-reasoning.log 2>&1 &
+          ready=false
+          for i in {1..60}; do
+            if python - <<'PY'
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=2) as response:
+                  raise SystemExit(0 if response.status == 200 else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ready" != true ]]; then
+            cat /tmp/genesis-file-review-reasoning.log || true
+            exit 1
+          fi
+      - name: Configure Genesis Git identity
+        run: |
+          git config user.name "Genesis AI"
+          git config user.email "genesis-ai@users.noreply.github.com"
+      - name: Review exactly one Genesis source file
+        run: python scripts/file_self_review_worker.py
+      - name: Preserve file-review evidence
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-file-self-review-${{ github.run_id }}
+          path: runtime/task_reviews/
+          retention-days: 30
+      - name: Resolve generated candidate
+        id: candidate
+        shell: bash
+        run: |
+          branch=$(git branch --show-current)
+          if [[ "$branch" != genesis/candidate-* ]]; then
+            echo 'has_candidate=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo 'has_candidate=true' >> "$GITHUB_OUTPUT"
+          echo "candidate_branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
+
+  validator_a:
+    needs: review
+    if: needs.review.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.review.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite A
+        run: python -m pytest -q
+      - name: Security review A
+        run: python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('${{ needs.review.outputs.candidate_sha }}^')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
+      - name: Sign validator A approval
+        run: python genesis/ephemeral_validator.py --validator-id file-review-validator-a --candidate ${{ needs.review.outputs.candidate_sha }} --output validator-a.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: file-review-validator-a
+          path: validator-a.json
+
+  validator_b:
+    needs: review
+    if: needs.review.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.review.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite B
+        run: python -m pytest -q
+      - name: Security review B
+        run: python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('${{ needs.review.outputs.candidate_sha }}^')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
+      - name: Sign validator B approval
+        run: python genesis/ephemeral_validator.py --validator-id file-review-validator-b --candidate ${{ needs.review.outputs.candidate_sha }} --output validator-b.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: file-review-validator-b
+          path: validator-b.json
+
+  promote:
+    needs: [review, validator_a, validator_b]
+    if: needs.review.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: file-review-validator-a
+          path: votes/a
+      - uses: actions/download-artifact@v4
+        with:
+          name: file-review-validator-b
+          path: votes/b
+      - name: Verify independent signed quorum
+        run: python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
+      - name: Promote exact reviewed candidate
+        shell: bash
+        run: |
+          candidate='${{ needs.review.outputs.candidate_sha }}'
+          branch='${{ needs.review.outputs.candidate_branch }}'
+          git fetch origin main "$branch"
+          main_sha=$(git rev-parse origin/main)
+          test "$(git rev-parse origin/$branch)" = "$candidate"
+          git merge-base --is-ancestor "$main_sha" "$candidate"
+          if git diff --name-only "$main_sha..$candidate" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
+            echo 'Protected Genesis identity/workflow boundary changed' >&2
+            exit 1
+          fi
+          git push origin "$candidate:refs/heads/main"
