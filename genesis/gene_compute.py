@@ -28,7 +28,9 @@ class GeneComputeFabric:
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root).resolve()
-        self.path = self.root / "config" / "gene_compute.json"
+        configured = self.root / "config" / "gene_compute.json"
+        packaged = Path(__file__).resolve().parents[1] / "config" / "gene_compute.json"
+        self.path = configured if configured.is_file() else packaged
         payload = json.loads(self.path.read_text(encoding="utf-8"))
         self.coordinator = dict(payload["coordinator"])
         self.rules = dict(payload.get("rules") or {})
@@ -66,7 +68,6 @@ class GeneComputeFabric:
             candidates = [worker for worker in self.workers if "reasoning" in worker.capabilities]
         if not candidates:
             return None
-        # Stable role specialization: research/validation -> Gene 2, engineering -> Gene 3.
         candidates.sort(key=lambda worker: (worker.logical_id, worker.model))
         if capability in {"engineering", "coding", "repair"}:
             for worker in candidates:
