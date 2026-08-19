@@ -19,14 +19,17 @@ SELF_DEVELOPMENT_MODULES = {
     "genesis.evaluation",
 }
 
+OWNER_ACTORS = {"owner", "user", "human"}
+ASSISTED_ACTORS = {"chatgpt", "assistant", "external", "unknown"}
+
 
 class GenesisSelfEvaluation:
-    """Machine-readable history of Genesis development with strict attribution.
+    """Machine-readable development history with explicit attribution.
 
-    Completed engineering remains useful advisory memory even when it was
-    assisted by an owner or external actor. Autonomous self-development credit
-    is stricter: only successful ``genesis_autonomous`` Autonomy Proof cycles
-    count toward the self-development total.
+    Genesis must be able to distinguish its own successful development from
+    owner-initiated and assisted engineering. Generic completed engineering is
+    still retained as advisory memory, but it never receives autonomous credit
+    without an Autonomy Proof cycle classified ``genesis_autonomous``.
     """
 
     def __init__(self, root: Path) -> None:
@@ -57,21 +60,19 @@ class GenesisSelfEvaluation:
             for task in tasks[:limit]
         ]
 
-    def _autonomous_improvements(self, limit: int = 20) -> list[dict]:
-        events = self.proof.events(limit=1000)
+    def _completed_cycles(self) -> list[dict]:
+        events = self.proof.events(limit=5000)
         by_cycle: dict[str, list[dict]] = {}
         for event in events:
             by_cycle.setdefault(str(event.get("cycle_id", "")), []).append(event)
 
-        improvements: list[dict] = []
+        rows: list[dict] = []
         for cycle_id, cycle in by_cycle.items():
             completed = next(
                 (
                     event
                     for event in reversed(cycle)
-                    if event.get("stage") == "cycle_complete"
-                    and event.get("outcome") == "success"
-                    and event.get("classification") == "genesis_autonomous"
+                    if event.get("stage") == "cycle_complete" and event.get("outcome") == "success"
                 ),
                 None,
             )
@@ -81,38 +82,60 @@ class GenesisSelfEvaluation:
             candidate = next((event for event in reversed(cycle) if event.get("stage") == "candidate_created"), {})
             detail = discovery.get("details") or {}
             candidate_detail = candidate.get("details") or {}
-            improvements.append(
+            actor = str(completed.get("actor") or "unknown").strip().lower()
+            classification = str(completed.get("classification") or "external")
+            if classification == "genesis_autonomous":
+                attribution = "genesis_autonomous"
+            elif actor in OWNER_ACTORS:
+                attribution = "owner"
+            else:
+                attribution = "assisted"
+            rows.append(
                 {
                     "cycle_id": cycle_id,
-                    "improved": detail.get("title") or "Bounded Genesis self-development",
+                    "improved": detail.get("title") or "Bounded Genesis development",
                     "files": detail.get("files") or [],
                     "branch": candidate_detail.get("branch"),
                     "commit_sha": candidate_detail.get("commit_sha"),
                     "completed_at": completed.get("recorded_at"),
-                    "classification": "genesis_autonomous",
-                    "credit": "self_development",
+                    "actor": completed.get("actor"),
+                    "classification": classification,
+                    "attribution": attribution,
+                    "credit": "self_development" if attribution == "genesis_autonomous" else "engineering_memory_only",
                 }
             )
-        improvements.sort(key=lambda item: str(item.get("completed_at") or ""), reverse=True)
-        return improvements[:limit]
+        rows.sort(key=lambda item: str(item.get("completed_at") or ""), reverse=True)
+        return rows
 
     def report(self, limit: int = 20) -> dict:
         engineering = self._completed_engineering_tasks(limit=1000)
-        autonomous = self._autonomous_improvements(limit=limit)
+        cycles = self._completed_cycles()
+        autonomous = [row for row in cycles if row["attribution"] == "genesis_autonomous"]
+        assisted = [row for row in cycles if row["attribution"] == "assisted"]
+        owner = [row for row in cycles if row["attribution"] == "owner"]
         proof = self.proof.report(limit=1000)
         return {
             "completed_self_development_tasks": len(autonomous),
+            "development_attribution": {
+                "genesis_autonomous": len(autonomous),
+                "assisted": len(assisted),
+                "owner": len(owner),
+                "total_proven_cycles": len(cycles),
+            },
             "recent_completed_tasks": engineering[:limit],
-            "recent_autonomous_improvements": autonomous,
+            "recent_autonomous_improvements": autonomous[:limit],
+            "recent_assisted_improvements": assisted[:limit],
+            "recent_owner_improvements": owner[:limit],
+            "recent_attributed_development": cycles[:limit],
             "completed_engineering_tasks_observed": len(engineering),
             "autonomy_proof": proof,
             "interpretation": (
-                "Completed engineering tasks are retained as advisory memory so Genesis can avoid repeating work, "
-                "but self-development credit requires a successful cycle classified as genesis_autonomous by the "
-                "Autonomy Proof Ledger."
+                "Genesis Autonomous means Genesis initiated/completed a successful proven cycle. "
+                "Assisted means an external assistant or unowned external actor drove the cycle. "
+                "Owner means the owner/user/human drove the cycle. Completed engineering is retained as advisory memory."
             ),
             "rule": (
-                "Owner-, assistant-, and externally initiated work must never be counted as Genesis self-development. "
-                "Assisted engineering may be remembered, but receives no autonomous credit."
+                "Owner and assisted work must never increase Genesis autonomous self-development credit. "
+                "Every proven completed cycle belongs to exactly one attribution bucket."
             ),
         }

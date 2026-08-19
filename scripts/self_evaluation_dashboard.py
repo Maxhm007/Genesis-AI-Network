@@ -16,10 +16,10 @@ DASHBOARD = Path("docs/status/index.html")
 AUTO_TITLE_PREFIX = "Genesis autonomous candidate:"
 AUTO_BODY_MARKER = "Autonomous Genesis candidate. Promotion requires the Genesis Candidate PR Gate"
 PROOF_MARKER = "<!-- genesis-autonomy-proof:genesis_autonomous -->"
+ASSISTED_MARKERS = ("assistant-initiated", "assistant-created", "chatgpt", "assisted development")
+OWNER_MARKERS = ("owner-authorized", "owner-initiated", "owner development")
 
-OLD_EVOLUTION_SECTION = '''<section class="view" id="v-evolution"><div class="head"><div><h2>Self Evolution</h2><p>Measured evidence of learning, healing and development.</p></div></div><div class="grid"><div class="card s7"><div id="evoMetrics" class="metrics"></div></div><div class="card s5"><div class="stats"><div class="stat"><b id="wfSamples">—</b><span>Workflow samples</span></div><div class="stat"><b id="healSamples">—</b><span>Healing samples</span></div><div class="stat"><b id="devSamples">—</b><span>Development samples</span></div></div></div><div class="card s4"><div class="label">Completed Self-Development Tasks</div><div id="selfDevDone" class="value">—</div><div class="cap">Merged, validated Genesis candidate improvements</div></div><div class="card s8"><div class="label">What Genesis Improved</div><div id="selfDevHistory" class="stack" style="margin-top:10px"></div></div><div class="card s12"><div class="label">Recent Evolution Activity</div><div id="evoActivity" class="stack" style="margin-top:10px"></div></div></div></section>'''
-
-NEW_EVOLUTION_SECTION = '''<section class="view" id="v-evolution"><div class="head"><div><h2>Self Evolution</h2><p>Measured evidence of learning, healing and development.</p></div></div><div class="grid"><div class="card s7"><div id="evoMetrics" class="metrics"></div></div><div class="card s5"><div class="stats"><div class="stat"><b id="wfSamples">—</b><span>Workflow samples</span></div><div class="stat"><b id="healSamples">—</b><span>Healing samples</span></div><div class="stat"><b id="devSamples">—</b><span>Development samples</span></div></div></div><div class="card s4"><div class="label">Verified Autonomous Self-Development</div><div id="selfDevDone" class="value">—</div><div class="cap">Only Genesis-initiated work with autonomous provenance</div></div><div class="card s8"><div class="label">What Genesis Autonomously Improved</div><div id="selfDevHistory" class="stack" style="margin-top:10px"></div></div><div class="card s12"><div class="label">Recent Evolution Activity</div><div id="evoActivity" class="stack" style="margin-top:10px"></div></div></div></section>'''
+NEW_EVOLUTION_SECTION = '''<section class="view" id="v-evolution"><div class="head"><div><h2>Self Evolution</h2><p>Measured evidence of learning, healing and development with strict attribution.</p></div></div><div class="grid"><div class="card s7"><div id="evoMetrics" class="metrics"></div></div><div class="card s5"><div class="stats"><div class="stat"><b id="wfSamples">—</b><span>Workflow samples</span></div><div class="stat"><b id="healSamples">—</b><span>Healing samples</span></div><div class="stat"><b id="devSamples">—</b><span>Development samples</span></div></div></div><div class="card s4"><div class="label">Genesis Autonomous Development</div><div id="autoDevDone" class="value">—</div><div class="cap">Genesis-initiated work with autonomous provenance</div></div><div class="card s4"><div class="label">Assisted Development</div><div id="assistedDevDone" class="value">—</div><div class="cap">Assistant/external initiated or completed engineering</div></div><div class="card s4"><div class="label">Owner Development</div><div id="ownerDevDone" class="value">—</div><div class="cap">Owner/user initiated or authorized engineering</div></div><div class="card s12"><div class="label">Attributed Development History</div><div id="attributedDevHistory" class="stack" style="margin-top:10px"></div></div><div class="card s12"><div class="label">Recent Evolution Activity</div><div id="evoActivity" class="stack" style="margin-top:10px"></div></div></div></section>'''
 
 
 def api(path: str):
@@ -53,21 +53,14 @@ def _section(body: str, heading: str) -> str:
 
 def improvement_from_pr(pr: dict) -> str:
     body = str(pr.get("body") or "")
-    for heading in ("Goal", "Changes", "Design"):
+    for heading in ("Goal", "Changes", "Design", "What changed"):
         text = _section(body, heading)
         if text:
             return text
-    return str(pr.get("title") or "Validated Genesis self-development improvement")[:420]
+    return str(pr.get("title") or "Genesis development improvement")[:420]
 
 
 def has_autonomous_provenance(pr: dict) -> bool:
-    """Credit only PRs that carry evidence they came from Genesis itself.
-
-    The ordinary autonomous PR opener emits a fixed title/body contract. A
-    privileged lane may instead provide the explicit proof marker. Manually
-    created candidate branches/PRs do not receive self-development credit just
-    because their branch starts with ``genesis/candidate-``.
-    """
     title = str(pr.get("title") or "")
     body = str(pr.get("body") or "")
     ordinary = title.startswith(AUTO_TITLE_PREFIX) and AUTO_BODY_MARKER in body
@@ -75,48 +68,91 @@ def has_autonomous_provenance(pr: dict) -> bool:
     return ordinary or explicit
 
 
-def merged_self_development_prs(pulls: list[dict]) -> list[dict]:
-    rows = []
+def classify_pr_attribution(pr: dict) -> str:
+    """Put one merged development PR into exactly one attribution bucket."""
+    head = str((pr.get("head") or {}).get("ref") or "")
+    body = str(pr.get("body") or "").lower()
+    if has_autonomous_provenance(pr):
+        return "genesis_autonomous"
+    if head.startswith("owner/") or any(marker in body for marker in OWNER_MARKERS):
+        return "owner"
+    return "assisted"
+
+
+def attributed_development_prs(pulls: list[dict]) -> list[dict]:
+    rows: list[dict] = []
     for pr in pulls:
-        head = str((pr.get("head") or {}).get("ref") or "")
         if not pr.get("merged_at"):
             continue
-        if not (head.startswith("genesis/candidate-") or head.startswith("genesis/privileged-candidate-")):
+        head = str((pr.get("head") or {}).get("ref") or "")
+        development_branch = (
+            head.startswith("genesis/candidate-")
+            or head.startswith("genesis/privileged-candidate-")
+            or head.startswith("owner/")
+        )
+        if not development_branch:
             continue
-        if not has_autonomous_provenance(pr):
-            continue
+        attribution = classify_pr_attribution(pr)
         rows.append(
             {
                 "number": pr.get("number"),
-                "title": str(pr.get("title") or "Genesis self-development"),
+                "title": str(pr.get("title") or "Genesis development"),
                 "improvement": improvement_from_pr(pr),
                 "head": head,
-                "lane": "privileged" if head.startswith("genesis/privileged-candidate-") else "normal",
+                "lane": "privileged" if "privileged-candidate" in head else ("owner" if head.startswith("owner/") else "normal"),
                 "merged_at": pr.get("merged_at"),
                 "url": pr.get("html_url"),
-                "classification": "genesis_autonomous",
-                "evidence": "merged candidate with Genesis-autonomous provenance",
+                "attribution": attribution,
+                "classification": attribution,
+                "evidence": (
+                    "Genesis autonomous provenance" if attribution == "genesis_autonomous"
+                    else "owner provenance" if attribution == "owner"
+                    else "assisted/manual provenance"
+                ),
             }
         )
     rows.sort(key=lambda row: str(row.get("merged_at") or ""), reverse=True)
     return rows
 
 
+def merged_self_development_prs(pulls: list[dict]) -> list[dict]:
+    """Compatibility helper: only genuinely autonomous development."""
+    return [row for row in attributed_development_prs(pulls) if row["attribution"] == "genesis_autonomous"]
+
+
+def summarize(history: list[dict]) -> dict:
+    auto = [row for row in history if row["attribution"] == "genesis_autonomous"]
+    assisted = [row for row in history if row["attribution"] == "assisted"]
+    owner = [row for row in history if row["attribution"] == "owner"]
+    return {
+        "genesis_autonomous": len(auto),
+        "assisted": len(assisted),
+        "owner": len(owner),
+        "total": len(history),
+    }
+
+
 def enrich_status(history: list[dict]) -> None:
     if not STATUS.is_file():
         return
+    counts = summarize(history)
     payload = json.loads(STATUS.read_text(encoding="utf-8"))
     gene0 = (payload.setdefault("genes", {})).setdefault("0", {})
     kpis = gene0.setdefault("kpis", {})
-    kpis["completed_self_development_tasks"] = len(history)
-    gene0["self_development_history"] = history[:20]
-    payload.setdefault("network", {})["completed_self_development_tasks"] = len(history)
+    kpis["completed_self_development_tasks"] = counts["genesis_autonomous"]
+    kpis["assisted_development_tasks"] = counts["assisted"]
+    kpis["owner_development_tasks"] = counts["owner"]
+    gene0["self_development_history"] = [row for row in history if row["attribution"] == "genesis_autonomous"][:20]
+    gene0["development_attribution"] = counts
+    gene0["attributed_development_history"] = history[:30]
+    payload.setdefault("network", {})["completed_self_development_tasks"] = counts["genesis_autonomous"]
     payload["self_development_evaluation"] = {
-        "completed_tasks": len(history),
-        "recent_improvements": history[:20],
+        "completed_tasks": counts["genesis_autonomous"],
+        "attribution": counts,
+        "recent_improvements": history[:30],
         "definition": (
-            "Merged Genesis candidate PRs with explicit Genesis-autonomous provenance. "
-            "Owner-, assistant-, and manually initiated candidate PRs are excluded."
+            "Genesis Autonomous requires explicit autonomous provenance. Assisted includes assistant/external/manual "
+            "candidate work. Owner includes owner/* or explicitly owner-attributed work. Buckets are mutually exclusive."
         ),
     }
     STATUS.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -126,21 +162,38 @@ def patch_dashboard() -> None:
     if not DASHBOARD.is_file():
         return
     html = DASHBOARD.read_text(encoding="utf-8")
-    if OLD_EVOLUTION_SECTION in html:
-        html = html.replace(OLD_EVOLUTION_SECTION, NEW_EVOLUTION_SECTION, 1)
-    else:
-        html = html.replace("Completed Self-Development Tasks", "Verified Autonomous Self-Development")
-        html = html.replace("Merged, validated Genesis candidate improvements", "Only Genesis-initiated work with autonomous provenance")
-        html = html.replace("What Genesis Improved", "What Genesis Autonomously Improved")
+    section_pattern = r'<section class="view" id="v-evolution">.*?</section>'
+    if not re.search(section_pattern, html, flags=re.S):
+        raise RuntimeError("Self Evolution section not found; refusing blind dashboard patch")
+    html = re.sub(section_pattern, NEW_EVOLUTION_SECTION, html, count=1, flags=re.S)
+
+    render_marker = "$('#wfSamples').textContent=k.workflow_samples??0;$('#healSamples').textContent=k.healing_samples??0;$('#devSamples').textContent=k.development_samples??0;"
+    attribution_render = (
+        "const da=(g.development_attribution||s.self_development_evaluation?.attribution||{});"
+        "$('#autoDevDone').textContent=da.genesis_autonomous??0;"
+        "$('#assistedDevDone').textContent=da.assisted??0;"
+        "$('#ownerDevDone').textContent=da.owner??0;"
+        "const dh=(g.attributed_development_history||s.self_development_evaluation?.recent_improvements||[]);"
+        "$('#attributedDevHistory').innerHTML=dh.map(x=>item(`[${(x.attribution||'unknown').replace('_',' ')}] #${x.number??'—'} ${x.title||'Development'}`,`${x.improvement||''} · ${age(x.merged_at)}`,x.url)).join('')||'<div class=\"empty\">No attributed development evidence in this snapshot.</div>';"
+    )
+    if attribution_render not in html:
+        if render_marker not in html:
+            raise RuntimeError("Self Evolution render marker not found; refusing blind dashboard patch")
+        html = html.replace(render_marker, render_marker + attribution_render, 1)
     DASHBOARD.write_text(html, encoding="utf-8")
 
 
 def build() -> dict:
     pulls = safe_api(f"/repos/{OWNER}/{REPO}/pulls?state=closed&sort=updated&direction=desc&per_page=100", [])
-    history = merged_self_development_prs(pulls if isinstance(pulls, list) else [])
+    history = attributed_development_prs(pulls if isinstance(pulls, list) else [])
+    counts = summarize(history)
     enrich_status(history)
     patch_dashboard()
-    return {"completed_self_development_tasks": len(history), "recent_improvements": history[:20]}
+    return {
+        "completed_self_development_tasks": counts["genesis_autonomous"],
+        "attribution": counts,
+        "recent_improvements": history[:30],
+    }
 
 
 if __name__ == "__main__":
