@@ -106,6 +106,8 @@ def test_coding_module_repairs_parse_and_schema_errors_with_same_provider(tmp_pa
     assert provider.calls == 3
     assert "RETRY:" in provider.prompts[1]
     assert "Exactly one edit" in provider.prompts[2]
+    assert '"path":"genesis/example.py"' in provider.prompts[1]
+    assert "existing allowed path" not in provider.prompts[1]
 
 
 def test_coding_module_recovery_is_bounded(tmp_path: Path):
@@ -134,6 +136,8 @@ def test_coding_prompt_requires_exactly_one_small_edit(tmp_path: Path):
     module.propose("Tune one value", ["genesis/example.py"], provider=provider)
     assert "exactly ONE smallest useful edit" in provider.prompt
     assert "no title/rationale/markdown/explanation" in provider.prompt
+    assert '"path":"genesis/example.py"' in provider.prompt
+    assert "existing allowed path" not in provider.prompt
     assert module.MAX_EDITS == 1
     assert module.MAX_CONTEXT_BYTES <= 12_000
 

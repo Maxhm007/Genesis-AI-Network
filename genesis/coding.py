@@ -187,7 +187,6 @@ class CodingModule:
                 rendered[path] = self._apply_line_edit(path, edit.get("start_line"), edit.get("end_line"), new)
                 continue
 
-            # Backward-compatible exact-text form for trusted callers. Autonomous prompts use line ranges.
             old = edit.get("old")
             new = edit.get("new")
             if not isinstance(old, str) or not isinstance(new, str) or not old:
@@ -232,14 +231,28 @@ class CodingModule:
             provider=provider_name,
         )
 
-    def _repair_prompt(self, original_prompt: str, raw: str, error: Exception, attempt: int) -> str:
+    def _repair_prompt(
+        self,
+        original_prompt: str,
+        raw: str,
+        error: Exception,
+        attempt: int,
+        allowed_paths: tuple[str, ...],
+    ) -> str:
         previous = raw.encode("utf-8", errors="replace")[: self.MAX_REPAIR_ECHO_BYTES].decode("utf-8", errors="replace")
+        preferred_path = allowed_paths[0] if allowed_paths else ""
+        example = json.dumps(
+            {"edits": [{"path": preferred_path, "start_line": 1, "end_line": 1, "new": "replacement text"}]},
+            separators=(",", ":"),
+        )
         return (
             original_prompt
             + "\nRETRY: previous JSON was invalid.\n"
             + f"ERROR: {type(error).__name__}: {str(error)[:500]}\n"
             + f"PREVIOUS: {previous}\n"
-            + 'Return ONLY: {"edits":[{"path":"existing allowed path","start_line":1,"end_line":1,"new":"replacement text"}]}. '
+            + f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
+            + f"Return ONLY: {example}. "
+            + "Copy the path exactly from VALID_PATHS/NUMBERED_CONTEXT. Do not invent, summarize, rename, or substitute the path. "
             + "Choose line numbers exactly from NUMBERED_CONTEXT. Exactly one edit. Do not copy old source text. "
             + "No title, rationale, markdown, commentary, new files, policy changes, test weakening, or protected paths.\n"
         )
@@ -259,13 +272,20 @@ class CodingModule:
             raise RuntimeError("no intelligence provider available")
         context = self.read_context(context_paths or [])
         numbered_context = {path: self._number_context(text) for path, text in context.items()}
+        allowed_paths = tuple(numbered_context)
+        preferred_path = allowed_paths[0] if allowed_paths else ""
+        output_example = json.dumps(
+            {"edits": [{"path": preferred_path, "start_line": 1, "end_line": 1, "new": "replacement text"}]},
+            separators=(",", ":"),
+        )
         prompt = (
             "ROLE: bounded_coding_engineer\n"
             "TASK: Make exactly ONE smallest useful edit toward OBJECTIVE using only NUMBERED_CONTEXT.\n"
-            'OUTPUT: JSON only: {"edits":[{"path":"existing allowed path","start_line":1,"end_line":1,"new":"replacement text"}]}\n'
-            "RULES: exactly one edit; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text; "
-            "no title/rationale/markdown/explanation; do not create files. The local executor resolves those lines against the repository. "
-            "Allowed paths: genesis/, tests/, docs/, config/, desktop/, mobile/. Never change Constitution, Genesis Block, .github, validation/quorum, permissions, secrets, or weaken tests.\n"
+            f"OUTPUT: JSON only: {output_example}\n"
+            f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
+            "RULES: exactly one edit; path must match one key from VALID_PATHS exactly; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text; "
+            "never emit placeholder path text; no title/rationale/markdown/explanation; do not create files. The local executor resolves those lines against the repository. "
+            "Allowed path prefixes: genesis/, tests/, docs/, config/, desktop/, mobile/. Never change Constitution, Genesis Block, .github, validation/quorum, permissions, secrets, or weaken tests.\n"
             f"OBJECTIVE: {objective}\n"
             f"NUMBERED_CONTEXT: {json.dumps(numbered_context, sort_keys=True)}\n"
         )
@@ -279,7 +299,7 @@ class CodingModule:
                 last_error = exc
                 if attempt >= self.MAX_PROPOSAL_ATTEMPTS:
                     break
-                current_prompt = self._repair_prompt(prompt, raw, exc, attempt)
+                current_prompt = self._repair_prompt(prompt, raw, exc, attempt, allowed_paths)
         raise ValueError(
             f"coding provider failed to produce a valid proposal after {self.MAX_PROPOSAL_ATTEMPTS} bounded attempts: {last_error}"
         )
