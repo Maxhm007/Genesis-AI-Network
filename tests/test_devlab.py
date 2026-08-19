@@ -2,12 +2,26 @@ from __future__ import annotations
 
 from pathlib import Path
 
-from genesis.devlab.module import GenesisDevLab
+from genesis.devlab.module import GenesisDevLab, TargetGroundedProvider
 from genesis.devlab.workspace import EditProposal, LabWorkspace
 from genesis.modules.registry import ModuleRegistry
 
 
 ROOT = Path(__file__).resolve().parents[1]
+
+
+class PlaceholderProvider:
+    name = "placeholder-provider"
+
+    def __init__(self) -> None:
+        self.prompt = ""
+
+    def available(self) -> bool:
+        return True
+
+    def reason(self, prompt: str) -> str:
+        self.prompt = prompt
+        return '{"edits":[{"path":"existing allowed path","start_line":1,"end_line":1,"new":"VALUE = 2"}]}'
 
 
 def test_devlab_is_registered_without_direct_authority() -> None:
@@ -70,3 +84,25 @@ def test_retry_planner_changes_method_and_stops() -> None:
     assert len({first.method, second.method, third.method}) == 3
     assert second.previous_error == "first failed"
     assert exhausted.exhausted is True
+
+
+def test_target_grounded_provider_replaces_schema_placeholder_only() -> None:
+    provider = PlaceholderProvider()
+    grounded = TargetGroundedProvider(provider, "genesis/budget.py")
+    raw = grounded.reason("BASE PROMPT")
+    assert '"path":"genesis/budget.py"' in raw
+    assert "existing allowed path" not in raw
+    assert "DEVLAB_EXACT_TARGET_PATH: genesis/budget.py" in provider.prompt
+
+
+def test_target_grounded_provider_does_not_rewrite_real_cross_file_path() -> None:
+    class CrossFileProvider(PlaceholderProvider):
+        def reason(self, prompt: str) -> str:
+            self.prompt = prompt
+            return '{"edits":[{"path":"genesis/other.py","start_line":1,"end_line":1,"new":"VALUE = 2"}]}'
+
+    provider = CrossFileProvider()
+    grounded = TargetGroundedProvider(provider, "genesis/budget.py")
+    raw = grounded.reason("BASE PROMPT")
+    assert '"path":"genesis/other.py"' in raw
+    assert '"path":"genesis/budget.py"' not in raw
