@@ -13,7 +13,7 @@
       "logical_id": "gene-node-2",
       "repository": "Maxhm007/Genesis-Node-2",
       "role": "research_validation",
-      "model": "Qwen/Qwen3-4B-Instruct-2507",
+      "model": "Qwen/Qwen3-1.7B",
       "license": "Apache-2.0",
       "capabilities": ["reasoning", "research", "validation", "review"]
     },
