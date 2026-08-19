@@ -21,12 +21,12 @@ SELF_DEVELOPMENT_MODULES = {
 
 
 class GenesisSelfEvaluation:
-    """Machine-readable history of what Genesis itself has actually improved.
+    """Machine-readable history of Genesis development with strict attribution.
 
-    Autonomous credit is intentionally stricter than generic engineering-task
-    completion. A task may be complete without being self-development if an
-    owner, assistant, or other external actor initiated or completed the cycle.
-    Only successful ``genesis_autonomous`` Autonomy Proof cycles count here.
+    Completed engineering remains useful advisory memory even when it was
+    assisted by an owner or external actor. Autonomous self-development credit
+    is stricter: only successful ``genesis_autonomous`` Autonomy Proof cycles
+    count toward the self-development total.
     """
 
     def __init__(self, root: Path) -> None:
@@ -52,6 +52,7 @@ class GenesisSelfEvaluation:
                 "attempts": task.attempt_count,
                 "source": task.payload.get("source"),
                 "task_type": task.payload.get("task_type"),
+                "credit": "engineering_memory_only",
             }
             for task in tasks[:limit]
         ]
@@ -89,6 +90,7 @@ class GenesisSelfEvaluation:
                     "commit_sha": candidate_detail.get("commit_sha"),
                     "completed_at": completed.get("recorded_at"),
                     "classification": "genesis_autonomous",
+                    "credit": "self_development",
                 }
             )
         improvements.sort(key=lambda item: str(item.get("completed_at") or ""), reverse=True)
@@ -100,17 +102,17 @@ class GenesisSelfEvaluation:
         proof = self.proof.report(limit=1000)
         return {
             "completed_self_development_tasks": len(autonomous),
-            "recent_completed_tasks": autonomous,
+            "recent_completed_tasks": engineering[:limit],
             "recent_autonomous_improvements": autonomous,
             "completed_engineering_tasks_observed": len(engineering),
             "autonomy_proof": proof,
             "interpretation": (
-                "Self-development credit requires a successful cycle classified as genesis_autonomous "
-                "by the Autonomy Proof Ledger. Generic completed engineering tasks are observed separately "
-                "and receive no self-development credit without autonomous provenance."
+                "Completed engineering tasks are retained as advisory memory so Genesis can avoid repeating work, "
+                "but self-development credit requires a successful cycle classified as genesis_autonomous by the "
+                "Autonomy Proof Ledger."
             ),
             "rule": (
                 "Owner-, assistant-, and externally initiated work must never be counted as Genesis self-development. "
-                "Self-development evidence is descriptive and cannot self-award benchmark or capability credit."
+                "Assisted engineering may be remembered, but receives no autonomous credit."
             ),
         }
