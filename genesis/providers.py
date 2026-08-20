@@ -7,6 +7,9 @@ from dataclasses import dataclass
 from typing import Protocol
 
 
+MAX_PROVIDER_TIMEOUT_SECONDS = 360.0
+
+
 class IntelligenceProvider(Protocol):
     name: str
 
@@ -110,7 +113,7 @@ class GenesisHTTPProvider:
 
 def _bounded_timeout(value: object, default: float = 60.0) -> float:
     try:
-        return max(5.0, min(float(value), 180.0))
+        return max(5.0, min(float(value), MAX_PROVIDER_TIMEOUT_SECONDS))
     except (TypeError, ValueError):
         return default
 

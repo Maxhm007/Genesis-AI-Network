@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import json
 
-from genesis.providers import GenesisHTTPProvider, ProviderRegistry
+from genesis.providers import GenesisHTTPProvider, MAX_PROVIDER_TIMEOUT_SECONDS, ProviderRegistry
 
 
 def _http_providers(registry: ProviderRegistry) -> list[GenesisHTTPProvider]:
@@ -75,6 +75,6 @@ def test_registry_deduplicates_exact_name_url_pair_and_bounds_timeout(monkeypatc
     providers = _http_providers(ProviderRegistry(include_bootstrap=False))
 
     assert [(provider.name, provider.timeout) for provider in providers] == [
-        ("same", 180.0),
+        ("same", MAX_PROVIDER_TIMEOUT_SECONDS),
         ("tiny-timeout", 5.0),
     ]
