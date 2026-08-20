@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 from dataclasses import asdict
 from pathlib import Path
@@ -13,6 +14,7 @@ from genesis.selfdev import SelfDevelopmentExecutor
 
 CHALLENGE_PATH = "config/genesis_challenge.json"
 MAX_ASSIGNED_CHALLENGE_ATTEMPTS = 2
+ASSIGNED_CHALLENGE_ENV = "GENESIS_RUN_ASSIGNED_CHALLENGE"
 
 
 def _challenge_spec(root: Path) -> dict | None:
@@ -41,6 +43,16 @@ def _challenge_spec(root: Path) -> dict | None:
         "method": method,
         "ephemeral_acceptance_files": ephemeral_files,
     }
+
+
+def _assigned_challenge_requested() -> bool:
+    """Only run owner-assigned work when the validated caller explicitly opts in.
+
+    Genesis's normal scheduled file review must remain free to discover its own
+    issues even while an owner challenge is active. The independent validator
+    workflow is the privileged handoff and sets this flag only after quorum.
+    """
+    return os.environ.get(ASSIGNED_CHALLENGE_ENV, "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def _candidate_created(attempt) -> bool:
@@ -129,7 +141,7 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     loop = QuorumFileSelfReviewLoop(root)
 
-    challenge = _run_assigned_challenge(root)
+    challenge = _run_assigned_challenge(root) if _assigned_challenge_requested() else None
     if challenge is not None:
         spec, attempt = challenge
         feedback = attempt.feedback
