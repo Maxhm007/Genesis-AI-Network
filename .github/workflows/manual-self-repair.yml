@@ -1,0 +1,13 @@
+name: Genesis Manual Self Repair
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+jobs:
+  self_repair:
+    uses: ./.github/workflows/file-self-review.yml
+    with:
+      run_assigned_challenge: false
