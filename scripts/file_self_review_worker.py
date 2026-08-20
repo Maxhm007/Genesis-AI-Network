@@ -12,6 +12,7 @@ from genesis.selfdev import SelfDevelopmentExecutor
 
 
 CHALLENGE_PATH = "config/genesis_challenge.json"
+MAX_ASSIGNED_CHALLENGE_ATTEMPTS = 3
 
 
 def _challenge_spec(root: Path) -> dict | None:
@@ -42,6 +43,24 @@ def _challenge_spec(root: Path) -> dict | None:
     }
 
 
+def _candidate_created(attempt) -> bool:
+    feedback = attempt.feedback
+    return bool(
+        feedback
+        and feedback.candidate_created
+        and feedback.tests_passed
+        and feedback.commit_sha
+        and feedback.branch
+    )
+
+
+def _attempt_failure(attempt) -> str:
+    feedback = attempt.feedback
+    if feedback and feedback.failure:
+        return str(feedback.failure)[-2000:]
+    return str(getattr(attempt, "status", "assigned challenge attempt failed"))[-2000:]
+
+
 def _run_assigned_challenge(root: Path):
     """Execute an owner-assigned challenge through Genesis's iterative DevLab.
 
@@ -53,6 +72,10 @@ def _run_assigned_challenge(root: Path):
     Optional executable acceptance tests are challenge evidence only: DevLab
     installs them into its disposable worktree, but they never become candidate
     files and therefore cannot place a known failing suite on ``main``.
+
+    A failed bounded DevLab cycle is fed back into the next outer retry strategy.
+    This lets Genesis use its existing correctness/edge-case/failure-analysis
+    recovery methods instead of abandoning an assigned task after one cycle.
     """
     spec = _challenge_spec(root)
     if spec is None:
@@ -68,22 +91,33 @@ def _run_assigned_challenge(root: Path):
         "Diagnose the current source yourself and make the smallest correct edit."
     )
     devlab = IterativeGenesisDevLab(root, coding.providers)
-    attempt = devlab.attempt_problem(
-        target_path=spec["target"],
-        problem=problem,
-        acceptance=spec["acceptance"],
-        attempt=0,
-        previous_error="",
-        provider=provider,
-        provenance={
-            "initiator": "owner.assigned_challenge",
-            "discovery": "owner.assigned_challenge",
-            "designer": "genesis.devlab",
-            "executor": "genesis.devlab",
-            "attribution": "owner_initiated",
-        },
-        ephemeral_files=spec["ephemeral_acceptance_files"],
-    )
+    previous_error = ""
+    attempt = None
+    for attempt_index in range(MAX_ASSIGNED_CHALLENGE_ATTEMPTS):
+        attempt = devlab.attempt_problem(
+            target_path=spec["target"],
+            problem=problem,
+            acceptance=spec["acceptance"],
+            attempt=attempt_index,
+            previous_error=previous_error,
+            provider=provider,
+            provenance={
+                "initiator": "owner.assigned_challenge",
+                "discovery": "owner.assigned_challenge",
+                "designer": "genesis.devlab",
+                "executor": "genesis.devlab",
+                "attribution": "owner_initiated",
+            },
+            ephemeral_files=spec["ephemeral_acceptance_files"],
+        )
+        if _candidate_created(attempt):
+            break
+        previous_error = _attempt_failure(attempt)
+        if getattr(attempt, "status", "") == "retry_exhausted":
+            break
+
+    if attempt is None:
+        raise RuntimeError("assigned Genesis challenge did not execute")
     return spec, attempt
 
 
@@ -99,13 +133,7 @@ def main() -> None:
     if challenge is not None:
         spec, attempt = challenge
         feedback = attempt.feedback
-        candidate_created = bool(
-            feedback
-            and feedback.candidate_created
-            and feedback.tests_passed
-            and feedback.commit_sha
-            and feedback.branch
-        )
+        candidate_created = _candidate_created(attempt)
         payload = {
             "status": "candidate_created" if candidate_created else "candidate_failed",
             "source": "assigned_challenge",
@@ -113,6 +141,7 @@ def main() -> None:
                 "title": f"Genesis assigned challenge: {spec['target']}",
                 "rationale": spec["problem"],
                 "method": spec["method"],
+                "max_outer_attempts": MAX_ASSIGNED_CHALLENGE_ATTEMPTS,
                 "ephemeral_acceptance_files": sorted(spec["ephemeral_acceptance_files"]),
             },
             "devlab": attempt.as_dict(),
