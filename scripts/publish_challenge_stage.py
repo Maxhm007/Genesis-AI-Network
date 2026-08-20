@@ -8,7 +8,7 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 
-DEFAULT_BRANCH = "genesis/challenge-diagnostics-v2"
+DEFAULT_BRANCH = "genesis/challenge-diagnostics-v3"
 STAGES = {"provider_starting", "provider_ready", "devlab_running", "worker_complete", "terminal"}
 
 
