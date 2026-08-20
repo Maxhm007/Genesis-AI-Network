@@ -96,7 +96,7 @@ jobs:
   challenge_scope:
     name: Resolve validated challenge handoff
     needs: quorum_gate
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' && github.ref == 'refs/heads/main') || github.event_name == 'schedule'
     runs-on: ubuntu-latest
     outputs:
       should_run: ${{ steps.scope.outputs.should_run }}
