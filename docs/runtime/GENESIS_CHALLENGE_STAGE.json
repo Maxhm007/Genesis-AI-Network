@@ -1,0 +1,6 @@
+{
+  "stage": "waiting_for_validated_handoff",
+  "run_id": "seed-v5",
+  "event": "diagnostics_seed",
+  "trigger_sha": ""
+}
