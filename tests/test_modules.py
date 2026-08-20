@@ -11,7 +11,7 @@ def test_default_registry_loads_consolidated_genesis_architecture():
     root = Path(__file__).resolve().parents[1]
     registry = ModuleRegistry.from_default_config(root)
     ids = {module.module_id for module in registry.all()}
-    assert len(ids) == 24
+    assert len(ids) == 25
     assert {
         "genesis.identity",
         "genesis.automation",
@@ -37,6 +37,7 @@ def test_default_registry_loads_consolidated_genesis_architecture():
         "genesis.application",
         "genesis.communication",
         "genesis.devlab",
+        "genesis.autonomy_pipeline",
     } == ids
     assert registry.get("genesis.identity").protected is True
     assert registry.get("genesis.validation").protected is True
