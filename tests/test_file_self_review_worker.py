@@ -18,21 +18,50 @@ class _FakeCoding:
 
 class _FakeAttempt:
     feedback = None
+    status = "iterative_trials_failed"
 
     def as_dict(self):
-        return {"status": "iterative_trials_failed"}
+        return {"status": self.status}
+
+
+class _FakeFeedback:
+    def __init__(self, *, success: bool = False, failure: str = "test failure"):
+        self.candidate_created = success
+        self.tests_passed = success
+        self.commit_sha = "abc123" if success else None
+        self.branch = "genesis/candidate-test" if success else ""
+        self.failure = "" if success else failure
+
+
+class _FakeSuccessfulAttempt(_FakeAttempt):
+    feedback = _FakeFeedback(success=True)
+    status = "candidate_created"
 
 
 class _FakeDevLab:
     last_init = None
     last_call = None
+    calls = []
 
     def __init__(self, root, providers):
         type(self).last_init = {"root": Path(root), "providers": providers}
+        type(self).calls = []
 
     def attempt_problem(self, **kwargs):
         type(self).last_call = kwargs
+        type(self).calls.append(kwargs)
         return _FakeAttempt()
+
+
+class _FakeRecoveryDevLab(_FakeDevLab):
+    def attempt_problem(self, **kwargs):
+        type(self).last_call = kwargs
+        type(self).calls.append(kwargs)
+        if len(type(self).calls) == 1:
+            failed = _FakeAttempt()
+            failed.feedback = _FakeFeedback(failure="first attempt failed")
+            return failed
+        return _FakeSuccessfulAttempt()
 
 
 def _write_challenge(root: Path, *, status: str = "active", with_ephemeral: bool = False) -> None:
@@ -68,6 +97,10 @@ def test_active_assigned_challenge_routes_through_iterative_devlab(tmp_path, mon
     spec, attempt = result
     assert isinstance(attempt, _FakeAttempt)
     assert spec["target"] == "genesis/sample.py"
+    assert len(_FakeDevLab.calls) == worker.MAX_ASSIGNED_CHALLENGE_ATTEMPTS
+    assert [call["attempt"] for call in _FakeDevLab.calls] == [0, 1, 2]
+    assert _FakeDevLab.calls[0]["previous_error"] == ""
+    assert _FakeDevLab.calls[1]["previous_error"] == "iterative_trials_failed"
     assert _FakeDevLab.last_call["target_path"] == "genesis/sample.py"
     assert _FakeDevLab.last_call["acceptance"] == "The assigned behavior is satisfied"
     assert "correctness_first" in _FakeDevLab.last_call["problem"]
@@ -78,6 +111,22 @@ def test_active_assigned_challenge_routes_through_iterative_devlab(tmp_path, mon
     assert _FakeDevLab.last_call["ephemeral_files"] == {
         "tests/test_sample_acceptance.py": "def test_acceptance():\n    assert True\n"
     }
+
+
+def test_assigned_challenge_stops_retrying_after_candidate_is_created(tmp_path, monkeypatch):
+    _write_challenge(tmp_path)
+    monkeypatch.setattr(worker, "CodingModule", _FakeCoding)
+    monkeypatch.setattr(worker, "IterativeGenesisDevLab", _FakeRecoveryDevLab)
+
+    result = worker._run_assigned_challenge(tmp_path)
+
+    assert result is not None
+    _spec, attempt = result
+    assert attempt.status == "candidate_created"
+    assert len(_FakeRecoveryDevLab.calls) == 2
+    assert _FakeRecoveryDevLab.calls[0]["attempt"] == 0
+    assert _FakeRecoveryDevLab.calls[1]["attempt"] == 1
+    assert _FakeRecoveryDevLab.calls[1]["previous_error"] == "first attempt failed"
 
 
 def test_inactive_assigned_challenge_does_not_run_devlab(tmp_path, monkeypatch):
