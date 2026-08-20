@@ -1,17 +1,6 @@
 name: Genesis File Self Review
 
 on:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/file-self-review.yml'
-      - 'scripts/file_self_review_worker.py'
-      - 'scripts/local_reasoning_provider.py'
-      - 'scripts/publish_challenge_stage.py'
-      - 'genesis/providers.py'
-      - 'genesis/devlab/**'
-      - 'genesis/file_self_review.py'
-      - 'genesis/file_self_review_policy.py'
   workflow_call:
   workflow_dispatch:
   schedule:
@@ -30,7 +19,7 @@ env:
   PIP_CACHE_DIR: ~/.cache/pip
 
 concurrency:
-  group: genesis-file-self-review-qwen25coder15-v4
+  group: genesis-file-self-review-qwen25coder15-v5
   cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 jobs:
@@ -49,6 +38,15 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Publish challenge handoff entered stage
+        continue-on-error: true
+        run: >-
+          python scripts/publish_challenge_stage.py
+          --stage handoff_entered
+          --run-id '${{ github.run_id }}'
+          --event '${{ github.event_name }}'
+          --trigger-sha '${{ github.sha }}'
+          --branch genesis/challenge-diagnostics-v5
       - name: Restore shared Genesis runtime state
         uses: actions/cache@v4
         with:
@@ -84,7 +82,7 @@ jobs:
           --run-id '${{ github.run_id }}'
           --event '${{ github.event_name }}'
           --trigger-sha '${{ github.sha }}'
-          --branch genesis/challenge-diagnostics-v4
+          --branch genesis/challenge-diagnostics-v5
       - name: Start validated coding specialist provider
         shell: bash
         run: |
@@ -117,7 +115,7 @@ jobs:
           --run-id '${{ github.run_id }}'
           --event '${{ github.event_name }}'
           --trigger-sha '${{ github.sha }}'
-          --branch genesis/challenge-diagnostics-v4
+          --branch genesis/challenge-diagnostics-v5
       - name: Refresh execution base from latest validated main
         shell: bash
         run: |
@@ -136,7 +134,7 @@ jobs:
           --run-id '${{ github.run_id }}'
           --event '${{ github.event_name }}'
           --trigger-sha '${{ github.sha }}'
-          --branch genesis/challenge-diagnostics-v4
+          --branch genesis/challenge-diagnostics-v5
       - name: Review exactly one Genesis source file
         run: python scripts/file_self_review_worker.py | tee runtime/file_self_review_result.json
       - name: Publish worker complete stage
@@ -147,7 +145,7 @@ jobs:
           --run-id '${{ github.run_id }}'
           --event '${{ github.event_name }}'
           --trigger-sha '${{ github.sha }}'
-          --branch genesis/challenge-diagnostics-v4
+          --branch genesis/challenge-diagnostics-v5
       - name: Preserve file-review evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -191,7 +189,7 @@ jobs:
             echo 'local reasoning provider log was not created' > /tmp/genesis-provider-last-log.txt
           fi
           git fetch origin main
-          git checkout -B genesis/challenge-diagnostics-v4 origin/main
+          git checkout -B genesis/challenge-diagnostics-v5 origin/main
           mkdir -p docs/runtime
           cp /tmp/genesis-file-self-review-result.json docs/runtime/GENESIS_CHALLENGE_LAST_RESULT.json
           cp /tmp/genesis-provider-last-log.txt docs/runtime/GENESIS_PROVIDER_LAST_LOG.txt
@@ -205,7 +203,7 @@ jobs:
           if ! git diff --cached --quiet; then
             git commit -m "Record Genesis challenge diagnostics for run ${{ github.run_id }}"
           fi
-          git push --force origin HEAD:refs/heads/genesis/challenge-diagnostics-v4
+          git push --force origin HEAD:refs/heads/genesis/challenge-diagnostics-v5
 
   validator_a:
     needs: review
