@@ -27,6 +27,37 @@ jobs:
     env:
       GH_REPO: ${{ github.repository }}
     steps:
+      - name: Prune stale queued Gene Pulse runs
+        id: prune
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          now=$(date -u +%s)
+          cutoff_seconds=7200
+          pruned=()
+          payload=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/gene-pulse.yml/runs?branch=main&status=queued&per_page=100")
+          while IFS=$'\t' read -r run_id run_url created; do
+            [[ -n "$run_id" && -n "$created" ]] || continue
+            created_epoch=$(date -u -d "$created" +%s 2>/dev/null || echo "$now")
+            age=$((now - created_epoch))
+            if (( age > cutoff_seconds )); then
+              if gh run cancel "$run_id" >/dev/null 2>&1; then
+                pruned+=("run=${run_id}:age_seconds=${age}:url=${run_url}")
+              fi
+            fi
+          done < <(printf '%s' "$payload" | jq -r '.workflow_runs[] | [.id, .html_url, .created_at] | @tsv')
+          {
+            echo 'pruned_runs<<EOF'
+            if (( ${#pruned[@]} > 0 )); then
+              printf '%s\n' "${pruned[@]}"
+            else
+              echo 'none'
+            fi
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
       - name: Check whether Genesis repair work is already active
         id: busy
         env:
@@ -75,10 +106,13 @@ jobs:
           ACTIVE_COUNT: ${{ steps.busy.outputs.active_count }}
           ACTIVE_DETAILS: ${{ steps.busy.outputs.details }}
           ACTIVE_RUNS: ${{ steps.busy.outputs.active_runs }}
+          PRUNED_RUNS: ${{ steps.prune.outputs.pruned_runs }}
         shell: bash
         run: |
           body="Genesis pulse request skipped: existing repair work is already queued/running (${ACTIVE_COUNT}). ${ACTIVE_DETAILS}"
-          body+=$'\n\nActive runs:\n```\n'
+          body+=$'\n\nStale queued runs pruned:\n```\n'
+          body+="${PRUNED_RUNS}"
+          body+=$'\n```\n\nActive runs:\n```\n'
           body+="${ACTIVE_RUNS}"
           body+=$'\n```'
           gh issue comment 140 --body "$body"
@@ -97,6 +131,11 @@ jobs:
         if: steps.busy.outputs.busy == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-        run: >-
-          gh issue comment 140
-          --body "Genesis pulse dispatched for gene-node-1. The pulse will continue chaining only while executable work remains."
+          PRUNED_RUNS: ${{ steps.prune.outputs.pruned_runs }}
+        shell: bash
+        run: |
+          body="Genesis pulse dispatched for gene-node-1. The pulse will continue chaining only while executable work remains."
+          body+=$'\n\nStale queued runs pruned:\n```\n'
+          body+="${PRUNED_RUNS}"
+          body+=$'\n```'
+          gh issue comment 140 --body "$body"
