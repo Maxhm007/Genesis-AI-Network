@@ -1,0 +1,60 @@
+{
+  "modules": [
+    {
+      "module_id": "genesis.autonomy_pipeline",
+      "name": "Genesis Autonomy Pipeline",
+      "version": "1.0.0",
+      "purpose": "Coordinate autonomous software issue discovery, triage, repair, internal review, independent validation handoff, promotion observation, and learning through one persistent work queue.",
+      "capabilities": [
+        "issue_discovery",
+        "issue_triage",
+        "repair_queue",
+        "candidate_review",
+        "validation_handoff",
+        "promotion_observation",
+        "repair_learning",
+        "persistent_stage_coordination"
+      ],
+      "permissions": [
+        "code.read",
+        "code.write_candidate",
+        "tests.run",
+        "provider.use",
+        "audit.read",
+        "audit.write"
+      ],
+      "dependencies": [
+        "genesis.devlab",
+        "genesis.coding",
+        "genesis.self_development",
+        "genesis.security",
+        "genesis.validation"
+      ],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.autonomy_pipeline",
+      "metadata": {
+        "aliases": [],
+        "components": [
+          "genesis.autonomy_pipeline.discovery",
+          "genesis.autonomy_pipeline.triage",
+          "genesis.autonomy_pipeline.repair",
+          "genesis.autonomy_pipeline.review",
+          "genesis.autonomy_pipeline.validation",
+          "genesis.autonomy_pipeline.promotion",
+          "genesis.autonomy_pipeline.learning"
+        ],
+        "shared_queue_database": "runtime/genesis_tasks.sqlite3",
+        "candidate_review_ref_prefix": "genesis/review-",
+        "candidate_validation_ref_prefix": "genesis/candidate-",
+        "direct_main_write": false,
+        "validation_authority": false,
+        "protected_file_bypass": false,
+        "internal_review_required_before_candidate_publication": true,
+        "promotion_requires_existing_validation_pipeline": true
+      }
+    }
+  ]
+}
