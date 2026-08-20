@@ -60,6 +60,20 @@ def test_discovery_chains_when_it_creates_executable_work(monkeypatch, tmp_path:
     assert result.next_pulse_reason == "discovery_created_executable_issue"
 
 
+def test_promotion_observed_continues_to_next_discovery(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(
+        "genesis.pulse.run_step",
+        lambda logical_id: {
+            "decision": {"mode": "solve_issue", "task_id": "task-4"},
+            "action": "promotion_observed_reassess",
+            "next_decision": {"mode": "learn_discover", "task_id": None},
+        },
+    )
+    result = GenePulse(tmp_path).run()
+    assert result.needs_next_pulse is True
+    assert result.next_pulse_reason == "validated_promotion_observed_continue_discovery"
+
+
 def test_validation_wait_checkpoints_until_external_event(monkeypatch, tmp_path: Path) -> None:
     monkeypatch.setattr(
         "genesis.pulse.run_step",
