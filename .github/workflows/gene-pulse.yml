@@ -109,43 +109,106 @@ jobs:
           git config user.name "Genesis AI"
           git config user.email "genesis-ai@users.noreply.github.com"
 
-      - name: Execute one pulse
+      - name: Execute one bounded queue transition
         run: python scripts/gene_pulse.py --gene "$GENE_ID" --output runtime/pulse_result.json
 
-      - name: Read pulse decision and candidate handoff
+      - name: Read pulse and specialist handoffs
         id: pulse
         shell: bash
         run: |
           python - <<'PY'
           import json, os
           from pathlib import Path
+
           p = json.loads(Path('runtime/pulse_result.json').read_text())
           payload = dict(p.get('payload', {}) or {})
+          pipeline = dict(payload.get('pipeline', {}) or {})
+          action = str(p.get('action') or '')
+          review_candidate = dict(pipeline.get('review_candidate', {}) or {})
+          validation_candidate = dict(pipeline.get('validation_candidate', {}) or {})
+          record = dict(pipeline.get('record', {}) or {})
+
+          # Legacy non-pipeline tasks keep their existing direct candidate handoff.
           attempt = dict(payload.get('attempt', {}) or {})
-          candidate = dict(attempt.get('candidate', {}) or {})
-          security = dict(attempt.get('candidate_security', {}) or {})
-          committed = bool(candidate.get('committed'))
-          branch = str(candidate.get('branch') or '')
-          sha = str(candidate.get('commit_sha') or '')
-          has_candidate = committed and bool(branch) and bool(sha) and security.get('status') == 'pass'
+          legacy_candidate = dict(attempt.get('candidate', {}) or {})
+          legacy_security = dict(attempt.get('candidate_security', {}) or {})
+          legacy_ok = (
+              bool(legacy_candidate.get('committed'))
+              and bool(legacy_candidate.get('branch'))
+              and bool(legacy_candidate.get('commit_sha'))
+              and legacy_security.get('status') == 'pass'
+          )
+
+          has_review = action == 'pipeline_repair_completed' and bool(review_candidate.get('candidate_sha')) and bool(review_candidate.get('review_ref'))
+          has_validation = action == 'pipeline_internal_review_approved' and bool(validation_candidate.get('candidate_sha')) and bool(validation_candidate.get('branch'))
+          rejected_review_ref = str(record.get('review_ref') or '') if action in {'pipeline_internal_review_needs_repair', 'pipeline_quarantined'} else ''
+
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
               f.write('continue=' + ('true' if p.get('needs_next_pulse') else 'false') + '\n')
-              f.write('has_candidate=' + ('true' if has_candidate else 'false') + '\n')
-              if has_candidate:
-                  f.write('candidate_branch=' + branch + '\n')
-                  f.write('candidate_sha=' + sha + '\n')
+              f.write('has_review_candidate=' + ('true' if has_review else 'false') + '\n')
+              f.write('has_validation_candidate=' + ('true' if has_validation else 'false') + '\n')
+              f.write('has_legacy_candidate=' + ('true' if legacy_ok else 'false') + '\n')
+              if has_review:
+                  f.write('review_sha=' + str(review_candidate['candidate_sha']) + '\n')
+                  f.write('review_ref=' + str(review_candidate['review_ref']) + '\n')
+              if has_validation:
+                  f.write('candidate_sha=' + str(validation_candidate['candidate_sha']) + '\n')
+                  f.write('candidate_branch=' + str(validation_candidate['branch']) + '\n')
+                  f.write('approved_review_ref=' + str(record.get('review_ref') or '') + '\n')
+              if rejected_review_ref:
+                  f.write('rejected_review_ref=' + rejected_review_ref + '\n')
+              if legacy_ok:
+                  f.write('legacy_sha=' + str(legacy_candidate['commit_sha']) + '\n')
+                  f.write('legacy_branch=' + str(legacy_candidate['branch']) + '\n')
           PY
 
-      - name: Push exact Genesis candidate
-        if: steps.pulse.outputs.has_candidate == 'true'
+      - name: Push isolated candidate to review queue
+        if: steps.pulse.outputs.has_review_candidate == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          ref='${{ steps.pulse.outputs.review_ref }}'
+          candidate='${{ steps.pulse.outputs.review_sha }}'
+          [[ "$ref" == genesis/review-* ]]
+          git rev-parse "$candidate^{commit}" >/dev/null
+          test "$(git rev-parse HEAD)" = "$candidate"
+          git push --force origin "$candidate:refs/heads/$ref"
+
+      - name: Publish internally reviewed exact candidate
+        if: steps.pulse.outputs.has_validation_candidate == 'true'
         shell: bash
         run: |
           set -euo pipefail
           branch='${{ steps.pulse.outputs.candidate_branch }}'
           candidate='${{ steps.pulse.outputs.candidate_sha }}'
+          [[ "$branch" == genesis/candidate-* ]]
           git rev-parse "$candidate^{commit}" >/dev/null
           test "$(git rev-parse HEAD)" = "$candidate"
+          git push --force origin "$candidate:refs/heads/$branch"
+          review_ref='${{ steps.pulse.outputs.approved_review_ref }}'
+          if [[ "$review_ref" == genesis/review-* ]]; then
+            git push origin --delete "$review_ref" || true
+          fi
+
+      - name: Remove rejected isolated review ref
+        if: steps.pulse.outputs.rejected_review_ref != ''
+        shell: bash
+        run: |
+          ref='${{ steps.pulse.outputs.rejected_review_ref }}'
+          if [[ "$ref" == genesis/review-* ]]; then
+            git push origin --delete "$ref" || true
+          fi
+
+      - name: Push legacy exact Genesis candidate
+        if: steps.pulse.outputs.has_legacy_candidate == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch='${{ steps.pulse.outputs.legacy_branch }}'
+          candidate='${{ steps.pulse.outputs.legacy_sha }}'
           [[ "$branch" == genesis/candidate-* ]]
+          git rev-parse "$candidate^{commit}" >/dev/null
+          test "$(git rev-parse HEAD)" = "$candidate"
           git push --set-upstream origin "$candidate:refs/heads/$branch"
 
       - name: Save Gene persistent pulse state
@@ -155,7 +218,7 @@ jobs:
           path: runtime
           key: gene-runtime-${{ env.GENE_ID }}-${{ github.run_id }}
 
-      - name: Upload pulse evidence
+      - name: Upload pulse and queue evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
@@ -163,6 +226,8 @@ jobs:
           path: |
             runtime/pulse_result.json
             runtime/discovery/
+            runtime/autonomy_pipeline/
+            runtime/genesis_tasks.sqlite3
             runtime/grce/${{ env.GENE_ID }}/candidate_handoff.json
             /tmp/genesis-gene-pulse-reasoning.log
           if-no-files-found: warn
