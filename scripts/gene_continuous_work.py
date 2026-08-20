@@ -8,7 +8,7 @@ import time
 from pathlib import Path
 
 from genesis.autonomous_engineering import AutonomousEngineeringLoop
-from genesis.autonomy_pipeline import AutonomyPipelineCoordinator
+from genesis.bounded_autonomy_pipeline import BoundedAutonomyPipelineCoordinator
 from genesis.proactive import ProactiveDevelopmentLoop
 from genesis.self_learning import SelfLearningEngine
 from genesis.work_rule import GeneWorkRule
@@ -135,7 +135,7 @@ def _run_legacy_task(logical_id: str, engineering: AutonomousEngineeringLoop, ru
 
 def run_step(logical_id: str) -> dict:
     engineering = AutonomousEngineeringLoop(ROOT)
-    pipeline = AutonomyPipelineCoordinator(ROOT, engineering)
+    pipeline = BoundedAutonomyPipelineCoordinator(ROOT, engineering)
     pipeline_result = pipeline.run_once()
 
     if pipeline_result.get("handled"):
