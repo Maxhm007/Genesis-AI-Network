@@ -27,3 +27,10 @@ def test_validated_quorum_handoff_remains_the_challenge_entrypoint():
     assert 'needs: quorum_gate' in workflow
     assert 'uses: ./.github/workflows/file-self-review.yml' in workflow
     assert "permissions:\n      contents: write" in workflow
+
+
+def test_validator_schedule_can_recover_a_missed_challenge_push():
+    workflow = Path('.github/workflows/independent-validator-gate.yml').read_text(encoding='utf-8')
+    assert "github.event_name == 'schedule'" in workflow
+    assert "github.event_name == 'push' && github.ref == 'refs/heads/main'" in workflow
+    assert "git diff --name-only HEAD^ HEAD | grep -Fxq 'config/genesis_challenge.json'" in workflow
