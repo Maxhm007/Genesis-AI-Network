@@ -12,7 +12,7 @@ from genesis.selfdev import SelfDevelopmentExecutor
 
 
 CHALLENGE_PATH = "config/genesis_challenge.json"
-MAX_ASSIGNED_CHALLENGE_ATTEMPTS = 3
+MAX_ASSIGNED_CHALLENGE_ATTEMPTS = 2
 
 
 def _challenge_spec(root: Path) -> dict | None:
@@ -73,9 +73,9 @@ def _run_assigned_challenge(root: Path):
     installs them into its disposable worktree, but they never become candidate
     files and therefore cannot place a known failing suite on ``main``.
 
-    A failed bounded DevLab cycle is fed back into the next outer retry strategy.
-    This lets Genesis use its existing correctness/edge-case/failure-analysis
-    recovery methods instead of abandoning an assigned task after one cycle.
+    One failed bounded DevLab cycle is fed into one second outer strategy. The
+    inner DevLab already performs edit/test/revise recovery, so this avoids
+    multiplying slow local-model calls while retaining failure-analysis feedback.
     """
     spec = _challenge_spec(root)
     if spec is None:
