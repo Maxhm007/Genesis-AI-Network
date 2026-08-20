@@ -79,10 +79,25 @@ class IterativeGenesisDevLab(GenesisDevLab):
             installed.append(normalized)
         return tuple(installed)
 
-    def _trial_tests(self, worktree: Path, *, timeout_seconds: int = 180) -> tuple[bool, str]:
+    def _trial_tests(
+        self,
+        worktree: Path,
+        *,
+        targets: tuple[str, ...] = (),
+        timeout_seconds: int = 180,
+    ) -> tuple[bool, str]:
+        """Run bounded revision feedback tests.
+
+        When an assigned challenge provides executable acceptance tests, run only
+        those tests during the inner edit/revise loop. The final candidate still
+        goes through SelfDevelopmentExecutor's full repository suite and the
+        independent validators, so this only removes redundant full-suite work
+        from failed intermediate revisions.
+        """
+        command = ["python", "-m", "pytest", "-q", *targets]
         try:
             result = subprocess.run(
-                ["python", "-m", "pytest", "-q"],
+                command,
                 cwd=worktree,
                 text=True,
                 capture_output=True,
@@ -153,7 +168,8 @@ class IterativeGenesisDevLab(GenesisDevLab):
                     content = proposal.files[normalized]
                     target = worktree / normalized
                     target.write_text(content, encoding="utf-8")
-                    passed, output = self._trial_tests(worktree)
+                    revision_targets = installed_acceptance if installed_acceptance else ()
+                    passed, output = self._trial_tests(worktree, targets=revision_targets)
                     if passed:
                         final_content = target.read_text(encoding="utf-8")
                         break
