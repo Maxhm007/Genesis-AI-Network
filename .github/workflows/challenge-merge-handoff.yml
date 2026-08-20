@@ -1,0 +1,54 @@
+name: Genesis Challenge Merge Handoff
+
+on:
+  pull_request:
+    branches: [main]
+    types: [closed]
+    paths:
+      - 'config/genesis_challenge.json'
+
+permissions:
+  contents: read
+
+jobs:
+  validate_assignment:
+    name: Validate merged Genesis challenge assignment
+    if: github.event.pull_request.merged == true
+    runs-on: ubuntu-latest
+    outputs:
+      active: ${{ steps.challenge.outputs.active }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 2
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Verify merged baseline
+        run: python -m pytest -q
+      - name: Confirm active challenge
+        id: challenge
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          from pathlib import Path
+          path = Path('config/genesis_challenge.json')
+          active = False
+          if path.is_file():
+              try:
+                  active = str(json.loads(path.read_text(encoding='utf-8')).get('status', 'active')).lower() == 'active'
+              except Exception:
+                  active = False
+          print(f"active={'true' if active else 'false'}")
+          PY
+
+  execute_challenge:
+    name: Execute merged Genesis challenge
+    needs: validate_assignment
+    if: needs.validate_assignment.outputs.active == 'true'
+    permissions:
+      contents: write
+    uses: ./.github/workflows/file-self-review.yml
