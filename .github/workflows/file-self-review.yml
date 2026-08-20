@@ -2,7 +2,19 @@ name: Genesis File Self Review
 
 on:
   workflow_call:
+    inputs:
+      run_assigned_challenge:
+        description: Run the active owner-assigned challenge after validated handoff
+        required: false
+        type: boolean
+        default: false
   workflow_dispatch:
+    inputs:
+      run_assigned_challenge:
+        description: Run the active owner-assigned challenge instead of intrinsic review
+        required: false
+        type: boolean
+        default: false
   schedule:
     - cron: '2,22,42 * * * *'
 
@@ -15,6 +27,7 @@ env:
   GENESIS_PROVIDER_NAME: qwen2.5-coder-1.5b-file-review
   GENESIS_PROVIDER_TIMEOUT_SECONDS: '120'
   GENESIS_PROVIDER_MAX_NEW_TOKENS: '256'
+  GENESIS_RUN_ASSIGNED_CHALLENGE: ${{ inputs.run_assigned_challenge == true }}
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
 

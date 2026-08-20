@@ -136,3 +136,5 @@ jobs:
     permissions:
       contents: write
     uses: ./.github/workflows/file-self-review.yml
+    with:
+      run_assigned_challenge: true
