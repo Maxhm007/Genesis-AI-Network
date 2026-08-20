@@ -13,8 +13,7 @@ on:
       - 'genesis/devlab/**'
       - 'genesis/file_self_review.py'
       - 'genesis/file_self_review_policy.py'
-  repository_dispatch:
-    types: [genesis_challenge_execution]
+  workflow_call:
   workflow_dispatch:
   schedule:
     - cron: '2,22,42 * * * *'
@@ -32,10 +31,8 @@ env:
   PIP_CACHE_DIR: ~/.cache/pip
 
 concurrency:
-  group: genesis-file-self-review-qwen25coder15-v3
-  # Validated dispatches, owner pushes, and manual runs preempt older challenge
-  # runs. Scheduled runs do not cancel an active priority execution.
-  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' || github.event_name == 'repository_dispatch' }}
+  group: genesis-file-self-review-qwen25coder15-v4
+  cancel-in-progress: ${{ github.event_name != 'schedule' }}
 
 jobs:
   review:
@@ -88,6 +85,7 @@ jobs:
           --run-id '${{ github.run_id }}'
           --event '${{ github.event_name }}'
           --trigger-sha '${{ github.sha }}'
+          --branch genesis/challenge-diagnostics-v4
       - name: Start validated coding specialist provider
         shell: bash
         run: |
@@ -120,6 +118,7 @@ jobs:
           --run-id '${{ github.run_id }}'
           --event '${{ github.event_name }}'
           --trigger-sha '${{ github.sha }}'
+          --branch genesis/challenge-diagnostics-v4
       - name: Refresh execution base from latest validated main
         shell: bash
         run: |
@@ -138,6 +137,7 @@ jobs:
           --run-id '${{ github.run_id }}'
           --event '${{ github.event_name }}'
           --trigger-sha '${{ github.sha }}'
+          --branch genesis/challenge-diagnostics-v4
       - name: Review exactly one Genesis source file
         run: python scripts/file_self_review_worker.py | tee runtime/file_self_review_result.json
       - name: Publish worker complete stage
@@ -148,6 +148,7 @@ jobs:
           --run-id '${{ github.run_id }}'
           --event '${{ github.event_name }}'
           --trigger-sha '${{ github.sha }}'
+          --branch genesis/challenge-diagnostics-v4
       - name: Preserve file-review evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -191,7 +192,7 @@ jobs:
             echo 'local reasoning provider log was not created' > /tmp/genesis-provider-last-log.txt
           fi
           git fetch origin main
-          git checkout -B genesis/challenge-diagnostics-v3 origin/main
+          git checkout -B genesis/challenge-diagnostics-v4 origin/main
           mkdir -p docs/runtime
           cp /tmp/genesis-file-self-review-result.json docs/runtime/GENESIS_CHALLENGE_LAST_RESULT.json
           cp /tmp/genesis-provider-last-log.txt docs/runtime/GENESIS_PROVIDER_LAST_LOG.txt
@@ -205,7 +206,7 @@ jobs:
           if ! git diff --cached --quiet; then
             git commit -m "Record Genesis challenge diagnostics for run ${{ github.run_id }}"
           fi
-          git push --force origin HEAD:refs/heads/genesis/challenge-diagnostics-v3
+          git push --force origin HEAD:refs/heads/genesis/challenge-diagnostics-v4
 
   validator_a:
     needs: review
