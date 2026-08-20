@@ -1,7 +1,7 @@
 {
   "status": "active",
   "target": "genesis/resource.py",
-  "problem": "ResourceModule.snapshot silently coerces arbitrary network_available values with Python truthiness. For example, the string 'false' is recorded as True, which can give the scheduler incorrect network-state telemetry. The network availability field should not silently reinterpret non-boolean values.",
+  "problem": "ResourceModule.snapshot silently coerces arbitrary network_available values with Python truthiness. For example, the string 'false' is recorded as True, which can give the scheduler incorrect network-state telemetry. The network availability field should not silently reinterpret non-boolean values. This is an owner-assigned execution challenge: Genesis must diagnose and implement the fix through its own iterative DevLab path.",
   "acceptance": "Boolean True and False remain accepted and are preserved exactly. Non-boolean values such as the strings 'true'/'false', integers 0/1, and None are rejected clearly instead of being silently coerced. Existing CPU, memory, disk, battery normalization and capacity scoring behavior remain unchanged.",
   "method": "minimal_correctness_fix",
   "ephemeral_acceptance_files": {
