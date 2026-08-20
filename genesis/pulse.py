@@ -20,12 +20,10 @@ class PulseResult:
 class GenePulse:
     """Execute one resumable unit of Gene work.
 
-    A pulse is deliberately short-lived. Persistent state belongs to the Gene
-    runtime/state backend, not to the process executing this class.
-
-    Immediate chaining is reserved for productive executable work. Discovery,
-    validation waits, owner stops, and fatal stops checkpoint and yield so Gene
-    does not burn compute by repeatedly re-observing unchanged state.
+    Each pulse performs at most one bounded autonomy-pipeline transition. Queue
+    state survives the process; specialist workers do not need to remain alive.
+    Immediate chaining is used only when the next stage has executable work.
+    Validation waits and idle discovery checkpoint instead of spinning.
     """
 
     def __init__(self, root: Path, logical_id: str = "gene-node-1") -> None:
@@ -36,6 +34,22 @@ class GenePulse:
     def _next_pulse_decision(action: str, payload: dict) -> tuple[bool, str]:
         if action in {"fatal_stop", "owner_stop"}:
             return False, action
+
+        pipeline_continue = {
+            "pipeline_issue_discovered": "issue_waiting_for_triage",
+            "pipeline_triaged": "triaged_issue_ready_for_repair",
+            "pipeline_repair_completed": "candidate_waiting_internal_review",
+            "pipeline_repair_retry": "repair_feedback_ready_for_retry",
+            "pipeline_internal_review_needs_repair": "review_feedback_returned_to_repair",
+            "pipeline_promotion_observed": "validated_promotion_ready_for_learning",
+            "pipeline_learning_completed": "learning_recorded_continue_discovery",
+            "pipeline_quarantined": "quarantined_issue_continue_other_work",
+        }
+        if action in pipeline_continue:
+            return True, pipeline_continue[action]
+
+        if action in {"pipeline_internal_review_approved", "pipeline_wait_validation"}:
+            return False, "waiting_for_independent_validation_and_promotion"
 
         if action == "attempt_focused_issue":
             return True, "focused_issue_has_executable_work"
@@ -55,8 +69,6 @@ class GenePulse:
         if action == "focus_missing_reassess":
             return False, "focus_cleared_for_external_reassessment"
 
-        # Unknown actions fail closed: preserve state and require another event
-        # rather than creating an accidental infinite Actions chain.
         return False, "unrecognized_action_checkpointed"
 
     def run(self) -> PulseResult:
