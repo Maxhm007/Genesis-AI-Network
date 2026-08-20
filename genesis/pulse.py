@@ -23,7 +23,7 @@ class GenePulse:
     Each pulse performs at most one bounded autonomy-pipeline transition. Queue
     state survives the process; specialist workers do not need to remain alive.
     Immediate chaining is used only when the next stage has executable work.
-    Validation waits and idle discovery checkpoint instead of spinning.
+    Validation waits and completed discovery cycles checkpoint instead of spinning.
     """
 
     def __init__(self, root: Path, logical_id: str = "gene-node-1") -> None:
@@ -37,6 +37,7 @@ class GenePulse:
 
         pipeline_continue = {
             "pipeline_issue_discovered": "issue_waiting_for_triage",
+            "pipeline_discovery_continue": "next_discovery_batch_ready",
             "pipeline_triaged": "triaged_issue_ready_for_repair",
             "pipeline_repair_completed": "candidate_waiting_internal_review",
             "pipeline_repair_retry": "repair_feedback_ready_for_retry",
