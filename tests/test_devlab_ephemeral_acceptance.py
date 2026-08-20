@@ -40,3 +40,17 @@ def test_ephemeral_acceptance_files_enforce_file_and_byte_budgets(tmp_path):
             tmp_path,
             {"tests/test_large_acceptance.py": "x" * (IterativeGenesisDevLab.MAX_EPHEMERAL_BYTES + 1)},
         )
+
+
+def test_trial_tests_can_focus_on_ephemeral_acceptance_before_full_suite(tmp_path):
+    tests = tmp_path / "tests"
+    tests.mkdir()
+    (tests / "test_acceptance.py").write_text("def test_acceptance():\n    assert True\n", encoding="utf-8")
+    (tests / "test_unrelated_failure.py").write_text("def test_unrelated():\n    assert False\n", encoding="utf-8")
+
+    lab = object.__new__(IterativeGenesisDevLab)
+    focused_passed, _ = lab._trial_tests(tmp_path, targets=("tests/test_acceptance.py",), timeout_seconds=30)
+    full_passed, _ = lab._trial_tests(tmp_path, timeout_seconds=30)
+
+    assert focused_passed is True
+    assert full_passed is False
