@@ -1,0 +1,6 @@
+{
+  "stage": "waiting_for_workflow",
+  "run_id": "seed",
+  "event": "diagnostics_seed",
+  "trigger_sha": ""
+}
