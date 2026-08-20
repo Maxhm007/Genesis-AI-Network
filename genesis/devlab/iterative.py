@@ -28,10 +28,11 @@ class IterativeGenesisDevLab(GenesisDevLab):
     source edit to pass the repository's ordinary full suite.
     """
 
-    MAX_INNER_REVISIONS = 3
+    MAX_INNER_REVISIONS = 2
     MAX_INNER_FAILURE_BYTES = 4000
     MAX_EPHEMERAL_FILES = 4
     MAX_EPHEMERAL_BYTES = 24_000
+    MAX_DEVLAB_PROPOSAL_ATTEMPTS = 2
 
     def __init__(self, root: str | Path, providers: ProviderRegistry | None = None) -> None:
         super().__init__(root, providers)
@@ -136,7 +137,15 @@ class IterativeGenesisDevLab(GenesisDevLab):
             try:
                 installed_acceptance = self._install_ephemeral_files(worktree, ephemeral_files)
                 worktree_coding = CodingModule(worktree, self.coding.providers)
+                # DevLab already has an edit/test/revise loop. Keep proposal-format
+                # retries bounded so one revision cannot fan out into many slow
+                # local-model calls.
+                worktree_coding.MAX_PROPOSAL_ATTEMPTS = self.MAX_DEVLAB_PROPOSAL_ATTEMPTS
                 grounded_provider = TargetGroundedProvider(provider, normalized) if provider is not None else None
+                if grounded_provider is not None:
+                    # Let CodingModule own the single schema-repair retry instead
+                    # of nesting extra content re-prompts inside every call.
+                    grounded_provider.MAX_CONTENT_REPROMPTS = 0
 
                 for revision in range(1, self.MAX_INNER_REVISIONS + 1):
                     acceptance_signal = (
