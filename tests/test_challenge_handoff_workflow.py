@@ -36,3 +36,14 @@ def test_validator_schedule_recovers_any_still_active_challenge():
     assert 'if [[ "${{ github.event_name }}" != "schedule" ]]; then' in workflow
     assert "git diff --name-only HEAD^ HEAD | grep -Fxq 'config/genesis_challenge.json'" in workflow
     assert "get('status', 'active')" in workflow
+
+
+def test_merged_challenge_pr_has_reliable_handoff_path():
+    workflow = Path('.github/workflows/challenge-merge-handoff.yml').read_text(encoding='utf-8')
+    assert 'pull_request:' in workflow
+    assert 'types: [closed]' in workflow
+    assert "- 'config/genesis_challenge.json'" in workflow
+    assert 'github.event.pull_request.merged == true' in workflow
+    assert 'Verify merged baseline' in workflow
+    assert 'uses: ./.github/workflows/file-self-review.yml' in workflow
+    assert "permissions:\n      contents: write" in workflow
