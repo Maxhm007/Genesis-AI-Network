@@ -36,12 +36,18 @@ jobs:
           set -euo pipefail
           active=0
           details=()
+          runs=()
           for workflow in gene-pulse.yml file-self-review.yml manual-self-repair.yml; do
             for status in queued in_progress; do
-              count=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?branch=main&status=${status}&per_page=100" --jq '.workflow_runs | length')
+              payload=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?branch=main&status=${status}&per_page=100")
+              count=$(printf '%s' "$payload" | jq '.workflow_runs | length')
               if (( count > 0 )); then
                 active=$((active + count))
                 details+=("${workflow}:${status}=${count}")
+                while IFS=$'\t' read -r run_id run_status run_url run_sha run_event run_created; do
+                  [[ -n "$run_id" ]] || continue
+                  runs+=("${workflow}:${run_status}:run=${run_id}:event=${run_event}:sha=${run_sha:0:12}:created=${run_created}:url=${run_url}")
+                done < <(printf '%s' "$payload" | jq -r '.workflow_runs[] | [.id, .status, .html_url, .head_sha, .event, .created_at] | @tsv')
               fi
             done
           done
@@ -52,6 +58,15 @@ jobs:
           fi
           echo "active_count=${active}" >> "$GITHUB_OUTPUT"
           printf 'details=%s\n' "${details[*]:-none}" >> "$GITHUB_OUTPUT"
+          {
+            echo 'active_runs<<EOF'
+            if (( ${#runs[@]} > 0 )); then
+              printf '%s\n' "${runs[@]}"
+            else
+              echo 'none'
+            fi
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
 
       - name: Report busy state and skip duplicate pulse
         if: steps.busy.outputs.busy == 'true'
@@ -59,9 +74,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ACTIVE_COUNT: ${{ steps.busy.outputs.active_count }}
           ACTIVE_DETAILS: ${{ steps.busy.outputs.details }}
-        run: >-
-          gh issue comment 140
-          --body "Genesis pulse request skipped: existing repair work is already queued/running (${ACTIVE_COUNT}). ${ACTIVE_DETAILS}"
+          ACTIVE_RUNS: ${{ steps.busy.outputs.active_runs }}
+        shell: bash
+        run: |
+          body="Genesis pulse request skipped: existing repair work is already queued/running (${ACTIVE_COUNT}). ${ACTIVE_DETAILS}"
+          body+=$'\n\nActive runs:\n```\n'
+          body+="${ACTIVE_RUNS}"
+          body+=$'\n```'
+          gh issue comment 140 --body "$body"
 
       - name: Dispatch Gene Pulse when idle
         if: steps.busy.outputs.busy == 'false'
