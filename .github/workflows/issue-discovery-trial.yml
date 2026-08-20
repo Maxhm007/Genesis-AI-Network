@@ -219,3 +219,4 @@ jobs:
 # Intentionally no schedule. If this one-shot trial proves issue discovery,
 # Genesis-authored repair, independent validation, and exact promotion, a
 # recurring schedule can be added in a separate validated change.
+# Owner-requested rerun marker: 2026-08-20 autonomous discovery verification v2.
