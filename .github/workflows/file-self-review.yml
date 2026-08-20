@@ -22,14 +22,14 @@ permissions:
 env:
   PYTHONPATH: ${{ github.workspace }}
   GENESIS_PROVIDER_URL: http://127.0.0.1:8766
-  GENESIS_PROVIDER_NAME: qwen3-1.7b-file-review
+  GENESIS_PROVIDER_NAME: qwen2.5-coder-1.5b-file-review
   GENESIS_PROVIDER_TIMEOUT_SECONDS: '240'
   GENESIS_PROVIDER_MAX_NEW_TOKENS: '384'
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
 
 concurrency:
-  group: genesis-file-self-review-qwen17-v2
+  group: genesis-file-self-review-qwen25coder15-v1
   # Owner-triggered code/challenge pushes and manual runs preempt an older
   # scheduled self-review. Scheduled runs never cancel an active priority run.
   cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
@@ -69,7 +69,7 @@ jobs:
           path: |
             ~/.cache/huggingface
             ~/.cache/pip
-          key: genesis-qwen3-1.7b-${{ runner.os }}-py312-v1
+          key: genesis-qwen2.5-coder-1.5b-${{ runner.os }}-py312-v1
       - run: pip install -r requirements.txt
       - name: Verify stable baseline
         run: python -m pytest -q
@@ -77,10 +77,10 @@ jobs:
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install 'transformers>=4.51,<5' safetensors
-      - name: Start validated reasoning provider
+      - name: Start validated coding specialist provider
         shell: bash
         run: |
-          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen3-1.7B --host 127.0.0.1 --port 8766 --max-new-tokens 384 > /tmp/genesis-file-review-reasoning.log 2>&1 &
+          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen2.5-Coder-1.5B-Instruct --host 127.0.0.1 --port 8766 --max-new-tokens 384 > /tmp/genesis-file-review-reasoning.log 2>&1 &
           ready=false
           for i in {1..300}; do
             if python - <<'PY'
