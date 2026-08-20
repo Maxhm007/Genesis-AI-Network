@@ -9,6 +9,7 @@ from pathlib import Path
 
 from genesis.autonomous_engineering import AutonomousEngineeringLoop
 from genesis.bounded_autonomy_pipeline import BoundedAutonomyPipelineCoordinator
+from genesis.issue_discovery import GenesisIssueDiscoveryEngine
 from genesis.proactive import ProactiveDevelopmentLoop
 from genesis.self_learning import SelfLearningEngine
 from genesis.work_rule import GeneWorkRule
@@ -16,6 +17,8 @@ from genesis.work_rule import GeneWorkRule
 
 ROOT = Path(__file__).resolve().parents[1]
 STOP = False
+PULSE_DISCOVERY_SOURCE_BYTES = 5_000
+PULSE_DISCOVERY_TEST_BYTES = 2_000
 
 
 def _stop(*_: object) -> None:
@@ -85,6 +88,12 @@ def _pipeline_decision(pipeline: dict) -> dict:
     }
 
 
+def _legacy_task_coding_ready(engineering: AutonomousEngineeringLoop, task) -> bool:
+    if task is None:
+        return False
+    return bool(engineering._context_paths_for_task(task))
+
+
 def _run_legacy_task(logical_id: str, engineering: AutonomousEngineeringLoop, rule: GeneWorkRule, decision) -> dict:
     result: dict = {"decision": decision.__dict__}
     task = engineering.queue.get(decision.task_id) if decision.task_id else None
@@ -113,7 +122,12 @@ def _run_legacy_task(logical_id: str, engineering: AutonomousEngineeringLoop, ru
     runtime = ROOT / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     result["action"] = "attempt_focused_issue"
-    attempt = engineering._attempt_task(task, runtime)
+    old_revision_budget = engineering.MAX_CANDIDATE_REVISIONS
+    engineering.MAX_CANDIDATE_REVISIONS = 0
+    try:
+        attempt = engineering._attempt_task(task, runtime)
+    finally:
+        engineering.MAX_CANDIDATE_REVISIONS = old_revision_budget
     result["attempt"] = attempt
     candidate = dict(attempt.get("candidate") or {})
     security = dict(attempt.get("candidate_security") or {})
@@ -134,6 +148,11 @@ def _run_legacy_task(logical_id: str, engineering: AutonomousEngineeringLoop, ru
 
 
 def run_step(logical_id: str) -> dict:
+    # Keep the Pulse-specific discovery prompt small enough for the local CPU
+    # specialist. Other workflows retain the canonical larger discovery limits.
+    GenesisIssueDiscoveryEngine.MAX_SOURCE_BYTES = PULSE_DISCOVERY_SOURCE_BYTES
+    GenesisIssueDiscoveryEngine.MAX_TEST_BYTES = PULSE_DISCOVERY_TEST_BYTES
+
     engineering = AutonomousEngineeringLoop(ROOT)
     pipeline = BoundedAutonomyPipelineCoordinator(ROOT, engineering)
     pipeline_result = pipeline.run_once()
@@ -145,20 +164,30 @@ def run_step(logical_id: str) -> dict:
             "pipeline": pipeline_result,
         }
 
-    # Keep legacy non-pipeline engineering work functional. Pipeline tasks that
-    # are terminal/quarantined must never leak back into the old monolithic path.
+    # Keep legacy code tasks functional, but never let a contextless capability,
+    # benchmark, or administrative task hijack the coding/repair Pulse.
     rule = GeneWorkRule(ROOT, logical_id, engineering.queue)
     decision = rule.decide()
+    legacy_skipped = None
     if decision.mode == "solve_issue" and decision.task_id:
         task = engineering.queue.get(decision.task_id)
         if not pipeline.is_pipeline_task(task):
-            result = _run_legacy_task(logical_id, engineering, rule, decision)
-            result["pipeline_discovery"] = pipeline_result.get("discovery")
-            return result
-        rule.clear_focus()
+            if _legacy_task_coding_ready(engineering, task):
+                result = _run_legacy_task(logical_id, engineering, rule, decision)
+                result["pipeline_discovery"] = pipeline_result.get("discovery")
+                return result
+            legacy_skipped = {
+                "task_id": task.task_id if task else decision.task_id,
+                "module_id": task.module_id if task else None,
+                "reason": "no_bounded_code_context_for_gene_pulse",
+            }
+            rule.clear_focus()
+        else:
+            rule.clear_focus()
 
-    # No executable queue work remains. Discovery already ran above and found no
-    # confirmed issue, so use the broader learning/capability path and checkpoint.
+    # No executable repair work remains. Discovery already completed one full
+    # source cycle and found no confirmed issue, so use broader learning work and
+    # checkpoint rather than repeatedly attempting an unrelated legacy task.
     result: dict = {
         "decision": {
             "mode": "learn_discover",
@@ -168,12 +197,25 @@ def run_step(logical_id: str) -> dict:
         "action": "learn_discover_reassess",
         "discovery": pipeline_result.get("discovery"),
     }
+    if legacy_skipped:
+        result["legacy_skipped"] = legacy_skipped
     result["learning"] = SelfLearningEngine(ROOT).run_once()
     proactive = ProactiveDevelopmentLoop(ROOT)
     result["score_work"] = proactive.ensure_score_work()
     result["velocity_work"] = proactive.ensure_velocity_work()
     result["capability_scan"] = proactive.inspect()[:5]
-    result["next_decision"] = rule.decide().__dict__
+
+    next_decision = rule.decide().__dict__
+    next_task_id = next_decision.get("task_id")
+    if next_decision.get("mode") == "solve_issue" and next_task_id:
+        next_task = engineering.queue.get(str(next_task_id))
+        if next_task and not pipeline.is_pipeline_task(next_task) and not _legacy_task_coding_ready(engineering, next_task):
+            next_decision = {
+                "mode": "idle",
+                "task_id": None,
+                "reason": "non_coding_legacy_task_not_executable_by_gene_pulse",
+            }
+    result["next_decision"] = next_decision
     return result
 
 
