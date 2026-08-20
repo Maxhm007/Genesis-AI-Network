@@ -20,12 +20,48 @@ def compact_prompt(prompt: str) -> str:
     return prompt[:head] + "\n[...bounded context elided...]\n" + prompt[-tail:]
 
 
+def balanced_json_object_complete(text: str) -> bool:
+    """Return True once text contains one complete top-level JSON object.
+
+    Text before the first opening brace is tolerated because small local models
+    sometimes emit a short preamble. Braces inside quoted strings are ignored.
+    """
+    start = text.find("{")
+    if start < 0:
+        return False
+    depth = 0
+    in_string = False
+    escaped = False
+    for char in text[start:]:
+        if in_string:
+            if escaped:
+                escaped = False
+            elif char == "\\":
+                escaped = True
+            elif char == '"':
+                in_string = False
+            continue
+        if char == '"':
+            in_string = True
+        elif char == "{":
+            depth += 1
+        elif char == "}":
+            depth -= 1
+            if depth == 0:
+                return True
+            if depth < 0:
+                return False
+    return False
+
+
 class LocalReasoningModel:
     def __init__(self, model_id: str, *, max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS) -> None:
         import torch
-        from transformers import AutoModelForCausalLM, AutoTokenizer
+        from transformers import AutoModelForCausalLM, AutoTokenizer, StoppingCriteria, StoppingCriteriaList
 
         self.torch = torch
+        self.StoppingCriteria = StoppingCriteria
+        self.StoppingCriteriaList = StoppingCriteriaList
         self.model_id = model_id
         self.max_new_tokens = max(64, min(int(max_new_tokens), MAX_ALLOWED_NEW_TOKENS))
         self.tokenizer = AutoTokenizer.from_pretrained(model_id, trust_remote_code=False)
@@ -36,6 +72,17 @@ class LocalReasoningModel:
             low_cpu_mem_usage=True,
         )
         self.model.eval()
+
+    def _json_stopping_criteria(self, prompt_tokens: int):
+        tokenizer = self.tokenizer
+        base = self.StoppingCriteria
+
+        class StopAfterBalancedJSONObject(base):
+            def __call__(self, input_ids, scores, **kwargs):
+                generated = tokenizer.decode(input_ids[0][prompt_tokens:], skip_special_tokens=True)
+                return balanced_json_object_complete(generated)
+
+        return self.StoppingCriteriaList([StopAfterBalancedJSONObject()])
 
     def reason(self, prompt: str, max_new_tokens: int | None = None) -> str:
         system = (
@@ -58,6 +105,7 @@ class LocalReasoningModel:
         except TypeError:
             text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=4096)
+        prompt_tokens = inputs["input_ids"].shape[-1]
         budget = self.max_new_tokens if max_new_tokens is None else max(64, min(int(max_new_tokens), MAX_ALLOWED_NEW_TOKENS))
         with self.torch.no_grad():
             output = self.model.generate(
@@ -66,8 +114,9 @@ class LocalReasoningModel:
                 do_sample=False,
                 repetition_penalty=1.03,
                 pad_token_id=self.tokenizer.eos_token_id,
+                stopping_criteria=self._json_stopping_criteria(prompt_tokens),
             )
-        generated = output[0][inputs["input_ids"].shape[-1]:]
+        generated = output[0][prompt_tokens:]
         return self.tokenizer.decode(generated, skip_special_tokens=True).strip()
 
 
