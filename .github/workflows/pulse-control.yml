@@ -37,21 +37,36 @@ jobs:
           now=$(date -u +%s)
           cutoff_seconds=7200
           pruned=()
+          failures=()
           payload=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/gene-pulse.yml/runs?branch=main&status=queued&per_page=100")
           while IFS=$'\t' read -r run_id run_url created; do
             [[ -n "$run_id" && -n "$created" ]] || continue
             created_epoch=$(date -u -d "$created" +%s 2>/dev/null || echo "$now")
             age=$((now - created_epoch))
-            if (( age > cutoff_seconds )); then
-              if gh run cancel "$run_id" >/dev/null 2>&1; then
-                pruned+=("run=${run_id}:age_seconds=${age}:url=${run_url}")
-              fi
+            if (( age <= cutoff_seconds )); then
+              continue
+            fi
+            if gh run cancel "$run_id" >/dev/null 2>&1; then
+              pruned+=("run=${run_id}:method=cancel:age_seconds=${age}:url=${run_url}")
+              continue
+            fi
+            if gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/force-cancel" >/dev/null 2>&1; then
+              pruned+=("run=${run_id}:method=force-cancel:age_seconds=${age}:url=${run_url}")
+            else
+              failures+=("run=${run_id}:age_seconds=${age}:url=${run_url}")
             fi
           done < <(printf '%s' "$payload" | jq -r '.workflow_runs[] | [.id, .html_url, .created_at] | @tsv')
           {
             echo 'pruned_runs<<EOF'
             if (( ${#pruned[@]} > 0 )); then
               printf '%s\n' "${pruned[@]}"
+            else
+              echo 'none'
+            fi
+            echo 'EOF'
+            echo 'prune_failures<<EOF'
+            if (( ${#failures[@]} > 0 )); then
+              printf '%s\n' "${failures[@]}"
             else
               echo 'none'
             fi
@@ -107,11 +122,14 @@ jobs:
           ACTIVE_DETAILS: ${{ steps.busy.outputs.details }}
           ACTIVE_RUNS: ${{ steps.busy.outputs.active_runs }}
           PRUNED_RUNS: ${{ steps.prune.outputs.pruned_runs }}
+          PRUNE_FAILURES: ${{ steps.prune.outputs.prune_failures }}
         shell: bash
         run: |
           body="Genesis pulse request skipped: existing repair work is already queued/running (${ACTIVE_COUNT}). ${ACTIVE_DETAILS}"
           body+=$'\n\nStale queued runs pruned:\n```\n'
           body+="${PRUNED_RUNS}"
+          body+=$'\n```\n\nStale prune failures:\n```\n'
+          body+="${PRUNE_FAILURES}"
           body+=$'\n```\n\nActive runs:\n```\n'
           body+="${ACTIVE_RUNS}"
           body+=$'\n```'
@@ -132,10 +150,13 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           PRUNED_RUNS: ${{ steps.prune.outputs.pruned_runs }}
+          PRUNE_FAILURES: ${{ steps.prune.outputs.prune_failures }}
         shell: bash
         run: |
           body="Genesis pulse dispatched for gene-node-1. The pulse will continue chaining only while executable work remains."
           body+=$'\n\nStale queued runs pruned:\n```\n'
           body+="${PRUNED_RUNS}"
+          body+=$'\n```\n\nStale prune failures:\n```\n'
+          body+="${PRUNE_FAILURES}"
           body+=$'\n```'
           gh issue comment 140 --body "$body"
