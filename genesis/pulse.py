@@ -46,6 +46,9 @@ class GenePulse:
                 return True, "discovery_created_executable_issue"
             return False, "idle_discovery_checkpointed"
 
+        if action == "promotion_observed_reassess":
+            return True, "validated_promotion_observed_continue_discovery"
+
         if action == "hold_focus_while_validation_finishes":
             return False, "waiting_for_independent_validation"
 

@@ -8,7 +8,7 @@ from pathlib import Path
 
 from genesis.coding import CodingModule
 from genesis.devlab.iterative import IterativeGenesisDevLab
-from genesis.file_self_review_policy import QuorumFileSelfReviewLoop
+from genesis.issue_discovery import DiscoveryFileSelfReviewLoop
 from genesis.selfdev import SelfDevelopmentExecutor
 
 
@@ -139,7 +139,7 @@ def _push_candidate(root: Path, branch: str) -> None:
 
 def main() -> None:
     root = Path(__file__).resolve().parents[1]
-    loop = QuorumFileSelfReviewLoop(root)
+    loop = DiscoveryFileSelfReviewLoop(root)
 
     challenge = _run_assigned_challenge(root) if _assigned_challenge_requested() else None
     if challenge is not None:

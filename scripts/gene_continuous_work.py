@@ -3,10 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import signal
+import subprocess
 import time
 from pathlib import Path
 
 from genesis.autonomous_engineering import AutonomousEngineeringLoop
+from genesis.issue_discovery import GenesisIssueDiscoveryEngine
 from genesis.proactive import ProactiveDevelopmentLoop
 from genesis.self_learning import SelfLearningEngine
 from genesis.work_rule import GeneWorkRule
@@ -19,6 +21,47 @@ STOP = False
 def _stop(*_: object) -> None:
     global STOP
     STOP = True
+
+
+def _handoff_path(logical_id: str) -> Path:
+    path = ROOT / "runtime" / "grce" / logical_id / "candidate_handoff.json"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    return path
+
+
+def _load_handoff(logical_id: str) -> dict:
+    path = _handoff_path(logical_id)
+    if not path.is_file():
+        return {}
+    try:
+        payload = json.loads(path.read_text(encoding="utf-8"))
+    except Exception:
+        return {}
+    return payload if isinstance(payload, dict) else {}
+
+
+def _write_handoff(logical_id: str, *, task_id: str, branch: str, candidate_sha: str) -> dict:
+    payload = {
+        "task_id": task_id,
+        "branch": branch,
+        "candidate_sha": candidate_sha,
+        "state": "waiting_validation",
+    }
+    _handoff_path(logical_id).write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+    return payload
+
+
+def _candidate_promoted(candidate_sha: str) -> bool:
+    if not candidate_sha:
+        return False
+    result = subprocess.run(
+        ["git", "merge-base", "--is-ancestor", candidate_sha, "HEAD"],
+        cwd=ROOT,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    return result.returncode == 0
 
 
 def run_step(logical_id: str) -> dict:
@@ -34,19 +77,57 @@ def run_step(logical_id: str) -> dict:
             result["action"] = "focus_missing_reassess"
             return result
         if task.state == "review":
+            handoff = _load_handoff(logical_id)
+            candidate_sha = str(handoff.get("candidate_sha") or "")
+            if handoff.get("task_id") == task.task_id and _candidate_promoted(candidate_sha):
+                engineering.queue.transition(task.task_id, "complete", module_id=task.module_id)
+                rule.clear_focus()
+                handoff["state"] = "promotion_confirmed"
+                _handoff_path(logical_id).write_text(
+                    json.dumps(handoff, indent=2, sort_keys=True) + "\n", encoding="utf-8"
+                )
+                result["action"] = "promotion_observed_reassess"
+                result["promotion"] = handoff
+                result["next_decision"] = rule.decide().__dict__
+                return result
             result["action"] = "hold_focus_while_validation_finishes"
+            result["candidate_handoff"] = handoff
             return result
         runtime = ROOT / "runtime"
         runtime.mkdir(parents=True, exist_ok=True)
         result["action"] = "attempt_focused_issue"
-        result["attempt"] = engineering._attempt_task(task, runtime)
+        attempt = engineering._attempt_task(task, runtime)
+        result["attempt"] = attempt
+        candidate = dict(attempt.get("candidate") or {})
+        candidate_security = dict(attempt.get("candidate_security") or {})
+        if (
+            attempt.get("coding_status") == "candidate_created"
+            and candidate.get("committed")
+            and candidate.get("commit_sha")
+            and candidate.get("branch")
+            and candidate_security.get("status") == "pass"
+        ):
+            result["candidate_handoff"] = _write_handoff(
+                logical_id,
+                task_id=task.task_id,
+                branch=str(candidate["branch"]),
+                candidate_sha=str(candidate["commit_sha"]),
+            )
         return result
 
-    # No issue exists. Learn from current evidence, inspect capability gaps and
-    # create real work when a measurable gap is found. Network/web discovery is
-    # an allowed idle action when the deployed runtime has an authorized network
-    # research provider; the core loop does not fabricate web evidence.
+    # No unresolved issue exists. Run evidence-driven code discovery first. A
+    # confirmed finding becomes persistent queue work, so the next pulse keeps
+    # focus on it instead of returning to generic learning/capability scanning.
+    provider = engineering.coding._provider()
+    discovery = GenesisIssueDiscoveryEngine(ROOT).discover_and_enqueue(engineering.queue, provider)
     result["action"] = "learn_discover_reassess"
+    result["discovery"] = discovery
+    result["next_decision"] = rule.decide().__dict__
+    if result["next_decision"].get("mode") == "solve_issue":
+        return result
+
+    # Discovery found no confirmed issue. Continue the broader learning and
+    # capability-gap path, then reassess once more before checkpointing.
     result["learning"] = SelfLearningEngine(ROOT).run_once()
     proactive = ProactiveDevelopmentLoop(ROOT)
     result["score_work"] = proactive.ensure_score_work()
