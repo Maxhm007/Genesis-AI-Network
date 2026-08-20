@@ -26,8 +26,10 @@ env:
   PIP_CACHE_DIR: ~/.cache/pip
 
 concurrency:
-  group: genesis-file-self-review-qwen17-v1
-  cancel-in-progress: false
+  group: genesis-file-self-review-qwen17-v2
+  # Owner-triggered code/challenge pushes and manual runs preempt an older
+  # scheduled self-review. Scheduled runs never cancel an active priority run.
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
 
 jobs:
   review:
@@ -96,17 +98,28 @@ jobs:
             cat /tmp/genesis-file-review-reasoning.log || true
             exit 1
           fi
+      - name: Refresh execution base from latest validated main
+        shell: bash
+        run: |
+          git fetch origin main
+          git checkout main
+          git reset --hard origin/main
       - name: Configure Genesis Git identity
         run: |
           git config user.name "Genesis AI"
           git config user.email "genesis-ai@users.noreply.github.com"
       - name: Review exactly one Genesis source file
-        run: python scripts/file_self_review_worker.py
+        run: python scripts/file_self_review_worker.py | tee runtime/file_self_review_result.json
       - name: Preserve file-review evidence
+        if: always()
         uses: actions/upload-artifact@v4
         with:
           name: genesis-file-self-review-${{ github.run_id }}
-          path: runtime/task_reviews/
+          path: |
+            runtime/task_reviews/
+            runtime/file_self_review_result.json
+            /tmp/genesis-file-review-reasoning.log
+          if-no-files-found: ignore
           retention-days: 30
       - name: Resolve generated candidate
         id: candidate
