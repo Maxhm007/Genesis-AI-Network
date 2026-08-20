@@ -10,6 +10,17 @@ def test_challenge_assignment_does_not_directly_trigger_file_review():
     assert 'schedule:' in trigger_block
 
 
+def test_file_review_separates_intrinsic_schedule_from_assigned_challenge_mode():
+    workflow = Path('.github/workflows/file-self-review.yml').read_text(encoding='utf-8')
+    assert 'run_assigned_challenge:' in workflow
+    assert 'default: false' in workflow
+    assert 'GENESIS_RUN_ASSIGNED_CHALLENGE: ${{ inputs.run_assigned_challenge == true }}' in workflow
+
+    validator = Path('.github/workflows/independent-validator-gate.yml').read_text(encoding='utf-8')
+    assert 'uses: ./.github/workflows/file-self-review.yml' in validator
+    assert 'with:\n      run_assigned_challenge: true' in validator
+
+
 def test_file_review_reports_handoff_before_runtime_setup():
     workflow = Path('.github/workflows/file-self-review.yml').read_text(encoding='utf-8')
     handoff = workflow.index('Publish challenge handoff entered stage')
@@ -27,6 +38,7 @@ def test_validated_quorum_handoff_remains_the_challenge_entrypoint():
     assert 'needs: quorum_gate' in workflow
     assert 'uses: ./.github/workflows/file-self-review.yml' in workflow
     assert "permissions:\n      contents: write" in workflow
+    assert 'run_assigned_challenge: true' in workflow
 
 
 def test_validator_schedule_recovers_any_still_active_challenge():
