@@ -8,6 +8,7 @@ on:
       - 'config/genesis_challenge.json'
       - 'scripts/file_self_review_worker.py'
       - 'scripts/local_reasoning_provider.py'
+      - 'scripts/publish_challenge_stage.py'
       - 'genesis/providers.py'
       - 'genesis/devlab/**'
       - 'genesis/file_self_review.py'
@@ -23,13 +24,13 @@ env:
   PYTHONPATH: ${{ github.workspace }}
   GENESIS_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_NAME: qwen2.5-coder-1.5b-file-review
-  GENESIS_PROVIDER_TIMEOUT_SECONDS: '240'
-  GENESIS_PROVIDER_MAX_NEW_TOKENS: '384'
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '120'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '256'
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
 
 concurrency:
-  group: genesis-file-self-review-qwen25coder15-v1
+  group: genesis-file-self-review-qwen25coder15-v2
   # Owner-triggered code/challenge pushes and manual runs preempt an older
   # scheduled self-review. Scheduled runs never cancel an active priority run.
   cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'workflow_dispatch' }}
@@ -77,10 +78,18 @@ jobs:
         run: |
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install 'transformers>=4.51,<5' safetensors
+      - name: Publish provider starting stage
+        continue-on-error: true
+        run: >-
+          python scripts/publish_challenge_stage.py
+          --stage provider_starting
+          --run-id '${{ github.run_id }}'
+          --event '${{ github.event_name }}'
+          --trigger-sha '${{ github.sha }}'
       - name: Start validated coding specialist provider
         shell: bash
         run: |
-          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen2.5-Coder-1.5B-Instruct --host 127.0.0.1 --port 8766 --max-new-tokens 384 > /tmp/genesis-file-review-reasoning.log 2>&1 &
+          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen2.5-Coder-1.5B-Instruct --host 127.0.0.1 --port 8766 --max-new-tokens 256 > /tmp/genesis-file-review-reasoning.log 2>&1 &
           ready=false
           for i in {1..300}; do
             if python - <<'PY'
@@ -101,6 +110,14 @@ jobs:
             cat /tmp/genesis-file-review-reasoning.log || true
             exit 1
           fi
+      - name: Publish provider ready stage
+        continue-on-error: true
+        run: >-
+          python scripts/publish_challenge_stage.py
+          --stage provider_ready
+          --run-id '${{ github.run_id }}'
+          --event '${{ github.event_name }}'
+          --trigger-sha '${{ github.sha }}'
       - name: Refresh execution base from latest validated main
         shell: bash
         run: |
@@ -111,8 +128,24 @@ jobs:
         run: |
           git config user.name "Genesis AI"
           git config user.email "genesis-ai@users.noreply.github.com"
+      - name: Publish DevLab running stage
+        continue-on-error: true
+        run: >-
+          python scripts/publish_challenge_stage.py
+          --stage devlab_running
+          --run-id '${{ github.run_id }}'
+          --event '${{ github.event_name }}'
+          --trigger-sha '${{ github.sha }}'
       - name: Review exactly one Genesis source file
         run: python scripts/file_self_review_worker.py | tee runtime/file_self_review_result.json
+      - name: Publish worker complete stage
+        continue-on-error: true
+        run: >-
+          python scripts/publish_challenge_stage.py
+          --stage worker_complete
+          --run-id '${{ github.run_id }}'
+          --event '${{ github.event_name }}'
+          --trigger-sha '${{ github.sha }}'
       - name: Preserve file-review evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -156,18 +189,21 @@ jobs:
             echo 'local reasoning provider log was not created' > /tmp/genesis-provider-last-log.txt
           fi
           git fetch origin main
-          git checkout -B genesis/challenge-diagnostics origin/main
+          git checkout -B genesis/challenge-diagnostics-v2 origin/main
           mkdir -p docs/runtime
           cp /tmp/genesis-file-self-review-result.json docs/runtime/GENESIS_CHALLENGE_LAST_RESULT.json
           cp /tmp/genesis-provider-last-log.txt docs/runtime/GENESIS_PROVIDER_LAST_LOG.txt
           cat > docs/runtime/GENESIS_CHALLENGE_LAST_RUN.json <<EOF
           {"run_id":"${{ github.run_id }}","event":"${{ github.event_name }}","trigger_sha":"${{ github.sha }}","job_status":"${{ job.status }}"}
           EOF
-          git add docs/runtime/GENESIS_CHALLENGE_LAST_RESULT.json docs/runtime/GENESIS_PROVIDER_LAST_LOG.txt docs/runtime/GENESIS_CHALLENGE_LAST_RUN.json
+          cat > docs/runtime/GENESIS_CHALLENGE_STAGE.json <<EOF
+          {"stage":"terminal","run_id":"${{ github.run_id }}","event":"${{ github.event_name }}","trigger_sha":"${{ github.sha }}","job_status":"${{ job.status }}"}
+          EOF
+          git add docs/runtime/GENESIS_CHALLENGE_LAST_RESULT.json docs/runtime/GENESIS_PROVIDER_LAST_LOG.txt docs/runtime/GENESIS_CHALLENGE_LAST_RUN.json docs/runtime/GENESIS_CHALLENGE_STAGE.json
           if ! git diff --cached --quiet; then
             git commit -m "Record Genesis challenge diagnostics for run ${{ github.run_id }}"
           fi
-          git push --force origin HEAD:refs/heads/genesis/challenge-diagnostics
+          git push --force origin HEAD:refs/heads/genesis/challenge-diagnostics-v2
 
   validator_a:
     needs: review
