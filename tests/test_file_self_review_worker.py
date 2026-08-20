@@ -86,6 +86,17 @@ def _write_challenge(root: Path, *, status: str = "active", with_ephemeral: bool
     )
 
 
+def test_assigned_challenge_requires_explicit_validated_handoff(monkeypatch):
+    monkeypatch.delenv(worker.ASSIGNED_CHALLENGE_ENV, raising=False)
+    assert worker._assigned_challenge_requested() is False
+
+    monkeypatch.setenv(worker.ASSIGNED_CHALLENGE_ENV, "true")
+    assert worker._assigned_challenge_requested() is True
+
+    monkeypatch.setenv(worker.ASSIGNED_CHALLENGE_ENV, "false")
+    assert worker._assigned_challenge_requested() is False
+
+
 def test_active_assigned_challenge_routes_through_iterative_devlab(tmp_path, monkeypatch):
     _write_challenge(tmp_path, with_ephemeral=True)
     monkeypatch.setattr(worker, "CodingModule", _FakeCoding)
