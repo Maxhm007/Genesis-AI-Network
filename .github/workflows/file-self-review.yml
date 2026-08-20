@@ -82,7 +82,7 @@ jobs:
         run: |
           nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen3-1.7B --host 127.0.0.1 --port 8766 --max-new-tokens 384 > /tmp/genesis-file-review-reasoning.log 2>&1 &
           ready=false
-          for i in {1..120}; do
+          for i in {1..300}; do
             if python - <<'PY'
           import urllib.request
           try:
@@ -138,18 +138,32 @@ jobs:
           echo "candidate_branch=$branch" >> "$GITHUB_OUTPUT"
           echo "candidate_sha=$(git rev-parse HEAD)" >> "$GITHUB_OUTPUT"
       - name: Publish latest challenge diagnostics
-        if: always() && hashFiles('runtime/file_self_review_result.json') != ''
+        if: always()
         shell: bash
         run: |
-          cp runtime/file_self_review_result.json /tmp/genesis-file-self-review-result.json
+          git config user.name "Genesis AI Diagnostics"
+          git config user.email "genesis-ai@users.noreply.github.com"
+          if [[ -f runtime/file_self_review_result.json ]]; then
+            cp runtime/file_self_review_result.json /tmp/genesis-file-self-review-result.json
+          else
+            cat > /tmp/genesis-file-self-review-result.json <<EOF
+          {"status":"worker_result_unavailable","job_status":"${{ job.status }}","event":"${{ github.event_name }}","trigger_sha":"${{ github.sha }}"}
+          EOF
+          fi
+          if [[ -f /tmp/genesis-file-review-reasoning.log ]]; then
+            tail -c 16000 /tmp/genesis-file-review-reasoning.log > /tmp/genesis-provider-last-log.txt
+          else
+            echo 'local reasoning provider log was not created' > /tmp/genesis-provider-last-log.txt
+          fi
           git fetch origin main
           git checkout -B genesis/challenge-diagnostics origin/main
           mkdir -p docs/runtime
           cp /tmp/genesis-file-self-review-result.json docs/runtime/GENESIS_CHALLENGE_LAST_RESULT.json
+          cp /tmp/genesis-provider-last-log.txt docs/runtime/GENESIS_PROVIDER_LAST_LOG.txt
           cat > docs/runtime/GENESIS_CHALLENGE_LAST_RUN.json <<EOF
-          {"run_id":"${{ github.run_id }}","event":"${{ github.event_name }}","trigger_sha":"${{ github.sha }}"}
+          {"run_id":"${{ github.run_id }}","event":"${{ github.event_name }}","trigger_sha":"${{ github.sha }}","job_status":"${{ job.status }}"}
           EOF
-          git add docs/runtime/GENESIS_CHALLENGE_LAST_RESULT.json docs/runtime/GENESIS_CHALLENGE_LAST_RUN.json
+          git add docs/runtime/GENESIS_CHALLENGE_LAST_RESULT.json docs/runtime/GENESIS_PROVIDER_LAST_LOG.txt docs/runtime/GENESIS_CHALLENGE_LAST_RUN.json
           if ! git diff --cached --quiet; then
             git commit -m "Record Genesis challenge diagnostics for run ${{ github.run_id }}"
           fi
