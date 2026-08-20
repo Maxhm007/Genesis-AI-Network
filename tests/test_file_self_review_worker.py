@@ -97,8 +97,9 @@ def test_active_assigned_challenge_routes_through_iterative_devlab(tmp_path, mon
     spec, attempt = result
     assert isinstance(attempt, _FakeAttempt)
     assert spec["target"] == "genesis/sample.py"
+    assert worker.MAX_ASSIGNED_CHALLENGE_ATTEMPTS == 2
     assert len(_FakeDevLab.calls) == worker.MAX_ASSIGNED_CHALLENGE_ATTEMPTS
-    assert [call["attempt"] for call in _FakeDevLab.calls] == [0, 1, 2]
+    assert [call["attempt"] for call in _FakeDevLab.calls] == list(range(worker.MAX_ASSIGNED_CHALLENGE_ATTEMPTS))
     assert _FakeDevLab.calls[0]["previous_error"] == ""
     assert _FakeDevLab.calls[1]["previous_error"] == "iterative_trials_failed"
     assert _FakeDevLab.last_call["target_path"] == "genesis/sample.py"
