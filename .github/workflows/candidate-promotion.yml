@@ -11,8 +11,6 @@ on:
 
 permissions:
   contents: write
-  pull-requests: read
-  checks: read
 
 concurrency:
   group: genesis-candidate-promotion
@@ -26,78 +24,46 @@ jobs:
       candidate_sha: ${{ steps.resolve.outputs.candidate_sha }}
       source_branch: ${{ steps.resolve.outputs.source_branch }}
       source_sha: ${{ steps.resolve.outputs.source_sha }}
-      source_pr: ${{ steps.resolve.outputs.source_pr }}
+      approval_branch: ${{ steps.resolve.outputs.approval_branch }}
       has_candidate: ${{ steps.resolve.outputs.has_candidate }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-      - name: Resolve validated candidate and safely stage it
+      - name: Resolve internally approved candidate and safely stage it
         id: resolve
-        env:
-          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           git config user.name "Genesis Promotion Stager"
           git config user.email "genesis-promotion@users.noreply.github.com"
           git fetch origin '+refs/heads/genesis/candidate-*:refs/remotes/origin/genesis/candidate-*'
+          git fetch origin '+refs/heads/genesis/approved-*:refs/remotes/origin/genesis/approved-*' || true
 
           selected_ref=''
           selected_branch=''
           selected_sha=''
-          selected_pr=''
-          required_checks=(
-            'validator_a'
-            'validator_b'
-            'secret_guard'
-            'Validator A'
-            'Validator B'
-            'Independent quorum gate'
-          )
-
+          selected_approval=''
           while IFS= read -r ref; do
             [[ -n "$ref" ]] || continue
             source_branch=${ref#origin/}
             source_sha=$(git rev-parse "$ref")
-            pr=$(gh pr list \
-              --repo "$GITHUB_REPOSITORY" \
-              --head "$source_branch" \
-              --base main \
-              --state open \
-              --json number,headRefOid,isDraft \
-              --jq ".[] | select(.headRefOid == \"$source_sha\" and (.isDraft | not)) | .number" \
-              | head -n1)
-            if [[ -z "$pr" ]]; then
-              echo "Skipping $source_branch: no open non-draft PR for exact head $source_sha"
+            approval_branch="genesis/approved-${source_sha}"
+            approval_ref="refs/remotes/origin/${approval_branch}"
+            if ! git show-ref --verify --quiet "$approval_ref"; then
+              echo "Skipping $source_branch: exact internal-review approval ref is missing"
               continue
             fi
-
-            checks=$(gh api \
-              -H 'Accept: application/vnd.github+json' \
-              "/repos/${GITHUB_REPOSITORY}/commits/${source_sha}/check-runs?per_page=100")
-            checks_ok=true
-            for check_name in "${required_checks[@]}"; do
-              if ! printf '%s' "$checks" | jq -e --arg name "$check_name" '
-                ([.check_runs[] | select(.name == $name)] | sort_by(.completed_at // .started_at // "")) as $runs
-                | (($runs | length) > 0
-                   and $runs[-1].status == "completed"
-                   and $runs[-1].conclusion == "success")
-              ' >/dev/null; then
-                echo "Skipping $source_branch: required exact-head check is not successful: $check_name"
-                checks_ok=false
-                break
-              fi
-            done
-            if [[ "$checks_ok" != true ]]; then
+            approval_sha=$(git rev-parse "$approval_ref")
+            if [[ "$approval_sha" != "$source_sha" ]]; then
+              echo "Skipping $source_branch: approval ref does not match exact candidate SHA"
               continue
             fi
-
             selected_ref="$ref"
             selected_branch="$source_branch"
             selected_sha="$source_sha"
-            selected_pr="$pr"
+            selected_approval="$approval_branch"
             break
           done < <(git for-each-ref --sort=-committerdate --format='%(refname:short)' 'refs/remotes/origin/genesis/candidate-*')
 
@@ -129,7 +95,7 @@ jobs:
           echo "candidate_sha=$staged_sha" >> "$GITHUB_OUTPUT"
           echo "source_branch=$selected_branch" >> "$GITHUB_OUTPUT"
           echo "source_sha=$selected_sha" >> "$GITHUB_OUTPUT"
-          echo "source_pr=$selected_pr" >> "$GITHUB_OUTPUT"
+          echo "approval_branch=$selected_approval" >> "$GITHUB_OUTPUT"
           echo 'has_candidate=true' >> "$GITHUB_OUTPUT"
 
   validator_a:
@@ -276,3 +242,7 @@ jobs:
           raise SystemExit(0 if report.status == 'pass' else 1)
           PY
           git push origin "$candidate:refs/heads/main"
+          approval='${{ needs.prepare.outputs.approval_branch }}'
+          if [[ "$approval" == genesis/approved-* ]]; then
+            git push origin --delete "$approval" || true
+          fi
