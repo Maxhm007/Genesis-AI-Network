@@ -105,6 +105,7 @@ def test_pulse_extracts_grounded_transferable_lesson_without_release_assets() ->
     assert "binary" not in provider.prompts[0]
     assert result["lesson_evidence"] in summary
     assert "tensor" in result["lesson_evidence"].lower()
+    assert "model_runtime" in result["capability_domains"]
 
 
 def test_pulse_anchors_paraphrased_lesson_to_exact_source_sentence() -> None:
@@ -133,6 +134,7 @@ def test_pulse_anchors_paraphrased_lesson_to_exact_source_sentence() -> None:
     assert result["lesson_evidence"] in summary
     assert result["lesson_evidence"].startswith("We argue that effective unlearning")
     assert result["lesson_evidence_overlap"] >= 3
+    assert "memory_learning" in result["capability_domains"]
 
 
 def test_pulse_rejects_hallucinated_research_lesson() -> None:
@@ -159,7 +161,7 @@ def test_pulse_rejects_hallucinated_research_lesson() -> None:
 def test_pulse_rejects_source_specific_feature_as_transferable_lesson() -> None:
     summary = (
         "mtmd: add --mmproj-device argument (#23255) and retain the "
-        "MTMD_BACKEND_DEVICE environment variable for compatibility"
+        "MTMD_BACKEND_DEVICE environment variable for compatibility with command-line device selection"
     )
     provider = _Provider(
         {
@@ -194,8 +196,83 @@ def test_pulse_skips_clearly_irrelevant_arxiv_before_model_call() -> None:
     )
 
     assert result["decision"] == "skip"
-    assert result["reason"] == "research_outside_genesis_ai_domains"
+    assert result["reason"] == "research_outside_genesis_capability_domains"
     assert provider.prompts == []
+
+
+def test_pulse_skips_rf_healthcare_paper_before_model_call() -> None:
+    provider = _Provider({"decision": "learn"})
+    engine = object.__new__(PulseEvolutionLearningEngine)
+    engine.provider = provider
+
+    result = engine._extract_lesson(
+        _item(
+            "We compare ceiling-mounted FMCW, IR-UWB, and Wi-Fi sensing using synchronized recordings. "
+            "All technologies are evaluated with the same convolutional neural network for human activity "
+            "recognition and sleep monitoring across room layouts.",
+            title="Comparison of radio technologies for in-bedroom activity monitoring",
+            source="arxiv",
+        )
+    )
+
+    assert result["decision"] == "skip"
+    assert result["reason"] == "research_outside_genesis_capability_domains"
+    assert provider.prompts == []
+
+
+def test_pulse_keeps_confidence_research_in_reliability_domain() -> None:
+    provider = _Provider(
+        {
+            "decision": "learn",
+            "lesson": "Confidence estimates should separate likely failures from reliable predictions.",
+            "topics": ["confidence", "failure prediction", "calibration"],
+            "confidence": 0.9,
+            "reason": "",
+        }
+    )
+    engine = object.__new__(PulseEvolutionLearningEngine)
+    engine.provider = provider
+    summary = (
+        "Post-hoc confidence estimation gives users a signal for deciding when a prediction can be trusted. "
+        "The method improves failure prediction by separating incorrect predictions from reliable predictions."
+    )
+
+    result = engine._extract_lesson(
+        _item(summary, title="Margin-controlled confidence estimation", source="arxiv")
+    )
+
+    assert result["decision"] == "learn"
+    assert "reliability_evaluation" in result["capability_domains"]
+    assert len(provider.prompts) == 1
+
+
+def test_pulse_domain_catalog_only_exposes_shared_executable_targets(tmp_path) -> None:
+    genesis = tmp_path / "genesis"
+    genesis.mkdir(parents=True)
+    (genesis / "gene_learning.py").write_text(
+        "class GeneLearningEngine:\n"
+        "    def add_lesson(self, knowledge):\n"
+        "        return knowledge\n",
+        encoding="utf-8",
+    )
+    runtime = genesis / "provider_runtime.py"
+    runtime.write_text(
+        "class ModelInferenceRuntime:\n"
+        "    def decode_token(self, token):\n"
+        "        return token\n",
+        encoding="utf-8",
+    )
+
+    engine = object.__new__(PulseEvolutionLearningEngine)
+    engine.root = tmp_path
+    item = _item(
+        "Use quantization during language model inference and token decoding.",
+        title="Efficient LLM inference",
+    )
+
+    catalog = engine._catalog_for_domains(item, ["model_runtime"])
+
+    assert [path for path, _ in catalog] == ["genesis/provider_runtime.py"]
 
 
 def test_pulse_mapping_uses_exact_source_and_code_anchors(tmp_path) -> None:
@@ -242,4 +319,5 @@ def test_pulse_mapping_uses_exact_source_and_code_anchors(tmp_path) -> None:
     assert finding["learning_evidence"] in summary
     assert finding["target_evidence"] in target.read_text(encoding="utf-8")
     assert finding["grounded"] is True
+    assert finding["shared_capability_domains"] == ["memory_learning"]
     assert len(provider.prompts) == 2
