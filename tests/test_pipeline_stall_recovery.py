@@ -71,6 +71,31 @@ class RepairEngineering:
         }
 
 
+class ScopeViolationEngineering(RepairEngineering):
+    def _attempt_task(self, task, runtime: Path) -> dict:
+        self.objectives.append(task.objective)
+        self.revision_budgets.append(self.MAX_CANDIDATE_REVISIONS)
+        current = self.queue.get(task.task_id)
+        assert current is not None
+        if current.state != "running":
+            if current.state != "assigned":
+                current = self.queue.transition(task.task_id, "assigned", module_id="genesis.coding")
+            current = self.queue.transition(task.task_id, "running", module_id="genesis.coding")
+        self.queue.transition(task.task_id, "review", module_id="genesis.coding")
+        return {
+            "coding_status": "candidate_created",
+            "candidate": {
+                "committed": True,
+                "tests_passed": True,
+                "message": "candidate committed",
+                "commit_sha": "abc123",
+                "branch": "genesis/candidate-scope-test",
+                "changed_files": ("genesis/worker.py", "tests/test_worker.py"),
+            },
+            "candidate_security": {"status": "pass"},
+        }
+
+
 class CoordinatorEngineering(DiscoveryEngineering):
     pass
 
@@ -131,6 +156,37 @@ def test_repair_yields_after_one_candidate_attempt_and_reuses_feedback(tmp_path:
     assert engineering.MAX_CANDIDATE_REVISIONS == 2
     assert "FAILED tests/test_worker.py::test_boundary" in engineering.objectives[1]
     assert store.get(task.task_id).repair_attempts == 2
+
+
+def test_repair_rejects_candidate_that_changes_outside_discovered_target(tmp_path: Path) -> None:
+    _write(tmp_path, "genesis/worker.py", "def worker(value):\n    return value\n")
+    _write(tmp_path, "tests/test_worker.py", "def test_worker():\n    assert True\n")
+    engineering = ScopeViolationEngineering(tmp_path)
+    store = PipelineStore(engineering.queue.path)
+    task = engineering.queue.create(
+        "Repair only the discovered worker implementation.",
+        module_id="genesis.coding",
+        payload={"source": "genesis.issue_discovery", "target_path": "genesis/worker.py"},
+        max_attempts=4,
+    )
+    engineering.queue.transition(task.task_id, "assigned", module_id="genesis.coding")
+    store.register_discovery(
+        task.task_id,
+        "genesis/worker.py",
+        {"finding": {"confidence_normalized": 0.9}},
+    )
+    store.transition(task.task_id, "repair_ready", worker="triage")
+
+    result = SingleAttemptRepairWorker(tmp_path, engineering, store).run(store.get(task.task_id))
+
+    assert result["action"] == "pipeline_repair_retry"
+    assert result["attempt"]["coding_status"] == "candidate_rejected_by_scope"
+    assert "repair_scope_violation" in result["attempt"]["error"]
+    assert "tests/test_worker.py" in result["attempt"]["error"]
+    assert "review_candidate" not in result
+    assert engineering.queue.get(task.task_id).state == "failed"
+    assert store.get(task.task_id).stage == "needs_repair"
+    assert "repair_scope_violation" in (store.get(task.task_id).last_feedback or "")
 
 
 def test_validation_wait_does_not_starve_discovered_work(tmp_path: Path) -> None:
