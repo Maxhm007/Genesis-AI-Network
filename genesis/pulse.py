@@ -49,6 +49,9 @@ class GenePulse:
         if action in pipeline_continue:
             return True, pipeline_continue[action]
 
+        if action == "pipeline_wait_coding_provider":
+            return False, "waiting_for_non_qwen_coding_provider"
+
         if action in {"pipeline_internal_review_approved", "pipeline_wait_validation"}:
             return False, "waiting_for_independent_validation_and_promotion"
 
