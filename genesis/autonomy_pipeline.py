@@ -16,6 +16,8 @@ from .modules.task_queue import GenesisTask
 
 ACTIVE_STAGES = (
     "discovered",
+    "development_ready",
+    "needs_development_revision",
     "repair_ready",
     "needs_repair",
     "review_ready",
@@ -23,10 +25,15 @@ ACTIVE_STAGES = (
     "promoted",
 )
 TERMINAL_STAGES = {"closed", "quarantined"}
+DEVELOPMENT_SOURCE = "genesis.evolution_learning"
 
 
 def utc_now() -> str:
     return datetime.now(timezone.utc).isoformat()
+
+
+def is_development_discovery(discovery: dict) -> bool:
+    return str(discovery.get("source") or "") == DEVELOPMENT_SOURCE
 
 
 @dataclass(frozen=True)
@@ -37,6 +44,7 @@ class PipelineRecord:
     candidate_branch: str | None
     candidate_sha: str | None
     review_ref: str | None
+    development_attempts: int
     repair_attempts: int
     review_attempts: int
     last_feedback: str | None
@@ -66,6 +74,7 @@ class PipelineStore:
                     candidate_branch TEXT,
                     candidate_sha TEXT,
                     review_ref TEXT,
+                    development_attempts INTEGER NOT NULL DEFAULT 0,
                     repair_attempts INTEGER NOT NULL DEFAULT 0,
                     review_attempts INTEGER NOT NULL DEFAULT 0,
                     last_feedback TEXT,
@@ -75,6 +84,41 @@ class PipelineStore:
                 )
                 """
             )
+            columns = {
+                str(row["name"])
+                for row in db.execute("PRAGMA table_info(genesis_autonomy_pipeline)").fetchall()
+            }
+            if "development_attempts" not in columns:
+                db.execute(
+                    "ALTER TABLE genesis_autonomy_pipeline "
+                    "ADD COLUMN development_attempts INTEGER NOT NULL DEFAULT 0"
+                )
+
+            # Migrate already-queued learning upgrades out of legacy repair stages.
+            rows = db.execute(
+                "SELECT task_id, stage, repair_attempts, development_attempts, discovery_json "
+                "FROM genesis_autonomy_pipeline WHERE stage IN ('repair_ready','needs_repair')"
+            ).fetchall()
+            for row in rows:
+                try:
+                    discovery = json.loads(row["discovery_json"] or "{}")
+                except Exception:
+                    continue
+                if not is_development_discovery(discovery):
+                    continue
+                stage = (
+                    "development_ready"
+                    if row["stage"] == "repair_ready"
+                    else "needs_development_revision"
+                )
+                development_attempts = max(
+                    int(row["development_attempts"] or 0), int(row["repair_attempts"] or 0)
+                )
+                db.execute(
+                    "UPDATE genesis_autonomy_pipeline "
+                    "SET stage=?, development_attempts=?, repair_attempts=0 WHERE task_id=?",
+                    (stage, development_attempts, row["task_id"]),
+                )
 
     def _connect(self) -> sqlite3.Connection:
         connection = sqlite3.connect(self.path)
@@ -90,6 +134,7 @@ class PipelineStore:
             candidate_branch=row["candidate_branch"],
             candidate_sha=row["candidate_sha"],
             review_ref=row["review_ref"],
+            development_attempts=int(row["development_attempts"]),
             repair_attempts=int(row["repair_attempts"]),
             review_attempts=int(row["review_attempts"]),
             last_feedback=row["last_feedback"],
@@ -143,6 +188,7 @@ class PipelineStore:
         candidate_branch: str | None = None,
         candidate_sha: str | None = None,
         review_ref: str | None = None,
+        bump_development: bool = False,
         bump_repair: bool = False,
         bump_review: bool = False,
     ) -> PipelineRecord:
@@ -160,6 +206,7 @@ class PipelineStore:
         branch = candidate_branch if candidate_branch is not None else current.candidate_branch
         sha = candidate_sha if candidate_sha is not None else current.candidate_sha
         review = review_ref if review_ref is not None else current.review_ref
+        development_attempts = current.development_attempts + (1 if bump_development else 0)
         repair_attempts = current.repair_attempts + (1 if bump_repair else 0)
         review_attempts = current.review_attempts + (1 if bump_review else 0)
         last_feedback = feedback if feedback is not None else current.last_feedback
@@ -168,7 +215,7 @@ class PipelineStore:
                 """
                 UPDATE genesis_autonomy_pipeline
                 SET stage = ?, candidate_branch = ?, candidate_sha = ?, review_ref = ?,
-                    repair_attempts = ?, review_attempts = ?, last_feedback = ?,
+                    development_attempts = ?, repair_attempts = ?, review_attempts = ?, last_feedback = ?,
                     history_json = ?, updated_at = ?
                 WHERE task_id = ?
                 """,
@@ -177,6 +224,7 @@ class PipelineStore:
                     branch,
                     sha,
                     review,
+                    development_attempts,
                     repair_attempts,
                     review_attempts,
                     last_feedback,
@@ -243,8 +291,15 @@ class TriageWorker:
                 feedback=f"unexpected_task_state:{task.state}",
             )
             return {"action": "pipeline_quarantined", "record": asdict(updated)}
-        updated = self.store.transition(record.task_id, "repair_ready", worker="triage")
-        return {"action": "pipeline_triaged", "task": asdict(task), "record": asdict(updated)}
+
+        development = str(task.payload.get("source") or "") == DEVELOPMENT_SOURCE
+        stage = "development_ready" if development else "repair_ready"
+        updated = self.store.transition(record.task_id, stage, worker="triage")
+        return {
+            "action": "pipeline_development_triaged" if development else "pipeline_triaged",
+            "task": asdict(task),
+            "record": asdict(updated),
+        }
 
 
 class RepairWorker:
@@ -265,7 +320,7 @@ class RepairWorker:
             return {"action": "pipeline_quarantined", "record": asdict(updated)}
         runtime = self.root / "runtime"
         runtime.mkdir(parents=True, exist_ok=True)
-        working = self.store.transition(record.task_id, "repair_ready", worker="repair", bump_repair=True)
+        self.store.transition(record.task_id, "repair_ready", worker="repair", bump_repair=True)
         attempt = self.engineering._attempt_task(task, runtime)
         candidate = dict(attempt.get("candidate") or {})
         security = dict(attempt.get("candidate_security") or {})
@@ -325,6 +380,95 @@ class RepairWorker:
         }
 
 
+class DevelopmentWorker:
+    """Implement new capabilities; use repair only after an implementation exists."""
+
+    def __init__(self, root: Path, engineering: AutonomousEngineeringLoop, store: PipelineStore) -> None:
+        self.root = root
+        self.engineering = engineering
+        self.store = store
+
+    def run(self, record: PipelineRecord) -> dict:
+        task = self.engineering.queue.get(record.task_id)
+        if task is None:
+            updated = self.store.transition(
+                record.task_id, "quarantined", worker="development", feedback="task_missing"
+            )
+            return {"action": "pipeline_quarantined", "record": asdict(updated)}
+        if record.development_attempts >= task.max_attempts:
+            updated = self.store.transition(
+                record.task_id,
+                "quarantined",
+                worker="development",
+                feedback="development_budget_exhausted",
+            )
+            return {"action": "pipeline_quarantined", "record": asdict(updated)}
+        runtime = self.root / "runtime"
+        runtime.mkdir(parents=True, exist_ok=True)
+        self.store.transition(
+            record.task_id, "development_ready", worker="development", bump_development=True
+        )
+        attempt = self.engineering._attempt_task(task, runtime)
+        candidate = dict(attempt.get("candidate") or {})
+        security = dict(attempt.get("candidate_security") or {})
+        if (
+            attempt.get("coding_status") == "candidate_created"
+            and candidate.get("committed")
+            and candidate.get("commit_sha")
+            and candidate.get("branch")
+            and security.get("status") == "pass"
+        ):
+            candidate_sha = str(candidate["commit_sha"])
+            branch = str(candidate["branch"])
+            review_ref = f"genesis/review-{candidate_sha[:12]}"
+            updated = self.store.transition(
+                record.task_id,
+                "review_ready",
+                worker="development",
+                candidate_branch=branch,
+                candidate_sha=candidate_sha,
+                review_ref=review_ref,
+            )
+            return {
+                "action": "pipeline_development_completed",
+                "attempt": attempt,
+                "record": asdict(updated),
+                "review_candidate": {
+                    "branch": branch,
+                    "candidate_sha": candidate_sha,
+                    "review_ref": review_ref,
+                },
+            }
+
+        current = self.engineering.queue.get(record.task_id)
+        feedback = str(
+            attempt.get("error") or attempt.get("coding_status") or "development_attempt_failed"
+        )[:2000]
+        if current and current.state not in {"failed", "quarantined", "complete"}:
+            try:
+                current = self.engineering.queue.record_failure(
+                    current.task_id,
+                    feedback,
+                    classification="pipeline_development",
+                    retry_after_seconds=0,
+                    module_id="genesis.coding",
+                )
+            except Exception:
+                current = self.engineering.queue.get(record.task_id)
+        terminal = bool(current and current.state == "quarantined")
+        updated = self.store.transition(
+            record.task_id,
+            "quarantined" if terminal else "needs_development_revision",
+            worker="development",
+            feedback=feedback,
+        )
+        return {
+            "action": "pipeline_quarantined" if terminal else "pipeline_development_retry",
+            "attempt": attempt,
+            "record": asdict(updated),
+        }
+
+
 class ReviewWorker:
     MAX_DIFF_BYTES = 14_000
     MAX_FEEDBACK_BYTES = 4_000
@@ -337,8 +481,15 @@ class ReviewWorker:
     def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["git", *args], cwd=self.root, text=True, capture_output=True, check=False)
 
+    @staticmethod
+    def _is_development(record: PipelineRecord, task) -> bool:
+        if task is not None and str(task.payload.get("source") or "") == DEVELOPMENT_SOURCE:
+            return True
+        return is_development_discovery(record.discovery)
+
     def _send_back(self, record: PipelineRecord, feedback: str) -> dict:
         task = self.engineering.queue.get(record.task_id)
+        development = self._is_development(record, task)
         if task and task.state == "review":
             task = self.engineering.queue.transition(task.task_id, "running", module_id="genesis.coding")
         if task and task.state not in {"failed", "quarantined", "complete"}:
@@ -346,22 +497,28 @@ class ReviewWorker:
                 task = self.engineering.queue.record_failure(
                     task.task_id,
                     feedback[: self.MAX_FEEDBACK_BYTES],
-                    classification="internal_review",
+                    classification="internal_development_review" if development else "internal_review",
                     retry_after_seconds=0,
                     module_id="genesis.coding",
                 )
             except Exception:
                 task = self.engineering.queue.get(record.task_id)
         terminal = bool(task and task.state == "quarantined")
+        retry_stage = "needs_development_revision" if development else "needs_repair"
         updated = self.store.transition(
             record.task_id,
-            "quarantined" if terminal else "needs_repair",
+            "quarantined" if terminal else retry_stage,
             worker="review",
             feedback=feedback,
             bump_review=True,
         )
+        retry_action = (
+            "pipeline_internal_review_needs_development"
+            if development
+            else "pipeline_internal_review_needs_repair"
+        )
         return {
-            "action": "pipeline_quarantined" if terminal else "pipeline_internal_review_needs_repair",
+            "action": "pipeline_quarantined" if terminal else retry_action,
             "record": asdict(updated),
             "feedback": feedback[: self.MAX_FEEDBACK_BYTES],
         }
@@ -400,7 +557,7 @@ class ReviewWorker:
             return self._send_back(record, "internal_review_requires_non_bootstrap_provider")
         prompt = (
             "ROLE: genesis_internal_code_reviewer\n"
-            "Review this already test-passing Genesis candidate independently from the repair attempt. "
+            "Review this already test-passing Genesis candidate independently from the implementation or repair attempt. "
             "Return JSON only with decision and feedback. decision must be approve or needs_repair. "
             "Approve only if the candidate addresses the objective without unrelated behavior changes, hidden regressions, "
             "or weakened safety/validation boundaries. Do not ask for style-only refactoring.\n"
@@ -417,7 +574,7 @@ class ReviewWorker:
         decision = str(payload.get("decision") or "").strip().lower()
         feedback = str(payload.get("feedback") or "").strip()[: self.MAX_FEEDBACK_BYTES]
         if decision != "approve":
-            return self._send_back(record, feedback or "internal_reviewer_requested_repair")
+            return self._send_back(record, feedback or "internal_reviewer_requested_revision")
         updated = self.store.transition(
             record.task_id,
             "validation_ready",
@@ -485,6 +642,7 @@ class LearningWorker:
             "target": record.target_path,
             "objective": task.objective if task else None,
             "candidate_sha": record.candidate_sha,
+            "development_attempts": record.development_attempts,
             "repair_attempts": record.repair_attempts,
             "review_attempts": record.review_attempts,
             "last_feedback": record.last_feedback,
@@ -507,6 +665,7 @@ class AutonomyPipelineCoordinator:
         self.store = PipelineStore(self.engineering.queue.path)
         self.discovery = DiscoveryWorker(self.root, self.engineering, self.store)
         self.triage = TriageWorker(self.root, self.engineering, self.store)
+        self.development = DevelopmentWorker(self.root, self.engineering, self.store)
         self.repair = RepairWorker(self.root, self.engineering, self.store)
         self.review = ReviewWorker(self.root, self.engineering, self.store)
         self.validation = ValidationWorker(self.root, self.engineering, self.store)
@@ -518,7 +677,9 @@ class AutonomyPipelineCoordinator:
             "promoted": 0,
             "validation_ready": 1,
             "review_ready": 2,
+            "needs_development_revision": 3,
             "needs_repair": 3,
+            "development_ready": 4,
             "repair_ready": 4,
             "discovered": 5,
         }.get(stage, 99)
@@ -526,7 +687,11 @@ class AutonomyPipelineCoordinator:
     def is_pipeline_task(self, task: GenesisTask | None) -> bool:
         if task is None:
             return False
-        return self.store.get(task.task_id) is not None or str(task.payload.get("source") or "") == "genesis.issue_discovery"
+        source = str(task.payload.get("source") or "")
+        return self.store.get(task.task_id) is not None or source in {
+            "genesis.issue_discovery",
+            DEVELOPMENT_SOURCE,
+        }
 
     def run_once(self) -> dict:
         active = self.store.list_active()
@@ -535,6 +700,8 @@ class AutonomyPipelineCoordinator:
             record = active[0]
             if record.stage == "discovered":
                 return {"handled": True, **self.triage.run(record)}
+            if record.stage in {"development_ready", "needs_development_revision"}:
+                return {"handled": True, **self.development.run(record)}
             if record.stage in {"repair_ready", "needs_repair"}:
                 return {"handled": True, **self.repair.run(record)}
             if record.stage == "review_ready":
