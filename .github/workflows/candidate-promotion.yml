@@ -22,41 +22,80 @@ jobs:
     outputs:
       candidate_branch: ${{ steps.resolve.outputs.candidate_branch }}
       candidate_sha: ${{ steps.resolve.outputs.candidate_sha }}
+      source_branch: ${{ steps.resolve.outputs.source_branch }}
+      source_sha: ${{ steps.resolve.outputs.source_sha }}
+      approval_branch: ${{ steps.resolve.outputs.approval_branch }}
       has_candidate: ${{ steps.resolve.outputs.has_candidate }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
           fetch-depth: 0
-      - name: Resolve and safely stage newest queued Genesis candidate
+      - name: Resolve internally approved candidate and safely stage it
         id: resolve
         shell: bash
         run: |
+          set -euo pipefail
           git config user.name "Genesis Promotion Stager"
           git config user.email "genesis-promotion@users.noreply.github.com"
           git fetch origin '+refs/heads/genesis/candidate-*:refs/remotes/origin/genesis/candidate-*'
-          ref=$(git for-each-ref --sort=-committerdate --format='%(refname:short)' 'refs/remotes/origin/genesis/candidate-*' | head -n1)
-          if [ -z "$ref" ]; then
+          git fetch origin '+refs/heads/genesis/approved-*:refs/remotes/origin/genesis/approved-*' || true
+
+          selected_ref=''
+          selected_branch=''
+          selected_sha=''
+          selected_approval=''
+          while IFS= read -r ref; do
+            [[ -n "$ref" ]] || continue
+            source_branch=${ref#origin/}
+            source_sha=$(git rev-parse "$ref")
+            approval_branch="genesis/approved-${source_sha}"
+            approval_ref="refs/remotes/origin/${approval_branch}"
+            if ! git show-ref --verify --quiet "$approval_ref"; then
+              echo "Skipping $source_branch: exact internal-review approval ref is missing"
+              continue
+            fi
+            approval_sha=$(git rev-parse "$approval_ref")
+            if [[ "$approval_sha" != "$source_sha" ]]; then
+              echo "Skipping $source_branch: approval ref does not match exact candidate SHA"
+              continue
+            fi
+            selected_ref="$ref"
+            selected_branch="$source_branch"
+            selected_sha="$source_sha"
+            selected_approval="$approval_branch"
+            break
+          done < <(git for-each-ref --sort=-committerdate --format='%(refname:short)' 'refs/remotes/origin/genesis/candidate-*')
+
+          if [[ -z "$selected_ref" ]]; then
             echo 'has_candidate=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
-          source_sha=$(git rev-parse "$ref")
+
           main_sha=$(git rev-parse main)
-          base=$(git merge-base "$main_sha" "$source_sha")
-          git checkout -B genesis-staged "$source_sha"
-          if [ "$base" != "$main_sha" ]; then
+          base=$(git merge-base "$main_sha" "$selected_sha")
+          git checkout -B genesis-staged "$selected_sha"
+          if [[ "$base" != "$main_sha" ]]; then
             git rebase --onto "$main_sha" "$base" genesis-staged
           fi
           staged_sha=$(git rev-parse HEAD)
           staged_branch="genesis/staged-${GITHUB_RUN_ID}"
           git merge-base --is-ancestor "$main_sha" "$staged_sha"
-          if git diff --name-only "$main_sha..$staged_sha" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
+          changed=$(git diff --name-only "$main_sha..$staged_sha")
+          if printf '%s\n' "$changed" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
             echo 'Protected Genesis identity file changed' >&2
+            exit 1
+          fi
+          if printf '%s\n' "$changed" | grep -Eq '^\.github/'; then
+            echo 'Normal autonomous candidate may not change GitHub workflows/control plane' >&2
             exit 1
           fi
           git push origin "$staged_sha:refs/heads/$staged_branch"
           echo "candidate_branch=$staged_branch" >> "$GITHUB_OUTPUT"
           echo "candidate_sha=$staged_sha" >> "$GITHUB_OUTPUT"
+          echo "source_branch=$selected_branch" >> "$GITHUB_OUTPUT"
+          echo "source_sha=$selected_sha" >> "$GITHUB_OUTPUT"
+          echo "approval_branch=$selected_approval" >> "$GITHUB_OUTPUT"
           echo 'has_candidate=true' >> "$GITHUB_OUTPUT"
 
   validator_a:
@@ -72,6 +111,31 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
+      - name: Enforce normal candidate boundary A
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          main_sha=$(git rev-parse origin/main)
+          git merge-base --is-ancestor "$main_sha" HEAD
+          changed=$(git diff --name-only "$main_sha..HEAD")
+          if printf '%s\n' "$changed" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
+            echo 'Immutable Genesis identity boundary changed' >&2
+            exit 1
+          fi
+          if printf '%s\n' "$changed" | grep -Eq '^\.github/'; then
+            echo 'Workflow changes require the privileged candidate lane' >&2
+            exit 1
+          fi
+      - name: Security review staged candidate A
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('origin/main')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
       - name: Independent full test suite A
         run: python -m pytest -q
       - name: Sign validator A approval
@@ -94,6 +158,31 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
+      - name: Enforce normal candidate boundary B
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          main_sha=$(git rev-parse origin/main)
+          git merge-base --is-ancestor "$main_sha" HEAD
+          changed=$(git diff --name-only "$main_sha..HEAD")
+          if printf '%s\n' "$changed" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
+            echo 'Immutable Genesis identity boundary changed' >&2
+            exit 1
+          fi
+          if printf '%s\n' "$changed" | grep -Eq '^\.github/'; then
+            echo 'Workflow changes require the privileged candidate lane' >&2
+            exit 1
+          fi
+      - name: Security review staged candidate B
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('origin/main')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
       - name: Independent full test suite B
         run: python -m pytest -q
       - name: Sign validator B approval
@@ -126,16 +215,34 @@ jobs:
           path: votes/b
       - name: Verify signed two-job quorum
         run: python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
-      - name: Re-verify exact staged candidate and fast-forward main
+      - name: Re-verify exact staged candidate boundary and security
         shell: bash
         run: |
+          set -euo pipefail
           git fetch origin main '${{ needs.prepare.outputs.candidate_branch }}'
           candidate='${{ needs.prepare.outputs.candidate_sha }}'
           main_sha=$(git rev-parse origin/main)
           test "$(git rev-parse origin/${{ needs.prepare.outputs.candidate_branch }})" = "$candidate"
           git merge-base --is-ancestor "$main_sha" "$candidate"
-          if git diff --name-only "$main_sha..$candidate" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
+          changed=$(git diff --name-only "$main_sha..$candidate")
+          if printf '%s\n' "$changed" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
             echo 'Protected Genesis identity file changed' >&2
             exit 1
           fi
+          if printf '%s\n' "$changed" | grep -Eq '^\.github/'; then
+            echo 'Normal autonomous candidate may not change GitHub workflows/control plane' >&2
+            exit 1
+          fi
+          git checkout --detach "$candidate"
+          PYTHONPATH=. python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('origin/main')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
           git push origin "$candidate:refs/heads/main"
+          approval='${{ needs.prepare.outputs.approval_branch }}'
+          if [[ "$approval" == genesis/approved-* ]]; then
+            git push origin --delete "$approval" || true
+          fi

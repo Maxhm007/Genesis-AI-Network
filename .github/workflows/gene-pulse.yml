@@ -176,6 +176,8 @@ jobs:
 
       - name: Publish internally reviewed exact candidate
         if: steps.pulse.outputs.has_validation_candidate == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -185,9 +187,14 @@ jobs:
           git rev-parse "$candidate^{commit}" >/dev/null
           test "$(git rev-parse HEAD)" = "$candidate"
           git push --force origin "$candidate:refs/heads/$branch"
+          approval_ref="genesis/approved-${candidate}"
+          git push --force origin "$candidate:refs/heads/$approval_ref"
           review_ref='${{ steps.pulse.outputs.approved_review_ref }}'
           if [[ "$review_ref" == genesis/review-* ]]; then
             git push origin --delete "$review_ref" || true
+          fi
+          if ! gh workflow run candidate-promotion.yml --repo "$GITHUB_REPOSITORY" --ref main; then
+            echo 'Immediate candidate-promotion dispatch failed; hourly promotion recovery remains available.' >&2
           fi
 
       - name: Remove rejected isolated review ref
