@@ -32,6 +32,7 @@ def _git(root: Path, *args: str) -> None:
 def test_iterative_devlab_repairs_failed_trial_before_candidate(tmp_path: Path) -> None:
     (tmp_path / "genesis").mkdir()
     (tmp_path / "tests").mkdir()
+    (tmp_path / "genesis" / "__init__.py").write_text("", encoding="utf-8")
     (tmp_path / "genesis" / "sample.py").write_text("VALUE = 1\n", encoding="utf-8")
     (tmp_path / "tests" / "test_sample.py").write_text(
         "from genesis.sample import VALUE\n\ndef test_value():\n    assert VALUE == 2\n",
