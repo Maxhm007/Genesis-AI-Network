@@ -67,7 +67,7 @@ jobs:
             done
           done
 
-          if (( ${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 )); then
+          if (( ${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 || ${#stale_cancel_failures[@]} > 0 )); then
             echo 'busy=true' >> "$GITHUB_OUTPUT"
           else
             echo 'busy=false' >> "$GITHUB_OUTPUT"
@@ -145,7 +145,7 @@ jobs:
             echo "## Genesis Autonomy Heartbeat"
             echo
             if [[ "$BUSY" == "true" ]]; then
-              echo "Autonomous repair activity is still active or a stale in-progress worker was found; duplicate Gene Pulse was skipped."
+              echo "Autonomous repair activity is still active or stale cleanup is unresolved; duplicate Gene Pulse was skipped."
             else
               echo "No active autonomous repair worker remained; Gene Pulse was dispatched."
             fi
