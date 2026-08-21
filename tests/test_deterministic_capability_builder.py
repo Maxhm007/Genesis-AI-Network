@@ -34,10 +34,16 @@ def _write_learned_target(root: Path) -> None:
     )
 
 
-def _learning_task(root: Path, *, lesson: str, evidence: str):
+def _learning_task(
+    root: Path,
+    *,
+    lesson: str,
+    evidence: str,
+    objective: str = "Autonomously apply one bounded learned capability upgrade.",
+):
     queue = PersistentTaskQueue(root / "runtime" / "genesis_tasks.sqlite3")
     task = queue.create(
-        "Autonomously apply one bounded learned capability upgrade.",
+        objective,
         module_id="genesis.coding",
         payload={
             "source": "genesis.evolution_learning",
@@ -64,21 +70,7 @@ def _learning_task(root: Path, *, lesson: str, evidence: str):
     return queue, task
 
 
-def test_grounded_device_learning_builds_candidate_without_qwen(tmp_path: Path) -> None:
-    _write_learned_target(tmp_path)
-    qwen = TrackingQwenProvider()
-    registry = ProviderRegistry(include_bootstrap=False)
-    registry.register(qwen)
-    loop = AutonomousEngineeringLoop(tmp_path, registry)
-    queue, task = _learning_task(
-        tmp_path,
-        lesson="Add a command-line argument to specify the memory-mapped projection device for MTMD.",
-        evidence="mtmd: add --mmproj-device argument and keep the MTMD_BACKEND_DEVICE fallback.",
-    )
-    loop.queue = queue
-
-    captured = {}
-
+def _pass_candidate(loop: AutonomousEngineeringLoop, captured: dict) -> None:
     def fake_execute(proposal):
         captured["proposal"] = proposal
         return SelfDevResult(
@@ -94,6 +86,23 @@ def test_grounded_device_learning_builds_candidate_without_qwen(tmp_path: Path) 
     loop.coding.execute_candidate = fake_execute
     loop.security.write_report = lambda *args, **kwargs: {"status": "pass", "findings": []}
 
+
+def test_grounded_device_learning_builds_candidate_without_qwen(tmp_path: Path) -> None:
+    _write_learned_target(tmp_path)
+    qwen = TrackingQwenProvider()
+    registry = ProviderRegistry(include_bootstrap=False)
+    registry.register(qwen)
+    loop = AutonomousEngineeringLoop(tmp_path, registry)
+    queue, task = _learning_task(
+        tmp_path,
+        lesson="Add a command-line argument to specify the memory-mapped projection device for MTMD.",
+        evidence="mtmd: add --mmproj-device argument and keep the MTMD_BACKEND_DEVICE fallback.",
+    )
+    loop.queue = queue
+
+    captured = {}
+    _pass_candidate(loop, captured)
+
     attempt = loop._attempt_task(task, tmp_path / "runtime")
 
     assert qwen.calls == 0
@@ -107,6 +116,34 @@ def test_grounded_device_learning_builds_candidate_without_qwen(tmp_path: Path) 
     current = queue.get(task.task_id)
     assert current is not None
     assert current.state == "review"
+
+
+def test_grounded_device_learning_retries_after_pipeline_feedback_without_qwen(tmp_path: Path) -> None:
+    _write_learned_target(tmp_path)
+    qwen = TrackingQwenProvider()
+    registry = ProviderRegistry(include_bootstrap=False)
+    registry.register(qwen)
+    loop = AutonomousEngineeringLoop(tmp_path, registry)
+    queue, task = _learning_task(
+        tmp_path,
+        lesson="Add a command-line argument to specify the memory-mapped projection device for MTMD.",
+        evidence="mtmd: add --mmproj-device argument and keep the MTMD_BACKEND_DEVICE fallback.",
+        objective=(
+            "Autonomously apply one bounded learned capability upgrade.\n\n"
+            "PREVIOUS_PIPELINE_FEEDBACK: unrelated repository baseline tests failed after the prior candidate."
+        ),
+    )
+    loop.queue = queue
+
+    captured = {}
+    _pass_candidate(loop, captured)
+
+    attempt = loop._attempt_task(task, tmp_path / "runtime")
+
+    assert qwen.calls == 0
+    assert attempt["coding_status"] == "candidate_created"
+    assert attempt["coding_strategy"] == "deterministic_learned_capability"
+    assert "runtime_device_selection_f92ab6ae15c7" in captured["proposal"].files["genesis/learned_capabilities.py"]
 
 
 def test_unsupported_learning_waits_instead_of_fabricating_code(tmp_path: Path) -> None:
