@@ -1,0 +1,118 @@
+name: Genesis Autonomy Heartbeat
+
+on:
+  schedule:
+    - cron: "7 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - ".github/workflows/autonomy-heartbeat.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: genesis-autonomy-heartbeat
+  cancel-in-progress: false
+
+jobs:
+  heartbeat:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check for fresh autonomous repair activity
+        id: gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          now=$(date -u +%s)
+          freshness_seconds=7200
+          fresh=()
+          stale=()
+
+          for workflow in gene-pulse.yml file-self-review.yml manual-self-repair.yml; do
+            for status in queued in_progress; do
+              payload=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?branch=main&status=${status}&per_page=100")
+              while IFS=$'\t' read -r run_id run_status run_url run_sha run_event created; do
+                [[ -n "$run_id" && -n "$created" ]] || continue
+                created_epoch=$(date -u -d "$created" +%s 2>/dev/null || echo "$now")
+                age=$((now - created_epoch))
+                detail="${workflow}:${run_status}:run=${run_id}:event=${run_event}:sha=${run_sha:0:12}:age_seconds=${age}:url=${run_url}"
+                if (( age <= freshness_seconds )); then
+                  fresh+=("$detail")
+                  continue
+                fi
+
+                stale+=("$detail")
+                if [[ "$workflow" == "gene-pulse.yml" ]]; then
+                  gh run cancel "$run_id" >/dev/null 2>&1 || \
+                    gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/force-cancel" >/dev/null 2>&1 || true
+                fi
+              done < <(printf '%s' "$payload" | jq -r '.workflow_runs[] | [.id, .status, .html_url, .head_sha, .event, .created_at] | @tsv')
+            done
+          done
+
+          if (( ${#fresh[@]} > 0 )); then
+            echo 'busy=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'busy=false' >> "$GITHUB_OUTPUT"
+          fi
+          echo "fresh_count=${#fresh[@]}" >> "$GITHUB_OUTPUT"
+          echo "stale_count=${#stale[@]}" >> "$GITHUB_OUTPUT"
+          {
+            echo 'fresh_runs<<EOF'
+            if (( ${#fresh[@]} > 0 )); then
+              printf '%s\n' "${fresh[@]}"
+            else
+              echo 'none'
+            fi
+            echo 'EOF'
+            echo 'stale_runs<<EOF'
+            if (( ${#stale[@]} > 0 )); then
+              printf '%s\n' "${stale[@]}"
+            else
+              echo 'none'
+            fi
+            echo 'EOF'
+          } >> "$GITHUB_OUTPUT"
+
+      - name: Dispatch Gene Pulse when autonomy is idle
+        if: steps.gate.outputs.busy == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh workflow run gene-pulse.yml
+          --ref main
+          -f gene=gene-node-1
+          -f continue_chain=true
+
+      - name: Record heartbeat decision
+        if: always()
+        env:
+          BUSY: ${{ steps.gate.outputs.busy }}
+          FRESH_COUNT: ${{ steps.gate.outputs.fresh_count }}
+          STALE_COUNT: ${{ steps.gate.outputs.stale_count }}
+          FRESH_RUNS: ${{ steps.gate.outputs.fresh_runs }}
+          STALE_RUNS: ${{ steps.gate.outputs.stale_runs }}
+        shell: bash
+        run: |
+          {
+            echo "## Genesis Autonomy Heartbeat"
+            echo
+            if [[ "$BUSY" == "true" ]]; then
+              echo "Fresh autonomous repair activity exists; duplicate Gene Pulse was skipped."
+            else
+              echo "No fresh autonomous repair activity existed; Gene Pulse was dispatched."
+            fi
+            echo
+            echo "Fresh runs: ${FRESH_COUNT:-0}"
+            echo "Stale runs ignored: ${STALE_COUNT:-0}"
+            echo
+            echo '```'
+            printf '%s\n' "${FRESH_RUNS:-none}"
+            printf '%s\n' "${STALE_RUNS:-none}"
+            echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
