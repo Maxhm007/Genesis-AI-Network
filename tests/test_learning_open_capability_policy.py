@@ -19,7 +19,7 @@ def _item(*, fingerprint: str = "a" * 64) -> ResearchItem:
     return ResearchItem(
         fingerprint=fingerprint,
         source="arxiv",
-        title="Resolution-aware physical support inference",
+        title="Resolution-aware physical support estimation",
         summary=(
             "Adaptive endpoint bracketing evaluates only candidates that can still affect the physical report "
             "and otherwise safely coarsens or abstains. The method avoids unsupported refinement with fewer "
