@@ -27,116 +27,104 @@ jobs:
     env:
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Prune stale queued Gene Pulse runs
-        id: prune
+      - name: Gate manual pulse against active or stale repair work
+        id: gate
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           now=$(date -u +%s)
-          cutoff_seconds=7200
-          pruned=()
-          failures=()
-          payload=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/gene-pulse.yml/runs?branch=main&status=queued&per_page=100")
-          while IFS=$'\t' read -r run_id run_url created; do
-            [[ -n "$run_id" && -n "$created" ]] || continue
-            created_epoch=$(date -u -d "$created" +%s 2>/dev/null || echo "$now")
-            age=$((now - created_epoch))
-            if (( age <= cutoff_seconds )); then
-              continue
-            fi
-            if gh run cancel "$run_id" >/dev/null 2>&1; then
-              pruned+=("run=${run_id}:method=cancel:age_seconds=${age}:url=${run_url}")
-              continue
-            fi
-            if gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/force-cancel" >/dev/null 2>&1; then
-              pruned+=("run=${run_id}:method=force-cancel:age_seconds=${age}:url=${run_url}")
-            else
-              failures+=("run=${run_id}:age_seconds=${age}:url=${run_url}")
-            fi
-          done < <(printf '%s' "$payload" | jq -r '.workflow_runs[] | [.id, .html_url, .created_at] | @tsv')
-          {
-            echo 'pruned_runs<<EOF'
-            if (( ${#pruned[@]} > 0 )); then
-              printf '%s\n' "${pruned[@]}"
-            else
-              echo 'none'
-            fi
-            echo 'EOF'
-            echo 'prune_failures<<EOF'
-            if (( ${#failures[@]} > 0 )); then
-              printf '%s\n' "${failures[@]}"
-            else
-              echo 'none'
-            fi
-            echo 'EOF'
-          } >> "$GITHUB_OUTPUT"
+          freshness_seconds=7200
+          fresh=()
+          stale=()
+          stale_in_progress=()
+          stale_cancelled=()
+          stale_cancel_failures=()
 
-      - name: Check whether Genesis repair work is already active
-        id: busy
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          active=0
-          details=()
-          runs=()
           for workflow in gene-pulse.yml file-self-review.yml manual-self-repair.yml; do
             for status in queued in_progress; do
               payload=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?branch=main&status=${status}&per_page=100")
-              count=$(printf '%s' "$payload" | jq '.workflow_runs | length')
-              if (( count > 0 )); then
-                active=$((active + count))
-                details+=("${workflow}:${status}=${count}")
-                while IFS=$'\t' read -r run_id run_status run_url run_sha run_event run_created; do
-                  [[ -n "$run_id" ]] || continue
-                  runs+=("${workflow}:${run_status}:run=${run_id}:event=${run_event}:sha=${run_sha:0:12}:created=${run_created}:url=${run_url}")
-                done < <(printf '%s' "$payload" | jq -r '.workflow_runs[] | [.id, .status, .html_url, .head_sha, .event, .created_at] | @tsv')
-              fi
+              while IFS=$'\t' read -r run_id run_status run_url run_sha run_event created; do
+                [[ -n "$run_id" && -n "$created" ]] || continue
+                created_epoch=$(date -u -d "$created" +%s 2>/dev/null || echo "$now")
+                age=$((now - created_epoch))
+                detail="${workflow}:${run_status}:run=${run_id}:event=${run_event}:sha=${run_sha:0:12}:age_seconds=${age}:url=${run_url}"
+                if (( age <= freshness_seconds )); then
+                  fresh+=("$detail")
+                  continue
+                fi
+
+                stale+=("$detail")
+                if [[ "$run_status" == "in_progress" ]]; then
+                  stale_in_progress+=("$detail")
+                fi
+
+                if gh run cancel "$run_id" >/dev/null 2>&1; then
+                  stale_cancelled+=("${detail}:cancel=normal")
+                elif gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/force-cancel" >/dev/null 2>&1; then
+                  stale_cancelled+=("${detail}:cancel=force")
+                else
+                  stale_cancel_failures+=("$detail")
+                fi
+              done < <(printf '%s' "$payload" | jq -r '.workflow_runs[] | [.id, .status, .html_url, .head_sha, .event, .created_at] | @tsv')
             done
           done
-          if (( active > 0 )); then
+
+          if (( ${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 || ${#stale_cancel_failures[@]} > 0 )); then
             echo 'busy=true' >> "$GITHUB_OUTPUT"
           else
             echo 'busy=false' >> "$GITHUB_OUTPUT"
           fi
-          echo "active_count=${active}" >> "$GITHUB_OUTPUT"
-          printf 'details=%s\n' "${details[*]:-none}" >> "$GITHUB_OUTPUT"
+          echo "fresh_count=${#fresh[@]}" >> "$GITHUB_OUTPUT"
+          echo "stale_count=${#stale[@]}" >> "$GITHUB_OUTPUT"
+          echo "stale_in_progress_count=${#stale_in_progress[@]}" >> "$GITHUB_OUTPUT"
+          echo "stale_cancelled_count=${#stale_cancelled[@]}" >> "$GITHUB_OUTPUT"
+          echo "stale_cancel_failure_count=${#stale_cancel_failures[@]}" >> "$GITHUB_OUTPUT"
           {
-            echo 'active_runs<<EOF'
-            if (( ${#runs[@]} > 0 )); then
-              printf '%s\n' "${runs[@]}"
-            else
-              echo 'none'
-            fi
+            echo 'fresh_runs<<EOF'
+            if (( ${#fresh[@]} > 0 )); then printf '%s\n' "${fresh[@]}"; else echo 'none'; fi
+            echo 'EOF'
+            echo 'stale_runs<<EOF'
+            if (( ${#stale[@]} > 0 )); then printf '%s\n' "${stale[@]}"; else echo 'none'; fi
+            echo 'EOF'
+            echo 'stale_in_progress_runs<<EOF'
+            if (( ${#stale_in_progress[@]} > 0 )); then printf '%s\n' "${stale_in_progress[@]}"; else echo 'none'; fi
+            echo 'EOF'
+            echo 'stale_cancelled_runs<<EOF'
+            if (( ${#stale_cancelled[@]} > 0 )); then printf '%s\n' "${stale_cancelled[@]}"; else echo 'none'; fi
+            echo 'EOF'
+            echo 'stale_cancel_failures<<EOF'
+            if (( ${#stale_cancel_failures[@]} > 0 )); then printf '%s\n' "${stale_cancel_failures[@]}"; else echo 'none'; fi
             echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
       - name: Report busy state and skip duplicate pulse
-        if: steps.busy.outputs.busy == 'true'
+        if: steps.gate.outputs.busy == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
-          ACTIVE_COUNT: ${{ steps.busy.outputs.active_count }}
-          ACTIVE_DETAILS: ${{ steps.busy.outputs.details }}
-          ACTIVE_RUNS: ${{ steps.busy.outputs.active_runs }}
-          PRUNED_RUNS: ${{ steps.prune.outputs.pruned_runs }}
-          PRUNE_FAILURES: ${{ steps.prune.outputs.prune_failures }}
+          FRESH_COUNT: ${{ steps.gate.outputs.fresh_count }}
+          STALE_COUNT: ${{ steps.gate.outputs.stale_count }}
+          STALE_IN_PROGRESS_COUNT: ${{ steps.gate.outputs.stale_in_progress_count }}
+          STALE_CANCELLED_COUNT: ${{ steps.gate.outputs.stale_cancelled_count }}
+          STALE_CANCEL_FAILURE_COUNT: ${{ steps.gate.outputs.stale_cancel_failure_count }}
+          FRESH_RUNS: ${{ steps.gate.outputs.fresh_runs }}
+          STALE_RUNS: ${{ steps.gate.outputs.stale_runs }}
+          STALE_IN_PROGRESS_RUNS: ${{ steps.gate.outputs.stale_in_progress_runs }}
+          STALE_CANCELLED_RUNS: ${{ steps.gate.outputs.stale_cancelled_runs }}
+          STALE_CANCEL_FAILURES: ${{ steps.gate.outputs.stale_cancel_failures }}
         shell: bash
         run: |
-          body="Genesis pulse request skipped: existing repair work is already queued/running (${ACTIVE_COUNT}). ${ACTIVE_DETAILS}"
-          body+=$'\n\nStale queued runs pruned:\n```\n'
-          body+="${PRUNED_RUNS}"
-          body+=$'\n```\n\nStale prune failures:\n```\n'
-          body+="${PRUNE_FAILURES}"
-          body+=$'\n```\n\nActive runs:\n```\n'
-          body+="${ACTIVE_RUNS}"
-          body+=$'\n```'
+          body="Genesis pulse request skipped: active repair work or unresolved stale cleanup remains. Fresh=${FRESH_COUNT:-0}, stale=${STALE_COUNT:-0}, stale_in_progress=${STALE_IN_PROGRESS_COUNT:-0}, cancelled=${STALE_CANCELLED_COUNT:-0}, cancellation_failures=${STALE_CANCEL_FAILURE_COUNT:-0}."
+          body+=$'\n\nFresh runs:\n```\n'"${FRESH_RUNS:-none}"$'\n```'
+          body+=$'\n\nStale runs:\n```\n'"${STALE_RUNS:-none}"$'\n```'
+          body+=$'\n\nStale in-progress runs:\n```\n'"${STALE_IN_PROGRESS_RUNS:-none}"$'\n```'
+          body+=$'\n\nStale cancellations accepted:\n```\n'"${STALE_CANCELLED_RUNS:-none}"$'\n```'
+          body+=$'\n\nStale cancellation failures:\n```\n'"${STALE_CANCEL_FAILURES:-none}"$'\n```'
           gh issue comment 140 --body "$body"
 
       - name: Dispatch Gene Pulse when idle
-        if: steps.busy.outputs.busy == 'false'
+        if: steps.gate.outputs.busy == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
         run: >-
@@ -146,17 +134,12 @@ jobs:
           -f continue_chain=true
 
       - name: Report pulse dispatch
-        if: steps.busy.outputs.busy == 'false'
+        if: steps.gate.outputs.busy == 'false'
         env:
           GH_TOKEN: ${{ github.token }}
-          PRUNED_RUNS: ${{ steps.prune.outputs.pruned_runs }}
-          PRUNE_FAILURES: ${{ steps.prune.outputs.prune_failures }}
+          STALE_COUNT: ${{ steps.gate.outputs.stale_count }}
+          STALE_CANCELLED_COUNT: ${{ steps.gate.outputs.stale_cancelled_count }}
         shell: bash
         run: |
-          body="Genesis pulse dispatched for gene-node-1. The pulse will continue chaining only while executable work remains."
-          body+=$'\n\nStale queued runs pruned:\n```\n'
-          body+="${PRUNED_RUNS}"
-          body+=$'\n```\n\nStale prune failures:\n```\n'
-          body+="${PRUNE_FAILURES}"
-          body+=$'\n```'
+          body="Genesis pulse dispatched for gene-node-1. No fresh autonomous repair worker or unresolved stale cleanup remained. Stale=${STALE_COUNT:-0}; cancellation requests accepted=${STALE_CANCELLED_COUNT:-0}."
           gh issue comment 140 --body "$body"

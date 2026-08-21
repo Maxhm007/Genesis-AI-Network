@@ -193,10 +193,15 @@ def test_gene_pulse_runtime_and_stale_cleanup_are_bounded() -> None:
     worker = (root / "scripts" / "gene_continuous_work.py").read_text(encoding="utf-8")
 
     assert "GENESIS_PROVIDER_TIMEOUT_SECONDS: '60'" in pulse
-    assert "status=queued" in control
-    assert "cutoff_seconds=7200" in control
-    assert "/force-cancel" in control
+    assert "freshness_seconds=7200" in control
+    assert "for workflow in gene-pulse.yml file-self-review.yml manual-self-repair.yml" in control
     assert "for status in queued in_progress" in control
+    assert "gh run cancel" in control
+    assert "/force-cancel" in control
+    assert "stale_in_progress" in control
+    assert "stale_cancel_failures" in control
+    assert "${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 || ${#stale_cancel_failures[@]} > 0" in control
+    assert "if: steps.gate.outputs.busy == 'false'" in control
     assert "PULSE_DISCOVERY_SOURCE_BYTES = 5_000" in worker
     assert "PULSE_DISCOVERY_TEST_BYTES = 2_000" in worker
     assert "no_bounded_code_context_for_gene_pulse" in worker
