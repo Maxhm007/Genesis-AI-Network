@@ -42,15 +42,7 @@ def test_verified_unmapped_lesson_becomes_new_capability(tmp_path) -> None:
         "General tool use by agents improves when training explicitly teaches tool affordances, "
         "argument grounding, tool-call workflows, and recovery from incomplete information."
     )
-    provider = _Provider(
-        {
-            "decision": "learn",
-            "lesson": "Agent tool use improves when learning explicitly covers tool affordances and grounded workflows.",
-            "topics": ["agent", "tool use", "learning", "grounding"],
-            "confidence": 0.9,
-            "reason": "",
-        }
-    )
+    provider = _Provider({"decision": "skip"})
     engine = object.__new__(PulseEvolutionLearningEngine)
     engine.root = tmp_path
     engine.provider = provider
@@ -63,7 +55,7 @@ def test_verified_unmapped_lesson_becomes_new_capability(tmp_path) -> None:
     assert finding["target_evidence"] == "# GENESIS_LEARNED_CAPABILITY_INSERTION_POINT"
     assert finding["learning_evidence"] in summary
     assert finding["fallback_from"] == "no_relevant_genesis_target"
-    assert len(provider.prompts) == 1
+    assert provider.prompts == []
 
 
 def test_new_capability_fallback_keeps_upgrade_confidence_gate(tmp_path) -> None:

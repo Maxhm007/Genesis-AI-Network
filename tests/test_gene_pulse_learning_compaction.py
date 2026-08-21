@@ -79,50 +79,35 @@ def test_pulse_catalog_requires_more_than_one_weak_token_overlap(tmp_path) -> No
     assert engine._catalog(_item("device projection memory mapping")) == []
 
 
-def test_pulse_extracts_grounded_transferable_lesson_without_release_assets() -> None:
+def test_pulse_extracts_grounded_source_evidence_without_release_assets() -> None:
     summary = (
         "<details open> Clamp the final tensor tile to the remaining valid K range so the kernel "
         "does not read beyond the tensor extent. This prevents corrupted results on unaligned inputs. "
         "</details> **Website:** <https://example.invalid> **Linux:** [binary](https://example.invalid/bin)"
     )
-    provider = _Provider(
-        {
-            "decision": "learn",
-            "lesson": "Bound the final processing tile to the remaining valid data extent.",
-            "topics": ["bounds checking", "tensor tails"],
-            "confidence": 0.91,
-            "reason": "",
-        }
-    )
+    provider = _Provider({"decision": "skip"})
     engine = object.__new__(PulseEvolutionLearningEngine)
     engine.provider = provider
 
     result = engine._extract_lesson(_item(summary))
 
     assert result["decision"] == "learn"
-    assert result["confidence_normalized"] == 0.91
-    assert "Website" not in provider.prompts[0]
-    assert "binary" not in provider.prompts[0]
+    assert result["confidence_normalized"] == engine.DIRECT_ROUTING_CONFIDENCE
+    assert provider.prompts == []
     assert result["lesson_evidence"] in summary
     assert "tensor" in result["lesson_evidence"].lower()
+    assert "Website" not in result["technical_source"]
+    assert "binary" not in result["technical_source"]
     assert "model_runtime" in result["capability_domains"]
 
 
-def test_pulse_anchors_paraphrased_lesson_to_exact_source_sentence() -> None:
+def test_pulse_anchors_direct_lesson_to_exact_source_text() -> None:
     summary = (
         "Large Language Models increasingly require selective removal of harmful knowledge. "
         "We argue that effective unlearning must operate at the level of concepts, ensuring complete removal "
         "of unsafe applications while maintaining benign and beneficial knowledge."
     )
-    provider = _Provider(
-        {
-            "decision": "learn",
-            "lesson": "Effective unlearning should operate at concept level while preserving benign knowledge.",
-            "topics": ["unlearning", "concepts", "safety"],
-            "confidence": 0.9,
-            "reason": "",
-        }
-    )
+    provider = _Provider({"decision": "skip"})
     engine = object.__new__(PulseEvolutionLearningEngine)
     engine.provider = provider
 
@@ -132,19 +117,19 @@ def test_pulse_anchors_paraphrased_lesson_to_exact_source_sentence() -> None:
 
     assert result["decision"] == "learn"
     assert result["lesson_evidence"] in summary
-    assert result["lesson_evidence"].startswith("We argue that effective unlearning")
-    assert result["lesson_evidence_overlap"] >= 3
+    assert "unlearning" in result["lesson_evidence"].lower()
+    assert result["lesson_evidence_overlap"] >= 1
     assert "memory_learning" in result["capability_domains"]
+    assert provider.prompts == []
 
 
-def test_pulse_rejects_hallucinated_research_lesson() -> None:
+def test_provider_cannot_inject_hallucinated_research_lesson() -> None:
     provider = _Provider(
         {
             "decision": "learn",
             "lesson": "Use speculative decoding for every request.",
             "topics": ["speculative decoding"],
             "confidence": 99,
-            "reason": "",
         }
     )
     engine = object.__new__(PulseEvolutionLearningEngine)
@@ -154,44 +139,32 @@ def test_pulse_rejects_hallucinated_research_lesson() -> None:
         _item("A release fixes a bounded tensor tail read on unaligned inputs.")
     )
 
-    assert result["decision"] == "skip"
-    assert result["reason"] == "ungrounded_learning_lesson"
+    assert result["decision"] == "learn"
+    assert "speculative decoding" not in result["lesson"].lower()
+    assert result["lesson_evidence"] in _item(
+        "A release fixes a bounded tensor tail read on unaligned inputs."
+    ).summary
+    assert provider.prompts == []
 
 
-def test_pulse_rejects_source_specific_feature_as_transferable_lesson() -> None:
+def test_source_specific_feature_is_preserved_as_evidence_not_model_instruction() -> None:
     summary = (
         "mtmd: add --mmproj-device argument (#23255) and retain the "
         "MTMD_BACKEND_DEVICE environment variable for compatibility with command-line device selection"
     )
-    provider = _Provider(
-        {
-            "decision": "learn",
-            "lesson": "Add a command-line argument to specify the projection device for MTMD.",
-            "topics": ["command-line arguments", "device selection"],
-            "confidence": 0.9,
-            "reason": "",
-        }
-    )
+    provider = _Provider({"decision": "skip"})
     engine = object.__new__(PulseEvolutionLearningEngine)
     engine.provider = provider
 
     result = engine._extract_lesson(_item(summary, title="MTMD device support"))
 
-    assert result["decision"] == "skip"
-    assert result["reason"] == "source_specific_learning_lesson"
-    assert "MTMD" in result["source_specific_markers"]
+    assert result["decision"] == "learn"
+    assert result["lesson_evidence"] in summary
+    assert provider.prompts == []
 
 
-def test_pulse_unfamiliar_arxiv_reaches_comprehension_before_skip() -> None:
-    provider = _Provider(
-        {
-            "decision": "skip",
-            "lesson": "",
-            "topics": [],
-            "confidence": 0.0,
-            "reason": "no_transferable_engineering_lesson",
-        }
-    )
+def test_pulse_unfamiliar_arxiv_becomes_emerging_capability_without_provider() -> None:
+    provider = _Provider({"decision": "skip"})
     engine = object.__new__(PulseEvolutionLearningEngine)
     engine.provider = provider
 
@@ -203,22 +176,13 @@ def test_pulse_unfamiliar_arxiv_reaches_comprehension_before_skip() -> None:
         )
     )
 
-    assert result["decision"] == "skip"
-    assert result["reason"] == "no_transferable_engineering_lesson"
-    assert len(provider.prompts) == 1
-    assert "emerging_capability" in result["research_domains"]
+    assert result["decision"] == "learn"
+    assert result["capability_domains"] == ["emerging_capability"]
+    assert provider.prompts == []
 
 
-def test_pulse_unfamiliar_rf_research_reaches_comprehension_before_skip() -> None:
-    provider = _Provider(
-        {
-            "decision": "skip",
-            "lesson": "",
-            "topics": [],
-            "confidence": 0.0,
-            "reason": "no_transferable_engineering_lesson",
-        }
-    )
+def test_pulse_unfamiliar_rf_research_becomes_emerging_capability_without_provider() -> None:
+    provider = _Provider({"decision": "skip"})
     engine = object.__new__(PulseEvolutionLearningEngine)
     engine.provider = provider
 
@@ -232,22 +196,13 @@ def test_pulse_unfamiliar_rf_research_reaches_comprehension_before_skip() -> Non
         )
     )
 
-    assert result["decision"] == "skip"
-    assert result["reason"] == "no_transferable_engineering_lesson"
-    assert len(provider.prompts) == 1
-    assert "emerging_capability" in result["research_domains"]
+    assert result["decision"] == "learn"
+    assert result["capability_domains"] == ["emerging_capability"]
+    assert provider.prompts == []
 
 
 def test_pulse_keeps_confidence_research_in_reliability_domain() -> None:
-    provider = _Provider(
-        {
-            "decision": "learn",
-            "lesson": "Confidence estimates should separate likely failures from reliable predictions.",
-            "topics": ["confidence", "failure prediction", "calibration"],
-            "confidence": 0.9,
-            "reason": "",
-        }
-    )
+    provider = _Provider({"decision": "skip"})
     engine = object.__new__(PulseEvolutionLearningEngine)
     engine.provider = provider
     summary = (
@@ -261,7 +216,7 @@ def test_pulse_keeps_confidence_research_in_reliability_domain() -> None:
 
     assert result["decision"] == "learn"
     assert "reliability_evaluation" in result["capability_domains"]
-    assert len(provider.prompts) == 1
+    assert provider.prompts == []
 
 
 def test_pulse_domain_catalog_only_exposes_shared_executable_targets(tmp_path) -> None:
@@ -293,7 +248,7 @@ def test_pulse_domain_catalog_only_exposes_shared_executable_targets(tmp_path) -
     assert [path for path, _ in catalog] == ["genesis/provider_runtime.py"]
 
 
-def test_pulse_mapping_uses_exact_source_and_code_anchors(tmp_path) -> None:
+def test_pulse_mapping_uses_exact_source_and_code_anchors_without_provider(tmp_path) -> None:
     target = tmp_path / "genesis" / "memory_policy.py"
     target.parent.mkdir(parents=True)
     target.write_text(
@@ -308,21 +263,8 @@ def test_pulse_mapping_uses_exact_source_and_code_anchors(tmp_path) -> None:
     )
     provider = _SequenceProvider(
         [
-            {
-                "decision": "learn",
-                "lesson": "Use concept-level unlearning to separate unsafe and benign knowledge.",
-                "topics": ["unlearning", "concepts", "safety"],
-                "confidence": 0.9,
-                "reason": "",
-            },
-            {
-                "decision": "upgrade",
-                "target_path": "genesis/memory_policy.py",
-                "summary": "Improve concept-level retention policy evaluation.",
-                "acceptance": "A focused test distinguishes unsafe removal from benign retention.",
-                "confidence": 0.86,
-                "reason": "",
-            },
+            {"decision": "skip"},
+            {"decision": "skip"},
         ]
     )
     engine = object.__new__(PulseEvolutionLearningEngine)
@@ -338,4 +280,5 @@ def test_pulse_mapping_uses_exact_source_and_code_anchors(tmp_path) -> None:
     assert finding["target_evidence"] in target.read_text(encoding="utf-8")
     assert finding["grounded"] is True
     assert finding["shared_capability_domains"] == ["memory_learning"]
-    assert len(provider.prompts) == 2
+    assert finding["routing_mode"] == "direct_source_evidence"
+    assert provider.prompts == []
