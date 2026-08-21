@@ -71,7 +71,10 @@ jobs:
             done
           done
 
-          if (( ${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 || ${#stale_cancel_failures[@]} > 0 )); then
+          # Only work that can still be executing blocks a new Pulse. A stale
+          # queued run that GitHub refuses to cancel is observable but inert and
+          # must not permanently disable autonomous recovery.
+          if (( ${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 )); then
             echo 'busy=true' >> "$GITHUB_OUTPUT"
           else
             echo 'busy=false' >> "$GITHUB_OUTPUT"
@@ -115,7 +118,7 @@ jobs:
           STALE_CANCEL_FAILURES: ${{ steps.gate.outputs.stale_cancel_failures }}
         shell: bash
         run: |
-          body="Genesis pulse request skipped: active repair work or unresolved stale cleanup remains. Fresh=${FRESH_COUNT:-0}, stale=${STALE_COUNT:-0}, stale_in_progress=${STALE_IN_PROGRESS_COUNT:-0}, cancelled=${STALE_CANCELLED_COUNT:-0}, cancellation_failures=${STALE_CANCEL_FAILURE_COUNT:-0}."
+          body="Genesis pulse request skipped: active repair work remains. Fresh=${FRESH_COUNT:-0}, stale=${STALE_COUNT:-0}, stale_in_progress=${STALE_IN_PROGRESS_COUNT:-0}, cancelled=${STALE_CANCELLED_COUNT:-0}, cancellation_failures=${STALE_CANCEL_FAILURE_COUNT:-0}."
           body+=$'\n\nFresh runs:\n```\n'"${FRESH_RUNS:-none}"$'\n```'
           body+=$'\n\nStale runs:\n```\n'"${STALE_RUNS:-none}"$'\n```'
           body+=$'\n\nStale in-progress runs:\n```\n'"${STALE_IN_PROGRESS_RUNS:-none}"$'\n```'
@@ -139,7 +142,8 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           STALE_COUNT: ${{ steps.gate.outputs.stale_count }}
           STALE_CANCELLED_COUNT: ${{ steps.gate.outputs.stale_cancelled_count }}
+          STALE_CANCEL_FAILURE_COUNT: ${{ steps.gate.outputs.stale_cancel_failure_count }}
         shell: bash
         run: |
-          body="Genesis pulse dispatched for gene-node-1. No fresh autonomous repair worker or unresolved stale cleanup remained. Stale=${STALE_COUNT:-0}; cancellation requests accepted=${STALE_CANCELLED_COUNT:-0}."
+          body="Genesis pulse dispatched for gene-node-1. No fresh or stale in-progress autonomous repair worker remained. Stale=${STALE_COUNT:-0}; cancellation requests accepted=${STALE_CANCELLED_COUNT:-0}; cancellation failures retained for observability=${STALE_CANCEL_FAILURE_COUNT:-0}."
           gh issue comment 140 --body "$body"
