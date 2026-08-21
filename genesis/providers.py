@@ -8,6 +8,26 @@ from typing import Protocol
 
 
 MAX_PROVIDER_TIMEOUT_SECONDS = 360.0
+LOCAL_REASONING_ROLE_TOKEN_BUDGETS = {
+    "genesis_research_comprehension": 128,
+    "genesis_learning_transfer_planner": 160,
+    "genesis_learning_upgrade_planner": 160,
+}
+
+
+def _reasoning_token_budget(prompt: str) -> int | None:
+    """Return a small output budget for bounded learning roles only.
+
+    Coding and other reasoning roles keep the provider's configured default.
+    This prevents short JSON learning decisions from consuming a full coding
+    generation budget on CPU-backed local models.
+    """
+    for line in prompt.splitlines()[:8]:
+        if not line.startswith("ROLE:"):
+            continue
+        role = line.split(":", 1)[1].strip()
+        return LOCAL_REASONING_ROLE_TOKEN_BUDGETS.get(role)
+    return None
 
 
 class IntelligenceProvider(Protocol):
@@ -96,7 +116,11 @@ class GenesisHTTPProvider:
             return False
 
     def reason(self, prompt: str) -> str:
-        body = json.dumps({"prompt": prompt}).encode("utf-8")
+        request_payload: dict[str, object] = {"prompt": prompt}
+        token_budget = _reasoning_token_budget(prompt)
+        if token_budget is not None:
+            request_payload["max_new_tokens"] = token_budget
+        body = json.dumps(request_payload).encode("utf-8")
         req = urllib.request.Request(
             self.base_url + "/reason",
             data=body,
