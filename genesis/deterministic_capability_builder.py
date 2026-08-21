@@ -154,12 +154,13 @@ class DeterministicLearnedCapabilityProvider:
             return None
 
         function_name = f"_learned_{token}"
+        capability_description = template_description + " Verified lesson: " + lesson
         registration = (
             handler
             + "\n"
             + "register_capability(\n"
             + f"    {capability_name!r},\n"
-            + f"    {template_description + ' Verified lesson: ' + lesson!r},\n"
+            + f"    {capability_description!r},\n"
             + f"    {evidence!r},\n"
             + f"    {function_name},\n"
             + ")\n"
