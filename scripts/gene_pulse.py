@@ -3,7 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import re
-from dataclasses import replace
+from dataclasses import asdict, replace
 from pathlib import Path
 
 from genesis.autonomous_engineering import AutonomousEngineeringLoop
@@ -19,50 +19,193 @@ ROOT = Path(__file__).resolve().parents[1]
 class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
     """Keep learning bounded and ground transfer in exact source/code evidence."""
 
+    MAX_CANDIDATES = 24
     MAX_PULSE_CANDIDATES = 3
     MAX_PULSE_TARGET_BYTES = 700
     MAX_PULSE_LEARNING_BYTES = 900
     MAX_PULSE_TECHNICAL_BYTES = 650
+    MAX_PREFILTER_ITEMS = 12
     MIN_LESSON_CONFIDENCE = 0.55
     MIN_TARGET_TOKEN_OVERLAP = 2
     MIN_SOURCE_EVIDENCE_OVERLAP = 3
     MIN_TARGET_EVIDENCE_OVERLAP = 2
-    ARXIV_RELEVANCE_TERMS = (
-        "agent",
-        "reasoning",
-        "memory",
-        "retrieval",
-        "language model",
-        "llm",
-        "transformer",
-        "inference",
-        "training",
-        "fine-tun",
-        "distill",
-        "quantiz",
-        "benchmark",
-        "evaluation",
-        "alignment",
-        "safety",
-        "unlearning",
-        "coding",
-        "code generation",
-        "tool use",
-        "planning",
-        "self-improv",
-        "autonomous",
-        "multimodal",
-        "context window",
-        "attention",
-        "mixture of experts",
-        "reinforcement learning",
-        "neural",
-        "generative",
-        "diffusion",
-        "representation learning",
-        "robot",
-        "vision-language",
-    )
+
+    CAPABILITY_DOMAIN_TERMS = {
+        "agent_reasoning": (
+            "agent",
+            "agents",
+            "reasoning",
+            "planner",
+            "planning",
+            "tool use",
+            "tool-use",
+            "autonomous",
+            "multi-agent",
+            "multiagent",
+            "reflection",
+            "self-correction",
+            "self correction",
+        ),
+        "memory_learning": (
+            "memory",
+            "retrieval",
+            "retrieval-augmented",
+            "retrieval augmented",
+            "rag",
+            "unlearning",
+            "continual learning",
+            "knowledge retention",
+            "forgetting",
+            "replay",
+            "concept-level",
+            "concept level",
+            "knowledge",
+            "lesson",
+            "learning store",
+        ),
+        "reliability_evaluation": (
+            "confidence",
+            "calibration",
+            "uncertainty",
+            "failure prediction",
+            "hallucination",
+            "factuality",
+            "guardrail",
+            "red teaming",
+            "red-team",
+            "model evaluation",
+            "llm evaluation",
+            "verifier",
+            "verification",
+        ),
+        "model_runtime": (
+            "language model",
+            "llm",
+            "transformer",
+            "inference",
+            "decoding",
+            "token",
+            "kv cache",
+            "context window",
+            "quantization",
+            "tensor",
+            "kernel",
+            "attention",
+            "mixture of experts",
+            "moe",
+            "model serving",
+            "batching",
+            "speculative decoding",
+            "command-line",
+            "environment variable",
+        ),
+        "training_evolution": (
+            "fine-tuning",
+            "finetuning",
+            "fine tuning",
+            "post-training",
+            "post training",
+            "reinforcement learning",
+            "reward model",
+            "reward learning",
+            "distillation",
+            "training objective",
+            "preference optimization",
+            "dpo",
+            "rlhf",
+            "self-improvement",
+            "self improvement",
+            "meta-learning",
+            "meta learning",
+        ),
+        "coding_engineering": (
+            "code generation",
+            "coding agent",
+            "software engineering",
+            "program repair",
+            "automated repair",
+            "debugging",
+            "test generation",
+            "repository",
+            "patch generation",
+            "code review",
+        ),
+        "multimodal_embodied": (
+            "vision-language",
+            "vision language",
+            "multimodal model",
+            "multimodal language model",
+            "robotics",
+            "robot learning",
+            "embodied agent",
+            "embodied ai",
+        ),
+    }
+
+    CAPABILITY_DOMAIN_STRONG_TERMS = {
+        "agent_reasoning": {
+            "reasoning",
+            "tool use",
+            "tool-use",
+            "multi-agent",
+            "multiagent",
+        },
+        "memory_learning": {
+            "memory",
+            "retrieval-augmented",
+            "retrieval augmented",
+            "unlearning",
+            "continual learning",
+        },
+        "reliability_evaluation": {
+            "confidence",
+            "calibration",
+            "uncertainty",
+            "failure prediction",
+            "hallucination",
+            "factuality",
+            "red teaming",
+            "red-team",
+        },
+        "model_runtime": {
+            "language model",
+            "llm",
+            "transformer",
+            "inference",
+            "quantization",
+            "tensor",
+            "context window",
+            "speculative decoding",
+        },
+        "training_evolution": {
+            "fine-tuning",
+            "finetuning",
+            "fine tuning",
+            "post-training",
+            "post training",
+            "reinforcement learning",
+            "distillation",
+            "dpo",
+            "rlhf",
+        },
+        "coding_engineering": {
+            "code generation",
+            "coding agent",
+            "software engineering",
+            "program repair",
+            "automated repair",
+            "test generation",
+        },
+        "multimodal_embodied": {
+            "vision-language",
+            "vision language",
+            "multimodal model",
+            "robotics",
+            "robot learning",
+            "embodied agent",
+            "embodied ai",
+        },
+    }
 
     @classmethod
     def _match_tokens(cls, text: str) -> set[str]:
@@ -125,14 +268,60 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
         best = ranked[0]
         return best[3], best[0]
 
+    @staticmethod
+    def _term_present(text: str, term: str) -> bool:
+        haystack = text.lower()
+        needle = term.lower()
+        if re.fullmatch(r"[a-z0-9_]+", needle):
+            return re.search(rf"\b{re.escape(needle)}\b", haystack) is not None
+        return needle in haystack
+
+    @classmethod
+    def _capability_domains(
+        cls,
+        text: str,
+        *,
+        allow_single_strong: bool = True,
+        min_hits: int = 2,
+    ) -> dict[str, list[str]]:
+        """Classify text into capability domains using transparent deterministic evidence."""
+        matched: dict[str, list[str]] = {}
+        normalized = f"{text}\n{' '.join(sorted(cls._match_tokens(text)))}"
+        for domain, terms in cls.CAPABILITY_DOMAIN_TERMS.items():
+            hits = [term for term in terms if cls._term_present(normalized, term)]
+            strong = cls.CAPABILITY_DOMAIN_STRONG_TERMS.get(domain, set())
+            if len(hits) >= min_hits or (
+                allow_single_strong and any(term in strong for term in hits)
+            ):
+                matched[domain] = hits[:10]
+        return matched
+
+    @classmethod
+    def _research_domains(cls, item: ResearchItem) -> dict[str, list[str]]:
+        return cls._capability_domains(f"{item.title}\n{item.summary}")
+
     @classmethod
     def _research_relevant(cls, item: ResearchItem) -> tuple[bool, list[str]]:
-        """Avoid spending model calls on clearly non-AI arXiv material."""
-        if str(item.source) != "arxiv":
-            return True, []
-        haystack = f"{item.title}\n{item.summary}".lower()
-        hits = [term for term in cls.ARXIV_RELEVANCE_TERMS if term in haystack]
-        return bool(hits), hits[:12]
+        """Require a real Genesis capability-domain match before spending a model call."""
+        domains = cls._research_domains(item)
+        hits = [
+            f"{domain}:{term}"
+            for domain, terms in sorted(domains.items())
+            for term in terms[:4]
+        ]
+        return bool(domains), hits[:16]
+
+    @classmethod
+    def _target_domains(cls, path: str, text: str) -> dict[str, list[str]]:
+        return cls._capability_domains(
+            f"{path}\n{text}",
+            allow_single_strong=False,
+            min_hits=2,
+        )
+
+    @staticmethod
+    def _looks_executable_target(text: str) -> bool:
+        return re.search(r"(?m)^\s*(?:async\s+def|def|class)\s+[A-Za-z_]", text) is not None
 
     def _catalog(self, item):
         query = self._match_tokens(f"{item.title} {item.summary}")
@@ -146,6 +335,30 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
             if len(compact) >= self.MAX_PULSE_CANDIDATES:
                 break
         return compact
+
+    def _catalog_for_domains(
+        self,
+        item: ResearchItem,
+        capability_domains: list[str],
+    ) -> list[tuple[str, str]]:
+        """Only expose executable Genesis targets in the same verified capability domain."""
+        wanted = set(capability_domains)
+        query = self._match_tokens(f"{item.title} {item.summary}")
+        ranked: list[tuple[int, int, str, str]] = []
+        for path, text in super()._catalog(item):
+            if not self._looks_executable_target(text):
+                continue
+            target_domains = self._target_domains(path, text)
+            shared = wanted & set(target_domains)
+            if not shared:
+                continue
+            excerpt = text[: self.MAX_PULSE_TARGET_BYTES]
+            overlap = len(query & self._match_tokens(f"{path} {excerpt}"))
+            if overlap < self.MIN_TARGET_TOKEN_OVERLAP:
+                continue
+            ranked.append((len(shared), overlap, path, excerpt))
+        ranked.sort(key=lambda row: (-row[0], -row[1], row[2]))
+        return [(path, excerpt) for _, _, path, excerpt in ranked[: self.MAX_PULSE_CANDIDATES]]
 
     def _prompt(self, item, catalog):
         compact_item = replace(
@@ -218,12 +431,14 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
         )
 
     def _extract_lesson(self, item: ResearchItem) -> dict:
+        research_domains = self._research_domains(item)
         relevant, relevance_hits = self._research_relevant(item)
         if not relevant:
             return {
                 "decision": "skip",
-                "reason": "research_outside_genesis_ai_domains",
+                "reason": "research_outside_genesis_capability_domains",
                 "relevance_hits": [],
+                "research_domains": [],
             }
 
         technical_source = self._technical_excerpt(item)
@@ -242,6 +457,7 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
                 "decision": "skip",
                 "reason": str(payload.get("reason") or payload.get("lesson") or "research_skip")[:1000],
                 "relevance_hits": relevance_hits,
+                "research_domains": sorted(research_domains),
             }
 
         lesson = str(payload.get("lesson") or "").strip()
@@ -299,6 +515,19 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
                 "confidence_normalized": confidence,
             }
 
+        lesson_domain_map = self._capability_domains(f"{lesson}\n{' '.join(topics)}")
+        shared_domains = sorted(set(research_domains) & set(lesson_domain_map))
+        if not shared_domains:
+            return {
+                "decision": "skip",
+                "reason": "lesson_outside_verified_capability_domains",
+                "lesson": lesson[:1000],
+                "lesson_evidence": evidence[:1200],
+                "lesson_topics": topics,
+                "research_domains": sorted(research_domains),
+                "confidence_normalized": confidence,
+            }
+
         return {
             "decision": "learn",
             "lesson": lesson[:1000],
@@ -308,6 +537,8 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
             "confidence_normalized": confidence,
             "technical_source": technical_source,
             "relevance_hits": relevance_hits,
+            "research_domains": sorted(research_domains),
+            "capability_domains": shared_domains,
         }
 
     def _mapping_prompt(self, lesson: dict, catalog: list[tuple[str, str]]) -> str:
@@ -315,15 +546,18 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
             f"TARGET {path}:\n{text}" for path, text in catalog
         )
         topics = ", ".join(lesson.get("topics") or [])
+        domains = ", ".join(lesson.get("capability_domains") or [])
         return (
             "ROLE: genesis_learning_transfer_planner\n"
             "You are given one VERIFIED_TRANSFERABLE_LESSON and a small set of real Genesis code targets. "
-            "Choose at most one target where the lesson can produce a small, measurable capability improvement. "
-            "Do not invent a bug. Do not invent code evidence. Do not weaken tests, security, validation, governance, "
-            "provenance, or promotion gates. Return compact JSON only with keys decision,target_path,summary,acceptance,"
+            "All targets already share a verified capability domain with the lesson. Choose at most one target "
+            "where the lesson can produce a small, measurable capability improvement. Do not invent a bug. "
+            "Do not invent code evidence. Do not weaken tests, security, validation, governance, provenance, "
+            "or promotion gates. Return compact JSON only with keys decision,target_path,summary,acceptance,"
             "confidence,reason. decision must be upgrade or skip. target_path must exactly match one supplied TARGET. "
             "acceptance must be measurable and implementation-neutral. If applicability is weak, return skip. "
             "Keep under 100 words.\n"
+            f"VERIFIED_CAPABILITY_DOMAINS: {domains}\n"
             f"VERIFIED_TRANSFERABLE_LESSON: {lesson['lesson']}\n"
             f"VERIFIED_TOPICS: {topics}\n"
             f"VERIFIED_SOURCE_EVIDENCE: {lesson['lesson_evidence']}\n\n"
@@ -336,15 +570,17 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
             return lesson
 
         topics = lesson.get("topics") or []
+        capability_domains = lesson.get("capability_domains") or []
         planning_item = replace(
             item,
             title=lesson["lesson"][:300],
             summary=(
                 f"TRANSFERABLE_TECHNICAL_LESSON: {lesson['lesson']}\n"
-                f"TECHNICAL_TOPICS: {', '.join(topics)}"
+                f"TECHNICAL_TOPICS: {', '.join(topics)}\n"
+                f"CAPABILITY_DOMAINS: {', '.join(capability_domains)}"
             )[: self.MAX_PULSE_LEARNING_BYTES],
         )
-        catalog = self._catalog(planning_item)
+        catalog = self._catalog_for_domains(planning_item, capability_domains)
         if not catalog:
             return {
                 "decision": "skip",
@@ -353,6 +589,7 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
                 "lesson_evidence": lesson["lesson_evidence"],
                 "lesson_confidence_normalized": lesson["confidence_normalized"],
                 "lesson_topics": topics,
+                "capability_domains": capability_domains,
             }
 
         raw = self.provider.reason(self._mapping_prompt(lesson, catalog))
@@ -368,6 +605,7 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
                 "lesson_evidence": lesson["lesson_evidence"],
                 "lesson_confidence_normalized": lesson["confidence_normalized"],
                 "lesson_topics": topics,
+                "capability_domains": capability_domains,
             }
 
         target = str(payload.get("target_path") or "").replace("\\", "/").lstrip("./")
@@ -376,6 +614,8 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
         summary = str(payload.get("summary") or "").strip()[:2400]
         acceptance = str(payload.get("acceptance") or "").strip()[:3000]
         target_context = contexts.get(target, "")
+        target_domains = self._target_domains(target, target_context)
+        shared_target_domains = sorted(set(capability_domains) & set(target_domains))
         target_evidence, target_overlap = self._best_exact_anchor(
             target_context,
             [lesson["lesson"], *topics],
@@ -383,6 +623,7 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
         )
         grounded = bool(
             target in contexts
+            and shared_target_domains
             and target_evidence
             and summary
             and acceptance
@@ -402,8 +643,50 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
             "lesson_evidence": lesson["lesson_evidence"],
             "lesson_confidence_normalized": lesson["confidence_normalized"],
             "lesson_topics": topics,
+            "capability_domains": capability_domains,
+            "target_capability_domains": sorted(target_domains),
+            "shared_capability_domains": shared_target_domains,
             "target_evidence_overlap": target_overlap,
         }
+
+    def _prefilter_irrelevant_pending(self) -> list[dict]:
+        """Skip a bounded run of unrelated pending research without spending model calls."""
+        skipped: list[dict] = []
+        for _ in range(self.MAX_PREFILTER_ITEMS):
+            item = self.store.next_pending()
+            if item is None:
+                break
+            relevant, hits = self._research_relevant(item)
+            if relevant:
+                break
+            self.store.set_research_status(item.fingerprint, "evaluated")
+            details = {
+                "research": asdict(item),
+                "reason": "research_outside_genesis_capability_domains",
+                "relevance_hits": hits,
+            }
+            self.store.event(
+                event_type="learning_prefilter",
+                status="skipped",
+                message="Skipped research outside Genesis capability domains.",
+                details=details,
+            )
+            skipped.append(
+                {
+                    "fingerprint": item.fingerprint,
+                    "title": item.title,
+                    "source": item.source,
+                }
+            )
+        return skipped
+
+    def refresh_sources(self) -> dict:
+        result = dict(super().refresh_sources())
+        skipped = self._prefilter_irrelevant_pending()
+        if skipped:
+            result["prefiltered_irrelevant_count"] = len(skipped)
+            result["prefiltered_irrelevant"] = skipped
+        return result
 
 
 def _run_learning_evolution() -> dict:
