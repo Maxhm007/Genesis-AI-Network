@@ -14,6 +14,13 @@ from .autonomy_proof import AutonomyProofLedger
 
 PROTECTED_PATHS = {"GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"}
 ALLOWED_PREFIXES = ("genesis/", "tests/", "docs/", "config/", "desktop/", "mobile/", ".github/")
+CANDIDATE_TEST_PROVIDER_ENV = (
+    "GENESIS_PROVIDER_URL",
+    "GENESIS_PROVIDER_NAME",
+    "GENESIS_PROVIDER_TIMEOUT_SECONDS",
+    "GENESIS_PROVIDER_MAX_NEW_TOKENS",
+    "GENESIS_PROVIDER_ENDPOINTS",
+)
 
 
 def normalize_selfdev_path(root: Path, path: str, *, allow_privileged: bool = False) -> str:
@@ -82,7 +89,18 @@ class SelfDevelopmentExecutor:
                 shutil.rmtree(target)
 
     def _candidate_test_env(self) -> dict[str, str]:
+        """Return a hermetic test environment for isolated candidate validation.
+
+        Gene Pulse may have a live reasoning provider configured for discovery or
+        review. Candidate tests must not inherit those endpoints: otherwise a
+        unit test that constructs the default provider registry can turn a local
+        test run into a model/network call and stall deterministic self-repair.
+        Tests remain free to configure providers explicitly inside their own
+        process when that behavior is what they are testing.
+        """
         env = dict(os.environ)
+        for name in CANDIDATE_TEST_PROVIDER_ENV:
+            env.pop(name, None)
         env["PYTHONPATH"] = str(self.root)
         return env
 
