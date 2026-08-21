@@ -139,9 +139,15 @@ jobs:
               and legacy_security.get('status') == 'pass'
           )
 
-          has_review = action == 'pipeline_repair_completed' and bool(review_candidate.get('candidate_sha')) and bool(review_candidate.get('review_ref'))
+          review_actions = {'pipeline_development_completed', 'pipeline_repair_completed'}
+          has_review = action in review_actions and bool(review_candidate.get('candidate_sha')) and bool(review_candidate.get('review_ref'))
           has_validation = action == 'pipeline_internal_review_approved' and bool(validation_candidate.get('candidate_sha')) and bool(validation_candidate.get('branch'))
-          rejected_review_ref = str(record.get('review_ref') or '') if action in {'pipeline_internal_review_needs_repair', 'pipeline_quarantined'} else ''
+          rejected_review_actions = {
+              'pipeline_internal_review_needs_development',
+              'pipeline_internal_review_needs_repair',
+              'pipeline_quarantined',
+          }
+          rejected_review_ref = str(record.get('review_ref') or '') if action in rejected_review_actions else ''
 
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
               f.write('continue=' + ('true' if p.get('needs_next_pulse') else 'false') + '\n')
