@@ -147,8 +147,13 @@ class Handler(BaseHTTPRequestHandler):
         if not prompt:
             self._json(400, {"error": "prompt required"})
             return
+        max_new_tokens = payload.get("max_new_tokens")
         try:
-            response = self.model.reason(prompt) if self.model else ""
+            response = (
+                self.model.reason(prompt, max_new_tokens=max_new_tokens)
+                if self.model
+                else ""
+            )
             self._json(200, {"response": response})
         except Exception as exc:
             self._json(500, {"error": str(exc)})
