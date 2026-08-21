@@ -141,6 +141,32 @@ class AutonomousEngineeringLoop:
         return result
 
     @staticmethod
+    def _is_qwen_provider(provider) -> bool:
+        """Qwen remains available to non-coding specialists, never to code execution."""
+        return "qwen" in str(getattr(provider, "name", "")).strip().lower()
+
+    def _coding_provider(self):
+        """Return the best available non-Qwen, non-bootstrap coding provider.
+
+        The small local Qwen runtime is useful for bounded discovery/review tasks,
+        but it must not be a blocking implementation dependency.  Coding either
+        uses another eligible provider or checkpoints without consuming repair
+        budget.
+        """
+        candidates = []
+        for provider in self.providers.available_providers():
+            profile = IntelligenceRouter.profile(provider)
+            if profile.name == "genesis-bootstrap" or self._is_qwen_provider(provider):
+                continue
+            if "coding" not in profile.capabilities and "reasoning" not in profile.capabilities:
+                continue
+            candidates.append((profile.resource_cost, -profile.reliability, profile.name, provider))
+        if not candidates:
+            return None
+        candidates.sort(key=lambda item: (item[0], item[1], item[2]))
+        return candidates[0][3]
+
+    @staticmethod
     def _recorded_team_context(runtime: Path, task_id: str, max_bytes: int) -> str:
         path = runtime / "ai_team_dispatch.json"
         if not path.is_file():
@@ -199,16 +225,21 @@ class AutonomousEngineeringLoop:
             "coding_status": "started",
             "candidate": None,
             "candidate_security": None,
+            "provider_policy": "qwen_excluded_from_coding",
         }
         try:
             if task.state != "assigned":
                 self.queue.transition(task.task_id, "assigned", module_id=owner_module)
-            self.queue.transition(task.task_id, "running", module_id=owner_module)
             context_paths = self._context_paths_for_task(task)
             attempt["context_paths"] = context_paths
-            provider = self.coding._provider()
+            provider = self._coding_provider()
             if provider is None:
-                raise RuntimeError("no intelligence provider available")
+                self.queue.pause(task.task_id, "waiting_for_non_qwen_coding_provider")
+                attempt["coding_status"] = "waiting_for_coding_provider"
+                attempt["error"] = "no_non_qwen_coding_provider_available"
+                return attempt
+
+            self.queue.transition(task.task_id, "running", module_id=owner_module)
             provider_name = provider.name
             objective = task.objective
             if team_context:
@@ -298,6 +329,8 @@ class AutonomousEngineeringLoop:
             result["candidate"] = attempt.get("candidate")
             result["candidate_security"] = attempt.get("candidate_security")
             if attempt["coding_status"] == "candidate_created" and attempt.get("candidate_security", {}).get("status") == "pass":
+                break
+            if attempt["coding_status"] == "waiting_for_coding_provider":
                 break
             self._git("checkout", "main")
 
