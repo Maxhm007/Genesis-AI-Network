@@ -6,11 +6,11 @@ from genesis.evolution_learning import ResearchItem
 from scripts.gene_pulse import PulseEvolutionLearningEngine
 
 
-def _item(summary: str) -> ResearchItem:
+def _item(summary: str, title: str = "quantization capability") -> ResearchItem:
     return ResearchItem(
         fingerprint="f" * 64,
         source="test",
-        title="quantization capability",
+        title=title,
         summary=summary,
         url="https://example.invalid/research",
         published_at="2026-08-21T00:00:00Z",
@@ -50,6 +50,17 @@ def test_pulse_learning_skips_unrelated_targets_without_model(tmp_path) -> None:
     engine.root = tmp_path
 
     assert engine._catalog(_item("quantization kernels and tensor packing")) == []
+
+
+def test_pulse_catalog_requires_more_than_one_weak_token_overlap(tmp_path) -> None:
+    source = tmp_path / "genesis" / "example.py"
+    source.parent.mkdir(parents=True)
+    source.write_text("def choose_device():\n    return 'cpu'\n", encoding="utf-8")
+
+    engine = object.__new__(PulseEvolutionLearningEngine)
+    engine.root = tmp_path
+
+    assert engine._catalog(_item("device projection memory mapping")) == []
 
 
 def test_pulse_extracts_grounded_transferable_lesson_without_release_assets() -> None:
@@ -100,3 +111,28 @@ def test_pulse_rejects_hallucinated_research_lesson() -> None:
 
     assert result["decision"] == "skip"
     assert result["reason"] == "ungrounded_learning_lesson"
+
+
+def test_pulse_rejects_source_specific_feature_as_transferable_lesson() -> None:
+    summary = (
+        "mtmd: add --mmproj-device argument (#23255) and retain the "
+        "MTMD_BACKEND_DEVICE environment variable for compatibility"
+    )
+    provider = _Provider(
+        {
+            "decision": "learn",
+            "lesson": "Add a command-line argument to specify the projection device for MTMD.",
+            "evidence": "mtmd: add --mmproj-device argument (#23255)",
+            "topics": ["command-line arguments", "device selection"],
+            "confidence": 0.9,
+            "reason": "",
+        }
+    )
+    engine = object.__new__(PulseEvolutionLearningEngine)
+    engine.provider = provider
+
+    result = engine._extract_lesson(_item(summary, title="MTMD device support"))
+
+    assert result["decision"] == "skip"
+    assert result["reason"] == "source_specific_learning_lesson"
+    assert "MTMD" in result["source_specific_markers"]
