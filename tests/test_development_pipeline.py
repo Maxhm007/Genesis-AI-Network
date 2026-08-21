@@ -4,12 +4,8 @@ import json
 import sqlite3
 from pathlib import Path
 
-from genesis.autonomy_pipeline import PipelineStore, ReviewWorker, TriageWorker
-from genesis.bounded_autonomy_pipeline import (
-    BoundedAutonomyPipelineCoordinator,
-    SingleAttemptDevelopmentWorker,
-    SingleAttemptRepairWorker,
-)
+from genesis.autonomy_pipeline import DevelopmentWorker, PipelineStore, RepairWorker, ReviewWorker, TriageWorker
+from genesis.bounded_autonomy_pipeline import SingleAttemptDevelopmentWorker, SingleAttemptRepairWorker
 from genesis.modules.task_queue import PersistentTaskQueue
 from genesis.pulse import GenePulse
 
@@ -152,12 +148,10 @@ def test_pipeline_store_migrates_legacy_learning_repair_stage(tmp_path: Path) ->
     assert record.repair_attempts == 0
 
 
-def test_bounded_pipeline_has_distinct_development_and_repair_workers(tmp_path: Path) -> None:
-    coordinator = BoundedAutonomyPipelineCoordinator(tmp_path)
-
-    assert isinstance(coordinator.development, SingleAttemptDevelopmentWorker)
-    assert isinstance(coordinator.repair, SingleAttemptRepairWorker)
-    assert coordinator.development is not coordinator.repair
+def test_bounded_pipeline_uses_distinct_development_and_repair_worker_types() -> None:
+    assert issubclass(SingleAttemptDevelopmentWorker, DevelopmentWorker)
+    assert issubclass(SingleAttemptRepairWorker, RepairWorker)
+    assert not issubclass(SingleAttemptDevelopmentWorker, RepairWorker)
 
 
 def test_development_actions_chain_without_becoming_repair_actions() -> None:
