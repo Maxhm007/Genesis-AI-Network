@@ -15,7 +15,10 @@ from genesis.evolution_learning import ResearchItem
 from scripts import gene_pulse_core as _core
 
 
-class PulseEvolutionLearningEngine(_core.PulseEvolutionLearningEngine):
+_CorePulseEvolutionLearningEngine = _core.PulseEvolutionLearningEngine
+
+
+class PulseEvolutionLearningEngine(_CorePulseEvolutionLearningEngine):
     """Allow external research to expand Genesis without a model-gated intake step."""
 
     EMERGING_CAPABILITY_DOMAIN = "emerging_capability"
@@ -55,7 +58,7 @@ class PulseEvolutionLearningEngine(_core.PulseEvolutionLearningEngine):
     @classmethod
     def _known_research_domains(cls, item: ResearchItem) -> dict[str, list[str]]:
         """Classify only against concrete existing domains, without the synthetic fallback."""
-        return _core.PulseEvolutionLearningEngine._capability_domains(
+        return _CorePulseEvolutionLearningEngine._capability_domains(
             f"{item.title}\n{item.summary}"
         )
 
