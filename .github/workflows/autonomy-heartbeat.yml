@@ -20,6 +20,8 @@ concurrency:
 jobs:
   heartbeat:
     runs-on: ubuntu-latest
+    env:
+      GH_REPO: ${{ github.repository }}
     steps:
       - name: Check for fresh autonomous repair activity
         id: gate
