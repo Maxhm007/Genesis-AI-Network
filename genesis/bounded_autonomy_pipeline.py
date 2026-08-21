@@ -7,6 +7,7 @@ from pathlib import Path
 
 from .autonomy_pipeline import (
     AutonomyPipelineCoordinator,
+    DevelopmentWorker,
     DiscoveryWorker,
     PipelineRecord,
     RepairWorker,
@@ -135,7 +136,7 @@ class ResumableDiscoveryWorker(DiscoveryWorker):
 
 
 class SingleAttemptRepairWorker(RepairWorker):
-    """Make one candidate attempt per Pulse; persist feedback for the next Pulse."""
+    """Make one repair candidate attempt per Pulse; persist feedback for the next Pulse."""
 
     MAX_FEEDBACK_BYTES = 4_000
 
@@ -161,8 +162,8 @@ class SingleAttemptRepairWorker(RepairWorker):
         objective = task.objective
         if record.last_feedback:
             objective += (
-                "\n\nPREVIOUS_PIPELINE_FEEDBACK: The previous bounded attempt did not pass. "
-                "Use this evidence to revise the SAME issue; verify against current repository context and do not broaden scope.\n"
+                "\n\nPREVIOUS_PIPELINE_FEEDBACK: The previous bounded repair attempt did not pass. "
+                "Use this evidence to revise the SAME defect; verify against current repository context and do not broaden scope.\n"
                 + record.last_feedback[-self.MAX_FEEDBACK_BYTES :]
             )
         attempt_task = replace(task, objective=objective)
@@ -274,12 +275,158 @@ class SingleAttemptRepairWorker(RepairWorker):
         }
 
 
+class SingleAttemptDevelopmentWorker(DevelopmentWorker):
+    """Make one new-capability implementation attempt per Pulse, separate from repair."""
+
+    MAX_FEEDBACK_BYTES = 4_000
+
+    @staticmethod
+    def _normalize_path(path: object) -> str:
+        return str(path).replace("\\", "/").lstrip("./")
+
+    def run(self, record: PipelineRecord) -> dict:
+        task = self.engineering.queue.get(record.task_id)
+        if task is None:
+            updated = self.store.transition(
+                record.task_id, "quarantined", worker="development", feedback="task_missing"
+            )
+            return {"action": "pipeline_quarantined", "record": asdict(updated)}
+        if record.development_attempts >= task.max_attempts:
+            updated = self.store.transition(
+                record.task_id,
+                "quarantined",
+                worker="development",
+                feedback="development_budget_exhausted",
+            )
+            return {"action": "pipeline_quarantined", "record": asdict(updated)}
+
+        runtime = self.root / "runtime"
+        runtime.mkdir(parents=True, exist_ok=True)
+        self.store.transition(record.task_id, "development_ready", worker="development")
+
+        objective = task.objective
+        if record.last_feedback:
+            objective += (
+                "\n\nPREVIOUS_DEVELOPMENT_FEEDBACK: The previous bounded implementation attempt did not pass. "
+                "Use this evidence to revise the SAME new capability; verify against current repository context and do not broaden scope.\n"
+                + record.last_feedback[-self.MAX_FEEDBACK_BYTES :]
+            )
+        attempt_task = replace(task, objective=objective)
+
+        old_revision_budget = self.engineering.MAX_CANDIDATE_REVISIONS
+        self.engineering.MAX_CANDIDATE_REVISIONS = 0
+        try:
+            attempt = self.engineering._attempt_task(attempt_task, runtime)
+        finally:
+            self.engineering.MAX_CANDIDATE_REVISIONS = old_revision_budget
+
+        if attempt.get("coding_status") == "waiting_for_coding_provider":
+            feedback = str(attempt.get("error") or "waiting_for_non_qwen_coding_provider")[-self.MAX_FEEDBACK_BYTES :]
+            updated = self.store.transition(
+                record.task_id,
+                "needs_development_revision",
+                worker="development",
+                feedback=feedback,
+            )
+            return {
+                "action": "pipeline_wait_development_provider",
+                "attempt": attempt,
+                "record": asdict(updated),
+            }
+
+        candidate = dict(attempt.get("candidate") or {})
+        security = dict(attempt.get("candidate_security") or {})
+        candidate_ready = bool(
+            attempt.get("coding_status") == "candidate_created"
+            and candidate.get("committed")
+            and candidate.get("commit_sha")
+            and candidate.get("branch")
+            and security.get("status") == "pass"
+        )
+        scope_error = ""
+        if candidate_ready:
+            expected_target = self._normalize_path(record.target_path)
+            changed_files = tuple(self._normalize_path(path) for path in (candidate.get("changed_files") or ()))
+            if len(changed_files) != 1 or changed_files[0] != expected_target:
+                scope_error = (
+                    "development_scope_violation: autonomous capability development must change exactly the approved target "
+                    f"{expected_target}; candidate changed {list(changed_files)}"
+                )
+                attempt["coding_status"] = "candidate_rejected_by_scope"
+                attempt["error"] = scope_error
+
+        if candidate_ready and not scope_error:
+            candidate_sha = str(candidate["commit_sha"])
+            branch = str(candidate["branch"])
+            review_ref = f"genesis/review-{candidate_sha[:12]}"
+            updated = self.store.transition(
+                record.task_id,
+                "review_ready",
+                worker="development",
+                candidate_branch=branch,
+                candidate_sha=candidate_sha,
+                review_ref=review_ref,
+                bump_development=True,
+            )
+            return {
+                "action": "pipeline_development_completed",
+                "attempt": attempt,
+                "record": asdict(updated),
+                "review_candidate": {
+                    "branch": branch,
+                    "candidate_sha": candidate_sha,
+                    "review_ref": review_ref,
+                },
+            }
+
+        candidate_message = str(candidate.get("message") or "").strip()
+        feedback = str(
+            attempt.get("error")
+            or candidate_message
+            or attempt.get("coding_status")
+            or "development_attempt_failed"
+        )[-self.MAX_FEEDBACK_BYTES :]
+        current = self.engineering.queue.get(record.task_id)
+        if current and current.state == "review":
+            try:
+                current = self.engineering.queue.transition(
+                    current.task_id, "running", module_id="genesis.coding"
+                )
+            except Exception:
+                current = self.engineering.queue.get(record.task_id)
+        if current and current.state not in {"failed", "quarantined", "complete"}:
+            try:
+                current = self.engineering.queue.record_failure(
+                    current.task_id,
+                    feedback,
+                    classification="pipeline_development",
+                    retry_after_seconds=0,
+                    module_id="genesis.coding",
+                )
+            except Exception:
+                current = self.engineering.queue.get(record.task_id)
+        terminal = bool(current and current.state == "quarantined")
+        updated = self.store.transition(
+            record.task_id,
+            "quarantined" if terminal else "needs_development_revision",
+            worker="development",
+            feedback=feedback,
+            bump_development=True,
+        )
+        return {
+            "action": "pipeline_quarantined" if terminal else "pipeline_development_retry",
+            "attempt": attempt,
+            "record": asdict(updated),
+        }
+
+
 class BoundedAutonomyPipelineCoordinator(AutonomyPipelineCoordinator):
     """Non-blocking specialist scheduler for one short, resumable Pulse transition."""
 
     def __init__(self, root: Path, engineering=None) -> None:
         super().__init__(root, engineering)
         self.discovery = ResumableDiscoveryWorker(self.root, self.engineering, self.store)
+        self.development = SingleAttemptDevelopmentWorker(self.root, self.engineering, self.store)
         self.repair = SingleAttemptRepairWorker(self.root, self.engineering, self.store)
 
     def run_once(self) -> dict:
@@ -293,8 +440,8 @@ class BoundedAutonomyPipelineCoordinator(AutonomyPipelineCoordinator):
             return {"handled": True, **self.learning.run(record)}
 
         # Poll independent validation without letting a waiting candidate starve
-        # triage/repair/review work. Promotion observation is cheap and has no
-        # authority to approve or merge a candidate.
+        # triage/development/repair/review work. Promotion observation is cheap and
+        # has no authority to approve or merge a candidate.
         validation_waits: list[dict] = []
         for record in sorted(
             (item for item in active if item.stage == "validation_ready"),
@@ -306,7 +453,14 @@ class BoundedAutonomyPipelineCoordinator(AutonomyPipelineCoordinator):
             validation_waits.append(outcome)
 
         # Executable internal work always outranks an unchanged validation wait.
-        stage_order = ("review_ready", "needs_repair", "repair_ready", "discovered")
+        stage_order = (
+            "review_ready",
+            "needs_development_revision",
+            "needs_repair",
+            "development_ready",
+            "repair_ready",
+            "discovered",
+        )
         for stage in stage_order:
             candidates = sorted(
                 (item for item in active if item.stage == stage),
@@ -317,6 +471,8 @@ class BoundedAutonomyPipelineCoordinator(AutonomyPipelineCoordinator):
             record = candidates[0]
             if stage == "review_ready":
                 return {"handled": True, **self.review.run(record)}
+            if stage in {"needs_development_revision", "development_ready"}:
+                return {"handled": True, **self.development.run(record)}
             if stage in {"needs_repair", "repair_ready"}:
                 return {"handled": True, **self.repair.run(record)}
             return {"handled": True, **self.triage.run(record)}
