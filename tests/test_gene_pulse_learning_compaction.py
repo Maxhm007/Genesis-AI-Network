@@ -182,8 +182,16 @@ def test_pulse_rejects_source_specific_feature_as_transferable_lesson() -> None:
     assert "MTMD" in result["source_specific_markers"]
 
 
-def test_pulse_skips_clearly_irrelevant_arxiv_before_model_call() -> None:
-    provider = _Provider({"decision": "learn"})
+def test_pulse_unfamiliar_arxiv_reaches_comprehension_before_skip() -> None:
+    provider = _Provider(
+        {
+            "decision": "skip",
+            "lesson": "",
+            "topics": [],
+            "confidence": 0.0,
+            "reason": "no_transferable_engineering_lesson",
+        }
+    )
     engine = object.__new__(PulseEvolutionLearningEngine)
     engine.provider = provider
 
@@ -196,12 +204,21 @@ def test_pulse_skips_clearly_irrelevant_arxiv_before_model_call() -> None:
     )
 
     assert result["decision"] == "skip"
-    assert result["reason"] == "research_outside_genesis_capability_domains"
-    assert provider.prompts == []
+    assert result["reason"] == "no_transferable_engineering_lesson"
+    assert len(provider.prompts) == 1
+    assert "emerging_capability" in result["research_domains"]
 
 
-def test_pulse_skips_rf_healthcare_paper_before_model_call() -> None:
-    provider = _Provider({"decision": "learn"})
+def test_pulse_unfamiliar_rf_research_reaches_comprehension_before_skip() -> None:
+    provider = _Provider(
+        {
+            "decision": "skip",
+            "lesson": "",
+            "topics": [],
+            "confidence": 0.0,
+            "reason": "no_transferable_engineering_lesson",
+        }
+    )
     engine = object.__new__(PulseEvolutionLearningEngine)
     engine.provider = provider
 
@@ -216,8 +233,9 @@ def test_pulse_skips_rf_healthcare_paper_before_model_call() -> None:
     )
 
     assert result["decision"] == "skip"
-    assert result["reason"] == "research_outside_genesis_capability_domains"
-    assert provider.prompts == []
+    assert result["reason"] == "no_transferable_engineering_lesson"
+    assert len(provider.prompts) == 1
+    assert "emerging_capability" in result["research_domains"]
 
 
 def test_pulse_keeps_confidence_research_in_reliability_domain() -> None:
