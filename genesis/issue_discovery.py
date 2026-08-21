@@ -43,8 +43,8 @@ class GenesisIssueDiscoveryEngine:
     created. This engine never edits code or promotes candidates itself.
     """
 
-    MAX_SOURCE_BYTES = 12_000
-    MAX_TEST_BYTES = 6_000
+    MAX_SOURCE_BYTES = 6_000
+    MAX_TEST_BYTES = 3_000
     MAX_PROVIDER_FILES = 6
     MAX_RANKED_EVIDENCE = 20
 
@@ -227,9 +227,11 @@ class GenesisIssueDiscoveryEngine:
             "Use the supplied risk signals as hints, not proof. Look for correctness bugs, unsafe coercion, edge cases, "
             "state mistakes, error-handling defects, reliability failures, or testable autonomy defects. "
             "Do not invent style work, speculative refactoring, or changes that weaken tests, Security, validation, governance, "
-            "protected boundaries, or promotion. Return JSON only with keys decision, summary, acceptance, confidence. "
-            "decision must be issue or no_issue. If issue, summary must state observable incorrect behavior and acceptance must "
-            "state testable expected behavior without prescribing implementation.\n"
+            "protected boundaries, or promotion. Return compact JSON only with keys decision, summary, acceptance, evidence, confidence. "
+            "decision must be issue or no_issue. If issue, summary must state observable incorrect behavior, acceptance must "
+            "state the expected passing behavior without prescribing implementation, and evidence must be one short exact substring "
+            "copied verbatim from SOURCE or RELATED_TEST_CONTEXT that directly supports the claim. If no exact supporting evidence "
+            "can be quoted, return no_issue. Keep the entire response under 120 words.\n"
             f"TARGET: {candidate.path}\n"
             f"RISK_SCORE: {candidate.score}\n"
             f"RISK_SIGNALS: {', '.join(candidate.reasons) or 'none'}\n"
@@ -245,14 +247,35 @@ class GenesisIssueDiscoveryEngine:
             raise ValueError("discovery decision must be issue or no_issue")
         summary = str(payload.get("summary", "")).strip()
         acceptance = str(payload.get("acceptance", "")).strip()
-        if decision == "issue" and (not summary or not acceptance):
-            raise ValueError("issue discovery requires summary and acceptance")
+        evidence = str(payload.get("evidence", "")).strip()
+        if decision == "issue" and (not summary or not acceptance or not evidence):
+            raise ValueError("issue discovery requires summary, acceptance, and exact evidence")
         return {
             "decision": decision,
             "summary": summary[:2400],
             "acceptance": acceptance[:3000],
+            "evidence": evidence[:1000],
             "confidence": payload.get("confidence"),
         }
+
+    def _ground_finding(self, candidate: IssueDiscoveryCandidate, finding: dict) -> tuple[bool, str | None]:
+        if finding.get("decision") != "issue":
+            return True, None
+        source = self._bounded_text(self.root / candidate.path, self.MAX_SOURCE_BYTES)
+        tests = (
+            self._bounded_text(self.root / candidate.test_path, self.MAX_TEST_BYTES)
+            if candidate.test_path and (self.root / candidate.test_path).is_file()
+            else ""
+        )
+        evidence = str(finding.get("evidence") or "")
+        if not evidence or (evidence not in source and evidence not in tests):
+            return False, "evidence_not_found_in_supplied_context"
+
+        claim = f"{finding.get('summary', '')} {finding.get('acceptance', '')}".lower()
+        claims_syntax_failure = "syntax error" in claim or "syntaxerror" in claim
+        if claims_syntax_failure and "syntax_error" not in candidate.reasons:
+            return False, "syntax_claim_without_parser_evidence"
+        return True, None
 
     def _persist(self, result: dict) -> None:
         self.last_result_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -286,8 +309,11 @@ class GenesisIssueDiscoveryEngine:
                         "error": f"{type(exc).__name__}: {exc}"[:1000],
                     }
                 )
+                if isinstance(exc, TimeoutError) or "timed out" in str(exc).lower():
+                    break
                 continue
 
+            grounded, grounding_error = self._ground_finding(candidate, finding)
             confidence = self._confidence(finding.get("confidence"))
             scan = {
                 "target": candidate.path,
@@ -296,6 +322,12 @@ class GenesisIssueDiscoveryEngine:
                 **finding,
                 "confidence_normalized": confidence,
             }
+            if not grounded:
+                scan["status"] = "unsupported_finding"
+                scan["grounding_error"] = grounding_error
+                result["scanned"].append(scan)
+                continue
+
             result["scanned"].append(scan)
             if finding["decision"] != "issue" or confidence < 0.55:
                 continue
@@ -304,6 +336,7 @@ class GenesisIssueDiscoveryEngine:
             objective = (
                 f"Autonomously repair a discovered Genesis issue in {candidate.path}. "
                 f"Problem: {finding['summary']} Acceptance: {finding['acceptance']} "
+                f"Grounding evidence: {finding['evidence']} "
                 "Diagnose current repository evidence yourself and make the smallest correct change. "
                 "Do not weaken tests, Security, validation, governance, or promotion safeguards."
             )
@@ -338,6 +371,12 @@ class GenesisIssueDiscoveryEngine:
             self._persist(result)
             return result
 
+        result["provider_error_count"] = sum(
+            1 for scan in result["scanned"] if scan.get("status") == "provider_error"
+        )
+        result["unsupported_finding_count"] = sum(
+            1 for scan in result["scanned"] if scan.get("status") == "unsupported_finding"
+        )
         result["status"] = "no_issue_found"
         self._persist(result)
         return result
