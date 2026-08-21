@@ -34,6 +34,13 @@ class ResearchItem:
 class EvolutionLearningStore:
     """Persistent research memory and append-only upgrade-process evidence."""
 
+    RESEARCH_QUEUE_COLUMNS = {
+        "retry_count": "INTEGER NOT NULL DEFAULT 0",
+        "next_retry_at": "TEXT",
+        "last_error": "TEXT",
+        "processing_started_at": "TEXT",
+    }
+
     def __init__(self, root: Path) -> None:
         self.root = Path(root).resolve()
         self.runtime = self.root / "runtime" / "evolution"
@@ -59,6 +66,10 @@ class EvolutionLearningStore:
                     url TEXT NOT NULL,
                     published_at TEXT NOT NULL,
                     status TEXT NOT NULL DEFAULT 'pending',
+                    retry_count INTEGER NOT NULL DEFAULT 0,
+                    next_retry_at TEXT,
+                    last_error TEXT,
+                    processing_started_at TEXT,
                     first_seen_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
                 );
@@ -92,6 +103,13 @@ class EvolutionLearningStore:
                 );
                 """
             )
+            existing = {
+                str(row["name"])
+                for row in db.execute("PRAGMA table_info(research_items)").fetchall()
+            }
+            for column, declaration in self.RESEARCH_QUEUE_COLUMNS.items():
+                if column not in existing:
+                    db.execute(f"ALTER TABLE research_items ADD COLUMN {column} {declaration}")
 
     def meta_get(self, key: str) -> str | None:
         with self._connect() as db:
@@ -115,8 +133,9 @@ class EvolutionLearningStore:
                     """
                     INSERT OR IGNORE INTO research_items(
                         fingerprint, source, title, summary, url, published_at,
-                        status, first_seen_at, updated_at
-                    ) VALUES(?,?,?,?,?,?,'pending',?,?)
+                        status, retry_count, next_retry_at, last_error,
+                        processing_started_at, first_seen_at, updated_at
+                    ) VALUES(?,?,?,?,?,?,'pending',0,NULL,NULL,NULL,?,?)
                     """,
                     (
                         item.fingerprint,
@@ -132,14 +151,8 @@ class EvolutionLearningStore:
                 added += int(cursor.rowcount > 0)
         return added
 
-    def next_pending(self) -> ResearchItem | None:
-        with self._connect() as db:
-            row = db.execute(
-                "SELECT * FROM research_items WHERE status='pending' "
-                "ORDER BY published_at DESC, first_seen_at ASC LIMIT 1"
-            ).fetchone()
-        if not row:
-            return None
+    @staticmethod
+    def _row_to_item(row: sqlite3.Row) -> ResearchItem:
         return ResearchItem(
             fingerprint=row["fingerprint"],
             source=row["source"],
@@ -149,12 +162,151 @@ class EvolutionLearningStore:
             published_at=row["published_at"],
         )
 
+    def next_pending(self) -> ResearchItem | None:
+        """Return a pending item without claiming it; retained for inspection/tests."""
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM research_items WHERE status='pending' "
+                "ORDER BY published_at DESC, first_seen_at ASC LIMIT 1"
+            ).fetchone()
+        return self._row_to_item(row) if row else None
+
+    def claim_next_ready(self, *, stale_after_minutes: int = 20) -> tuple[ResearchItem, dict] | None:
+        """Atomically claim one ready item and recover abandoned processing leases."""
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        stale_cutoff = (now_dt - timedelta(minutes=max(1, int(stale_after_minutes)))).isoformat()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            db.execute(
+                """
+                UPDATE research_items
+                SET status='waiting',
+                    retry_count=retry_count + 1,
+                    next_retry_at=?,
+                    last_error=COALESCE(last_error, 'stale_processing_lease_recovered'),
+                    processing_started_at=NULL,
+                    updated_at=?
+                WHERE status='processing' AND updated_at <= ?
+                """,
+                (now, now, stale_cutoff),
+            )
+            db.execute(
+                """
+                UPDATE research_items
+                SET status='pending', next_retry_at=NULL, updated_at=?
+                WHERE status='waiting' AND (next_retry_at IS NULL OR next_retry_at <= ?)
+                """,
+                (now, now),
+            )
+            row = db.execute(
+                "SELECT * FROM research_items WHERE status='pending' "
+                "ORDER BY published_at DESC, first_seen_at ASC LIMIT 1"
+            ).fetchone()
+            if not row:
+                return None
+            db.execute(
+                """
+                UPDATE research_items
+                SET status='processing', processing_started_at=?, updated_at=?
+                WHERE fingerprint=? AND status='pending'
+                """,
+                (now, now, row["fingerprint"]),
+            )
+            metadata = {
+                "retry_count": int(row["retry_count"] or 0),
+                "last_error": str(row["last_error"] or ""),
+            }
+        return self._row_to_item(row), metadata
+
+    def research_record(self, fingerprint: str) -> dict | None:
+        with self._connect() as db:
+            row = db.execute(
+                "SELECT * FROM research_items WHERE fingerprint=?", (fingerprint,)
+            ).fetchone()
+        return dict(row) if row else None
+
+    def research_queue_summary(self) -> dict:
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT status, COUNT(*) AS count FROM research_items GROUP BY status"
+            ).fetchall()
+            next_wait = db.execute(
+                "SELECT MIN(next_retry_at) AS next_retry_at FROM research_items WHERE status='waiting'"
+            ).fetchone()
+        counts = {str(row["status"]): int(row["count"]) for row in rows}
+        return {
+            "counts": dict(sorted(counts.items())),
+            "next_retry_at": str(next_wait["next_retry_at"]) if next_wait and next_wait["next_retry_at"] else None,
+        }
+
     def set_research_status(self, fingerprint: str, status: str) -> None:
         with self._connect() as db:
             db.execute(
-                "UPDATE research_items SET status=?, updated_at=? WHERE fingerprint=?",
-                (status, utc_now(), fingerprint),
+                """
+                UPDATE research_items
+                SET status=?,
+                    processing_started_at=CASE WHEN ?='processing' THEN processing_started_at ELSE NULL END,
+                    next_retry_at=CASE WHEN ?='waiting' THEN next_retry_at ELSE NULL END,
+                    updated_at=?
+                WHERE fingerprint=?
+                """,
+                (status, status, status, utc_now(), fingerprint),
             )
+
+    def defer_research(
+        self,
+        fingerprint: str,
+        error: str,
+        *,
+        max_retries: int,
+        base_delay_minutes: int,
+    ) -> dict:
+        """Move a failed item to waiting or quarantine after bounded retries."""
+        now_dt = datetime.now(timezone.utc)
+        now = now_dt.isoformat()
+        with self._connect() as db:
+            db.execute("BEGIN IMMEDIATE")
+            row = db.execute(
+                "SELECT retry_count FROM research_items WHERE fingerprint=?", (fingerprint,)
+            ).fetchone()
+            if not row:
+                return {"status": "missing", "retry_count": 0, "next_retry_at": None}
+            retry_count = int(row["retry_count"] or 0) + 1
+            if retry_count >= max(1, int(max_retries)):
+                status = "quarantined"
+                next_retry_at = None
+            else:
+                status = "waiting"
+                delay = max(1, int(base_delay_minutes)) * (2 ** max(0, retry_count - 1))
+                next_retry_at = (now_dt + timedelta(minutes=min(delay, 60))).isoformat()
+            db.execute(
+                """
+                UPDATE research_items
+                SET status=?, retry_count=?, next_retry_at=?, last_error=?,
+                    processing_started_at=NULL, updated_at=?
+                WHERE fingerprint=?
+                """,
+                (status, retry_count, next_retry_at, error[:2000], now, fingerprint),
+            )
+        return {
+            "status": status,
+            "retry_count": retry_count,
+            "next_retry_at": next_retry_at,
+        }
+
+    def quarantine_research(self, fingerprint: str, reason: str) -> dict:
+        with self._connect() as db:
+            db.execute(
+                """
+                UPDATE research_items
+                SET status='quarantined', next_retry_at=NULL, last_error=?,
+                    processing_started_at=NULL, updated_at=?
+                WHERE fingerprint=?
+                """,
+                (reason[:2000], utc_now(), fingerprint),
+            )
+        return {"status": "quarantined", "next_retry_at": None}
 
     def create_opportunity(
         self,
@@ -458,6 +610,7 @@ class EvolutionProgressReporter:
             "purpose": "Trace Genesis learning -> upgrade -> review -> validation -> promotion so weak stages are visible.",
             "counts_by_stage": dict(sorted(counts.items())),
             "active_upgrades": active,
+            "learning_queue": self.store.research_queue_summary(),
             "recent_events": self.store.recent_events(limit=50),
         }
         self.output.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -471,6 +624,10 @@ class GenesisEvolutionLearningEngine:
     MAX_CANDIDATES = 8
     MAX_TARGET_BYTES = 2600
     REFRESH_MINUTES = 60
+    MAX_QUEUE_ADVANCE_PER_RUN = 2
+    MAX_RESEARCH_RETRIES = 3
+    RETRY_BASE_MINUTES = 10
+    PROCESSING_LEASE_MINUTES = 20
 
     def __init__(
         self,
@@ -672,54 +829,110 @@ class GenesisEvolutionLearningEngine:
                 "status": "active_upgrade_in_progress",
                 "active_task_ids": active,
                 "research_refresh": refresh,
+                "learning_queue": self.store.research_queue_summary(),
             }
             report = self.reporter.refresh()
             result["process_report"] = str(self.reporter.output.relative_to(self.root))
             result["active_upgrades"] = report["active_upgrades"]
             return result
 
-        item = self.store.next_pending()
-        if item is None:
-            result = {"status": "no_pending_learning", "research_refresh": refresh}
-            self.reporter.refresh()
-            return result
-
-        try:
-            finding = self._assess(item)
-        except Exception as exc:
-            self.store.event(
-                event_type="learning_assessment",
-                status="error",
-                message=f"{type(exc).__name__}: {exc}"[:1200],
-                details={"research": asdict(item)},
+        transitions: list[dict] = []
+        for _ in range(max(1, int(self.MAX_QUEUE_ADVANCE_PER_RUN))):
+            claimed = self.store.claim_next_ready(
+                stale_after_minutes=self.PROCESSING_LEASE_MINUTES
             )
-            result = {
-                "status": "assessment_error",
-                "research_fingerprint": item.fingerprint,
-                "error": f"{type(exc).__name__}: {exc}"[:1200],
-                "research_refresh": refresh,
-            }
+            if claimed is None:
+                queue_summary = self.store.research_queue_summary()
+                waiting = int(queue_summary["counts"].get("waiting", 0))
+                result = {
+                    "status": "learning_waiting" if waiting else "no_pending_learning",
+                    "research_refresh": refresh,
+                    "learning_queue": queue_summary,
+                    "queue_transitions": transitions,
+                }
+                self.reporter.refresh()
+                return result
+
+            item, claim = claimed
+            if int(claim.get("retry_count") or 0) >= self.MAX_RESEARCH_RETRIES:
+                deferred = self.store.quarantine_research(
+                    item.fingerprint,
+                    str(claim.get("last_error") or "retry_budget_exhausted"),
+                )
+                transition = {
+                    "research_fingerprint": item.fingerprint,
+                    "status": deferred["status"],
+                    "retry_count": int(claim.get("retry_count") or 0),
+                    "reason": "retry_budget_exhausted",
+                }
+                transitions.append(transition)
+                self.store.event(
+                    event_type="learning_queue",
+                    status="quarantined",
+                    message="Research item exhausted its retry budget and was quarantined.",
+                    details={"research": asdict(item), **transition},
+                )
+                continue
+
+            try:
+                finding = self._assess(item)
+            except Exception as exc:
+                error = f"{type(exc).__name__}: {exc}"[:1200]
+                deferred = self.store.defer_research(
+                    item.fingerprint,
+                    error,
+                    max_retries=self.MAX_RESEARCH_RETRIES,
+                    base_delay_minutes=self.RETRY_BASE_MINUTES,
+                )
+                transition = {
+                    "research_fingerprint": item.fingerprint,
+                    "status": deferred["status"],
+                    "retry_count": deferred["retry_count"],
+                    "next_retry_at": deferred["next_retry_at"],
+                    "error": error,
+                }
+                transitions.append(transition)
+                self.store.event(
+                    event_type="learning_assessment",
+                    status=deferred["status"],
+                    message=error,
+                    details={"research": asdict(item), **transition},
+                )
+                # A failed item no longer blocks the queue. Try one next ready item
+                # within this same bounded Pulse before returning control.
+                continue
+
+            if finding.get("decision") != "upgrade":
+                self.store.set_research_status(item.fingerprint, "evaluated")
+                self.store.event(
+                    event_type="learning_assessment",
+                    status="skipped",
+                    message=str(finding.get("reason") or "No grounded upgrade opportunity.")[:1200],
+                    details={"research": asdict(item), "finding": finding},
+                )
+                result = {
+                    "status": "learning_recorded_no_upgrade",
+                    "research": asdict(item),
+                    "finding": finding,
+                    "research_refresh": refresh,
+                    "learning_queue": self.store.research_queue_summary(),
+                    "queue_transitions": transitions,
+                }
+                self.reporter.refresh()
+                return result
+
+            result = self._enqueue(item, finding)
+            result["research_refresh"] = refresh
+            result["learning_queue"] = self.store.research_queue_summary()
+            result["queue_transitions"] = transitions
             self.reporter.refresh()
             return result
 
-        if finding.get("decision") != "upgrade":
-            self.store.set_research_status(item.fingerprint, "evaluated")
-            self.store.event(
-                event_type="learning_assessment",
-                status="skipped",
-                message=str(finding.get("reason") or "No grounded upgrade opportunity.")[:1200],
-                details={"research": asdict(item), "finding": finding},
-            )
-            result = {
-                "status": "learning_recorded_no_upgrade",
-                "research": asdict(item),
-                "finding": finding,
-                "research_refresh": refresh,
-            }
-            self.reporter.refresh()
-            return result
-
-        result = self._enqueue(item, finding)
-        result["research_refresh"] = refresh
+        result = {
+            "status": "learning_queue_advanced",
+            "research_refresh": refresh,
+            "learning_queue": self.store.research_queue_summary(),
+            "queue_transitions": transitions,
+        }
         self.reporter.refresh()
         return result
