@@ -27,6 +27,19 @@ class PromptCaptureProvider(LineRangeProvider):
         return super().reason(prompt)
 
 
+class SyntaxRetryProvider(LineRangeProvider):
+    name = "syntax-retry-coder"
+
+    def __init__(self) -> None:
+        self.calls = 0
+
+    def reason(self, prompt: str) -> str:
+        self.calls += 1
+        if self.calls == 1:
+            return '{"edits":[{"path":"genesis/example.py","start_line":2,"end_line":2,"new":"    return ="}]}'
+        return '{"edits":[{"path":"genesis/example.py","start_line":2,"end_line":2,"new":"    return 2"}]}'
+
+
 def test_line_range_edit_does_not_require_copying_old_text(tmp_path: Path):
     (tmp_path / "genesis").mkdir()
     (tmp_path / "genesis" / "example.py").write_text("HEADER = 1\nVALUE = 7\nTAIL = 3\n", encoding="utf-8")
@@ -82,3 +95,15 @@ def test_line_range_keeps_single_edit_and_protected_path_rules(tmp_path: Path):
             {"edits": [{"path": "GENESIS_CONSTITUTION.md", "start_line": 1, "end_line": 1, "new": "changed"}]},
             "test",
         )
+
+
+def test_invalid_python_edit_is_rejected_and_retried_inside_proposal(tmp_path: Path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "genesis" / "example.py").write_text("def value():\n    return 1\n", encoding="utf-8")
+    provider = SyntaxRetryProvider()
+    module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
+
+    proposal = module.propose("Return two", ["genesis/example.py"], provider=provider)
+
+    assert provider.calls == 2
+    assert proposal.files["genesis/example.py"] == "def value():\n    return 2\n"
