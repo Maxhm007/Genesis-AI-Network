@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 from genesis.evolution_learning import ResearchItem
 from scripts.gene_pulse import PulseEvolutionLearningEngine
 
@@ -13,6 +15,18 @@ def _item(summary: str) -> ResearchItem:
         url="https://example.invalid/research",
         published_at="2026-08-21T00:00:00Z",
     )
+
+
+class _Provider:
+    name = "test-provider"
+
+    def __init__(self, payload: dict) -> None:
+        self.payload = payload
+        self.prompts: list[str] = []
+
+    def reason(self, prompt: str) -> str:
+        self.prompts.append(prompt)
+        return json.dumps(self.payload)
 
 
 def test_pulse_learning_prompt_is_compact() -> None:
@@ -36,3 +50,53 @@ def test_pulse_learning_skips_unrelated_targets_without_model(tmp_path) -> None:
     engine.root = tmp_path
 
     assert engine._catalog(_item("quantization kernels and tensor packing")) == []
+
+
+def test_pulse_extracts_grounded_transferable_lesson_without_release_assets() -> None:
+    summary = (
+        "<details open> Clamp the final tensor tile to the remaining valid K range so the kernel "
+        "does not read beyond the tensor extent. This prevents corrupted results on unaligned inputs. "
+        "</details> **Website:** <https://example.invalid> **Linux:** [binary](https://example.invalid/bin)"
+    )
+    provider = _Provider(
+        {
+            "decision": "learn",
+            "lesson": "Bound the final processing tile to the remaining valid data extent.",
+            "evidence": "Clamp the final tensor tile to the remaining valid K range",
+            "topics": ["bounds checking", "tensor tails"],
+            "confidence": 0.91,
+            "reason": "",
+        }
+    )
+    engine = object.__new__(PulseEvolutionLearningEngine)
+    engine.provider = provider
+
+    result = engine._extract_lesson(_item(summary))
+
+    assert result["decision"] == "learn"
+    assert result["confidence_normalized"] == 0.91
+    assert "Website" not in provider.prompts[0]
+    assert "binary" not in provider.prompts[0]
+    assert result["lesson_evidence"] in summary
+
+
+def test_pulse_rejects_hallucinated_research_lesson() -> None:
+    provider = _Provider(
+        {
+            "decision": "learn",
+            "lesson": "Use speculative decoding for every request.",
+            "evidence": "This exact evidence is not in the research source.",
+            "topics": ["decoding"],
+            "confidence": 99,
+            "reason": "",
+        }
+    )
+    engine = object.__new__(PulseEvolutionLearningEngine)
+    engine.provider = provider
+
+    result = engine._extract_lesson(
+        _item("A release fixes a bounded tensor tail read on unaligned inputs.")
+    )
+
+    assert result["decision"] == "skip"
+    assert result["reason"] == "ungrounded_learning_lesson"
