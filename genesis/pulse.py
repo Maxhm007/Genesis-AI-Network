@@ -39,8 +39,12 @@ class GenePulse:
             "pipeline_issue_discovered": "issue_waiting_for_triage",
             "pipeline_discovery_continue": "next_discovery_batch_ready",
             "pipeline_triaged": "triaged_issue_ready_for_repair",
+            "pipeline_development_triaged": "approved_upgrade_ready_for_development",
+            "pipeline_development_completed": "developed_candidate_waiting_internal_review",
+            "pipeline_development_retry": "development_feedback_ready_for_revision",
             "pipeline_repair_completed": "candidate_waiting_internal_review",
             "pipeline_repair_retry": "repair_feedback_ready_for_retry",
+            "pipeline_internal_review_needs_development": "review_feedback_returned_to_development",
             "pipeline_internal_review_needs_repair": "review_feedback_returned_to_repair",
             "pipeline_promotion_observed": "validated_promotion_ready_for_learning",
             "pipeline_learning_completed": "learning_recorded_continue_discovery",
@@ -51,6 +55,9 @@ class GenePulse:
 
         if action == "pipeline_wait_coding_provider":
             return False, "waiting_for_non_qwen_coding_provider"
+
+        if action == "pipeline_wait_development_provider":
+            return False, "waiting_for_non_qwen_development_provider"
 
         if action in {"pipeline_internal_review_approved", "pipeline_wait_validation"}:
             return False, "waiting_for_independent_validation_and_promotion"
