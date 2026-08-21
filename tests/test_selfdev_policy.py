@@ -53,3 +53,22 @@ def test_selfdev_allows_bounded_code_and_tests(tmp_path: Path):
         "docs/NOTE.md",
         "config/example.json",
     ])
+
+
+def test_candidate_tests_do_not_inherit_live_provider_endpoints(tmp_path: Path, monkeypatch):
+    monkeypatch.setenv("GENESIS_PROVIDER_URL", "http://127.0.0.1:8766")
+    monkeypatch.setenv("GENESIS_PROVIDER_NAME", "qwen2.5-coder-1.5b-gene-pulse")
+    monkeypatch.setenv("GENESIS_PROVIDER_TIMEOUT_SECONDS", "60")
+    monkeypatch.setenv("GENESIS_PROVIDER_MAX_NEW_TOKENS", "384")
+    monkeypatch.setenv("GENESIS_PROVIDER_ENDPOINTS", '[{"url":"http://127.0.0.1:9999"}]')
+    monkeypatch.setenv("UNRELATED_TEST_SETTING", "kept")
+
+    env = SelfDevelopmentExecutor(tmp_path)._candidate_test_env()
+
+    assert "GENESIS_PROVIDER_URL" not in env
+    assert "GENESIS_PROVIDER_NAME" not in env
+    assert "GENESIS_PROVIDER_TIMEOUT_SECONDS" not in env
+    assert "GENESIS_PROVIDER_MAX_NEW_TOKENS" not in env
+    assert "GENESIS_PROVIDER_ENDPOINTS" not in env
+    assert env["UNRELATED_TEST_SETTING"] == "kept"
+    assert env["PYTHONPATH"] == str(tmp_path.resolve())
