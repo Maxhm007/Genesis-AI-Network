@@ -7,6 +7,7 @@ on:
 permissions:
   actions: write
   contents: read
+  issues: write
 
 concurrency:
   group: genesis-manual-pulse-recovery
@@ -45,12 +46,21 @@ jobs:
           done
 
           if (( fresh > 0 )); then
-            echo "Fresh autonomous repair work already exists (${fresh}); no duplicate Pulse dispatched."
+            gh issue comment 140 --body "Manual Pulse recovery: ${fresh} fresh repair run(s) already exist; no duplicate Pulse dispatched."
             exit 0
           fi
 
           # A stale queued run that GitHub refuses to cancel is not executing and
-          # must not permanently disable manual recovery. Stale in-progress work
-          # is handled by the normal heartbeat/pulse-control cleanup path.
-          gh workflow run gene-pulse.yml --ref main -f gene=gene-node-1 -f continue_chain=true
-          echo "Gene Pulse dispatched: no fresh autonomous repair worker exists."
+          # must not permanently disable manual recovery.
+          if ! gh workflow run gene-pulse.yml --ref main -f gene=gene-node-1 -f continue_chain=true; then
+            gh issue comment 140 --body "Manual Pulse recovery failed to dispatch Gene Pulse. Check the recovery workflow run for the GitHub API error."
+            exit 1
+          fi
+
+          latest=""
+          for _ in {1..10}; do
+            latest=$(gh run list --workflow gene-pulse.yml --event workflow_dispatch --limit 1 --json databaseId,status,url,headSha,createdAt --jq '.[0] | "run=\(.databaseId) status=\(.status) sha=\(.headSha[0:12]) created=\(.createdAt) url=\(.url)"' 2>/dev/null || true)
+            [[ -n "$latest" ]] && break
+            sleep 1
+          done
+          gh issue comment 140 --body "Manual Pulse recovery dispatched Gene Pulse. ${latest:-Run id not visible yet.}"
