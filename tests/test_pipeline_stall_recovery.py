@@ -256,7 +256,8 @@ def test_gene_pulse_runtime_and_stale_cleanup_are_bounded() -> None:
     assert "/force-cancel" in control
     assert "stale_in_progress" in control
     assert "stale_cancel_failures" in control
-    assert "${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 || ${#stale_cancel_failures[@]} > 0" in control
+    assert "${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0" in control
+    assert "${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 || ${#stale_cancel_failures[@]} > 0" not in control
     assert "if: steps.gate.outputs.busy == 'false'" in control
     assert "PULSE_DISCOVERY_SOURCE_BYTES = 5_000" in worker
     assert "PULSE_DISCOVERY_TEST_BYTES = 2_000" in worker
