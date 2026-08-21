@@ -156,7 +156,7 @@ class SingleAttemptRepairWorker(RepairWorker):
 
         runtime = self.root / "runtime"
         runtime.mkdir(parents=True, exist_ok=True)
-        self.store.transition(record.task_id, "repair_ready", worker="repair", bump_repair=True)
+        self.store.transition(record.task_id, "repair_ready", worker="repair")
 
         objective = task.objective
         if record.last_feedback:
@@ -173,6 +173,20 @@ class SingleAttemptRepairWorker(RepairWorker):
             attempt = self.engineering._attempt_task(attempt_task, runtime)
         finally:
             self.engineering.MAX_CANDIDATE_REVISIONS = old_revision_budget
+
+        if attempt.get("coding_status") == "waiting_for_coding_provider":
+            feedback = str(attempt.get("error") or "waiting_for_non_qwen_coding_provider")[-self.MAX_FEEDBACK_BYTES :]
+            updated = self.store.transition(
+                record.task_id,
+                "needs_repair",
+                worker="repair",
+                feedback=feedback,
+            )
+            return {
+                "action": "pipeline_wait_coding_provider",
+                "attempt": attempt,
+                "record": asdict(updated),
+            }
 
         candidate = dict(attempt.get("candidate") or {})
         security = dict(attempt.get("candidate_security") or {})
@@ -206,6 +220,7 @@ class SingleAttemptRepairWorker(RepairWorker):
                 candidate_branch=branch,
                 candidate_sha=candidate_sha,
                 review_ref=review_ref,
+                bump_repair=True,
             )
             return {
                 "action": "pipeline_repair_completed",
@@ -250,6 +265,7 @@ class SingleAttemptRepairWorker(RepairWorker):
             "quarantined" if terminal else "needs_repair",
             worker="repair",
             feedback=feedback,
+            bump_repair=True,
         )
         return {
             "action": "pipeline_quarantined" if terminal else "pipeline_repair_retry",
