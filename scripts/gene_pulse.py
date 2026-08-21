@@ -29,6 +29,8 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
     MIN_TARGET_TOKEN_OVERLAP = 2
     MIN_SOURCE_EVIDENCE_OVERLAP = 3
     MIN_TARGET_EVIDENCE_OVERLAP = 2
+    NEW_CAPABILITY_TARGET = "genesis/learned_capabilities.py"
+    NEW_CAPABILITY_MARKER = "# GENESIS_LEARNED_CAPABILITY_INSERTION_POINT"
 
     CAPABILITY_DOMAIN_TERMS = {
         "agent_reasoning": (
@@ -564,6 +566,81 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
             f"GENESIS_TARGETS:\n{target_context}\n"
         )
 
+    def _new_capability_finding(self, lesson: dict, *, planner_reason: str) -> dict:
+        """Route a verified but unmapped lesson into the bounded capability incubator."""
+        confidence = self._confidence(lesson.get("confidence_normalized"))
+        target_path = self.root / self.NEW_CAPABILITY_TARGET
+        if confidence < self.MIN_CONFIDENCE:
+            return {
+                "decision": "skip",
+                "reason": "new_capability_confidence_below_threshold",
+                "lesson": str(lesson.get("lesson") or "")[:1000],
+                "lesson_evidence": str(lesson.get("lesson_evidence") or "")[:1200],
+                "lesson_confidence_normalized": confidence,
+                "lesson_topics": list(lesson.get("topics") or []),
+                "capability_domains": list(lesson.get("capability_domains") or []),
+            }
+        if not target_path.is_file():
+            return {
+                "decision": "skip",
+                "reason": "new_capability_incubator_missing",
+                "lesson": str(lesson.get("lesson") or "")[:1000],
+                "lesson_evidence": str(lesson.get("lesson_evidence") or "")[:1200],
+                "lesson_confidence_normalized": confidence,
+                "lesson_topics": list(lesson.get("topics") or []),
+                "capability_domains": list(lesson.get("capability_domains") or []),
+            }
+        target_text = target_path.read_text(encoding="utf-8")
+        if self.NEW_CAPABILITY_MARKER not in target_text:
+            return {
+                "decision": "skip",
+                "reason": "new_capability_incubator_marker_missing",
+                "lesson": str(lesson.get("lesson") or "")[:1000],
+                "lesson_evidence": str(lesson.get("lesson_evidence") or "")[:1200],
+                "lesson_confidence_normalized": confidence,
+                "lesson_topics": list(lesson.get("topics") or []),
+                "capability_domains": list(lesson.get("capability_domains") or []),
+            }
+
+        transferable_lesson = str(lesson.get("lesson") or "").strip()
+        learning_evidence = str(lesson.get("lesson_evidence") or "").strip()
+        topics = [str(value) for value in (lesson.get("topics") or [])]
+        capability_domains = [str(value) for value in (lesson.get("capability_domains") or [])]
+        if not transferable_lesson or not learning_evidence:
+            return {
+                "decision": "skip",
+                "reason": "new_capability_requires_grounded_lesson",
+                "lesson_confidence_normalized": confidence,
+            }
+
+        return {
+            "decision": "upgrade",
+            "target_path": self.NEW_CAPABILITY_TARGET,
+            "summary": (
+                "Add one new bounded Genesis capability implementing this verified transferable lesson: "
+                + transferable_lesson
+            )[:2400],
+            "acceptance": (
+                "The learned-capability module adds one registered executable capability that materially applies "
+                "the verified lesson, preserves evidence in its registration, performs no external side effects "
+                "at import time, keeps existing safeguards intact, and the full repository test suite passes."
+            ),
+            "learning_evidence": learning_evidence[:1200],
+            "target_evidence": self.NEW_CAPABILITY_MARKER,
+            "confidence_normalized": confidence,
+            "grounded": True,
+            "reason": "new_capability_fallback",
+            "new_capability": True,
+            "fallback_from": planner_reason[:1000],
+            "lesson": transferable_lesson[:1000],
+            "lesson_evidence": learning_evidence[:1200],
+            "lesson_confidence_normalized": confidence,
+            "lesson_topics": topics,
+            "capability_domains": capability_domains,
+            "target_capability_domains": ["learned_capability_incubator"],
+            "shared_capability_domains": capability_domains,
+        }
+
     def _assess(self, item: ResearchItem) -> dict:
         lesson = self._extract_lesson(item)
         if lesson.get("decision") != "learn":
@@ -582,15 +659,10 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
         )
         catalog = self._catalog_for_domains(planning_item, capability_domains)
         if not catalog:
-            return {
-                "decision": "skip",
-                "reason": "no_relevant_genesis_target",
-                "lesson": lesson["lesson"],
-                "lesson_evidence": lesson["lesson_evidence"],
-                "lesson_confidence_normalized": lesson["confidence_normalized"],
-                "lesson_topics": topics,
-                "capability_domains": capability_domains,
-            }
+            return self._new_capability_finding(
+                lesson,
+                planner_reason="no_relevant_genesis_target",
+            )
 
         raw = self.provider.reason(self._mapping_prompt(lesson, catalog))
         payload = CodingModule._extract_json(raw)
@@ -598,15 +670,12 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
         if decision not in {"upgrade", "skip"}:
             raise ValueError("learning transfer decision must be upgrade or skip")
         if decision == "skip":
-            return {
-                "decision": "skip",
-                "reason": str(payload.get("reason") or payload.get("summary") or "planner_skip")[:1000],
-                "lesson": lesson["lesson"],
-                "lesson_evidence": lesson["lesson_evidence"],
-                "lesson_confidence_normalized": lesson["confidence_normalized"],
-                "lesson_topics": topics,
-                "capability_domains": capability_domains,
-            }
+            return self._new_capability_finding(
+                lesson,
+                planner_reason=str(
+                    payload.get("reason") or payload.get("summary") or "planner_skip"
+                )[:1000],
+            )
 
         target = str(payload.get("target_path") or "").replace("\\", "/").lstrip("./")
         contexts = dict(catalog)
@@ -629,16 +698,21 @@ class PulseEvolutionLearningEngine(GenesisEvolutionLearningEngine):
             and acceptance
             and confidence >= self.MIN_CONFIDENCE
         )
+        if not grounded:
+            return self._new_capability_finding(
+                lesson,
+                planner_reason="ungrounded_upgrade_mapping",
+            )
         return {
-            "decision": "upgrade" if grounded else "skip",
+            "decision": "upgrade",
             "target_path": target,
             "summary": summary,
             "acceptance": acceptance,
             "learning_evidence": lesson["lesson_evidence"][:1200],
             "target_evidence": target_evidence[:1200],
             "confidence_normalized": confidence,
-            "grounded": grounded,
-            "reason": None if grounded else "ungrounded_upgrade_mapping",
+            "grounded": True,
+            "reason": None,
             "lesson": lesson["lesson"],
             "lesson_evidence": lesson["lesson_evidence"],
             "lesson_confidence_normalized": lesson["confidence_normalized"],
