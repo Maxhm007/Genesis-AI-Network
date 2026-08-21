@@ -21,7 +21,8 @@ def test_autonomy_heartbeat_restarts_idle_pipeline_without_duplicate_work() -> N
     assert 'if [[ "$run_status" == "in_progress" ]]' in workflow
     assert "stale_in_progress" in workflow
     assert "stale_cancel_failures" in workflow
-    assert "${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 || ${#stale_cancel_failures[@]} > 0" in workflow
+    assert "${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0" in workflow
+    assert "${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 || ${#stale_cancel_failures[@]} > 0" not in workflow
 
     assert "if: steps.gate.outputs.busy == 'false'" in workflow
     assert "gh workflow run gene-pulse.yml" in workflow
@@ -44,7 +45,8 @@ def test_manual_and_scheduled_pulse_controls_share_stale_safety_invariants() -> 
         assert "/force-cancel" in workflow
         assert "stale_in_progress" in workflow
         assert "stale_cancel_failures" in workflow
-        assert "${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 || ${#stale_cancel_failures[@]} > 0" in workflow
+        assert "${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0" in workflow
+        assert "${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 || ${#stale_cancel_failures[@]} > 0" not in workflow
         assert "if: steps.gate.outputs.busy == 'false'" in workflow
         assert "gh workflow run gene-pulse.yml" in workflow
         assert "-f continue_chain=true" in workflow
