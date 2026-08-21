@@ -1,21 +1,18 @@
 from __future__ import annotations
 
-import json
-
 from genesis.evolution_learning import EvolutionLearningStore, ResearchItem
 from scripts.gene_pulse import PulseEvolutionLearningEngine
 
 
-class _Provider:
-    name = "test-provider"
+class _ExplodingProvider:
+    name = "must-not-be-called"
 
-    def __init__(self, payload: dict) -> None:
-        self.payload = payload
-        self.prompts: list[str] = []
+    def __init__(self) -> None:
+        self.calls = 0
 
     def reason(self, prompt: str) -> str:
-        self.prompts.append(prompt)
-        return json.dumps(self.payload)
+        self.calls += 1
+        raise AssertionError("research intake must not call a reasoning provider")
 
 
 def _item(*, fingerprint: str = "a" * 64) -> ResearchItem:
@@ -33,7 +30,7 @@ def _item(*, fingerprint: str = "a" * 64) -> ResearchItem:
     )
 
 
-def _engine(tmp_path, provider: _Provider) -> PulseEvolutionLearningEngine:
+def _engine(tmp_path, provider: _ExplodingProvider | None = None) -> PulseEvolutionLearningEngine:
     genesis = tmp_path / "genesis"
     genesis.mkdir(parents=True, exist_ok=True)
     (genesis / "learned_capabilities.py").write_text(
@@ -48,19 +45,8 @@ def _engine(tmp_path, provider: _Provider) -> PulseEvolutionLearningEngine:
     return engine
 
 
-def test_unknown_domain_can_become_new_capability(tmp_path) -> None:
-    provider = _Provider(
-        {
-            "decision": "learn",
-            "lesson": (
-                "Adaptive endpoint bracketing can reduce candidate evaluations while preserving safe abstention "
-                "when refinement is unsupported."
-            ),
-            "topics": ["adaptive endpoint bracketing", "candidate evaluations", "safe abstention"],
-            "confidence": 0.9,
-            "reason": "",
-        }
-    )
+def test_unknown_domain_becomes_new_capability_without_provider(tmp_path) -> None:
+    provider = _ExplodingProvider()
     engine = _engine(tmp_path, provider)
 
     finding = engine._assess(_item())
@@ -68,14 +54,27 @@ def test_unknown_domain_can_become_new_capability(tmp_path) -> None:
     assert finding["decision"] == "upgrade"
     assert finding["new_capability"] is True
     assert finding["target_path"] == "genesis/learned_capabilities.py"
-    assert finding["fallback_from"] == "no_relevant_genesis_target"
+    assert finding["fallback_from"] == "no_existing_capability_domain"
     assert "emerging_capability" in finding["capability_domains"]
-    assert len(provider.prompts) == 1
+    assert finding["lesson_evidence"] in _item().summary
+    assert provider.calls == 0
+
+
+def test_extract_lesson_is_direct_source_evidence(tmp_path) -> None:
+    provider = _ExplodingProvider()
+    engine = _engine(tmp_path, provider)
+
+    lesson = engine._extract_lesson(_item())
+
+    assert lesson["decision"] == "learn"
+    assert lesson["routing_mode"] == "direct_source_evidence"
+    assert lesson["lesson_evidence"] in _item().summary
+    assert lesson["confidence_normalized"] == engine.DIRECT_ROUTING_CONFIDENCE
+    assert provider.calls == 0
 
 
 def test_emerging_domain_never_fakes_existing_target_match(tmp_path) -> None:
-    provider = _Provider({})
-    engine = _engine(tmp_path, provider)
+    engine = _engine(tmp_path)
 
     domains = engine._target_domains(
         "genesis/example.py",
@@ -100,3 +99,22 @@ def test_prior_evaluated_items_are_replayed_exactly_once(tmp_path) -> None:
     assert store.research_queue_summary()["counts"]["pending"] == 2
     assert engine._replay_evaluated_for_new_capability_policy() == 0
     assert store.meta_get(engine.POLICY_REPLAY_META_KEY) == "done"
+
+
+def test_waiting_and_quarantined_provider_failures_replay_for_direct_routing(tmp_path) -> None:
+    store = EvolutionLearningStore(tmp_path)
+    waiting = _item(fingerprint="3" * 64)
+    quarantined = _item(fingerprint="4" * 64)
+    evaluated = _item(fingerprint="5" * 64)
+    store.ingest([waiting, quarantined, evaluated])
+    store.set_research_status(waiting.fingerprint, "waiting")
+    store.set_research_status(quarantined.fingerprint, "quarantined")
+    store.set_research_status(evaluated.fingerprint, "evaluated")
+
+    engine = object.__new__(PulseEvolutionLearningEngine)
+    engine.store = store
+
+    assert engine._replay_provider_failures_for_direct_routing() == 3
+    assert store.research_queue_summary()["counts"]["pending"] == 3
+    assert engine._replay_provider_failures_for_direct_routing() == 0
+    assert store.meta_get(engine.DIRECT_ROUTING_REPLAY_META_KEY) == "done"
