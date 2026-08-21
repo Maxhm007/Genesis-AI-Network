@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.request
 from dataclasses import dataclass
 from typing import Protocol
@@ -10,9 +11,16 @@ from typing import Protocol
 MAX_PROVIDER_TIMEOUT_SECONDS = 360.0
 LOCAL_REASONING_ROLE_TOKEN_BUDGETS = {
     "genesis_research_comprehension": 128,
-    "genesis_learning_transfer_planner": 160,
     "genesis_learning_upgrade_planner": 160,
 }
+
+
+def _reasoning_role(prompt: str) -> str:
+    """Return the bounded ROLE marker from the start of a reasoning prompt."""
+    for line in prompt.splitlines()[:8]:
+        if line.startswith("ROLE:"):
+            return line.split(":", 1)[1].strip()
+    return ""
 
 
 def _reasoning_token_budget(prompt: str) -> int | None:
@@ -22,12 +30,55 @@ def _reasoning_token_budget(prompt: str) -> int | None:
     This prevents short JSON learning decisions from consuming a full coding
     generation budget on CPU-backed local models.
     """
-    for line in prompt.splitlines()[:8]:
-        if not line.startswith("ROLE:"):
-            continue
-        role = line.split(":", 1)[1].strip()
-        return LOCAL_REASONING_ROLE_TOKEN_BUDGETS.get(role)
-    return None
+    return LOCAL_REASONING_ROLE_TOKEN_BUDGETS.get(_reasoning_role(prompt))
+
+
+def _deterministic_learning_transfer(prompt: str) -> str | None:
+    """Route a verified lesson without asking the language model to map it.
+
+    `PulseEvolutionLearningEngine` already ranks same-domain executable targets
+    before it emits this prompt and independently verifies target evidence after
+    the response. Selecting the first supplied target therefore removes an
+    unnecessary model gate while preserving the existing grounding checks. If
+    that deterministic target is not grounded, the caller's validated fallback
+    creates a new learned capability instead.
+    """
+    if _reasoning_role(prompt) != "genesis_learning_transfer_planner":
+        return None
+
+    target_match = re.search(r"(?m)^TARGET ([^:\n]+):\s*$", prompt)
+    lesson_match = re.search(r"(?m)^VERIFIED_TRANSFERABLE_LESSON:\s*(.+)$", prompt)
+    if not target_match:
+        return json.dumps(
+            {
+                "decision": "skip",
+                "target_path": "",
+                "summary": "",
+                "acceptance": "",
+                "confidence": 0.0,
+                "reason": "no_ranked_genesis_target",
+            },
+            sort_keys=True,
+        )
+
+    target = target_match.group(1).strip()
+    lesson = lesson_match.group(1).strip() if lesson_match else "verified transferable lesson"
+    return json.dumps(
+        {
+            "decision": "upgrade",
+            "target_path": target,
+            "summary": (
+                f"Apply the verified transferable lesson to the ranked Genesis target {target}: {lesson}"
+            )[:1200],
+            "acceptance": (
+                "The target measurably applies the verified lesson, keeps existing safeguards intact, "
+                "and the full repository test suite passes."
+            ),
+            "confidence": 0.8,
+            "reason": "deterministic_ranked_target",
+        },
+        sort_keys=True,
+    )
 
 
 class IntelligenceProvider(Protocol):
@@ -116,6 +167,10 @@ class GenesisHTTPProvider:
             return False
 
     def reason(self, prompt: str) -> str:
+        deterministic = _deterministic_learning_transfer(prompt)
+        if deterministic is not None:
+            return deterministic
+
         request_payload: dict[str, object] = {"prompt": prompt}
         token_budget = _reasoning_token_budget(prompt)
         if token_budget is not None:

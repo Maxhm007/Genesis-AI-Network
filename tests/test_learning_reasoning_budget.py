@@ -7,7 +7,7 @@ import genesis.providers as providers
 
 def test_learning_roles_get_small_output_budgets() -> None:
     assert providers._reasoning_token_budget("ROLE: genesis_research_comprehension\nX") == 128
-    assert providers._reasoning_token_budget("ROLE: genesis_learning_transfer_planner\nX") == 160
+    assert providers._reasoning_token_budget("ROLE: genesis_learning_transfer_planner\nX") is None
     assert providers._reasoning_token_budget("ROLE: genesis_learning_upgrade_planner\nX") == 160
 
 
@@ -16,7 +16,28 @@ def test_non_learning_roles_keep_provider_default_budget() -> None:
     assert providers._reasoning_token_budget("OBJECTIVE: no role\nX") is None
 
 
-def test_http_provider_sends_budget_only_for_learning_roles(monkeypatch) -> None:
+def test_deterministic_transfer_uses_first_ranked_target() -> None:
+    prompt = (
+        "ROLE: genesis_learning_transfer_planner\n"
+        "VERIFIED_CAPABILITY_DOMAINS: agent_reasoning\n"
+        "VERIFIED_TRANSFERABLE_LESSON: Agents improve when tool arguments are grounded in context.\n"
+        "VERIFIED_TOPICS: agent, tool use, grounding\n"
+        "GENESIS_TARGETS:\n"
+        "TARGET genesis/first.py:\n"
+        "def first():\n    return True\n\n"
+        "TARGET genesis/second.py:\n"
+        "def second():\n    return True\n"
+    )
+
+    payload = json.loads(providers._deterministic_learning_transfer(prompt) or "{}")
+
+    assert payload["decision"] == "upgrade"
+    assert payload["target_path"] == "genesis/first.py"
+    assert payload["reason"] == "deterministic_ranked_target"
+    assert "tool arguments are grounded" in payload["summary"]
+
+
+def test_http_provider_skips_model_for_transfer_role(monkeypatch) -> None:
     captured: list[dict] = []
 
     class _Response:
@@ -38,9 +59,18 @@ def test_http_provider_sends_budget_only_for_learning_roles(monkeypatch) -> None
     monkeypatch.setattr(providers.urllib.request, "urlopen", fake_urlopen)
     provider = providers.GenesisHTTPProvider("http://127.0.0.1:8766", timeout=60)
 
+    transfer = provider.reason(
+        "ROLE: genesis_learning_transfer_planner\n"
+        "VERIFIED_TRANSFERABLE_LESSON: Ground tool arguments from context.\n"
+        "GENESIS_TARGETS:\nTARGET genesis/tooling.py:\ndef route():\n    return True\n"
+    )
     provider.reason("ROLE: genesis_research_comprehension\nReturn JSON")
     provider.reason("ROLE: engineer\nReturn JSON")
 
+    transfer_payload = json.loads(transfer)
+    assert transfer_payload["decision"] == "upgrade"
+    assert transfer_payload["target_path"] == "genesis/tooling.py"
+    assert len(captured) == 2
     assert captured[0]["max_new_tokens"] == 128
     assert captured[0]["prompt"].startswith("ROLE: genesis_research_comprehension")
     assert "max_new_tokens" not in captured[1]
