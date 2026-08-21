@@ -10,6 +10,7 @@ def test_autonomy_heartbeat_restarts_idle_pipeline_without_duplicate_work() -> N
     assert '".github/workflows/autonomy-heartbeat.yml"' in workflow
     assert "group: genesis-autonomy-heartbeat" in workflow
     assert "cancel-in-progress: false" in workflow
+    assert "GH_REPO: ${{ github.repository }}" in workflow
 
     assert "for workflow in gene-pulse.yml file-self-review.yml manual-self-repair.yml" in workflow
     assert "for status in queued in_progress" in workflow
