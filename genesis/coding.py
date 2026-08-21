@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import ast
 import json
 from dataclasses import dataclass
 from pathlib import Path
@@ -224,6 +225,15 @@ class CodingModule:
             raise ValueError("coding proposal exceeds byte limit")
         if not all(isinstance(content, str) for content in files.values()):
             raise ValueError("coding proposal contents must be text")
+        for path, content in files.items():
+            if str(path).endswith(".py"):
+                try:
+                    ast.parse(content, filename=str(path))
+                except SyntaxError as exc:
+                    location = f"{exc.lineno}:{exc.offset}" if exc.lineno else "unknown"
+                    raise ValueError(
+                        f"coding proposal creates invalid Python syntax in {path} at {location}: {exc.msg}"
+                    ) from exc
         return CodingProposal(
             title=str(proposal.get("title", "Genesis bounded coding candidate"))[:200],
             rationale=str(proposal.get("rationale", "one bounded repository edit"))[:4000],
