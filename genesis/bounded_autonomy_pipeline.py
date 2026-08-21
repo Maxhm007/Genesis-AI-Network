@@ -139,6 +139,10 @@ class SingleAttemptRepairWorker(RepairWorker):
 
     MAX_FEEDBACK_BYTES = 4_000
 
+    @staticmethod
+    def _normalize_path(path: object) -> str:
+        return str(path).replace("\\", "/").lstrip("./")
+
     def run(self, record: PipelineRecord) -> dict:
         task = self.engineering.queue.get(record.task_id)
         if task is None:
@@ -172,13 +176,26 @@ class SingleAttemptRepairWorker(RepairWorker):
 
         candidate = dict(attempt.get("candidate") or {})
         security = dict(attempt.get("candidate_security") or {})
-        if (
+        candidate_ready = bool(
             attempt.get("coding_status") == "candidate_created"
             and candidate.get("committed")
             and candidate.get("commit_sha")
             and candidate.get("branch")
             and security.get("status") == "pass"
-        ):
+        )
+        scope_error = ""
+        if candidate_ready:
+            expected_target = self._normalize_path(record.target_path)
+            changed_files = tuple(self._normalize_path(path) for path in (candidate.get("changed_files") or ()))
+            if len(changed_files) != 1 or changed_files[0] != expected_target:
+                scope_error = (
+                    "repair_scope_violation: autonomous issue repair must change exactly the discovered target "
+                    f"{expected_target}; candidate changed {list(changed_files)}"
+                )
+                attempt["coding_status"] = "candidate_rejected_by_scope"
+                attempt["error"] = scope_error
+
+        if candidate_ready and not scope_error:
             candidate_sha = str(candidate["commit_sha"])
             branch = str(candidate["branch"])
             review_ref = f"genesis/review-{candidate_sha[:12]}"
@@ -209,6 +226,13 @@ class SingleAttemptRepairWorker(RepairWorker):
             or "repair_failed"
         )[-self.MAX_FEEDBACK_BYTES :]
         current = self.engineering.queue.get(record.task_id)
+        if current and current.state == "review":
+            try:
+                current = self.engineering.queue.transition(
+                    current.task_id, "running", module_id="genesis.coding"
+                )
+            except Exception:
+                current = self.engineering.queue.get(record.task_id)
         if current and current.state not in {"failed", "quarantined", "complete"}:
             try:
                 current = self.engineering.queue.record_failure(
