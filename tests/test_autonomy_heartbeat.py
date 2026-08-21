@@ -17,12 +17,16 @@ def test_autonomy_heartbeat_restarts_idle_pipeline_without_duplicate_work() -> N
     assert "freshness_seconds=7200" in workflow
     assert "age <= freshness_seconds" in workflow
     assert "/force-cancel" in workflow
+    assert 'if [[ "$workflow" == "gene-pulse.yml" ]]' not in workflow
+    assert 'if [[ "$run_status" == "in_progress" ]]' in workflow
+    assert "stale_in_progress" in workflow
+    assert "stale_cancel_failures" in workflow
 
     assert "if: steps.gate.outputs.busy == 'false'" in workflow
     assert "gh workflow run gene-pulse.yml" in workflow
     assert "-f continue_chain=true" in workflow
     assert "duplicate Gene Pulse was skipped" in workflow
-    assert "Stale runs ignored" in workflow
+    assert "Stale in-progress runs" in workflow
 
 
 def test_gene_pulse_remains_bounded_and_self_chaining() -> None:
