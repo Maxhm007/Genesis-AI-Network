@@ -8,6 +8,7 @@ from pathlib import Path
 
 from .application import ApplicationModule
 from .coding import CodingModule
+from .deterministic_capability_builder import DeterministicLearnedCapabilityProvider
 from .efficiency import EfficiencyTracker
 from .intelligence_router import IntelligenceRouter
 from .modules.task_queue import PersistentTaskQueue
@@ -226,19 +227,27 @@ class AutonomousEngineeringLoop:
             "candidate": None,
             "candidate_security": None,
             "provider_policy": "qwen_excluded_from_coding",
+            "coding_strategy": None,
         }
         try:
             if task.state != "assigned":
                 self.queue.transition(task.task_id, "assigned", module_id=owner_module)
             context_paths = self._context_paths_for_task(task)
             attempt["context_paths"] = context_paths
-            provider = self._coding_provider()
+            provider = DeterministicLearnedCapabilityProvider.for_task(self.root, task, self.coding)
+            if provider is None:
+                provider = self._coding_provider()
             if provider is None:
                 self.queue.pause(task.task_id, "waiting_for_non_qwen_coding_provider")
                 attempt["coding_status"] = "waiting_for_coding_provider"
                 attempt["error"] = "no_non_qwen_coding_provider_available"
                 return attempt
 
+            attempt["coding_strategy"] = (
+                "deterministic_learned_capability"
+                if provider.name == DeterministicLearnedCapabilityProvider.name
+                else "external_non_qwen_provider"
+            )
             self.queue.transition(task.task_id, "running", module_id=owner_module)
             provider_name = provider.name
             objective = task.objective
