@@ -32,3 +32,11 @@ from .provider_fallback import install_provider_fallback as _install_provider_fa
 
 _install_provider_fallback()
 del _install_provider_fallback
+
+# Git review refs are durable evidence even if an ephemeral Actions runtime cache
+# is lost. Reconstruct only strict Genesis-owned orphaned review work, then resume
+# the existing tests, internal review, independent validation, and promotion gates.
+from .review_recovery import install_orphan_review_recovery as _install_orphan_review_recovery
+
+_install_orphan_review_recovery()
+del _install_orphan_review_recovery
