@@ -10,6 +10,7 @@ from .types import ModuleManifest, ModuleProposal
 PROTECTED_MODULES = {
     "genesis.identity",
     "genesis.validation",
+    "genesis.merge",
 }
 
 SAFE_ACTIONS = {"add", "modify", "split", "merge", "replace", "retire", "reactivate"}
