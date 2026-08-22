@@ -9,6 +9,9 @@ from genesis.goal_directed_pipeline import GoalDirectedPipelineCoordinator
 class _Record:
     task_id: str
     stage: str
+    candidate_sha: str | None = None
+    review_ref: str | None = None
+    updated_at: str = ""
 
 
 class _Store:
@@ -64,6 +67,36 @@ def test_preferred_goal_task_controls_next_bounded_worker():
     assert result["action"] == "pipeline_repair_completed"
     assert coordinator.repair.seen == ["repair-a"]
     assert coordinator.review.seen == []
+
+
+def test_existing_durable_review_preempts_unrelated_preferred_goal():
+    durable = _Record(
+        "durable-review",
+        "review_ready",
+        candidate_sha="a" * 40,
+        review_ref="genesis/review-aaaaaaaaaaaa",
+        updated_at="2026-08-22T00:00:00+00:00",
+    )
+    coordinator = _coordinator(
+        [
+            _Record("repair-a", "needs_repair"),
+            durable,
+        ]
+    )
+
+    result = coordinator.run_once(preferred_task_id="repair-a")
+
+    assert result["handled"] is True
+    assert result["action"] == "pipeline_internal_review_approved"
+    assert result["goal_directed"] is False
+    assert result["preferred_task_id"] == "repair-a"
+    assert result["durable_review_resumed"] == {
+        "task_id": "durable-review",
+        "candidate_sha": "a" * 40,
+        "review_ref": "genesis/review-aaaaaaaaaaaa",
+    }
+    assert coordinator.review.seen == ["durable-review"]
+    assert coordinator.repair.seen == []
 
 
 def test_recovered_review_preempts_unrelated_preferred_goal():
