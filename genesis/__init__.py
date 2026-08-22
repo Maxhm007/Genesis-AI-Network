@@ -9,3 +9,10 @@ from .capability_routing import install_new_capability_routing as _install_new_c
 
 _install_new_capability_routing()
 del _install_new_capability_routing
+
+# Translate validated benchmark deficits into capability-growth work and require
+# post-promotion benchmark evidence before counting an improvement.
+from .capability_evolution import install_capability_evolution_controller as _install_capability_evolution_controller
+
+_install_capability_evolution_controller()
+del _install_capability_evolution_controller
