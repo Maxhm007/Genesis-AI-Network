@@ -9,7 +9,8 @@ from pathlib import Path
 
 from genesis.agentic import AgenticPulseController
 from genesis.autonomous_engineering import AutonomousEngineeringLoop
-from genesis.bounded_autonomy_pipeline import BoundedAutonomyPipelineCoordinator
+from genesis.goal_directed_pipeline import GoalDirectedPipelineCoordinator
+from genesis.goal_orchestrator import GoalOrchestrator
 from genesis.issue_discovery import GenesisIssueDiscoveryEngine
 from genesis.proactive import ProactiveDevelopmentLoop
 from genesis.self_learning import SelfLearningEngine
@@ -95,10 +96,21 @@ def _legacy_task_coding_ready(engineering: AutonomousEngineeringLoop, task) -> b
     return bool(engineering._context_paths_for_task(task))
 
 
-def _finalize_agentic(controller: AgenticPulseController, planned_step, result: dict) -> dict:
+def _finalize_agentic(
+    controller: AgenticPulseController,
+    planned_step,
+    goals: GoalOrchestrator,
+    orchestration: dict,
+    result: dict,
+) -> dict:
+    goal_observation = goals.observe(result)
     agentic = controller.observe(result)
     agentic["planned_step"] = dict(planned_step.__dict__)
     result["agentic"] = agentic
+    result["goal_orchestration"] = {
+        "before": orchestration,
+        "after": goal_observation,
+    }
     return result
 
 
@@ -162,15 +174,23 @@ def run_step(logical_id: str) -> dict:
     GenesisIssueDiscoveryEngine.MAX_TEST_BYTES = PULSE_DISCOVERY_TEST_BYTES
 
     engineering = AutonomousEngineeringLoop(ROOT)
-    pipeline = BoundedAutonomyPipelineCoordinator(ROOT, engineering)
+    pipeline = GoalDirectedPipelineCoordinator(ROOT, engineering)
+    goals = GoalOrchestrator(ROOT, logical_id)
+    orchestration = goals.sync(pipeline)
+    selected = dict(orchestration.get("selected") or {})
+    selected_goal = dict(selected.get("goal") or {})
+    preferred_task_id = selected_goal.get("task_id")
+
     agentic = AgenticPulseController(ROOT, logical_id)
     planned_step = agentic.plan(pipeline)
-    pipeline_result = pipeline.run_once()
+    pipeline_result = pipeline.run_once(preferred_task_id=str(preferred_task_id) if preferred_task_id else None)
 
     if pipeline_result.get("handled"):
         return _finalize_agentic(
             agentic,
             planned_step,
+            goals,
+            orchestration,
             {
                 "decision": _pipeline_decision(pipeline_result),
                 "action": pipeline_result.get("action", "pipeline_unknown"),
@@ -189,7 +209,7 @@ def run_step(logical_id: str) -> dict:
             if _legacy_task_coding_ready(engineering, task):
                 result = _run_legacy_task(logical_id, engineering, rule, decision)
                 result["pipeline_discovery"] = pipeline_result.get("discovery")
-                return _finalize_agentic(agentic, planned_step, result)
+                return _finalize_agentic(agentic, planned_step, goals, orchestration, result)
             legacy_skipped = {
                 "task_id": task.task_id if task else decision.task_id,
                 "module_id": task.module_id if task else None,
@@ -230,7 +250,7 @@ def run_step(logical_id: str) -> dict:
                 "reason": "non_coding_legacy_task_not_executable_by_gene_pulse",
             }
     result["next_decision"] = next_decision
-    return _finalize_agentic(agentic, planned_step, result)
+    return _finalize_agentic(agentic, planned_step, goals, orchestration, result)
 
 
 def main() -> int:
