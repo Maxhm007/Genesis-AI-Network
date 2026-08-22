@@ -11,6 +11,7 @@ MAX_ALLOWED_NEW_TOKENS = 768
 MAX_PROVIDER_PROMPT_CHARS = 14_000
 ROLE_MAX_NEW_TOKENS = {
     "genesis_internal_code_reviewer": 128,
+    "bounded_coding_engineer": 256,
 }
 
 
