@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+from collections import Counter
 from email.message import EmailMessage
 import json
 import os
@@ -11,14 +12,17 @@ import ssl
 import urllib.error
 import urllib.request
 
+from genesis.capability_evolution import CapabilityEvolutionController
 from genesis.operations import GenesisOperations
 from genesis.scorecard import GenesisScorecard
 from genesis.modules.task_queue import PersistentTaskQueue
+from genesis.self_evaluation import GenesisSelfEvaluation
 from genesis.task_lifecycle import TaskLifecycleReconciler
 
 
 ROOT = Path(__file__).resolve().parents[1]
 RUNTIME = ROOT / "runtime"
+ACTIVE_GROWTH_STATES = {"new", "assigned", "running", "paused", "blocked", "review", "failed"}
 
 
 def _load_json(path: Path, default):
@@ -26,6 +30,116 @@ def _load_json(path: Path, default):
         return json.loads(path.read_text(encoding="utf-8"))
     except Exception:
         return default
+
+
+def _task_gap(task) -> dict:
+    payload = dict(getattr(task, "payload", {}) or {})
+    direct = payload.get("benchmark_gap")
+    if isinstance(direct, dict):
+        return dict(direct)
+    discovery = payload.get("discovery")
+    if isinstance(discovery, dict):
+        finding = discovery.get("finding")
+        if isinstance(finding, dict) and isinstance(finding.get("benchmark_gap"), dict):
+            return dict(finding["benchmark_gap"])
+    return {}
+
+
+def _is_new_capability_task(task) -> bool:
+    payload = dict(getattr(task, "payload", {}) or {})
+    if bool(payload.get("new_capability")):
+        return True
+    discovery = payload.get("discovery")
+    if isinstance(discovery, dict):
+        finding = discovery.get("finding")
+        if isinstance(finding, dict) and bool(finding.get("new_capability")):
+            return True
+    finding = payload.get("finding")
+    return isinstance(finding, dict) and bool(finding.get("new_capability"))
+
+
+def capability_evolution_snapshot(queue: PersistentTaskQueue | None = None) -> dict:
+    """Return dashboard-safe evidence for benchmark-driven capability evolution.
+
+    A missing benchmark is reported as an evidence gap. Only a validated
+    below-reference result is reported as a measured capability deficit. This
+    function is read-only: it never creates work or changes score.
+    """
+    queue = queue or PersistentTaskQueue(RUNTIME / "genesis_tasks.sqlite3")
+    controller = CapabilityEvolutionController(ROOT, queue=queue)
+    gaps = controller.benchmark_gaps()
+    quarantine = controller.quarantine_analysis()
+    impacts = controller.impact_assessments(gaps)
+    tasks = queue.list(limit=5000)
+
+    growth = [task for task in tasks if task.payload.get("task_type") == "capability_growth"]
+    measurements = [task for task in tasks if task.payload.get("task_type") == "frontier_benchmark_measurement"]
+    new_capability = [task for task in tasks if _is_new_capability_task(task)]
+
+    growth_states = Counter(task.state for task in growth)
+    measurement_states = Counter(task.state for task in measurements)
+    impact_states = Counter(str(item.get("status") or "unknown") for item in impacts)
+
+    active_growth = []
+    for task in growth:
+        if task.state not in ACTIVE_GROWTH_STATES:
+            continue
+        gap = _task_gap(task)
+        active_growth.append({
+            "task_id": task.task_id,
+            "state": task.state,
+            "benchmark_id": gap.get("benchmark_id"),
+            "capability_key": task.payload.get("capability_key") or gap.get("capability_key"),
+            "generation": task.payload.get("capability_generation") or task.payload.get("work_generation") or 1,
+            "target_path": task.payload.get("target_path") or gap.get("target_path"),
+            "last_error": task.last_error,
+        })
+    active_growth.sort(key=lambda item: (str(item.get("benchmark_id") or ""), str(item.get("task_id") or "")))
+
+    new_capability_rows = []
+    for task in new_capability:
+        gap = _task_gap(task)
+        new_capability_rows.append({
+            "task_id": task.task_id,
+            "state": task.state,
+            "capability_key": task.payload.get("capability_key") or gap.get("capability_key"),
+            "target_path": task.payload.get("target_path") or gap.get("target_path") or "genesis/learned_capabilities.py",
+        })
+
+    return {
+        "status": "ok",
+        "benchmark_total": len(gaps),
+        "measured": sum(1 for gap in gaps if gap.get("status") != "unmeasured"),
+        "measured_below_reference": sum(1 for gap in gaps if gap.get("status") == "measured_below_reference"),
+        "unmeasured": sum(1 for gap in gaps if gap.get("status") == "unmeasured"),
+        "at_or_above_reference": sum(1 for gap in gaps if gap.get("status") == "at_or_above_reference"),
+        "gaps": gaps,
+        "growth_states": dict(growth_states),
+        "growth_active": len(active_growth),
+        "active_growth_tasks": active_growth,
+        "measurement_states": dict(measurement_states),
+        "new_capability_tasks": len(new_capability_rows),
+        "new_capability_rows": new_capability_rows[:10],
+        "quarantine_analysis": quarantine,
+        "impact_counts": dict(impact_states),
+        "impact_assessments": impacts,
+    }
+
+
+def development_attribution_snapshot() -> dict:
+    try:
+        report = GenesisSelfEvaluation(ROOT).report(limit=10)
+        attribution = dict(report.get("development_attribution") or {})
+        return {
+            "status": "ok",
+            "genesis_autonomous": int(attribution.get("genesis_autonomous", 0) or 0),
+            "assisted": int(attribution.get("assisted", 0) or 0),
+            "owner": int(attribution.get("owner", 0) or 0),
+            "total_proven_cycles": int(attribution.get("total_proven_cycles", 0) or 0),
+            "recent_autonomous_improvements": report.get("recent_autonomous_improvements", []),
+        }
+    except Exception as exc:
+        return {"status": "unavailable", "error": f"{type(exc).__name__}: {exc}"[:1000]}
 
 
 def collect() -> dict:
@@ -38,7 +152,18 @@ def collect() -> dict:
     operations = GenesisOperations(ROOT)
     detected = operations.detect(scorecard)
     result = operations.persist_and_queue(detected)
-    output = {"scorecard": scorecard, "task_lifecycle": lifecycle, **result}
+    try:
+        capability = capability_evolution_snapshot()
+    except Exception as exc:
+        capability = {"status": "unavailable", "error": f"{type(exc).__name__}: {exc}"[:1000]}
+    attribution = development_attribution_snapshot()
+    output = {
+        "scorecard": scorecard,
+        "task_lifecycle": lifecycle,
+        "capability_evolution": capability,
+        "development_attribution": attribution,
+        **result,
+    }
     (RUNTIME / "hourly_operations.json").write_text(json.dumps(output, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return output
 
@@ -75,14 +200,7 @@ def _body_field(body: str, label: str, default: str = "") -> str:
 
 
 def _recover_resolved_github_history(existing_github_issues: list[dict], operations_report: dict) -> int:
-    """Recover lost resolved tombstones from the durable GitHub issue mirror.
-
-    Older runtime caches did not retain resolved rows. GitHub operational issues are
-    durable external evidence, so a closed/resolved issue can safely seed a missing
-    resolved tombstone. A title already present in the current ledger is never
-    imported, preventing superseded key migrations from being counted as a second
-    solution.
-    """
+    """Recover lost resolved tombstones from the durable GitHub issue mirror."""
     operations = GenesisOperations(ROOT)
     ledger: dict[str, dict] = {}
     if operations.ledger_path.exists():
@@ -194,7 +312,7 @@ def sync_github_issues(operations_report: dict) -> dict:
             f"- **Last seen:** {item.get('last_seen_at', '')}\n"
             f"- **Work generation:** {item.get('work_generation', 0)}\n\n"
             f"### Gene issue history\n{history_lines}\n\n"
-            "Gene 0 keeps this issue active until the measured condition disappears. New repair work is generated when previous work ends but the issue remains. Repairs still use the bounded task → candidate → test → Security → validator path."
+            "Gene 0 keeps this issue active until the measured condition disappears. New work is generated when previous work ends but the issue remains. Repairs and development still use bounded candidate → test → Security → independent validator → promotion gates."
         )
         current = by_key.get(key)
         desired_state = "closed" if item.get("status") == "resolved" else "open"
@@ -215,30 +333,107 @@ def sync_github_issues(operations_report: dict) -> dict:
     return result
 
 
+def format_capability_evolution_lines(snapshot: dict) -> list[str]:
+    if snapshot.get("status") != "ok":
+        return ["CAPABILITY EVOLUTION", f"- Unavailable: {snapshot.get('error', 'unknown error')}"]
+
+    lines = ["CAPABILITY EVOLUTION", "Benchmark gaps and evidence:"]
+    for gap in snapshot.get("gaps", []):
+        actual = "unmeasured" if gap.get("actual_score") is None else str(gap.get("actual_score"))
+        lines.append(
+            f"- [GAP:{str(gap.get('status','unknown')).upper()}] {gap.get('benchmark_id')} | "
+            f"family={gap.get('family')} | actual={actual} | reference={gap.get('reference_score')} {gap.get('unit')} | "
+            f"capability={gap.get('capability_key')} | target={gap.get('target_path')}"
+        )
+
+    lines += ["", "Active capability growth:"]
+    active = snapshot.get("active_growth_tasks", [])
+    if active:
+        for task in active[:12]:
+            lines.append(
+                f"- [GROWTH:{str(task.get('state','unknown')).upper()}] {task.get('task_id')} | "
+                f"benchmark={task.get('benchmark_id')} | capability={task.get('capability_key')} | "
+                f"generation={task.get('generation')} | target={task.get('target_path')}"
+            )
+    else:
+        lines.append("- None. Measured deficits are required before capability-growth code is created.")
+
+    lines += ["", "New learned capability work:"]
+    learned = snapshot.get("new_capability_rows", [])
+    if learned:
+        for task in learned[:8]:
+            lines.append(
+                f"- [NEW-CAPABILITY:{str(task.get('state','unknown')).upper()}] {task.get('task_id')} | "
+                f"capability={task.get('capability_key')} | target={task.get('target_path')}"
+            )
+    else:
+        lines.append("- No active or historical new-capability task detected in the current queue snapshot.")
+
+    lines += ["", "Strategy changes from quarantine learning:"]
+    directives = (snapshot.get("quarantine_analysis") or {}).get("strategy_directives", [])
+    if directives:
+        for directive in directives[:4]:
+            lines.append(f"- Strategy change: {directive}")
+    else:
+        lines.append("- No repeated failure pattern currently requires a forced strategy change.")
+
+    lines += ["", "Post-promotion benchmark impact:"]
+    impacts = snapshot.get("impact_assessments", [])
+    if impacts:
+        for item in impacts[:10]:
+            lines.append(
+                f"- [IMPACT:{str(item.get('status','unknown')).upper()}] {item.get('benchmark_id')} | "
+                f"capability={item.get('capability_key')} | baseline={item.get('baseline_score')} | "
+                f"current={item.get('current_score')} | delta={item.get('delta')} | growth_task={item.get('growth_task_id')}"
+            )
+    else:
+        lines.append("- No completed capability-growth task is awaiting or reporting post-promotion impact yet.")
+    return lines
+
+
 def render_email() -> tuple[str, str]:
     scorecard = _load_json(RUNTIME / "system_scorecard.json", {})
     operations = GenesisOperations(ROOT)
     ops = operations.report()
     queue = PersistentTaskQueue(RUNTIME / "genesis_tasks.sqlite3")
-    states = {state: len(queue.list(state=state, limit=1000)) for state in ("new", "assigned", "running", "blocked", "review", "complete", "failed", "quarantined")}
+    states = {state: len(queue.list(state=state, limit=1000)) for state in ("new", "assigned", "running", "paused", "blocked", "review", "complete", "failed", "quarantined")}
     ai = scorecard.get("ai_capability_score", {})
     eff = scorecard.get("efficiency_score", {})
     mission = scorecard.get("immortality_research_progress_score", {})
+    try:
+        capability = capability_evolution_snapshot(queue)
+    except Exception as exc:
+        capability = {"status": "unavailable", "error": f"{type(exc).__name__}: {exc}"[:1000]}
+    attribution = development_attribution_snapshot()
 
     open_items = [x for x in ops.get("issues", []) if x.get("status") in {"open", "blocked"}]
     resolved_items = [x for x in ops.get("issues", []) if x.get("status") == "resolved"]
-    subject = f"Genesis Hourly Update — AI {ai.get('score', 'Unmeasured')} | Open {len(open_items)} | Blocked {ops.get('blocked', 0)}"
+    subject = (
+        f"Genesis Hourly Update — AI {ai.get('score', 'Unmeasured')} | "
+        f"Gaps {capability.get('measured_below_reference', 0)}/{capability.get('unmeasured', 0)} | "
+        f"Open {len(open_items)}"
+    )
 
+    impact_counts = capability.get("impact_counts", {}) if capability.get("status") == "ok" else {}
+    quarantine = capability.get("quarantine_analysis", {}) if capability.get("status") == "ok" else {}
+    growth_states = capability.get("growth_states", {}) if capability.get("status") == "ok" else {}
     lines = [
         "Genesis Hourly Operations Report", "Generated and sent by Gene 0 from GitHub Actions.", "",
         "KPI DASHBOARD",
         f"AI Capability: {ai.get('score', 'Unmeasured')}/{ai.get('max_score', 100)}",
         f"Efficiency: {eff.get('score', 'Unmeasured')}/{eff.get('max_score', 100)} | samples={eff.get('samples', 0)} | capability/compute={eff.get('capability_per_compute', 0)}",
         f"Immortality Research Progress: {mission.get('score', 'Unmeasured')}/{mission.get('max_score', 100)} (evidence-pipeline maturity, not percent immortality achieved)",
+        f"Benchmark coverage: measured={capability.get('measured', 0)}/{capability.get('benchmark_total', 0)} | below_reference={capability.get('measured_below_reference', 0)} | unmeasured={capability.get('unmeasured', 0)} | at_or_above={capability.get('at_or_above_reference', 0)}",
+        f"Capability growth: active={capability.get('growth_active', 0)} | complete={growth_states.get('complete', 0)} | quarantined={growth_states.get('quarantined', 0)} | new_capability_tasks={capability.get('new_capability_tasks', 0)}",
+        f"Post-promotion impact: improved={impact_counts.get('improved', 0)} | no_gain={impact_counts.get('no_measured_gain', 0)} | regressed={impact_counts.get('regressed', 0)} | awaiting={impact_counts.get('awaiting_post_promotion_measurement', 0)}",
+        f"Strategy-change directives: {len(quarantine.get('strategy_directives', []))} | quarantined_total={quarantine.get('quarantined_tasks', states.get('quarantined', 0))}",
+        f"Development attribution: autonomous={attribution.get('genesis_autonomous', 0)} | assisted={attribution.get('assisted', 0)} | owner={attribution.get('owner', 0)} | proven_cycles={attribution.get('total_proven_cycles', 0)}",
         f"Persistent tasks: {json.dumps(states, sort_keys=True)}",
         f"Issue history events: {ops.get('history_events', 0)}", "",
-        f"ISSUES: open={ops.get('open', 0)} blocked={ops.get('blocked', 0)} resolved={ops.get('resolved', 0)}",
     ]
+
+    lines.extend(format_capability_evolution_lines(capability))
+    lines += ["", f"ISSUES: open={ops.get('open', 0)} blocked={ops.get('blocked', 0)} resolved={ops.get('resolved', 0)}"]
     if open_items:
         for item in open_items:
             lines.append(f"- [{item.get('severity','?').upper()}] {item.get('title')} | {item.get('status')} | module={item.get('module_id')} | work_generation={item.get('work_generation', 0)}")
@@ -256,8 +451,8 @@ def render_email() -> tuple[str, str]:
     if not resolved_items:
         lines.append("- None recorded yet.")
 
-    lines += ["", "AUTONOMOUS ISSUE POLICY",
-        "Gene 0 owns the issue lifecycle. Every detection, observation, repair task, reopen and resolution is kept in append-only history. If a repair task ends but the measured issue remains, Gene creates the next work generation instead of forgetting the issue. No repair may bypass tests, Security review, independent validation, protected files, signing boundaries, or owner-only secrets."]
+    lines += ["", "AUTONOMOUS EVIDENCE POLICY",
+        "Gene 0 keeps issue and capability work durable across generations. Unmeasured benchmarks are evidence gaps, not proof of weakness. Capability-growth work requires a validated below-reference measurement. A promoted candidate does not count as capability improvement until the same benchmark is measured again. No work may bypass tests, Security review, independent validation, protected files, signing boundaries, or owner-only secrets."]
     return subject, "\n".join(lines) + "\n"
 
 
@@ -284,7 +479,14 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Genesis GitHub-native hourly operations")
     parser.add_argument("action", choices=("collect", "sync-issues", "email", "all")); args = parser.parse_args()
     if args.action in {"collect", "all"}:
-        report = collect(); print(json.dumps({"detected": len(report.get("issues", [])), "created_tasks": report.get("created_tasks", []), "history_events": report.get("history_events", 0), "task_lifecycle": report.get("task_lifecycle", {})}, sort_keys=True))
+        report = collect(); print(json.dumps({
+            "detected": len(report.get("issues", [])),
+            "created_tasks": report.get("created_tasks", []),
+            "history_events": report.get("history_events", 0),
+            "task_lifecycle": report.get("task_lifecycle", {}),
+            "capability_evolution": report.get("capability_evolution", {}),
+            "development_attribution": report.get("development_attribution", {}),
+        }, sort_keys=True))
     if args.action in {"sync-issues", "all"}:
         print(json.dumps(sync_github_issues(GenesisOperations(ROOT).report()), sort_keys=True))
     if args.action in {"email", "all"}:
