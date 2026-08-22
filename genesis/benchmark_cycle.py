@@ -8,8 +8,17 @@ from .benchmark_execution import BenchmarkExecutionPlanner
 from .modules.task_queue import PersistentTaskQueue
 
 
+_STATE_PRIORITY = {
+    "assigned": 0,
+    "new": 1,
+    "blocked": 2,
+    "failed": 3,
+    "paused": 4,
+}
+
+
 def candidate_tasks(queue: PersistentTaskQueue):
-    return [
+    candidates = [
         task
         for task in queue.list(limit=200)
         if task.module_id == "genesis.evaluation"
@@ -19,6 +28,8 @@ def candidate_tasks(queue: PersistentTaskQueue):
             or (task.state == "failed" and queue.retryable(task))
         )
     ]
+    candidates.sort(key=lambda task: _STATE_PRIORITY.get(task.state, 99))
+    return candidates
 
 
 def advance_one_benchmark(root: Path) -> dict[str, Any]:
@@ -50,6 +61,12 @@ def advance_one_benchmark(root: Path) -> dict[str, Any]:
         queue.pause(
             task.task_id,
             f"Waiting for benchmark runner task {result['task_id']} generation {result.get('work_generation', 1)} to produce real comparable evidence",
+        )
+    elif result["status"] == "runner_integration_exhausted":
+        queue.pause(
+            task.task_id,
+            "Bounded benchmark runner integration is exhausted. "
+            "Do not create another runner generation until benchmark-specific execution/evidence support changes.",
         )
     elif result["status"] == "external_execution_required":
         missing = ", ".join(result.get("missing", [])) or "external benchmark execution prerequisites"
