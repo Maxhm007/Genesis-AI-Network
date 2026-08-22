@@ -150,31 +150,9 @@ def test_grounded_device_learning_retries_after_pipeline_feedback_without_qwen(t
     assert "runtime_device_selection_f92ab6ae15c7" in captured["proposal"].files["genesis/learned_capabilities.py"]
 
 
-def test_grounded_unknown_template_uses_agentic_qwen_fallback(tmp_path: Path) -> None:
+def test_grounded_unknown_template_waits_without_non_qwen_provider(tmp_path: Path) -> None:
     _write_learned_target(tmp_path)
-    insertion = (
-        "def _learned_agentic_identity(value):\n"
-        "    return value\n\n"
-        "register_capability(\n"
-        "    'agentic_identity',\n"
-        "    'Apply one evidence-backed identity transform.',\n"
-        "    'Verified external evidence for the bounded transform.',\n"
-        "    _learned_agentic_identity,\n"
-        ")\n\n"
-        "# GENESIS_LEARNED_CAPABILITY_INSERTION_POINT"
-    )
-    qwen = TrackingQwenProvider(
-        {
-            "edits": [
-                {
-                    "path": "genesis/learned_capabilities.py",
-                    "start_line": 6,
-                    "end_line": 6,
-                    "new": insertion,
-                }
-            ]
-        }
-    )
+    qwen = TrackingQwenProvider({"edits": []})
     registry = ProviderRegistry(include_bootstrap=False)
     registry.register(qwen)
     loop = AutonomousEngineeringLoop(tmp_path, registry)
@@ -185,23 +163,17 @@ def test_grounded_unknown_template_uses_agentic_qwen_fallback(tmp_path: Path) ->
     )
     loop.queue = queue
 
-    captured = {}
-    _pass_candidate(loop, captured)
-
     attempt = loop._attempt_task(task, tmp_path / "runtime")
 
-    assert qwen.calls == 1
-    assert attempt["coding_status"] == "candidate_created"
-    assert attempt["coding_strategy"] == "agentic_grounded_capability_provider"
-    assert attempt["provider_policy"] == "grounded_agentic_capability_with_qwen_fallback"
+    assert qwen.calls == 0
+    assert attempt["coding_status"] == "waiting_for_coding_provider"
+    assert attempt["error"] == "no_non_qwen_coding_provider_available"
+    assert attempt["provider_policy"] == "grounded_agentic_capability_non_qwen_only"
     assert attempt["capability_scope"] == "append_only_learned_capability"
-    proposal = captured["proposal"]
-    assert proposal.provider == qwen.name
-    assert set(proposal.files) == {"genesis/learned_capabilities.py"}
-    assert "agentic_identity" in proposal.files["genesis/learned_capabilities.py"]
     current = queue.get(task.task_id)
     assert current is not None
-    assert current.state == "review"
+    assert current.state == "paused"
+    assert current.attempt_count == 0
 
 
 def test_ungrounded_new_capability_still_blocks_qwen_invention(tmp_path: Path) -> None:
