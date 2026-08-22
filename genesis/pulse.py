@@ -6,6 +6,9 @@ from pathlib import Path
 from scripts.gene_continuous_work import run_step
 
 
+DEFAULT_IDLE_DISCOVERY_BURST = 4
+
+
 @dataclass(frozen=True)
 class PulseResult:
     logical_id: str
@@ -17,13 +20,46 @@ class PulseResult:
     payload: dict
 
 
+def workflow_chain_decision(
+    *,
+    needs_next_pulse: bool,
+    next_pulse_reason: str,
+    idle_budget: int,
+    default_idle_budget: int = DEFAULT_IDLE_DISCOVERY_BURST,
+) -> tuple[bool, int, str]:
+    """Decide whether GitHub Actions should dispatch another Gene Pulse.
+
+    Executable work keeps chaining and resets the idle-discovery budget. A pulse
+    that checkpointed only because discovery was idle may receive a small bounded
+    burst of extra reassessment pulses. This gives Genesis enough consecutive
+    opportunities to discover/route work without creating an unbounded workflow
+    loop when there is genuinely nothing actionable.
+    """
+    if default_idle_budget < 1:
+        raise ValueError("default idle discovery budget must be positive")
+    if idle_budget < 0:
+        raise ValueError("idle discovery budget cannot be negative")
+
+    if needs_next_pulse:
+        return True, default_idle_budget, "executable_work_continues"
+
+    if next_pulse_reason != "idle_discovery_checkpointed":
+        return False, idle_budget, "checkpoint_preserved"
+
+    if idle_budget <= 1:
+        return False, 0, "idle_discovery_budget_exhausted"
+
+    return True, idle_budget - 1, "bounded_idle_discovery_burst"
+
+
 class GenePulse:
     """Execute one resumable unit of Gene work.
 
     Each pulse performs at most one bounded autonomy-pipeline transition. Queue
     state survives the process; specialist workers do not need to remain alive.
-    Immediate chaining is used only when the next stage has executable work.
-    Validation waits and completed discovery cycles checkpoint instead of spinning.
+    Immediate chaining is used when the next stage has executable work. An outer
+    workflow may also grant a small bounded burst for repeated idle discovery;
+    validation waits and hard checkpoints still stop immediately.
     """
 
     def __init__(self, root: Path, logical_id: str = "gene-node-1") -> None:
