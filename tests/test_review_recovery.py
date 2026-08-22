@@ -107,6 +107,39 @@ def test_orphaned_genesis_capability_review_is_reconstructed(tmp_path: Path) -> 
     assert record.stage == "review_ready"
     assert record.candidate_sha == sha
     assert record.review_ref == f"genesis/review-{sha[:12]}"
+    assert "Normalize one bounded input deterministically" in task.objective
+
+    # Exact SHA/ref deduplication prevents duplicate reconstructed work.
+    assert recover_one_orphan_review(root, coordinator) is None
+
+
+def test_orphan_recovery_is_not_starved_by_unrelated_active_work(tmp_path: Path) -> None:
+    root, sha = _repo(tmp_path)
+    coordinator, queue, store = _coordinator(root)
+
+    unrelated, _ = queue.create_unique(
+        "unrelated-active-work",
+        "Handle an unrelated active task.",
+        module_id="genesis.coding",
+        payload={"source": "genesis.issue_discovery"},
+    )
+    store.register_discovery(
+        unrelated.task_id,
+        "genesis/unrelated.py",
+        {
+            "source": "genesis.issue_discovery",
+            "finding": {"confidence_normalized": 1.0},
+        },
+    )
+
+    recovered = recover_one_orphan_review(root, coordinator)
+
+    assert recovered is not None
+    assert recovered["candidate_sha"] == sha
+    recovered_record = store.get(recovered["task_id"])
+    assert recovered_record is not None
+    assert recovered_record.stage == "review_ready"
+    assert store.get(unrelated.task_id) is not None
 
 
 def test_non_genesis_review_commit_is_not_recovered(tmp_path: Path) -> None:
