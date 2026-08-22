@@ -4,7 +4,7 @@ from pathlib import Path
 import pytest
 
 from scripts import dashboard_v3_patch as v3
-from scripts import render_static_dashboard as static
+from scripts import render_static_sections as sections
 from scripts import validate_dashboard_artifact as artifact
 
 
@@ -45,7 +45,7 @@ def _payload() -> dict:
 
 
 def test_sections_have_static_content_for_every_major_view():
-    rendered = static.sections(_payload())
+    rendered = sections.build_sections(_payload())
     for key in ("focus", "latestActivity", "activity", "gapList", "growthList", "strategyList", "impactList", "targets", "taskStats", "peerGrid", "prs", "autoMainHistory", "autoPromotionHistory", "autoDefinition"):
         assert rendered[key].strip()
     assert "swe_bench_pro" in rendered["gapList"]
@@ -104,6 +104,7 @@ def test_pages_workflow_runs_v3_patch_static_render_and_artifact_validation_in_o
     order = [
         "python scripts/dashboard_navigation_fallback.py",
         "python scripts/dashboard_v3_patch.py",
+        "python scripts/render_static_sections.py",
         "python scripts/render_static_dashboard.py",
         "python scripts/validate_dashboard_js.py",
         "python scripts/validate_dashboard_artifact.py",
