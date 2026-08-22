@@ -9,6 +9,9 @@ DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
 DEFAULT_MAX_NEW_TOKENS = 512
 MAX_ALLOWED_NEW_TOKENS = 768
 MAX_PROVIDER_PROMPT_CHARS = 14_000
+ROLE_MAX_NEW_TOKENS = {
+    "genesis_internal_code_reviewer": 128,
+}
 
 
 def compact_prompt(prompt: str) -> str:
@@ -18,6 +21,15 @@ def compact_prompt(prompt: str) -> str:
     head = MAX_PROVIDER_PROMPT_CHARS // 2
     tail = MAX_PROVIDER_PROMPT_CHARS - head
     return prompt[:head] + "\n[...bounded context elided...]\n" + prompt[-tail:]
+
+
+def role_token_budget(prompt: str) -> int | None:
+    """Return a narrow output cap for roles that only need compact JSON decisions."""
+    for line in prompt.splitlines()[:8]:
+        if line.startswith("ROLE:"):
+            role = line.split(":", 1)[1].strip()
+            return ROLE_MAX_NEW_TOKENS.get(role)
+    return None
 
 
 def balanced_json_object_complete(text: str) -> bool:
@@ -148,6 +160,13 @@ class Handler(BaseHTTPRequestHandler):
             self._json(400, {"error": "prompt required"})
             return
         max_new_tokens = payload.get("max_new_tokens")
+        role_budget = role_token_budget(prompt)
+        if role_budget is not None:
+            try:
+                requested_budget = int(max_new_tokens) if max_new_tokens is not None else role_budget
+            except (TypeError, ValueError):
+                requested_budget = role_budget
+            max_new_tokens = min(requested_budget, role_budget)
         try:
             response = (
                 self.model.reason(prompt, max_new_tokens=max_new_tokens)
