@@ -10,6 +10,8 @@ on:
       - 'scripts/self_evaluation_dashboard.py'
       - 'scripts/autonomy_history_backfill.py'
       - 'scripts/dashboard_live_minute_patch.py'
+      - 'scripts/dashboard_resilience_patch.py'
+      - 'scripts/validate_dashboard_js.py'
       - 'scripts/gene_chat_reply.py'
       - '.github/workflows/gene-chat.yml'
       - '.github/workflows/pages-status.yml'
@@ -50,6 +52,8 @@ jobs:
           python scripts/self_evaluation_dashboard.py
           python scripts/autonomy_history_backfill.py
           python scripts/dashboard_live_minute_patch.py
+          python scripts/dashboard_resilience_patch.py
+          python scripts/validate_dashboard_js.py
       - name: Build Genesis chat snapshot
         env:
           GITHUB_TOKEN: ${{ github.token }}
