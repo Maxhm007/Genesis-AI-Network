@@ -16,3 +16,10 @@ from .capability_evolution import install_capability_evolution_controller as _in
 
 _install_capability_evolution_controller()
 del _install_capability_evolution_controller
+
+# Separate improvement of existing capabilities from new-capability development,
+# and require a dedicated merge boundary before learning closes promoted work.
+from .improvement_merge_routing import install_improvement_merge_submodules as _install_improvement_merge_submodules
+
+_install_improvement_merge_submodules()
+del _install_improvement_merge_submodules
