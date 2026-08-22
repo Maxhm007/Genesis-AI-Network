@@ -18,17 +18,19 @@ def _is_qwen(provider) -> bool:
 
 
 def _select_eligible_coding_provider(self: AutonomousEngineeringLoop):
-    """Choose the best available bounded coding provider, with Qwen as fallback.
+    """Choose the best available bounded non-Qwen coding provider.
 
-    Selection is capability- and evidence-driven: bootstrap is excluded, measured
-    reliability wins first, a non-Qwen provider wins an exact reliability tie,
-    then lower resource cost/name break remaining ties. Qwen may therefore serve
-    as the local bounded implementation provider when it is the best available
-    option. Normal edit limits, tests, Security, review, validation, provenance,
-    and promotion gates still apply.
+    Selection is capability- and evidence-driven: bootstrap and Qwen providers are
+    excluded, measured reliability wins first, then lower resource cost/name break
+    remaining ties. This preserves the core AutonomousEngineeringLoop policy that
+    Qwen is not an autonomous coding/generation provider after repeated bounded
+    timeout failures. Normal edit limits, tests, Security, review, validation,
+    provenance, and promotion gates still apply.
     """
     candidates = []
     for provider in self.providers.available_providers():
+        if _is_qwen(provider):
+            continue
         try:
             profile, _source = self.coding.router._effective_profile(provider)
         except Exception:
@@ -40,7 +42,6 @@ def _select_eligible_coding_provider(self: AutonomousEngineeringLoop):
         candidates.append(
             (
                 -float(profile.reliability),
-                1 if _is_qwen(provider) else 0,
                 float(profile.resource_cost),
                 profile.name,
                 provider,
@@ -48,8 +49,8 @@ def _select_eligible_coding_provider(self: AutonomousEngineeringLoop):
         )
     if not candidates:
         return None
-    candidates.sort(key=lambda item: item[:4])
-    return candidates[0][4]
+    candidates.sort(key=lambda item: item[:3])
+    return candidates[0][3]
 
 
 def _task_payload_and_finding(task) -> tuple[dict, dict]:
@@ -158,14 +159,10 @@ def _install_scoped_capability_guards(self: AutonomousEngineeringLoop, task):
 
 
 def _attempt_task_with_provider_fallback(self: AutonomousEngineeringLoop, task, runtime):
-    """Use the best eligible provider while keeping new capability creation bounded."""
+    """Use the best eligible non-Qwen provider while keeping creation bounded."""
     if not _is_new_capability_task(task):
         result = _ORIGINAL_ATTEMPT_TASK(self, task, runtime)
-        result["provider_policy"] = "eligible_provider_with_qwen_fallback"
-        if result.get("coding_strategy") == "external_non_qwen_provider":
-            result["coding_strategy"] = "eligible_model_provider"
-        if result.get("error") == "no_non_qwen_coding_provider_available":
-            result["error"] = "no_eligible_coding_provider_available"
+        result["provider_policy"] = "qwen_excluded_from_coding"
         return result
 
     if _is_grounded_agentic_capability_task(task):
@@ -174,12 +171,10 @@ def _attempt_task_with_provider_fallback(self: AutonomousEngineeringLoop, task, 
             result = _ORIGINAL_ATTEMPT_TASK(self, task, runtime)
         finally:
             restore()
-        result["provider_policy"] = "grounded_agentic_capability_with_qwen_fallback"
+        result["provider_policy"] = "grounded_agentic_capability_non_qwen_only"
         result["capability_scope"] = "append_only_learned_capability"
         if result.get("coding_strategy") == "external_non_qwen_provider":
             result["coding_strategy"] = "agentic_grounded_capability_provider"
-        if result.get("error") == "no_non_qwen_coding_provider_available":
-            result["error"] = "no_eligible_coding_provider_available"
         return result
 
     # Ungrounded capability invention remains blocked. Genesis may reason about the
