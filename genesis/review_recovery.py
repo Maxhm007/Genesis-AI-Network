@@ -40,9 +40,6 @@ def _review_refs(root: Path) -> list[tuple[str, str]]:
     )
     if fetch.returncode != 0:
         return []
-    # Enumerate the complete genesis namespace and enforce the exact review-ref
-    # shape below. Git ref patterns do not treat a partial final path component as
-    # a simple string prefix on every supported Git version.
     result = _git(
         root,
         "for-each-ref",
@@ -70,7 +67,11 @@ def _changed_files(root: Path, sha: str) -> list[str]:
     result = _git(root, "diff-tree", "--no-commit-id", "--name-only", "-r", f"{sha}^", sha)
     if result.returncode != 0:
         return []
-    return [line.strip().replace("\\", "/").lstrip("./") for line in result.stdout.splitlines() if line.strip()]
+    return [
+        line.strip().replace("\\", "/").lstrip("./")
+        for line in result.stdout.splitlines()
+        if line.strip()
+    ]
 
 
 def _show_file(root: Path, ref: str, path: str) -> str:
@@ -153,8 +154,6 @@ def _candidate_evidence(root: Path, ref: str, sha: str) -> dict | None:
     if not _show_file(root, sha, target):
         return None
 
-    # Do not recover work that is already present on main, including an equivalent
-    # patch rebased by the normal candidate-promotion workflow.
     if _git(root, "fetch", "origin", "main").returncode != 0:
         return None
     ancestor = _git(root, "merge-base", "--is-ancestor", sha, "origin/main")
@@ -204,15 +203,21 @@ def _candidate_evidence(root: Path, ref: str, sha: str) -> dict | None:
 def recover_one_orphan_review(root: Path, coordinator: BoundedAutonomyPipelineCoordinator) -> dict | None:
     """Reconstruct one missing review task from surviving Git evidence.
 
-    Git review refs outlive Actions caches. Recovery never approves or promotes a
-    candidate; it only restores queue/pipeline metadata so the normal reviewer and
-    independent validation gates can resume.
+    A valid review ref must not be starved by unrelated active work. Recovery is
+    deduplicated by exact candidate SHA/ref and never approves or promotes work; it
+    only restores queue/pipeline metadata for the normal review/validation path.
     """
     root = Path(root).resolve()
-    if coordinator.store.list_active():
-        return None
+    active = list(coordinator.store.list_active())
+    represented = {
+        (str(record.candidate_sha or ""), str(record.review_ref or ""))
+        for record in active
+        if record.candidate_sha or record.review_ref
+    }
 
     for ref, sha in _review_refs(root):
+        if (sha, ref) in represented:
+            continue
         evidence = _candidate_evidence(root, ref, sha)
         if not evidence:
             continue
@@ -231,13 +236,22 @@ def recover_one_orphan_review(root: Path, coordinator: BoundedAutonomyPipelineCo
         if evidence.get("capability_key"):
             payload["capability_key"] = evidence["capability_key"]
 
+        summary = str(finding.get("summary") or evidence["subject"]).strip()
+        acceptance = str(finding.get("acceptance") or "").strip()
+        objective = (
+            f"Resume Genesis-owned candidate {sha} for {target}. "
+            f"Verify the recovered capability/change against this objective: {summary}. "
+        )
+        if acceptance:
+            objective += f"Acceptance: {acceptance} "
+        objective += (
+            "Do not broaden the candidate. Re-run full tests, internal review, independent validation, "
+            "and promotion gates before accepting it."
+        )
+
         task, _created = coordinator.engineering.queue.create_unique(
             f"genesis-orphan-review-recovery:{sha}",
-            (
-                f"Resume Genesis-owned candidate {sha} for {target}. "
-                "Do not broaden the candidate. Re-run full tests, internal review, independent validation, "
-                "and promotion gates before accepting it."
-            ),
+            objective,
             module_id="genesis.coding",
             priority=95,
             payload=payload,
@@ -246,13 +260,21 @@ def recover_one_orphan_review(root: Path, coordinator: BoundedAutonomyPipelineCo
         if task.state in {"complete", "cancelled", "quarantined"}:
             continue
         if task.state in {"failed", "blocked", "paused"}:
-            task = coordinator.engineering.queue.transition(task.task_id, "assigned", module_id="genesis.coding")
+            task = coordinator.engineering.queue.transition(
+                task.task_id, "assigned", module_id="genesis.coding"
+            )
         if task.state == "new":
-            task = coordinator.engineering.queue.transition(task.task_id, "assigned", module_id="genesis.coding")
+            task = coordinator.engineering.queue.transition(
+                task.task_id, "assigned", module_id="genesis.coding"
+            )
         if task.state == "assigned":
-            task = coordinator.engineering.queue.transition(task.task_id, "running", module_id="genesis.coding")
+            task = coordinator.engineering.queue.transition(
+                task.task_id, "running", module_id="genesis.coding"
+            )
         if task.state == "running":
-            task = coordinator.engineering.queue.transition(task.task_id, "review", module_id="genesis.coding")
+            task = coordinator.engineering.queue.transition(
+                task.task_id, "review", module_id="genesis.coding"
+            )
         if task.state != "review":
             continue
 
