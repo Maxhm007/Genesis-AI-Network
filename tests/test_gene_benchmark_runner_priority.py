@@ -6,6 +6,7 @@ from genesis.modules.task_queue import PersistentTaskQueue
 from scripts.gene_continuous_work import (
     _completion_poll_blocks_benchmark_runner,
     _next_benchmark_runner_task,
+    _refresh_benchmark_runner_context,
 )
 
 
@@ -78,6 +79,28 @@ def test_blocked_benchmark_runner_is_resumable(tmp_path: Path) -> None:
     assert selected is not None
     assert selected.task_id == runner.task_id
     assert selected.state == "blocked"
+
+
+def test_stale_benchmark_runner_context_is_refreshed_before_attempt(tmp_path: Path) -> None:
+    queue = _queue(tmp_path)
+    runner = queue.create(
+        "Integrate agents_last_exam runner",
+        module_id="genesis.coding",
+        priority=93,
+        payload={
+            "task_type": "benchmark_runner_integration",
+            "benchmark_id": "agents_last_exam",
+            "context_paths": ["scripts/benchmark_task_worker.py"],
+        },
+    )
+
+    refreshed = _refresh_benchmark_runner_context(runner)
+
+    assert refreshed.task_id == runner.task_id
+    assert refreshed.state == runner.state
+    assert refreshed.payload["context_paths"][0] == "genesis/benchmark_execution.py"
+    assert "scripts/benchmark_task_worker.py" not in refreshed.payload["context_paths"]
+    assert runner.payload["context_paths"] == ["scripts/benchmark_task_worker.py"]
 
 
 def test_runner_in_review_finishes_before_new_higher_priority_runner(tmp_path: Path) -> None:
