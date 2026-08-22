@@ -55,7 +55,7 @@ def _task(root: Path):
     return queue, task
 
 
-def test_qwen_is_selected_when_it_is_the_only_eligible_coder(tmp_path: Path) -> None:
+def test_qwen_is_not_selected_when_it_is_the_only_coder(tmp_path: Path) -> None:
     _write_target(tmp_path)
     qwen = TrackingQwenProvider()
     registry = ProviderRegistry(include_bootstrap=False)
@@ -64,26 +64,29 @@ def test_qwen_is_selected_when_it_is_the_only_eligible_coder(tmp_path: Path) -> 
 
     selected = loop._coding_provider()
 
-    assert selected is qwen
+    assert selected is None
+    assert qwen.calls == 0
 
 
-def test_qwen_can_generate_a_bounded_repository_edit(tmp_path: Path) -> None:
+def test_autonomous_task_waits_instead_of_calling_qwen(tmp_path: Path) -> None:
     _write_target(tmp_path)
     qwen = TrackingQwenProvider()
     registry = ProviderRegistry(include_bootstrap=False)
     registry.register(qwen)
     loop = AutonomousEngineeringLoop(tmp_path, registry)
+    queue, task = _task(tmp_path)
+    loop.queue = queue
 
-    selected = loop._coding_provider()
-    proposal = loop.coding.propose(
-        "Change the bounded worker value from 1 to 2.",
-        context_paths=["genesis/worker.py"],
-        provider=selected,
-    )
+    attempt = loop._attempt_task(task, tmp_path / "runtime")
 
-    assert qwen.calls == 1
-    assert proposal.provider == qwen.name
-    assert proposal.files["genesis/worker.py"] == "VALUE = 2\n"
+    assert qwen.calls == 0
+    assert attempt["coding_status"] == "waiting_for_coding_provider"
+    assert attempt["error"] == "no_non_qwen_coding_provider_available"
+    assert attempt["provider_policy"] == "qwen_excluded_from_coding"
+    current = queue.get(task.task_id)
+    assert current is not None
+    assert current.state == "paused"
+    assert current.attempt_count == 0
 
 
 def test_stronger_non_qwen_coder_wins_an_equal_reliability_tie(tmp_path: Path) -> None:
