@@ -45,7 +45,7 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}
       GENESIS_PROVIDER_URL: http://127.0.0.1:8766
       GENESIS_PROVIDER_NAME: qwen2.5-coder-1.5b-gene-pulse
-      GENESIS_PROVIDER_TIMEOUT_SECONDS: '180'
+      GENESIS_PROVIDER_TIMEOUT_SECONDS: '60'
       GENESIS_PROVIDER_MAX_NEW_TOKENS: '384'
       HF_HOME: ~/.cache/huggingface
       PIP_CACHE_DIR: ~/.cache/pip
