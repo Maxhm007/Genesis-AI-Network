@@ -4,6 +4,7 @@ from pathlib import Path
 
 from genesis.benchmark_execution import BenchmarkExecutionPlanner
 from genesis.modules.task_queue import PersistentTaskQueue
+from genesis.selfdev import normalize_selfdev_path
 
 
 def make_task(root: Path, benchmark_id: str = "terminal_bench_2_1"):
@@ -42,17 +43,25 @@ def test_missing_real_result_creates_one_runner_task(tmp_path: Path) -> None:
     assert "genesis/terminal_bench_evidence.py" in child.payload["context_paths"]
 
 
-def test_terminal_runner_context_prioritizes_executable_files(tmp_path: Path) -> None:
+def test_terminal_runner_context_prioritizes_editable_executable_files(tmp_path: Path) -> None:
     task = make_task(tmp_path)
     result = BenchmarkExecutionPlanner(tmp_path).advance(task)
     child = BenchmarkExecutionPlanner(tmp_path).queue.get(result["task_id"])
     assert child is not None
     assert child.payload["context_paths"][:4] == [
-        "scripts/benchmark_task_worker.py",
         "genesis/terminal_bench_evidence.py",
         "genesis/benchmark_execution.py",
         "tests/test_terminal_bench_evidence.py",
+        "tests/test_benchmark_execution.py",
     ]
+
+
+def test_runner_context_is_inside_self_development_sandbox(tmp_path: Path) -> None:
+    for benchmark_id in ("terminal_bench_2_1", "agents_last_exam"):
+        context = BenchmarkExecutionPlanner._runner_context(benchmark_id)
+        assert context
+        for path in context:
+            assert normalize_selfdev_path(tmp_path, path) == path
 
 
 def test_exhausted_terminal_runner_work_surfaces_execution_readiness_blocker(tmp_path: Path, monkeypatch) -> None:
@@ -86,10 +95,10 @@ def test_unknown_benchmark_still_queues_bounded_runner_work(tmp_path: Path) -> N
     assert child.payload["benchmark_id"] == "new_frontier_benchmark"
     assert child.payload["requires_independent_validation"] is True
     assert child.payload["context_paths"][:4] == [
-        "scripts/benchmark_task_worker.py",
         "genesis/benchmark_execution.py",
         "genesis/benchmark_evidence.py",
         "tests/test_benchmark_execution.py",
+        "genesis/competitive_benchmarks.py",
     ]
 
 
