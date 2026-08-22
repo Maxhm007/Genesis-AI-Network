@@ -1,0 +1,38 @@
+name: Genesis Pulse Request Trigger
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "ops/pulse-request.json"
+      - ".github/workflows/pulse-request-trigger.yml"
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: genesis-pulse-request-trigger
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch agentic Gene Pulse
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh workflow run gene-pulse.yml
+          --repo "$GITHUB_REPOSITORY"
+          --ref main
+          -f gene=gene-node-1
+          -f continue_chain=true
+
+      - name: Record request bridge
+        run: |
+          echo "## Genesis Pulse Request" >> "$GITHUB_STEP_SUMMARY"
+          echo >> "$GITHUB_STEP_SUMMARY"
+          echo "Dispatched Gene Pulse with continuation enabled." >> "$GITHUB_STEP_SUMMARY"
+          echo "The Pulse remains bounded by candidate isolation, tests, Security, review, validation, and promotion gates." >> "$GITHUB_STEP_SUMMARY"
