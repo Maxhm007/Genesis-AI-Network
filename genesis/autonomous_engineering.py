@@ -45,6 +45,9 @@ class AutonomousEngineeringLoop:
     MAX_CANDIDATE_REVISIONS = 2
     MAX_TEST_FEEDBACK_BYTES = 6_000
     MAX_TEAM_CONTEXT_BYTES = 12_000
+    MAX_FAILURE_LEARNING_BYTES = 10_000
+    MAX_FAILURE_LEARNING_TASKS = 4
+    MAX_FAILURE_EVENTS_PER_TASK = 3
 
     MODULE_CONTEXT = {
         "genesis.ai_score": (
@@ -150,7 +153,7 @@ class AutonomousEngineeringLoop:
         """Return the best available non-Qwen, non-bootstrap coding provider.
 
         The small local Qwen runtime is useful for bounded discovery/review tasks,
-        but it must not be a blocking implementation dependency.  Coding either
+        but it must not be a blocking implementation dependency. Coding either
         uses another eligible provider or checkpoints without consuming repair
         budget.
         """
@@ -180,6 +183,55 @@ class AutonomousEngineeringLoop:
             return ""
         compact = json.dumps(report.get("outputs", []), sort_keys=True)
         data = compact.encode("utf-8")[:max_bytes]
+        return data.decode("utf-8", errors="ignore")
+
+    def _failure_learning_context(self, task) -> str:
+        """Return bounded durable lessons from this task and prior generations.
+
+        Operational issues intentionally create a new task generation after older
+        work finishes without resolving the measured condition. Without this
+        transfer, each generation starts cognitively from zero even though failure
+        evidence is durable in the task database. This method links those records
+        by issue_key and also includes same-task retry history.
+        """
+        issue_key = str(task.payload.get("issue_key") or "").strip()
+        related = []
+        for candidate in self.queue.list(limit=5000):
+            same_task = candidate.task_id == task.task_id
+            same_issue = bool(issue_key) and str(candidate.payload.get("issue_key") or "") == issue_key
+            if not (same_task or same_issue):
+                continue
+            if not candidate.last_error and not candidate.failure_history:
+                continue
+            related.append(candidate)
+
+        related.sort(key=lambda item: item.updated_at, reverse=True)
+        lessons = []
+        for candidate in related[: self.MAX_FAILURE_LEARNING_TASKS]:
+            failures = list(candidate.failure_history)[-self.MAX_FAILURE_EVENTS_PER_TASK :]
+            lessons.append(
+                {
+                    "task_id": candidate.task_id,
+                    "state": candidate.state,
+                    "work_generation": candidate.payload.get("work_generation"),
+                    "attempt_count": candidate.attempt_count,
+                    "last_error": candidate.last_error,
+                    "recent_failures": failures,
+                }
+            )
+        if not lessons:
+            return ""
+
+        payload = {
+            "issue_key": issue_key or None,
+            "instruction": (
+                "Treat prior failures as evidence. Do not repeat a previously failed approach unless new repository "
+                "evidence directly addresses the failure. Preserve tests, Security, validation and owner boundaries."
+            ),
+            "lessons": lessons,
+        }
+        compact = json.dumps(payload, sort_keys=True)
+        data = compact.encode("utf-8")[: self.MAX_FAILURE_LEARNING_BYTES]
         return data.decode("utf-8", errors="ignore")
 
     def _record_efficiency(self, provider_name: str, started: float, success: bool, task_type: str = "coding") -> None:
@@ -216,11 +268,13 @@ class AutonomousEngineeringLoop:
         task_type = str(task.payload.get("task_type", "coding"))
         owner_module = task.module_id or "genesis.coding"
         team_context = self._recorded_team_context(runtime, task.task_id, self.MAX_TEAM_CONTEXT_BYTES)
+        failure_context = self._failure_learning_context(task)
         attempt = {
             "task": asdict(task),
             "owner_module": owner_module,
             "executor_module": "genesis.coding",
             "ai_team_context_used": bool(team_context),
+            "failure_learning_context_used": bool(failure_context),
             "context_paths": [],
             "candidate_revisions": 0,
             "coding_status": "started",
@@ -251,10 +305,15 @@ class AutonomousEngineeringLoop:
             self.queue.transition(task.task_id, "running", module_id=owner_module)
             provider_name = provider.name
             objective = task.objective
+            if failure_context:
+                objective += (
+                    "\n\nFAILURE_LEARNING_CONTEXT: " + failure_context
+                    + "\nUse this durable failure evidence to choose a materially better approach. Do not merely restate the previous attempt."
+                )
             if team_context:
                 objective += (
-                    "\n\nAI_TEAM_ADVISORY_CONTEXT: " + team_context +
-                    "\nTreat this as advisory analysis only; verify it against repository evidence and preserve all safety/validation boundaries."
+                    "\n\nAI_TEAM_ADVISORY_CONTEXT: " + team_context
+                    + "\nTreat this as advisory analysis only; verify it against repository evidence and preserve all safety/validation boundaries."
                 )
 
             candidate = None
@@ -274,6 +333,8 @@ class AutonomousEngineeringLoop:
             if candidate is None:
                 raise RuntimeError("coding provider produced no candidate")
             attempt["coding_status"] = "candidate_created" if candidate.committed else "candidate_not_committed"
+            if not candidate.committed and candidate.message:
+                attempt["error"] = candidate.message[-self.MAX_TEST_FEEDBACK_BYTES :]
             success = False
             if candidate.committed:
                 candidate_security = self.security.write_report(
@@ -282,6 +343,10 @@ class AutonomousEngineeringLoop:
                 attempt["candidate_security"] = candidate_security
                 if candidate_security["status"] != "pass":
                     attempt["coding_status"] = "candidate_rejected_by_security"
+                    security_feedback = json.dumps(candidate_security.get("findings", []), sort_keys=True)
+                    attempt["error"] = (
+                        "candidate_security_rejection:" + security_feedback
+                    )[-self.MAX_TEST_FEEDBACK_BYTES :]
                     self._git("checkout", "main")
                     self.queue.transition(task.task_id, "blocked", module_id=owner_module)
                 else:
