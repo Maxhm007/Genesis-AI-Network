@@ -13,8 +13,11 @@ on:
       - 'scripts/dashboard_resilience_patch.py'
       - 'scripts/embed_dashboard_status.py'
       - 'scripts/dashboard_navigation_fallback.py'
+      - 'scripts/dashboard_v3_patch.py'
+      - 'scripts/render_static_sections.py'
       - 'scripts/render_static_dashboard.py'
       - 'scripts/validate_dashboard_js.py'
+      - 'scripts/validate_dashboard_artifact.py'
       - 'scripts/gene_chat_reply.py'
       - '.github/workflows/gene-chat.yml'
       - '.github/workflows/pages-status.yml'
@@ -60,8 +63,11 @@ jobs:
           python scripts/dashboard_resilience_patch.py
           python scripts/embed_dashboard_status.py
           python scripts/dashboard_navigation_fallback.py
+          python scripts/dashboard_v3_patch.py
+          python scripts/render_static_sections.py
           python scripts/render_static_dashboard.py
           python scripts/validate_dashboard_js.py
+          python scripts/validate_dashboard_artifact.py
       - name: Build Genesis chat snapshot
         env:
           GITHUB_TOKEN: ${{ github.token }}
