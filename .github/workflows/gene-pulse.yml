@@ -11,6 +11,10 @@ on:
         description: Request the next pulse when this pulse finishes
         required: false
         default: "true"
+      chain_budget:
+        description: Remaining bounded idle-discovery pulses before checkpointing
+        required: false
+        default: "4"
   repository_dispatch:
     types: [gene-pulse]
   push:
@@ -37,6 +41,7 @@ jobs:
     env:
       GENE_ID: ${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
       CONTINUE_CHAIN: ${{ inputs.continue_chain || github.event.client_payload.continue_chain || 'true' }}
+      IDLE_DISCOVERY_BUDGET: ${{ inputs.chain_budget || github.event.client_payload.chain_budget || '4' }}
       PYTHONPATH: ${{ github.workspace }}
       GENESIS_PROVIDER_URL: http://127.0.0.1:8766
       GENESIS_PROVIDER_NAME: qwen2.5-coder-1.5b-gene-pulse
@@ -120,6 +125,8 @@ jobs:
           import json, os
           from pathlib import Path
 
+          from genesis.pulse import DEFAULT_IDLE_DISCOVERY_BURST, workflow_chain_decision
+
           p = json.loads(Path('runtime/pulse_result.json').read_text())
           payload = dict(p.get('payload', {}) or {})
           pipeline = dict(payload.get('pipeline', {}) or {})
@@ -149,8 +156,22 @@ jobs:
           }
           rejected_review_ref = str(record.get('review_ref') or '') if action in rejected_review_actions else ''
 
+          try:
+              idle_budget = int(os.environ.get('IDLE_DISCOVERY_BUDGET', str(DEFAULT_IDLE_DISCOVERY_BURST)))
+          except ValueError:
+              idle_budget = DEFAULT_IDLE_DISCOVERY_BURST
+          idle_budget = max(0, idle_budget)
+          dispatch_next, next_budget, chain_reason = workflow_chain_decision(
+              needs_next_pulse=bool(p.get('needs_next_pulse')),
+              next_pulse_reason=str(p.get('next_pulse_reason') or ''),
+              idle_budget=idle_budget,
+          )
+
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
               f.write('continue=' + ('true' if p.get('needs_next_pulse') else 'false') + '\n')
+              f.write('dispatch_next=' + ('true' if dispatch_next else 'false') + '\n')
+              f.write('next_budget=' + str(next_budget) + '\n')
+              f.write('chain_reason=' + chain_reason + '\n')
               f.write('has_review_candidate=' + ('true' if has_review else 'false') + '\n')
               f.write('has_validation_candidate=' + ('true' if has_validation else 'false') + '\n')
               f.write('has_legacy_candidate=' + ('true' if legacy_ok else 'false') + '\n')
@@ -247,8 +268,11 @@ jobs:
           retention-days: 30
 
       - name: Request next pulse
-        if: steps.pulse.outputs.continue == 'true' && env.CONTINUE_CHAIN == 'true'
+        if: steps.pulse.outputs.dispatch_next == 'true' && env.CONTINUE_CHAIN == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          gh workflow run gene-pulse.yml --ref main -f gene="$GENE_ID" -f continue_chain=true
+          gh workflow run gene-pulse.yml --ref main \
+            -f gene="$GENE_ID" \
+            -f continue_chain=true \
+            -f chain_budget='${{ steps.pulse.outputs.next_budget }}'
