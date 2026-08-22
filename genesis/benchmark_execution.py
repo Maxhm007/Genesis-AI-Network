@@ -80,10 +80,15 @@ class BenchmarkExecutionPlanner:
 
     @staticmethod
     def _runner_context(benchmark_id: str) -> list[str]:
-        """Order context by execution value because autonomous Coding is bounded."""
+        """Order editable context by execution value because autonomous Coding is bounded.
+
+        Context supplied to autonomous coding must remain inside the self-development
+        sandbox. Workflow/entry-point scripts may be useful for humans to inspect,
+        but including an uneditable `scripts/` path can make Coding choose it as the
+        proposal target and fail before any benchmark adapter work is attempted.
+        """
         if benchmark_id == "terminal_bench_2_1":
             return [
-                "scripts/benchmark_task_worker.py",
                 "genesis/terminal_bench_evidence.py",
                 "genesis/benchmark_execution.py",
                 "tests/test_terminal_bench_evidence.py",
@@ -95,7 +100,6 @@ class BenchmarkExecutionPlanner:
                 "tests/test_competitive_benchmarks.py",
             ]
         return [
-            "scripts/benchmark_task_worker.py",
             "genesis/benchmark_execution.py",
             "genesis/benchmark_evidence.py",
             "tests/test_benchmark_execution.py",

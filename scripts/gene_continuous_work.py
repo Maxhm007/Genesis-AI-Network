@@ -22,7 +22,14 @@ STOP = False
 PULSE_DISCOVERY_SOURCE_BYTES = 5_000
 PULSE_DISCOVERY_TEST_BYTES = 2_000
 BENCHMARK_RUNNER_TASK_TYPE = "benchmark_runner_integration"
-BENCHMARK_RUNNER_EXECUTABLE_STATES = {"new", "assigned", "failed", "review"}
+BENCHMARK_RUNNER_EXECUTABLE_STATES = {"new", "assigned", "blocked", "failed", "review"}
+BENCHMARK_RUNNER_STATE_PRIORITY = {
+    "review": 0,
+    "assigned": 1,
+    "blocked": 1,
+    "failed": 1,
+    "new": 1,
+}
 PIPELINE_COMPLETION_PRIORITY_STAGES = {"review_ready", "validation_ready", "promoted"}
 
 
@@ -102,9 +109,9 @@ def _legacy_task_coding_ready(engineering: AutonomousEngineeringLoop, task) -> b
 def _next_benchmark_runner_task(queue):
     """Return one executable benchmark-runner integration task, if any.
 
-    Benchmark measurement parents are paused while these child coding tasks are
-    pending. Selecting one child explicitly prevents fresh learning-pipeline work
-    from starving benchmark execution indefinitely.
+    A runner already in review owns the single candidate handoff for this Gene and
+    therefore finishes before newer runner coding work. Blocked runner tasks remain
+    executable so a corrected implementation/context can resume them on a later Pulse.
     """
     candidates = []
     for task in queue.list(limit=5000):
@@ -116,16 +123,30 @@ def _next_benchmark_runner_task(queue):
         if task.state == "failed" and not queue.retryable(task):
             continue
         candidates.append(task)
-    candidates.sort(key=lambda task: (-task.priority, task.created_at, task.task_id))
+    candidates.sort(
+        key=lambda task: (
+            BENCHMARK_RUNNER_STATE_PRIORITY.get(task.state, 99),
+            -task.priority,
+            task.created_at,
+            task.task_id,
+        )
+    )
     return candidates[0] if candidates else None
 
 
 def _pipeline_completion_has_priority(pipeline: GoalDirectedPipelineCoordinator) -> bool:
-    """Never preempt a durable candidate that is already at review/validation/learning."""
+    """Poll durable candidate completion before starting fresh benchmark coding."""
     return any(
         str(getattr(record, "stage", "")) in PIPELINE_COMPLETION_PRIORITY_STAGES
         for record in pipeline.store.list_active()
     )
+
+
+def _completion_poll_blocks_benchmark_runner(pipeline_result: dict) -> bool:
+    """A no-change validation wait must not consume every future benchmark Pulse."""
+    if not pipeline_result.get("handled"):
+        return False
+    return str(pipeline_result.get("action") or "") != "pipeline_wait_validation"
 
 
 def _finalize_agentic(
@@ -217,11 +238,27 @@ def run_step(logical_id: str) -> dict:
     planned_step = agentic.plan(pipeline)
 
     # Frontier benchmark parents pause while a bounded runner-integration coding
-    # task is outstanding. Give one such child a Pulse before unrelated pipeline
-    # development can enqueue another learning task. Candidate completion stages
-    # still win so this scheduling rule cannot starve review/validation/promotion.
+    # task is outstanding. Poll candidate completion first. A real review,
+    # promotion, or learning transition consumes this Pulse; a validation wait that
+    # made no state change does not permanently starve benchmark execution.
     benchmark_runner = _next_benchmark_runner_task(engineering.queue)
-    if benchmark_runner is not None and not _pipeline_completion_has_priority(pipeline):
+    if benchmark_runner is not None:
+        completion_poll = None
+        if _pipeline_completion_has_priority(pipeline):
+            completion_poll = pipeline.run_once(preferred_task_id=None)
+            if _completion_poll_blocks_benchmark_runner(completion_poll):
+                return _finalize_agentic(
+                    agentic,
+                    planned_step,
+                    goals,
+                    orchestration,
+                    {
+                        "decision": _pipeline_decision(completion_poll),
+                        "action": completion_poll.get("action", "pipeline_unknown"),
+                        "pipeline": completion_poll,
+                    },
+                )
+
         rule = GeneWorkRule(ROOT, logical_id, engineering.queue)
         decision = WorkDecision(
             gene=rule.identity.display_name,
@@ -238,6 +275,11 @@ def run_step(logical_id: str) -> dict:
             "state": benchmark_runner.state,
             "priority": benchmark_runner.priority,
         }
+        if completion_poll is not None:
+            result["pipeline_completion_poll"] = {
+                "action": completion_poll.get("action"),
+                "record": completion_poll.get("record"),
+            }
         return _finalize_agentic(agentic, planned_step, goals, orchestration, result)
 
     pipeline_result = pipeline.run_once(preferred_task_id=str(preferred_task_id) if preferred_task_id else None)

@@ -3,7 +3,10 @@ from __future__ import annotations
 from pathlib import Path
 
 from genesis.modules.task_queue import PersistentTaskQueue
-from scripts.gene_continuous_work import _next_benchmark_runner_task
+from scripts.gene_continuous_work import (
+    _completion_poll_blocks_benchmark_runner,
+    _next_benchmark_runner_task,
+)
 
 
 def _queue(root: Path) -> PersistentTaskQueue:
@@ -36,7 +39,7 @@ def test_benchmark_runner_is_selected_ahead_of_unrelated_work(tmp_path: Path) ->
     assert selected.payload["benchmark_id"] == "agents_last_exam"
 
 
-def test_benchmark_runner_selection_prefers_highest_priority_oldest(tmp_path: Path) -> None:
+def test_benchmark_runner_selection_prefers_highest_priority_within_work_state(tmp_path: Path) -> None:
     queue = _queue(tmp_path)
     older = queue.create(
         "Integrate agents_last_exam runner",
@@ -56,6 +59,59 @@ def test_benchmark_runner_selection_prefers_highest_priority_oldest(tmp_path: Pa
     assert selected is not None
     assert selected.task_id == newer.task_id
     assert selected.task_id != older.task_id
+
+
+def test_blocked_benchmark_runner_is_resumable(tmp_path: Path) -> None:
+    queue = _queue(tmp_path)
+    runner = queue.create(
+        "Integrate agents_last_exam runner",
+        module_id="genesis.coding",
+        priority=93,
+        payload={"task_type": "benchmark_runner_integration", "benchmark_id": "agents_last_exam"},
+    )
+    queue.transition(runner.task_id, "assigned", module_id="genesis.coding")
+    queue.transition(runner.task_id, "running", module_id="genesis.coding")
+    queue.transition(runner.task_id, "blocked", module_id="genesis.coding")
+
+    selected = _next_benchmark_runner_task(queue)
+
+    assert selected is not None
+    assert selected.task_id == runner.task_id
+    assert selected.state == "blocked"
+
+
+def test_runner_in_review_finishes_before_new_higher_priority_runner(tmp_path: Path) -> None:
+    queue = _queue(tmp_path)
+    review_runner = queue.create(
+        "Review agents_last_exam runner",
+        module_id="genesis.coding",
+        priority=93,
+        payload={"task_type": "benchmark_runner_integration", "benchmark_id": "agents_last_exam"},
+    )
+    queue.transition(review_runner.task_id, "assigned", module_id="genesis.coding")
+    queue.transition(review_runner.task_id, "running", module_id="genesis.coding")
+    queue.transition(review_runner.task_id, "review", module_id="genesis.coding")
+    queue.create(
+        "Integrate newer benchmark runner",
+        module_id="genesis.coding",
+        priority=100,
+        payload={"task_type": "benchmark_runner_integration", "benchmark_id": "swe_bench_pro"},
+    )
+
+    selected = _next_benchmark_runner_task(queue)
+
+    assert selected is not None
+    assert selected.task_id == review_runner.task_id
+    assert selected.state == "review"
+
+
+def test_validation_wait_does_not_starve_benchmark_runner() -> None:
+    assert _completion_poll_blocks_benchmark_runner(
+        {"handled": True, "action": "pipeline_wait_validation"}
+    ) is False
+    assert _completion_poll_blocks_benchmark_runner(
+        {"handled": True, "action": "pipeline_internal_review_approved"}
+    ) is True
 
 
 def test_non_retryable_failed_runner_is_not_selected(tmp_path: Path) -> None:
