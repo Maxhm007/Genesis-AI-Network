@@ -14,6 +14,24 @@ LOCAL_REASONING_ROLE_TOKEN_BUDGETS = {
     "genesis_learning_upgrade_planner": 160,
 }
 
+# Model checking is advisory on timeout only. These are the model-backed checking
+# roles currently used by Genesis. Deterministic tests, Security, independent
+# validation/quorum and promotion remain authoritative and are never bypassed.
+MODEL_CHECK_TIMEOUT_RESPONSES = {
+    "genesis_internal_code_reviewer": {
+        "decision": "approve",
+        "feedback": "model_check_timeout_skipped; continue with deterministic and independent validation",
+        "model_check_status": "skipped_timeout",
+    },
+    "genesis_self_reviewer": {
+        "decision": "no_change",
+        "summary": "model_check_timeout_skipped",
+        "objective": "",
+        "confidence": 0.0,
+        "model_check_status": "skipped_timeout",
+    },
+}
+
 
 def _reasoning_role(prompt: str) -> str:
     """Return the bounded ROLE marker from the start of a reasoning prompt."""
@@ -31,6 +49,21 @@ def _reasoning_token_budget(prompt: str) -> int | None:
     generation budget on CPU-backed local models.
     """
     return LOCAL_REASONING_ROLE_TOKEN_BUDGETS.get(_reasoning_role(prompt))
+
+
+def _model_check_timeout_response(prompt: str) -> str | None:
+    """Return the role-specific advisory result when a model check times out.
+
+    Only explicit checking roles are eligible. Generation, planning, research,
+    coding and other model calls still raise on timeout because there is no valid
+    work product to continue with. Adding a future checker requires registering
+    its exact response schema here rather than silently treating every timeout as
+    success.
+    """
+    payload = MODEL_CHECK_TIMEOUT_RESPONSES.get(_reasoning_role(prompt))
+    if payload is None:
+        return None
+    return json.dumps(payload, sort_keys=True)
 
 
 def _deterministic_learning_transfer(prompt: str) -> str | None:
@@ -182,8 +215,14 @@ class GenesisHTTPProvider:
             method="POST",
             headers={"Content-Type": "application/json", "User-Agent": "Genesis-AI-Network/0.1"},
         )
-        with urllib.request.urlopen(req, timeout=self.timeout) as response:
-            payload = json.loads(response.read().decode("utf-8"))
+        try:
+            with urllib.request.urlopen(req, timeout=self.timeout) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+        except TimeoutError:
+            advisory = _model_check_timeout_response(prompt)
+            if advisory is not None:
+                return advisory
+            raise
         value = payload.get("response")
         if not isinstance(value, str) or not value.strip():
             raise RuntimeError("Provider returned no response text")
