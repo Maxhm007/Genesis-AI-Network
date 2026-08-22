@@ -45,7 +45,7 @@ jobs:
       PYTHONPATH: ${{ github.workspace }}
       GENESIS_PROVIDER_URL: http://127.0.0.1:8766
       GENESIS_PROVIDER_NAME: qwen2.5-coder-1.5b-gene-pulse
-      GENESIS_PROVIDER_TIMEOUT_SECONDS: '60'
+      GENESIS_PROVIDER_TIMEOUT_SECONDS: '180'
       GENESIS_PROVIDER_MAX_NEW_TOKENS: '384'
       HF_HOME: ~/.cache/huggingface
       PIP_CACHE_DIR: ~/.cache/pip
@@ -116,6 +116,9 @@ jobs:
 
       - name: Execute one bounded queue transition
         run: python scripts/gene_pulse.py --gene "$GENE_ID" --output runtime/pulse_result.json
+
+      - name: Advance one bounded frontier benchmark task
+        run: python scripts/benchmark_task_worker.py
 
       - name: Read pulse and specialist handoffs
         id: pulse
@@ -264,6 +267,8 @@ jobs:
             runtime/discovery/
             runtime/autonomy_pipeline/
             runtime/genesis_tasks.sqlite3
+            runtime/competitive_benchmark_inputs/
+            runtime/competitive_benchmark_candidates/
             runtime/grce/${{ env.GENE_ID }}/candidate_handoff.json
             /tmp/genesis-gene-pulse-reasoning.log
           if-no-files-found: warn
