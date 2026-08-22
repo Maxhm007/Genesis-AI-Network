@@ -200,7 +200,7 @@ def complete_job(score: float = 1.0) -> dict:
         "environment": "official-ale-sandbox",
         "aggregate_score": 0.0,
         "results": [
-            {"task_id": f"task/{{index:03d}}", "status": "completed", "score": score}
+            {"task_id": f"task/{index:03d}", "status": "completed", "score": score}
             for index in range(ALE_TASK_COUNT)
         ],
     }
