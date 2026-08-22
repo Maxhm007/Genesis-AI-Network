@@ -5,10 +5,12 @@ import json
 import signal
 import subprocess
 import time
+from dataclasses import replace
 from pathlib import Path
 
 from genesis.agentic import AgenticPulseController
 from genesis.autonomous_engineering import AutonomousEngineeringLoop
+from genesis.benchmark_execution import BenchmarkExecutionPlanner
 from genesis.goal_directed_pipeline import GoalDirectedPipelineCoordinator
 from genesis.goal_orchestrator import GoalOrchestrator
 from genesis.issue_discovery import GenesisIssueDiscoveryEngine
@@ -106,6 +108,24 @@ def _legacy_task_coding_ready(engineering: AutonomousEngineeringLoop, task) -> b
     return bool(engineering._context_paths_for_task(task))
 
 
+def _refresh_benchmark_runner_context(task):
+    """Use the current safe runner context for already-persisted benchmark tasks.
+
+    Durable tasks can outlive the code version that created them. Older benchmark
+    runner tasks may therefore retain context paths that are no longer valid for
+    autonomous self-development. Keep the durable task identity/state untouched and
+    refresh only the ephemeral task view used for this coding attempt.
+    """
+    payload = dict(task.payload or {})
+    if payload.get("task_type") != BENCHMARK_RUNNER_TASK_TYPE:
+        return task
+    benchmark_id = str(payload.get("benchmark_id") or "").strip()
+    if not benchmark_id:
+        return task
+    payload["context_paths"] = BenchmarkExecutionPlanner._runner_context(benchmark_id)
+    return replace(task, payload=payload)
+
+
 def _next_benchmark_runner_task(queue):
     """Return one executable benchmark-runner integration task, if any.
 
@@ -192,6 +212,7 @@ def _run_legacy_task(logical_id: str, engineering: AutonomousEngineeringLoop, ru
         result["candidate_handoff"] = handoff
         return result
 
+    task = _refresh_benchmark_runner_context(task)
     runtime = ROOT / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     result["action"] = "attempt_focused_issue"
