@@ -1,6 +1,6 @@
 {
-  "request_id": "stuck-review-recovery-20260822T1121Z",
-  "requested_action": "resume-agentic-review-pipeline",
+  "request_id": "orphan-review-recovery-live-20260822T1137Z",
+  "requested_action": "recover-and-resume-genesis-review",
   "gene": "gene-node-1",
   "requested_by": "owner"
 }
