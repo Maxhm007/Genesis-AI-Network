@@ -40,3 +40,11 @@ from .review_recovery import install_orphan_review_recovery as _install_orphan_r
 
 _install_orphan_review_recovery()
 del _install_orphan_review_recovery
+
+# Review the exact autonomous patch against the latest main snapshot rather than
+# running the full suite on a stale candidate base. The original Genesis SHA stays
+# authoritative and is restored before the normal validation/promotion handoff.
+from .current_main_review import install_current_main_review as _install_current_main_review
+
+_install_current_main_review()
+del _install_current_main_review
