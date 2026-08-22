@@ -1,7 +1,12 @@
 import json
 from pathlib import Path
 
+import pytest
+
 from scripts import autonomy_history_backfill as backfill
+
+
+ROOT = Path(__file__).resolve().parents[1]
 
 
 def test_enrich_status_separates_strict_and_historical_evidence(tmp_path: Path):
@@ -26,8 +31,8 @@ def test_enrich_status_separates_strict_and_historical_evidence(tmp_path: Path):
             "sha": "a1",
             "title": "Health helper",
             "authored_at": "2026-08-16T00:00:00Z",
-            "author": "genesis-ai",
-            "committer": "genesis-ai",
+            "author": "Genesis AI",
+            "committer": "Genesis AI",
             "url": "https://example.test/a1",
             "provenance": "genesis_ai_authored",
             "evidence": "confirmed",
@@ -54,6 +59,7 @@ def test_enrich_status_separates_strict_and_historical_evidence(tmp_path: Path):
     assert evaluation["historical_autonomous_main_evidence"] == 2
     assert evaluation["genesis_authored_main_commits"] == 1
     assert evaluation["autonomy_trial_main_commits"] == 1
+    assert evaluation["history_source"] == "full_local_git_log_head"
     assert evaluation["attribution"]["assisted"] == 61
     assert evaluation["attribution"]["owner"] == 6
 
@@ -80,31 +86,84 @@ def test_patch_dashboard_replaces_misleading_pr_only_card(tmp_path: Path):
     assert "No historical Genesis autonomous" in html
 
 
-def test_search_self_development_commits_requires_main_ancestry_and_genesis_actor(monkeypatch):
-    candidate = {
-        "sha": "abc",
-        "commit": {
-            "message": "Genesis self-development candidate: Add runtime health snapshot helper",
-            "author": {"name": "Genesis AI", "date": "2026-08-16T00:00:00Z"},
-            "committer": {"name": "Genesis AI", "date": "2026-08-16T00:00:00Z"},
-        },
-        "author": {"login": "genesis-ai"},
-        "committer": {"login": "genesis-ai"},
-        "html_url": "https://example.test/abc",
-    }
+def test_parse_git_history_finds_trusted_genesis_actors_only():
+    sep = "\x1f"
+    history = "\n".join(
+        [
+            sep.join(
+                [
+                    "abc",
+                    "Genesis AI",
+                    "genesis-ai@users.noreply.github.com",
+                    "Genesis AI",
+                    "genesis-ai@users.noreply.github.com",
+                    "2026-08-16T14:46:19+00:00",
+                    "Genesis self-development candidate: Add runtime health snapshot helper",
+                ]
+            ),
+            sep.join(
+                [
+                    "def",
+                    "Genesis Autonomy Trial",
+                    "actions@github.com",
+                    "Genesis Promotion Stager",
+                    "actions@github.com",
+                    "2026-08-17T22:45:05+00:00",
+                    "Genesis self-development candidate: Fix health snapshot status handling",
+                ]
+            ),
+            sep.join(
+                [
+                    "human",
+                    "Human",
+                    "human@example.com",
+                    "Human",
+                    "human@example.com",
+                    "2026-08-18T00:00:00+00:00",
+                    "Genesis self-development candidate: Pretend autonomous change",
+                ]
+            ),
+        ]
+    )
 
-    def fake_safe_api(path, default):
-        if path.startswith("/search/commits?"):
-            return {"items": [{"sha": "abc"}]}
-        if path.endswith("/commits/abc"):
-            return candidate
-        if "/compare/abc...main" in path:
-            return {"status": "ahead", "merge_base_commit": {"sha": "abc"}}
-        return default
+    rows, candidates = backfill.parse_git_history(history)
 
-    monkeypatch.setattr(backfill, "safe_api", fake_safe_api)
-    rows = backfill.search_self_development_commits()
+    assert candidates == 3
+    assert [row["sha"] for row in rows] == ["def", "abc"]
+    assert {row["provenance"] for row in rows} == {"genesis_ai_authored", "autonomy_trial_promoted"}
 
-    assert len(rows) == 1
-    assert rows[0]["sha"] == "abc"
-    assert rows[0]["provenance"] == "genesis_ai_authored"
+
+def test_scan_rejects_shallow_checkout(monkeypatch):
+    monkeypatch.setattr(backfill, "_run_git", lambda args, root: "true" if args[0] == "rev-parse" else "")
+    with pytest.raises(RuntimeError, match="full git checkout"):
+        backfill.scan_local_main_history(Path("."))
+
+
+def test_scan_refuses_false_zero_when_signatures_exist(monkeypatch):
+    sep = "\x1f"
+    human_only = sep.join(
+        [
+            "human",
+            "Human",
+            "human@example.com",
+            "Human",
+            "human@example.com",
+            "2026-08-18T00:00:00+00:00",
+            "Genesis self-development candidate: Pretend autonomous change",
+        ]
+    )
+
+    def fake_git(args, root):
+        if args[0] == "rev-parse":
+            return "false"
+        return human_only
+
+    monkeypatch.setattr(backfill, "_run_git", fake_git)
+    with pytest.raises(RuntimeError, match="refusing false zero evidence"):
+        backfill.scan_local_main_history(Path("."))
+
+
+def test_pages_workflow_checks_out_full_history_before_backfill():
+    workflow = (ROOT / ".github" / "workflows" / "pages-status.yml").read_text(encoding="utf-8")
+    assert "fetch-depth: 0" in workflow
+    assert "python scripts/autonomy_history_backfill.py" in workflow
