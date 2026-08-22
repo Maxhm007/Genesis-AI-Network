@@ -1,0 +1,87 @@
+{
+  "version": 1,
+  "modules": [
+    {
+      "module_id": "genesis.improvement",
+      "name": "Improvement Submodule",
+      "version": "0.1.0",
+      "purpose": "Improve existing Genesis capabilities in response to validated benchmark deficits and failure evidence without creating unrelated capabilities or owning promotion.",
+      "capabilities": [
+        "capability_improvement",
+        "benchmark_gap_remediation",
+        "strategy_revision",
+        "existing_capability_optimization"
+      ],
+      "permissions": [
+        "code.read",
+        "code.write_candidate",
+        "tests.run",
+        "benchmarks.run",
+        "provider.use",
+        "knowledge.read"
+      ],
+      "dependencies": [
+        "genesis.capability_scorecard",
+        "genesis.evaluation_lab",
+        "genesis.memory",
+        "genesis.security",
+        "genesis.validation"
+      ],
+      "status": "active",
+      "dynamic": false,
+      "mutable": true,
+      "protected": false,
+      "implementation": "genesis.improvement",
+      "metadata": {
+        "new_capability_creation": false,
+        "direct_main_write": false,
+        "merge_authority": false,
+        "post_promotion_remeasurement_required": true,
+        "components": [
+          "genesis.improvement",
+          "genesis.improvement_merge_routing.SingleAttemptImprovementWorker"
+        ]
+      }
+    },
+    {
+      "module_id": "genesis.merge",
+      "name": "Merge Submodule",
+      "version": "0.1.0",
+      "purpose": "Own the final validated promotion boundary: verify that an internally reviewed candidate passed the independent promotion path and record the exact merge before learning closes the task.",
+      "capabilities": [
+        "validated_merge",
+        "promotion_boundary",
+        "merge_provenance",
+        "release_handoff"
+      ],
+      "permissions": [
+        "code.read",
+        "audit.read",
+        "candidate.read",
+        "versions.write"
+      ],
+      "dependencies": [
+        "genesis.security",
+        "genesis.validation",
+        "genesis.update_version"
+      ],
+      "status": "active",
+      "dynamic": false,
+      "mutable": false,
+      "protected": true,
+      "implementation": "genesis.merge",
+      "metadata": {
+        "candidate_creation": false,
+        "self_review": false,
+        "validation_authority": false,
+        "requires_internal_review": true,
+        "requires_independent_promotion": true,
+        "normal_lane_protected_paths_denied": true,
+        "components": [
+          "genesis.merge",
+          "genesis.improvement_merge_routing.MergeWorker"
+        ]
+      }
+    }
+  ]
+}
