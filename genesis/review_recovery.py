@@ -5,7 +5,7 @@ import re
 import subprocess
 from pathlib import Path
 
-from .autonomy_pipeline import DEVELOPMENT_SOURCE, PipelineStore
+from .autonomy_pipeline import DEVELOPMENT_SOURCE
 from .bounded_autonomy_pipeline import BoundedAutonomyPipelineCoordinator
 from .issue_discovery import AUTONOMOUS_REPAIR_EXCLUDED
 
@@ -30,13 +30,16 @@ def _git(root: Path, *args: str, input_text: str | None = None) -> subprocess.Co
 
 
 def _review_refs(root: Path) -> list[tuple[str, str]]:
-    """Return surviving Genesis review refs and exact candidate SHAs."""
-    _git(
+    """Return only review refs that still exist on the remote."""
+    fetch = _git(
         root,
         "fetch",
+        "--prune",
         "origin",
         "+refs/heads/genesis/review-*:refs/remotes/origin/genesis/review-*",
     )
+    if fetch.returncode != 0:
+        return []
     result = _git(
         root,
         "for-each-ref",
@@ -149,7 +152,8 @@ def _candidate_evidence(root: Path, ref: str, sha: str) -> dict | None:
 
     # Do not recover work that is already present on main, including an equivalent
     # patch rebased by the normal candidate-promotion workflow.
-    _git(root, "fetch", "origin", "main")
+    if _git(root, "fetch", "origin", "main").returncode != 0:
+        return None
     ancestor = _git(root, "merge-base", "--is-ancestor", sha, "origin/main")
     if ancestor.returncode == 0:
         return None
