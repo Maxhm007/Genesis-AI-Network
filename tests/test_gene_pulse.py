@@ -1,6 +1,6 @@
 from pathlib import Path
 
-from genesis.pulse import GenePulse
+from genesis.pulse import GenePulse, workflow_chain_decision
 
 
 def test_focused_issue_requests_immediate_continuation(monkeypatch, tmp_path: Path) -> None:
@@ -98,3 +98,47 @@ def test_unknown_action_fails_closed(monkeypatch, tmp_path: Path) -> None:
     result = GenePulse(tmp_path).run()
     assert result.needs_next_pulse is False
     assert result.next_pulse_reason == "unrecognized_action_checkpointed"
+
+
+def test_idle_checkpoint_gets_bounded_extra_discovery_pulse() -> None:
+    dispatch, next_budget, reason = workflow_chain_decision(
+        needs_next_pulse=False,
+        next_pulse_reason="idle_discovery_checkpointed",
+        idle_budget=4,
+    )
+    assert dispatch is True
+    assert next_budget == 3
+    assert reason == "bounded_idle_discovery_burst"
+
+
+def test_idle_discovery_burst_stops_when_budget_is_exhausted() -> None:
+    dispatch, next_budget, reason = workflow_chain_decision(
+        needs_next_pulse=False,
+        next_pulse_reason="idle_discovery_checkpointed",
+        idle_budget=1,
+    )
+    assert dispatch is False
+    assert next_budget == 0
+    assert reason == "idle_discovery_budget_exhausted"
+
+
+def test_executable_work_resets_idle_discovery_budget() -> None:
+    dispatch, next_budget, reason = workflow_chain_decision(
+        needs_next_pulse=True,
+        next_pulse_reason="candidate_waiting_internal_review",
+        idle_budget=2,
+    )
+    assert dispatch is True
+    assert next_budget == 4
+    assert reason == "executable_work_continues"
+
+
+def test_validation_checkpoint_does_not_use_idle_discovery_budget() -> None:
+    dispatch, next_budget, reason = workflow_chain_decision(
+        needs_next_pulse=False,
+        next_pulse_reason="waiting_for_independent_validation",
+        idle_budget=4,
+    )
+    assert dispatch is False
+    assert next_budget == 4
+    assert reason == "checkpoint_preserved"
