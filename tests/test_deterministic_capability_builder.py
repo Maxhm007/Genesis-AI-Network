@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 from genesis.autonomous_engineering import AutonomousEngineeringLoop
@@ -11,15 +12,18 @@ from genesis.selfdev import SelfDevResult
 class TrackingQwenProvider:
     name = "qwen2.5-coder-1.5b-gene-pulse"
 
-    def __init__(self) -> None:
+    def __init__(self, payload: dict | None = None) -> None:
         self.calls = 0
+        self.payload = payload
 
     def available(self) -> bool:
         return True
 
     def reason(self, prompt: str) -> str:
         self.calls += 1
-        raise AssertionError("Qwen must not be called by deterministic learned-capability coding")
+        if self.payload is None:
+            raise AssertionError("Qwen must not be called when deterministic learned-capability coding applies")
+        return json.dumps(self.payload)
 
 
 def _write_learned_target(root: Path) -> None:
@@ -146,24 +150,79 @@ def test_grounded_device_learning_retries_after_pipeline_feedback_without_qwen(t
     assert "runtime_device_selection_f92ab6ae15c7" in captured["proposal"].files["genesis/learned_capabilities.py"]
 
 
-def test_unsupported_learning_waits_instead_of_fabricating_code(tmp_path: Path) -> None:
+def test_grounded_unknown_template_uses_agentic_qwen_fallback(tmp_path: Path) -> None:
     _write_learned_target(tmp_path)
-    qwen = TrackingQwenProvider()
+    insertion = (
+        "def _learned_agentic_identity(value):\n"
+        "    return value\n\n"
+        "register_capability(\n"
+        "    'agentic_identity',\n"
+        "    'Apply one evidence-backed identity transform.',\n"
+        "    'Verified external evidence for the bounded transform.',\n"
+        "    _learned_agentic_identity,\n"
+        ")\n\n"
+        "# GENESIS_LEARNED_CAPABILITY_INSERTION_POINT"
+    )
+    qwen = TrackingQwenProvider(
+        {
+            "edits": [
+                {
+                    "path": "genesis/learned_capabilities.py",
+                    "start_line": 6,
+                    "end_line": 6,
+                    "new": insertion,
+                }
+            ]
+        }
+    )
     registry = ProviderRegistry(include_bootstrap=False)
     registry.register(qwen)
     loop = AutonomousEngineeringLoop(tmp_path, registry)
     queue, task = _learning_task(
         tmp_path,
-        lesson="Exact variational identities for nonnegative martingales can be derived from information flow.",
-        evidence="A theoretical path-space martingale result with no bounded Genesis implementation template.",
+        lesson="Exact variational identities can support a bounded identity transform.",
+        evidence="Verified source evidence describes the transform but has no deterministic Genesis template.",
     )
+    loop.queue = queue
+
+    captured = {}
+    _pass_candidate(loop, captured)
+
+    attempt = loop._attempt_task(task, tmp_path / "runtime")
+
+    assert qwen.calls == 1
+    assert attempt["coding_status"] == "candidate_created"
+    assert attempt["coding_strategy"] == "agentic_grounded_capability_provider"
+    assert attempt["provider_policy"] == "grounded_agentic_capability_with_qwen_fallback"
+    assert attempt["capability_scope"] == "append_only_learned_capability"
+    proposal = captured["proposal"]
+    assert proposal.provider == qwen.name
+    assert set(proposal.files) == {"genesis/learned_capabilities.py"}
+    assert "agentic_identity" in proposal.files["genesis/learned_capabilities.py"]
+    current = queue.get(task.task_id)
+    assert current is not None
+    assert current.state == "review"
+
+
+def test_ungrounded_new_capability_still_blocks_qwen_invention(tmp_path: Path) -> None:
+    _write_learned_target(tmp_path)
+    qwen = TrackingQwenProvider({"edits": []})
+    registry = ProviderRegistry(include_bootstrap=False)
+    registry.register(qwen)
+    loop = AutonomousEngineeringLoop(tmp_path, registry)
+    queue, task = _learning_task(
+        tmp_path,
+        lesson="Speculative capability idea.",
+        evidence="Unverified claim.",
+    )
+    task.payload["discovery"]["finding"]["grounded"] = False
     loop.queue = queue
 
     attempt = loop._attempt_task(task, tmp_path / "runtime")
 
     assert qwen.calls == 0
     assert attempt["coding_status"] == "waiting_for_coding_provider"
-    assert attempt["error"] == "no_non_qwen_coding_provider_available"
+    assert attempt["provider_policy"] == "ungrounded_capability_requires_stronger_provider"
     current = queue.get(task.task_id)
     assert current is not None
     assert current.state == "paused"

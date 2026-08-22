@@ -8,6 +8,7 @@ from .intelligence_router import IntelligenceRouter
 
 INSTALL_MARKER = "_genesis_provider_fallback_installed"
 LEARNED_CAPABILITY_TARGET = "genesis/learned_capabilities.py"
+LEARNED_CAPABILITY_MARKER = "# GENESIS_LEARNED_CAPABILITY_INSERTION_POINT"
 _ORIGINAL_CODING_PROVIDER = AutonomousEngineeringLoop._coding_provider
 _ORIGINAL_ATTEMPT_TASK = AutonomousEngineeringLoop._attempt_task
 
@@ -19,14 +20,12 @@ def _is_qwen(provider) -> bool:
 def _select_eligible_coding_provider(self: AutonomousEngineeringLoop):
     """Choose the best available bounded coding provider, with Qwen as fallback.
 
-    Genesis previously excluded Qwen from code generation even though Gene Pulse
-    provisioned Qwen as its only model runtime. That policy could park otherwise
-    executable self-development tasks forever. Selection is now capability- and
-    evidence-driven: bootstrap is still excluded from coding, measured reliability
-    wins first, a non-Qwen provider wins an exact reliability tie, then lower
-    resource cost/name break remaining ties. If Qwen is the only eligible coding
-    provider it is used and remains subject to the normal bounded edit, tests,
-    Security, review, independent validation, provenance, and promotion gates.
+    Selection is capability- and evidence-driven: bootstrap is excluded, measured
+    reliability wins first, a non-Qwen provider wins an exact reliability tie,
+    then lower resource cost/name break remaining ties. Qwen may therefore serve
+    as the local bounded implementation provider when it is the best available
+    option. Normal edit limits, tests, Security, review, validation, provenance,
+    and promotion gates still apply.
     """
     candidates = []
     for provider in self.providers.available_providers():
@@ -53,24 +52,114 @@ def _select_eligible_coding_provider(self: AutonomousEngineeringLoop):
     return candidates[0][4]
 
 
-def _requires_grounded_capability_builder(task) -> bool:
-    """Keep open-ended learned capability creation on its deterministic builder."""
+def _task_payload_and_finding(task) -> tuple[dict, dict]:
     payload = getattr(task, "payload", {}) or {}
     if not isinstance(payload, dict):
         payload = {}
-    target = str(payload.get("target_path") or "").replace("\\", "/").lstrip("./")
-    task_type = str(payload.get("task_type") or "").strip().lower()
     finding = payload.get("finding")
     discovery = payload.get("discovery")
     if not isinstance(finding, dict) and isinstance(discovery, dict):
         finding = discovery.get("finding")
-    new_capability = bool(finding.get("new_capability")) if isinstance(finding, dict) else False
-    return target == LEARNED_CAPABILITY_TARGET or task_type == "new_capability" or new_capability
+    if not isinstance(finding, dict):
+        finding = {}
+    return payload, finding
+
+
+def _is_new_capability_task(task) -> bool:
+    payload, finding = _task_payload_and_finding(task)
+    target = str(payload.get("target_path") or "").replace("\\", "/").lstrip("./")
+    task_type = str(payload.get("task_type") or "").strip().lower()
+    return (
+        target == LEARNED_CAPABILITY_TARGET
+        or task_type == "new_capability"
+        or finding.get("new_capability") is True
+    )
+
+
+def _is_grounded_agentic_capability_task(task) -> bool:
+    """Allow model synthesis only for evidence-backed learned-capability work."""
+    payload, finding = _task_payload_and_finding(task)
+    target = str(payload.get("target_path") or "").replace("\\", "/").lstrip("./")
+    source = str(payload.get("source") or "").strip()
+    lesson = str(finding.get("lesson") or finding.get("summary") or "").strip()
+    evidence = str(
+        finding.get("lesson_evidence")
+        or finding.get("learning_evidence")
+        or finding.get("evidence")
+        or ""
+    ).strip()
+    return (
+        target == LEARNED_CAPABILITY_TARGET
+        and source == "genesis.evolution_learning"
+        and finding.get("new_capability") is True
+        and finding.get("grounded") is True
+        and bool(lesson)
+        and bool(evidence)
+    )
+
+
+def _install_scoped_capability_guards(self: AutonomousEngineeringLoop, task):
+    """Restrict agentic capability synthesis to append-only incubator insertion."""
+    original_context = self._context_paths_for_task
+    original_validate = self.coding.validate_proposal
+    task_id = str(getattr(task, "task_id", ""))
+
+    def scoped_context(_self, candidate_task):
+        if str(getattr(candidate_task, "task_id", "")) == task_id:
+            target = self.root / LEARNED_CAPABILITY_TARGET
+            return [LEARNED_CAPABILITY_TARGET] if target.is_file() else []
+        return original_context(candidate_task)
+
+    def scoped_validate(_coding, proposal, provider_name):
+        validated = original_validate(proposal, provider_name)
+        if set(validated.files) != {LEARNED_CAPABILITY_TARGET}:
+            raise ValueError("agentic new capability may edit only the learned capability incubator")
+
+        target = self.root / LEARNED_CAPABILITY_TARGET
+        current = target.read_text(encoding="utf-8")
+        proposed = validated.files[LEARNED_CAPABILITY_TARGET]
+        if current.count(LEARNED_CAPABILITY_MARKER) != 1:
+            raise ValueError("learned capability insertion marker is missing or ambiguous")
+        if proposed.count(LEARNED_CAPABILITY_MARKER) != 1:
+            raise ValueError("agentic capability proposal must preserve the insertion marker exactly once")
+
+        prefix, suffix = current.split(LEARNED_CAPABILITY_MARKER, 1)
+        tail = LEARNED_CAPABILITY_MARKER + suffix
+        if not proposed.startswith(prefix) or not proposed.endswith(tail):
+            raise ValueError("agentic capability proposal must be append-only before the insertion marker")
+        insertion_end = len(proposed) - len(tail)
+        inserted = proposed[len(prefix):insertion_end]
+        if not inserted.strip():
+            raise ValueError("agentic capability proposal contains no new implementation")
+        if LEARNED_CAPABILITY_MARKER in inserted:
+            raise ValueError("agentic capability proposal may not duplicate the insertion marker")
+        if len(inserted.encode("utf-8")) > self.coding.MAX_EDIT_BYTES:
+            raise ValueError("agentic capability insertion exceeds bounded edit size")
+        return validated
+
+    had_context_override = "_context_paths_for_task" in self.__dict__
+    previous_context_override = self.__dict__.get("_context_paths_for_task")
+    had_validate_override = "validate_proposal" in self.coding.__dict__
+    previous_validate_override = self.coding.__dict__.get("validate_proposal")
+    self._context_paths_for_task = MethodType(scoped_context, self)
+    self.coding.validate_proposal = MethodType(scoped_validate, self.coding)
+
+    def restore() -> None:
+        if had_context_override:
+            self.__dict__["_context_paths_for_task"] = previous_context_override
+        else:
+            self.__dict__.pop("_context_paths_for_task", None)
+        if had_validate_override:
+            self.coding.__dict__["validate_proposal"] = previous_validate_override
+        else:
+            self.coding.__dict__.pop("validate_proposal", None)
+
+    return restore
 
 
 def _attempt_task_with_provider_fallback(self: AutonomousEngineeringLoop, task, runtime):
-    """Use Qwen for grounded code work but not unsupported capability invention."""
-    if not _requires_grounded_capability_builder(task):
+    """Use the best eligible provider while keeping new capability creation bounded."""
+    if not _is_new_capability_task(task):
         result = _ORIGINAL_ATTEMPT_TASK(self, task, runtime)
         result["provider_policy"] = "eligible_provider_with_qwen_fallback"
         if result.get("coding_strategy") == "external_non_qwen_provider":
@@ -79,15 +168,30 @@ def _attempt_task_with_provider_fallback(self: AutonomousEngineeringLoop, task, 
             result["error"] = "no_eligible_coding_provider_available"
         return result
 
-    # New learned capabilities remain evidence-gated: the deterministic builder
-    # gets first chance inside the original attempt. If it cannot ground a safe
-    # implementation, restore the previous non-Qwen selector for this one task so
-    # a small local model cannot fabricate an unsupported capability.
+    if _is_grounded_agentic_capability_task(task):
+        restore = _install_scoped_capability_guards(self, task)
+        try:
+            result = _ORIGINAL_ATTEMPT_TASK(self, task, runtime)
+        finally:
+            restore()
+        result["provider_policy"] = "grounded_agentic_capability_with_qwen_fallback"
+        result["capability_scope"] = "append_only_learned_capability"
+        if result.get("coding_strategy") == "external_non_qwen_provider":
+            result["coding_strategy"] = "agentic_grounded_capability_provider"
+        if result.get("error") == "no_non_qwen_coding_provider_available":
+            result["error"] = "no_eligible_coding_provider_available"
+        return result
+
+    # Ungrounded capability invention remains blocked. Genesis may reason about the
+    # gap, but implementation requires evidence strong enough to enter the grounded
+    # evolution-learning lane or a stronger non-Qwen provider.
     had_override = "_coding_provider" in self.__dict__
     previous_override = self.__dict__.get("_coding_provider")
     self._coding_provider = MethodType(_ORIGINAL_CODING_PROVIDER, self)
     try:
-        return _ORIGINAL_ATTEMPT_TASK(self, task, runtime)
+        result = _ORIGINAL_ATTEMPT_TASK(self, task, runtime)
+        result["provider_policy"] = "ungrounded_capability_requires_stronger_provider"
+        return result
     finally:
         if had_override:
             self.__dict__["_coding_provider"] = previous_override
@@ -96,7 +200,7 @@ def _attempt_task_with_provider_fallback(self: AutonomousEngineeringLoop, task, 
 
 
 def install_provider_fallback() -> None:
-    """Install the provider-selection repair once for every Genesis entrypoint."""
+    """Install capability-driven provider selection once for every Genesis entrypoint."""
     if getattr(AutonomousEngineeringLoop, INSTALL_MARKER, False):
         return
     AutonomousEngineeringLoop._coding_provider = _select_eligible_coding_provider
