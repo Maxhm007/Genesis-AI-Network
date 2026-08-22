@@ -166,9 +166,11 @@ jobs:
               next_pulse_reason=str(p.get('next_pulse_reason') or ''),
               idle_budget=idle_budget,
           )
+          idle_continue = dispatch_next and not bool(p.get('needs_next_pulse'))
 
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
               f.write('continue=' + ('true' if p.get('needs_next_pulse') else 'false') + '\n')
+              f.write('idle_continue=' + ('true' if idle_continue else 'false') + '\n')
               f.write('dispatch_next=' + ('true' if dispatch_next else 'false') + '\n')
               f.write('next_budget=' + str(next_budget) + '\n')
               f.write('chain_reason=' + chain_reason + '\n')
@@ -268,7 +270,7 @@ jobs:
           retention-days: 30
 
       - name: Request next pulse
-        if: steps.pulse.outputs.dispatch_next == 'true' && env.CONTINUE_CHAIN == 'true'
+        if: env.CONTINUE_CHAIN == 'true' && (steps.pulse.outputs.continue == 'true' || steps.pulse.outputs.idle_continue == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
