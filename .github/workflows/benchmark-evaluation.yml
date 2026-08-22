@@ -4,7 +4,6 @@ on:
   workflow_run:
     workflows:
       - Genesis Proactive Development
-      - Gene Pulse
     types:
       - completed
   workflow_dispatch: {}
