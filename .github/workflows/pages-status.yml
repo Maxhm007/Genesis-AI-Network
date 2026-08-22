@@ -8,6 +8,7 @@ on:
       - 'scripts/build_live_status.py'
       - 'scripts/build_gene_chat.py'
       - 'scripts/self_evaluation_dashboard.py'
+      - 'scripts/autonomy_history_backfill.py'
       - 'scripts/dashboard_live_minute_patch.py'
       - 'scripts/gene_chat_reply.py'
       - '.github/workflows/gene-chat.yml'
@@ -45,6 +46,7 @@ jobs:
         run: |
           python scripts/build_live_status.py
           python scripts/self_evaluation_dashboard.py
+          python scripts/autonomy_history_backfill.py
           python scripts/dashboard_live_minute_patch.py
       - name: Build Genesis chat snapshot
         env:
