@@ -541,6 +541,7 @@ class ReviewWorker:
             capture_output=True,
             check=False,
             timeout=900,
+            env=self.engineering.coding.executor._candidate_test_env(),
         )
         test_output = (tests.stdout + "\n" + tests.stderr)[-self.MAX_FEEDBACK_BYTES :]
         if tests.returncode != 0:
