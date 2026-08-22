@@ -11,6 +11,7 @@ on:
       - 'scripts/autonomy_history_backfill.py'
       - 'scripts/dashboard_live_minute_patch.py'
       - 'scripts/dashboard_resilience_patch.py'
+      - 'scripts/embed_dashboard_status.py'
       - 'scripts/validate_dashboard_js.py'
       - 'scripts/gene_chat_reply.py'
       - '.github/workflows/gene-chat.yml'
@@ -50,9 +51,12 @@ jobs:
         run: |
           python scripts/build_live_status.py
           python scripts/self_evaluation_dashboard.py
-          python scripts/autonomy_history_backfill.py
+          if ! python scripts/autonomy_history_backfill.py; then
+            echo "::warning::Autonomy history backfill failed; deploying the current strict snapshot instead of keeping a stale Pages artifact."
+          fi
           python scripts/dashboard_live_minute_patch.py
           python scripts/dashboard_resilience_patch.py
+          python scripts/embed_dashboard_status.py
           python scripts/validate_dashboard_js.py
       - name: Build Genesis chat snapshot
         env:
