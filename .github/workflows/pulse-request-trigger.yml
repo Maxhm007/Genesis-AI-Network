@@ -20,19 +20,52 @@ jobs:
   dispatch:
     runs-on: ubuntu-latest
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Resolve requested Gene
+        id: request
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json, os, re
+          from pathlib import Path
+
+          gene = "gene-node-1"
+          path = Path("ops/pulse-request.json")
+          if path.is_file():
+              try:
+                  payload = json.loads(path.read_text(encoding="utf-8"))
+              except Exception as exc:
+                  raise SystemExit(f"invalid ops/pulse-request.json: {type(exc).__name__}: {exc}")
+              requested = str(payload.get("gene") or "").strip()
+              if requested:
+                  gene = requested
+
+          if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", gene):
+              raise SystemExit(f"invalid requested gene: {gene!r}")
+
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"gene={gene}\n")
+          print(f"Resolved Gene: {gene}")
+          PY
+
       - name: Dispatch agentic Gene Pulse
         env:
           GH_TOKEN: ${{ github.token }}
+          REQUESTED_GENE: ${{ steps.request.outputs.gene }}
         run: >-
           gh workflow run gene-pulse.yml
           --repo "$GITHUB_REPOSITORY"
           --ref main
-          -f gene=gene-node-1
+          -f gene="$REQUESTED_GENE"
           -f continue_chain=true
 
       - name: Record request bridge
         run: |
           echo "## Genesis Pulse Request" >> "$GITHUB_STEP_SUMMARY"
           echo >> "$GITHUB_STEP_SUMMARY"
-          echo "Dispatched Gene Pulse with continuation enabled." >> "$GITHUB_STEP_SUMMARY"
+          echo "Dispatched Gene Pulse for \`${{ steps.request.outputs.gene }}\` with continuation enabled." >> "$GITHUB_STEP_SUMMARY"
           echo "The Pulse remains bounded by candidate isolation, tests, Security, review, validation, and promotion gates." >> "$GITHUB_STEP_SUMMARY"
