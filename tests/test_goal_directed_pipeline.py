@@ -18,6 +18,9 @@ class _Store:
     def list_active(self):
         return list(self.records)
 
+    def get(self, task_id):
+        return next((record for record in self.records if record.task_id == task_id), None)
+
 
 class _Worker:
     def __init__(self, action):
@@ -41,6 +44,7 @@ def _coordinator(records):
     coordinator.repair = _Worker("pipeline_repair_completed")
     coordinator.triage = _Worker("pipeline_triaged")
     coordinator.validation = _Worker("pipeline_wait_validation")
+    coordinator._recover_orphan_review = lambda: None
     return coordinator
 
 
@@ -60,6 +64,32 @@ def test_preferred_goal_task_controls_next_bounded_worker():
     assert result["action"] == "pipeline_repair_completed"
     assert coordinator.repair.seen == ["repair-a"]
     assert coordinator.review.seen == []
+
+
+def test_recovered_review_preempts_unrelated_preferred_goal():
+    coordinator = _coordinator([_Record("repair-a", "needs_repair")])
+
+    def recover():
+        recovered = _Record("recovered-review", "review_ready")
+        coordinator.store.records.append(recovered)
+        return {
+            "status": "orphan_review_recovered",
+            "task_id": recovered.task_id,
+            "candidate_sha": "a" * 40,
+            "review_ref": "genesis/review-aaaaaaaaaaaa",
+        }
+
+    coordinator._recover_orphan_review = recover
+
+    result = coordinator.run_once(preferred_task_id="repair-a")
+
+    assert result["handled"] is True
+    assert result["action"] == "pipeline_internal_review_approved"
+    assert result["goal_directed"] is False
+    assert result["preferred_task_id"] == "repair-a"
+    assert result["orphan_review_recovery"]["task_id"] == "recovered-review"
+    assert coordinator.review.seen == ["recovered-review"]
+    assert coordinator.repair.seen == []
 
 
 def test_goal_selected_validation_still_uses_canonical_validator_worker():
