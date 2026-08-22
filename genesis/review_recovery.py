@@ -40,11 +40,14 @@ def _review_refs(root: Path) -> list[tuple[str, str]]:
     )
     if fetch.returncode != 0:
         return []
+    # Enumerate the complete genesis namespace and enforce the exact review-ref
+    # shape below. Git ref patterns do not treat a partial final path component as
+    # a simple string prefix on every supported Git version.
     result = _git(
         root,
         "for-each-ref",
         "--format=%(refname) %(objectname)",
-        "refs/remotes/origin/genesis/review-",
+        "refs/remotes/origin/genesis/",
     )
     if result.returncode != 0:
         return []
