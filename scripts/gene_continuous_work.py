@@ -14,13 +14,16 @@ from genesis.goal_orchestrator import GoalOrchestrator
 from genesis.issue_discovery import GenesisIssueDiscoveryEngine
 from genesis.proactive import ProactiveDevelopmentLoop
 from genesis.self_learning import SelfLearningEngine
-from genesis.work_rule import GeneWorkRule
+from genesis.work_rule import GeneWorkRule, WorkDecision
 
 
 ROOT = Path(__file__).resolve().parents[1]
 STOP = False
 PULSE_DISCOVERY_SOURCE_BYTES = 5_000
 PULSE_DISCOVERY_TEST_BYTES = 2_000
+BENCHMARK_RUNNER_TASK_TYPE = "benchmark_runner_integration"
+BENCHMARK_RUNNER_EXECUTABLE_STATES = {"new", "assigned", "failed", "review"}
+PIPELINE_COMPLETION_PRIORITY_STAGES = {"review_ready", "validation_ready", "promoted"}
 
 
 def _stop(*_: object) -> None:
@@ -94,6 +97,35 @@ def _legacy_task_coding_ready(engineering: AutonomousEngineeringLoop, task) -> b
     if task is None:
         return False
     return bool(engineering._context_paths_for_task(task))
+
+
+def _next_benchmark_runner_task(queue):
+    """Return one executable benchmark-runner integration task, if any.
+
+    Benchmark measurement parents are paused while these child coding tasks are
+    pending. Selecting one child explicitly prevents fresh learning-pipeline work
+    from starving benchmark execution indefinitely.
+    """
+    candidates = []
+    for task in queue.list(limit=5000):
+        payload = dict(task.payload or {})
+        if payload.get("task_type") != BENCHMARK_RUNNER_TASK_TYPE:
+            continue
+        if task.state not in BENCHMARK_RUNNER_EXECUTABLE_STATES:
+            continue
+        if task.state == "failed" and not queue.retryable(task):
+            continue
+        candidates.append(task)
+    candidates.sort(key=lambda task: (-task.priority, task.created_at, task.task_id))
+    return candidates[0] if candidates else None
+
+
+def _pipeline_completion_has_priority(pipeline: GoalDirectedPipelineCoordinator) -> bool:
+    """Never preempt a durable candidate that is already at review/validation/learning."""
+    return any(
+        str(getattr(record, "stage", "")) in PIPELINE_COMPLETION_PRIORITY_STAGES
+        for record in pipeline.store.list_active()
+    )
 
 
 def _finalize_agentic(
@@ -183,6 +215,31 @@ def run_step(logical_id: str) -> dict:
 
     agentic = AgenticPulseController(ROOT, logical_id)
     planned_step = agentic.plan(pipeline)
+
+    # Frontier benchmark parents pause while a bounded runner-integration coding
+    # task is outstanding. Give one such child a Pulse before unrelated pipeline
+    # development can enqueue another learning task. Candidate completion stages
+    # still win so this scheduling rule cannot starve review/validation/promotion.
+    benchmark_runner = _next_benchmark_runner_task(engineering.queue)
+    if benchmark_runner is not None and not _pipeline_completion_has_priority(pipeline):
+        rule = GeneWorkRule(ROOT, logical_id, engineering.queue)
+        decision = WorkDecision(
+            gene=rule.identity.display_name,
+            logical_id=logical_id,
+            mode="solve_issue",
+            task_id=benchmark_runner.task_id,
+            objective=benchmark_runner.objective,
+            reason="frontier_benchmark_runner_priority",
+        )
+        result = _run_legacy_task(logical_id, engineering, rule, decision)
+        result["benchmark_runner_priority"] = {
+            "task_id": benchmark_runner.task_id,
+            "benchmark_id": str(benchmark_runner.payload.get("benchmark_id") or ""),
+            "state": benchmark_runner.state,
+            "priority": benchmark_runner.priority,
+        }
+        return _finalize_agentic(agentic, planned_step, goals, orchestration, result)
+
     pipeline_result = pipeline.run_once(preferred_task_id=str(preferred_task_id) if preferred_task_id else None)
 
     if pipeline_result.get("handled"):
