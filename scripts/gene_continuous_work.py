@@ -7,6 +7,7 @@ import subprocess
 import time
 from pathlib import Path
 
+from genesis.agentic import AgenticPulseController
 from genesis.autonomous_engineering import AutonomousEngineeringLoop
 from genesis.bounded_autonomy_pipeline import BoundedAutonomyPipelineCoordinator
 from genesis.issue_discovery import GenesisIssueDiscoveryEngine
@@ -94,6 +95,13 @@ def _legacy_task_coding_ready(engineering: AutonomousEngineeringLoop, task) -> b
     return bool(engineering._context_paths_for_task(task))
 
 
+def _finalize_agentic(controller: AgenticPulseController, planned_step, result: dict) -> dict:
+    agentic = controller.observe(result)
+    agentic["planned_step"] = dict(planned_step.__dict__)
+    result["agentic"] = agentic
+    return result
+
+
 def _run_legacy_task(logical_id: str, engineering: AutonomousEngineeringLoop, rule: GeneWorkRule, decision) -> dict:
     result: dict = {"decision": decision.__dict__}
     task = engineering.queue.get(decision.task_id) if decision.task_id else None
@@ -155,14 +163,20 @@ def run_step(logical_id: str) -> dict:
 
     engineering = AutonomousEngineeringLoop(ROOT)
     pipeline = BoundedAutonomyPipelineCoordinator(ROOT, engineering)
+    agentic = AgenticPulseController(ROOT, logical_id)
+    planned_step = agentic.plan(pipeline)
     pipeline_result = pipeline.run_once()
 
     if pipeline_result.get("handled"):
-        return {
-            "decision": _pipeline_decision(pipeline_result),
-            "action": pipeline_result.get("action", "pipeline_unknown"),
-            "pipeline": pipeline_result,
-        }
+        return _finalize_agentic(
+            agentic,
+            planned_step,
+            {
+                "decision": _pipeline_decision(pipeline_result),
+                "action": pipeline_result.get("action", "pipeline_unknown"),
+                "pipeline": pipeline_result,
+            },
+        )
 
     # Keep legacy code tasks functional, but never let a contextless capability,
     # benchmark, or administrative task hijack the coding/repair Pulse.
@@ -175,7 +189,7 @@ def run_step(logical_id: str) -> dict:
             if _legacy_task_coding_ready(engineering, task):
                 result = _run_legacy_task(logical_id, engineering, rule, decision)
                 result["pipeline_discovery"] = pipeline_result.get("discovery")
-                return result
+                return _finalize_agentic(agentic, planned_step, result)
             legacy_skipped = {
                 "task_id": task.task_id if task else decision.task_id,
                 "module_id": task.module_id if task else None,
@@ -216,7 +230,7 @@ def run_step(logical_id: str) -> dict:
                 "reason": "non_coding_legacy_task_not_executable_by_gene_pulse",
             }
     result["next_decision"] = next_decision
-    return result
+    return _finalize_agentic(agentic, planned_step, result)
 
 
 def main() -> int:
