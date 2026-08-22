@@ -12,6 +12,7 @@ on:
       - 'scripts/dashboard_live_minute_patch.py'
       - 'scripts/dashboard_resilience_patch.py'
       - 'scripts/embed_dashboard_status.py'
+      - 'scripts/dashboard_navigation_fallback.py'
       - 'scripts/render_static_dashboard.py'
       - 'scripts/validate_dashboard_js.py'
       - 'scripts/gene_chat_reply.py'
@@ -58,6 +59,7 @@ jobs:
           python scripts/dashboard_live_minute_patch.py
           python scripts/dashboard_resilience_patch.py
           python scripts/embed_dashboard_status.py
+          python scripts/dashboard_navigation_fallback.py
           python scripts/render_static_dashboard.py
           python scripts/validate_dashboard_js.py
       - name: Build Genesis chat snapshot
