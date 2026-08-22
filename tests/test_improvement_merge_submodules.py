@@ -3,11 +3,15 @@ from __future__ import annotations
 from pathlib import Path
 from types import SimpleNamespace
 
+import pytest
+
 from genesis.bounded_autonomy_pipeline import BoundedAutonomyPipelineCoordinator
 from genesis.improvement import IMPROVEMENT_MODULE_ID, ImprovementModule
 from genesis.merge import MERGE_MODULE_ID, MergeModule
+from genesis.modules.manager import ModuleManager
 from genesis.modules.registry import ModuleRegistry
 from genesis.modules.task_queue import GenesisTask
+from genesis.modules.types import ModuleProposal
 
 
 def _task(*, task_type: str, target: str, new_capability: bool = False) -> GenesisTask:
@@ -106,6 +110,22 @@ def test_merge_requires_review_promotion_and_safe_target(tmp_path, monkeypatch) 
     protected_evidence = module.verify(protected)
     assert protected_evidence.approved is False
     assert protected_evidence.reason == "normal_autonomous_merge_target_protected"
+
+
+def test_merge_submodule_cannot_be_dynamically_retired_or_replaced() -> None:
+    root = Path(__file__).resolve().parents[1]
+    manager = ModuleManager(ModuleRegistry.from_default_config(root))
+    for action in ("retire", "replace"):
+        proposal = ModuleProposal(
+            proposal_id=f"test-{action}",
+            action=action,
+            target_module_id=MERGE_MODULE_ID,
+            title=f"bad {action}",
+            rationale="test",
+            requested_by="test",
+        )
+        with pytest.raises(ValueError, match="protected"):
+            manager.validate_proposal(proposal)
 
 
 def test_bounded_pulse_scheduler_has_improvement_merge_extension_installed() -> None:
