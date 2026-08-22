@@ -1,6 +1,6 @@
 {
-  "request_id": "agentic-autonomy-enable-20260822-1",
-  "requested_action": "run-agentic-self-development",
+  "request_id": "stuck-review-recovery-20260822T1121Z",
+  "requested_action": "resume-agentic-review-pipeline",
   "gene": "gene-node-1",
   "requested_by": "owner"
 }
