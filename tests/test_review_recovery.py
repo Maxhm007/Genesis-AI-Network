@@ -73,8 +73,7 @@ def _repo(tmp_path: Path) -> tuple[Path, str]:
     return root, sha
 
 
-def test_orphaned_genesis_capability_review_is_reconstructed(tmp_path: Path) -> None:
-    root, sha = _repo(tmp_path)
+def _coordinator(root: Path):
     queue = PersistentTaskQueue(root / "runtime" / "genesis_tasks.sqlite3")
     store = PipelineStore(queue.path)
     coordinator = SimpleNamespace(
@@ -82,6 +81,12 @@ def test_orphaned_genesis_capability_review_is_reconstructed(tmp_path: Path) -> 
         engineering=SimpleNamespace(queue=queue),
         store=store,
     )
+    return coordinator, queue, store
+
+
+def test_orphaned_genesis_capability_review_is_reconstructed(tmp_path: Path) -> None:
+    root, sha = _repo(tmp_path)
+    coordinator, queue, store = _coordinator(root)
 
     recovered = recover_one_orphan_review(root, coordinator)
 
@@ -105,21 +110,9 @@ def test_orphaned_genesis_capability_review_is_reconstructed(tmp_path: Path) -> 
 
 
 def test_non_genesis_review_commit_is_not_recovered(tmp_path: Path) -> None:
-    root, _sha = _repo(tmp_path)
-    queue = PersistentTaskQueue(root / "runtime" / "genesis_tasks.sqlite3")
-    store = PipelineStore(queue.path)
-    coordinator = SimpleNamespace(
-        root=root,
-        engineering=SimpleNamespace(queue=queue),
-        store=store,
-    )
-
-    # The genuine Genesis review is deliberately made ineligible so an unrelated
-    # branch cannot be accepted merely by matching the review-ref naming pattern.
-    _git(root, "push", "origin", "--delete", next(
-        line.split()[0].replace("refs/remotes/origin/", "")
-        for line in _git(root, "for-each-ref", "--format=%(refname) %(objectname)", "refs/remotes/origin/genesis/review-").splitlines()
-    ))
+    root, genuine_sha = _repo(tmp_path)
+    coordinator, _queue, store = _coordinator(root)
+    _git(root, "push", "origin", "--delete", f"genesis/review-{genuine_sha[:12]}")
 
     _git(root, "checkout", "-b", "untrusted")
     target = root / "genesis" / "learned_capabilities.py"
