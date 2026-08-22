@@ -21,7 +21,7 @@ class TrackingQwenProvider:
 
     def reason(self, prompt: str) -> str:
         self.calls += 1
-        raise AssertionError("Qwen must not be called by coding/repair")
+        return '{"edits":[{"path":"genesis/worker.py","start_line":1,"end_line":1,"new":"VALUE = 2"}]}'
 
 
 class StrongCodingProvider:
@@ -31,7 +31,7 @@ class StrongCodingProvider:
         return True
 
     def reason(self, prompt: str) -> str:
-        return '{"edits":[{"path":"genesis/worker.py","start_line":1,"end_line":1,"new":"VALUE = 2"}]}'
+        return '{"edits":[{"path":"genesis/worker.py","start_line":1,"end_line":1,"new":"VALUE = 3"}]}'
 
 
 def _write_target(root: Path) -> None:
@@ -55,29 +55,38 @@ def _task(root: Path):
     return queue, task
 
 
-def test_qwen_is_never_selected_for_coding(tmp_path: Path) -> None:
+def test_qwen_is_selected_when_it_is_the_only_eligible_coder(tmp_path: Path) -> None:
     _write_target(tmp_path)
     qwen = TrackingQwenProvider()
     registry = ProviderRegistry(include_bootstrap=False)
     registry.register(qwen)
     loop = AutonomousEngineeringLoop(tmp_path, registry)
-    queue, task = _task(tmp_path)
-    loop.queue = queue
 
-    attempt = loop._attempt_task(task, tmp_path / "runtime")
+    selected = loop._coding_provider()
 
-    assert qwen.calls == 0
-    assert attempt["coding_status"] == "waiting_for_coding_provider"
-    assert attempt["provider_policy"] == "qwen_excluded_from_coding"
-    assert attempt["error"] == "no_non_qwen_coding_provider_available"
-    current = queue.get(task.task_id)
-    assert current is not None
-    assert current.state == "paused"
-    assert current.state_reason == "waiting_for_non_qwen_coding_provider"
-    assert current.attempt_count == 0
+    assert selected is qwen
 
 
-def test_stronger_non_qwen_coder_is_preferred_even_when_qwen_is_available(tmp_path: Path) -> None:
+def test_qwen_can_generate_a_bounded_repository_edit(tmp_path: Path) -> None:
+    _write_target(tmp_path)
+    qwen = TrackingQwenProvider()
+    registry = ProviderRegistry(include_bootstrap=False)
+    registry.register(qwen)
+    loop = AutonomousEngineeringLoop(tmp_path, registry)
+
+    selected = loop._coding_provider()
+    proposal = loop.coding.propose(
+        "Change the bounded worker value from 1 to 2.",
+        context_paths=["genesis/worker.py"],
+        provider=selected,
+    )
+
+    assert qwen.calls == 1
+    assert proposal.provider == qwen.name
+    assert proposal.files["genesis/worker.py"] == "VALUE = 2\n"
+
+
+def test_stronger_non_qwen_coder_wins_an_equal_reliability_tie(tmp_path: Path) -> None:
     _write_target(tmp_path)
     qwen = TrackingQwenProvider()
     strong = StrongCodingProvider()
@@ -92,11 +101,9 @@ def test_stronger_non_qwen_coder_is_preferred_even_when_qwen_is_available(tmp_pa
     assert qwen.calls == 0
 
 
-def test_waiting_for_coder_does_not_spend_pipeline_repair_budget(tmp_path: Path) -> None:
+def test_true_provider_absence_does_not_spend_pipeline_repair_budget(tmp_path: Path) -> None:
     _write_target(tmp_path)
-    qwen = TrackingQwenProvider()
     registry = ProviderRegistry(include_bootstrap=False)
-    registry.register(qwen)
     loop = AutonomousEngineeringLoop(tmp_path, registry)
     queue, task = _task(tmp_path)
     loop.queue = queue
@@ -111,7 +118,6 @@ def test_waiting_for_coder_does_not_spend_pipeline_repair_budget(tmp_path: Path)
     result = SingleAttemptRepairWorker(tmp_path, loop, store).run(store.get(task.task_id))
 
     assert result["action"] == "pipeline_wait_coding_provider"
-    assert qwen.calls == 0
     record = store.get(task.task_id)
     assert record is not None
     assert record.stage == "needs_repair"
@@ -122,8 +128,8 @@ def test_waiting_for_coder_does_not_spend_pipeline_repair_budget(tmp_path: Path)
     assert current.attempt_count == 0
 
 
-def test_coder_wait_checkpoints_without_immediate_pulse_chain() -> None:
+def test_coder_wait_checkpoint_is_provider_neutral() -> None:
     assert GenePulse._next_pulse_decision("pipeline_wait_coding_provider", {}) == (
         False,
-        "waiting_for_non_qwen_coding_provider",
+        "waiting_for_eligible_coding_provider",
     )

@@ -23,3 +23,12 @@ from .improvement_merge_routing import install_improvement_merge_submodules as _
 
 _install_improvement_merge_submodules()
 del _install_improvement_merge_submodules
+
+# Keep autonomous coding capability-driven rather than provider-name-driven. The
+# local Qwen runtime may act as the bounded fallback when no stronger eligible
+# coding provider is available; all existing tests/Security/review/validation gates
+# still apply before promotion.
+from .provider_fallback import install_provider_fallback as _install_provider_fallback
+
+_install_provider_fallback()
+del _install_provider_fallback
