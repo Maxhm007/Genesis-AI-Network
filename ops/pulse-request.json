@@ -1,6 +1,6 @@
 {
-  "request_id": "orphan-review-recovery-live-20260822T1844BDT",
-  "requested_action": "recover-and-resume-genesis-review",
+  "request_id": "current-main-review-recovery-20260822T2015BDT",
+  "requested_action": "recover-review-validate-promote",
   "gene": "gene-node-1",
   "requested_by": "owner"
 }
