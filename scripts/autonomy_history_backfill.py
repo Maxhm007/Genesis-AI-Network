@@ -1,127 +1,109 @@
 from __future__ import annotations
 
 import json
-import os
 import re
-import urllib.error
-import urllib.parse
-import urllib.request
+import subprocess
 from pathlib import Path
 from typing import Any
 
 OWNER = "Maxhm007"
 REPO = "Genesis-AI-Network"
-TOKEN = os.environ.get("GITHUB_TOKEN", "").strip()
 STATUS = Path("docs/status/status.json")
 DASHBOARD = Path("docs/status/index.html")
 SELFDEV_PREFIX = "Genesis self-development candidate:"
-GENESIS_AI_LOGIN = "genesis-ai"
+
 AUTONOMY_TRIAL_NAME = "genesis autonomy trial"
 PROMOTION_STAGER_NAME = "genesis promotion stager"
 
 
-def api(path: str) -> Any:
-    req = urllib.request.Request(
-        f"https://api.github.com{path}",
-        headers={
-            "Accept": "application/vnd.github+json",
-            "User-Agent": "genesis-autonomy-history-backfill",
-            **({"Authorization": f"Bearer {TOKEN}"} if TOKEN else {}),
-        },
-    )
-    with urllib.request.urlopen(req, timeout=30) as response:
-        return json.load(response)
+def _norm(value: str) -> str:
+    return re.sub(r"\s+", " ", str(value or "").strip().lower())
 
 
-def safe_api(path: str, default: Any) -> Any:
-    try:
-        return api(path)
-    except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError, ValueError):
-        return default
+def _is_genesis_ai(name: str, email: str) -> bool:
+    name_key = re.sub(r"[^a-z0-9]+", "", _norm(name))
+    email_key = _norm(email)
+    return name_key == "genesisai" or email_key.startswith("genesis-ai@") or email_key.startswith("genesisai@")
 
 
-def _actor_name(value: Any) -> str:
-    if not isinstance(value, dict):
-        return ""
-    return str(value.get("login") or value.get("name") or "").strip()
+def _classify_actor(author_name: str, author_email: str, committer_name: str, committer_email: str) -> str | None:
+    if _is_genesis_ai(author_name, author_email):
+        return "genesis_ai_authored"
+    if _norm(author_name) == AUTONOMY_TRIAL_NAME and _norm(committer_name) == PROMOTION_STAGER_NAME:
+        return "autonomy_trial_promoted"
+    return None
 
 
-def _commit_message(detail: dict[str, Any]) -> str:
-    return str((detail.get("commit") or {}).get("message") or "").splitlines()[0]
+def parse_git_history(text: str) -> tuple[list[dict[str, Any]], int]:
+    """Parse full HEAD history and return trusted Genesis self-development evidence.
 
-
-def _reachable_from_main(sha: str) -> bool:
-    compare = safe_api(f"/repos/{OWNER}/{REPO}/compare/{sha}...main", {})
-    if not isinstance(compare, dict):
-        return False
-    merge_base = compare.get("merge_base_commit") or {}
-    status = str(compare.get("status") or "")
-    return str(merge_base.get("sha") or "") == sha and status in {"ahead", "identical"}
-
-
-def search_self_development_commits() -> list[dict[str, Any]]:
-    """Find historical self-development commits and prove they are on main.
-
-    Commit search avoids the old one-page author window. Every result is then
-    fetched directly and ancestry-checked against main before it is displayed.
+    The caller must provide a full, non-shallow repository history. Every row in
+    the returned list is already reachable from the checked-out HEAD because it
+    came directly from `git log HEAD`.
     """
-    query = f'repo:{OWNER}/{REPO} "{SELFDEV_PREFIX}"'
-    encoded = urllib.parse.urlencode({"q": query, "per_page": 100})
-    result = safe_api(f"/search/commits?{encoded}", {"items": []})
-    items = result.get("items", []) if isinstance(result, dict) else []
-
     rows: list[dict[str, Any]] = []
-    seen: set[str] = set()
-    for item in items:
-        sha = str(item.get("sha") or "").strip()
-        if not sha or sha in seen:
+    candidate_count = 0
+    for raw in str(text or "").splitlines():
+        parts = raw.split("\x1f")
+        if len(parts) != 7:
             continue
-        seen.add(sha)
-        detail = safe_api(f"/repos/{OWNER}/{REPO}/commits/{sha}", {})
-        if not isinstance(detail, dict):
+        sha, author_name, author_email, committer_name, committer_email, authored_at, subject = parts
+        if not subject.startswith(SELFDEV_PREFIX):
             continue
-        message = _commit_message(detail)
-        if not message.startswith(SELFDEV_PREFIX):
+        candidate_count += 1
+        provenance = _classify_actor(author_name, author_email, committer_name, committer_email)
+        if provenance is None:
             continue
-        if not _reachable_from_main(sha):
-            continue
-
-        author_actor = _actor_name(detail.get("author"))
-        committer_actor = _actor_name(detail.get("committer"))
-        commit_author = (detail.get("commit") or {}).get("author") or {}
-        commit_committer = (detail.get("commit") or {}).get("committer") or {}
-        author_name = author_actor or str(commit_author.get("name") or "")
-        committer_name = committer_actor or str(commit_committer.get("name") or "")
-        author_key = author_name.lower()
-        committer_key = committer_name.lower()
-
-        if author_key == GENESIS_AI_LOGIN:
-            provenance = "genesis_ai_authored"
-        elif author_key == AUTONOMY_TRIAL_NAME and committer_key == PROMOTION_STAGER_NAME:
-            provenance = "autonomy_trial_promoted"
-        else:
-            continue
-
         rows.append(
             {
                 "sha": sha,
-                "title": re.sub(rf"^{re.escape(SELFDEV_PREFIX)}\s*", "", message),
-                "message": message,
-                "authored_at": commit_author.get("date"),
+                "title": re.sub(rf"^{re.escape(SELFDEV_PREFIX)}\s*", "", subject),
+                "message": subject,
+                "authored_at": authored_at,
                 "author": author_name or "Genesis",
                 "committer": committer_name or "Genesis",
-                "url": detail.get("html_url"),
+                "url": f"https://github.com/{OWNER}/{REPO}/commit/{sha}",
                 "provenance": provenance,
                 "evidence": (
-                    "Genesis AI authored self-development commit confirmed as an ancestor of main"
+                    "Genesis AI authored self-development commit present in full deployed main history"
                     if provenance == "genesis_ai_authored"
-                    else "Genesis Autonomy Trial change promoted by Genesis Promotion Stager and confirmed as an ancestor of main"
+                    else "Genesis Autonomy Trial change promoted by Genesis Promotion Stager and present in full deployed main history"
                 ),
                 "credit": "historical_autonomous_main_evidence",
             }
         )
-
     rows.sort(key=lambda row: str(row.get("authored_at") or ""), reverse=True)
+    return rows, candidate_count
+
+
+def _run_git(args: list[str], root: Path) -> str:
+    result = subprocess.run(
+        ["git", *args],
+        cwd=root,
+        check=True,
+        capture_output=True,
+        text=True,
+    )
+    return result.stdout.strip()
+
+
+def scan_local_main_history(root: Path = Path(".")) -> list[dict[str, Any]]:
+    """Read self-development proof from the checked-out full Git history.
+
+    Pages checks out main with fetch-depth: 0. We explicitly reject shallow
+    repositories so a partial checkout can never silently publish false zeros.
+    """
+    shallow = _run_git(["rev-parse", "--is-shallow-repository"], root).lower()
+    if shallow == "true":
+        raise RuntimeError("Autonomy history requires a full git checkout; refusing to publish false zero evidence")
+
+    fmt = "%H%x1f%an%x1f%ae%x1f%cn%x1f%ce%x1f%aI%x1f%s"
+    history = _run_git(["log", "HEAD", f"--format={fmt}"], root)
+    rows, candidate_count = parse_git_history(history)
+    if candidate_count and not rows:
+        raise RuntimeError(
+            f"Found {candidate_count} self-development commit signatures but none matched trusted Genesis actors; refusing false zero evidence"
+        )
     return rows
 
 
@@ -139,10 +121,12 @@ def enrich_status(rows: list[dict[str, Any]], path: Path = STATUS) -> None:
     evaluation["autonomy_trial_main_commits"] = len(trials)
     evaluation["historical_autonomous_main_evidence"] = len(rows)
     evaluation["recent_genesis_authored_main"] = rows[:30]
+    evaluation["history_source"] = "full_local_git_log_head"
     evaluation["definition"] = (
         "Strict verified cycles come only from the autonomy-proof ledger. Historical autonomous main evidence is a separate, "
-        "source-control-backed count of Genesis AI authored self-development and Genesis Autonomy Trial changes that are proven "
-        "ancestors of main. Historical evidence does not retroactively become strict ledger credit. Assisted and owner work remain separate."
+        "source-control-backed count of Genesis AI authored self-development and Genesis Autonomy Trial changes found directly "
+        "in the full deployed main Git history. Historical evidence does not retroactively become strict ledger credit. "
+        "Assisted and owner work remain separate."
     )
 
     gene0 = payload.setdefault("genes", {}).setdefault("0", {})
@@ -179,13 +163,14 @@ def patch_dashboard(path: Path = DASHBOARD) -> None:
 
 
 def build() -> dict[str, Any]:
-    rows = search_self_development_commits()
+    rows = scan_local_main_history()
     enrich_status(rows)
     patch_dashboard()
     return {
         "historical_autonomous_main_evidence": len(rows),
         "genesis_authored_main_commits": sum(1 for row in rows if row.get("provenance") == "genesis_ai_authored"),
         "autonomy_trial_main_commits": sum(1 for row in rows if row.get("provenance") == "autonomy_trial_promoted"),
+        "history_source": "full_local_git_log_head",
         "recent": rows[:30],
     }
 
