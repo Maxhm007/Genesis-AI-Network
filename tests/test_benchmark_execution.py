@@ -93,6 +93,24 @@ def test_unknown_benchmark_still_queues_bounded_runner_work(tmp_path: Path) -> N
     ]
 
 
+def test_unknown_benchmark_stops_after_bounded_runner_generations(tmp_path: Path) -> None:
+    task = make_task(tmp_path, "new_frontier_benchmark")
+    planner = BenchmarkExecutionPlanner(tmp_path)
+
+    first = planner.advance(task)
+    quarantine(planner.queue, first["task_id"])
+    second = planner.advance(task)
+    quarantine(planner.queue, second["task_id"])
+
+    result = planner.advance(task)
+    assert result["status"] == "runner_integration_exhausted"
+    assert result["engineering_assistance_required"] is True
+    assert result["owner_action_required"] is False
+    assert result["last_work_generation"] == 2
+    assert result["missing"] == ["benchmark_specific_evidence_adapter"]
+    assert len(planner._runner_tasks("new_frontier_benchmark")) == 2
+
+
 def test_invalid_evaluation_task_does_not_create_work(tmp_path: Path) -> None:
     queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
     task = queue.create("Measure something", module_id="genesis.evaluation", payload={})

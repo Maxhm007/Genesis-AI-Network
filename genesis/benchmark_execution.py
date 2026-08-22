@@ -22,6 +22,7 @@ class BenchmarkExecutionPlanner:
 
     TERMINAL_RUNNER_STATES = {"complete", "quarantined", "cancelled"}
     MAX_RUNNER_INTEGRATION_GENERATIONS = 2
+    EVIDENCE_ADAPTER_BENCHMARKS = {"terminal_bench_2_1"}
     TERMINAL_BENCH_ENV = (
         "GENESIS_BENCHMARK_AGENT",
         "GENESIS_BENCHMARK_MODEL",
@@ -57,7 +58,11 @@ class BenchmarkExecutionPlanner:
     @classmethod
     def _execution_readiness(cls, benchmark_id: str) -> dict[str, Any]:
         if benchmark_id != "terminal_bench_2_1":
-            return {"ready": True, "missing": [], "benchmark_id": benchmark_id}
+            return {
+                "ready": benchmark_id in cls.EVIDENCE_ADAPTER_BENCHMARKS,
+                "missing": [] if benchmark_id in cls.EVIDENCE_ADAPTER_BENCHMARKS else ["benchmark_specific_evidence_adapter"],
+                "benchmark_id": benchmark_id,
+            }
         missing: list[str] = []
         if shutil.which("harbor") is None:
             missing.append("harbor_cli")
@@ -115,23 +120,34 @@ class BenchmarkExecutionPlanner:
             }
 
         readiness = self._execution_readiness(benchmark_id)
-        if (
-            latest is not None
-            and self._runner_generation(latest) >= self.MAX_RUNNER_INTEGRATION_GENERATIONS
-            and not readiness["ready"]
-        ):
-            return {
-                "status": "external_execution_required",
-                "benchmark_id": benchmark_id,
-                "reason": (
-                    "bounded runner-integration work is exhausted; real benchmark execution prerequisites are missing"
-                ),
-                "missing": readiness["missing"],
-                "readiness": readiness,
-                "last_runner_task_id": latest.task_id,
-                "last_work_generation": self._runner_generation(latest),
-                "owner_action_required": True,
-            }
+        if latest is not None and self._runner_generation(latest) >= self.MAX_RUNNER_INTEGRATION_GENERATIONS:
+            if benchmark_id not in self.EVIDENCE_ADAPTER_BENCHMARKS:
+                return {
+                    "status": "runner_integration_exhausted",
+                    "benchmark_id": benchmark_id,
+                    "reason": (
+                        "bounded runner-integration work is exhausted and no benchmark-specific evidence adapter is active"
+                    ),
+                    "missing": readiness["missing"],
+                    "readiness": readiness,
+                    "last_runner_task_id": latest.task_id,
+                    "last_work_generation": self._runner_generation(latest),
+                    "engineering_assistance_required": True,
+                    "owner_action_required": False,
+                }
+            if not readiness["ready"]:
+                return {
+                    "status": "external_execution_required",
+                    "benchmark_id": benchmark_id,
+                    "reason": (
+                        "bounded runner-integration work is exhausted; real benchmark execution prerequisites are missing"
+                    ),
+                    "missing": readiness["missing"],
+                    "readiness": readiness,
+                    "last_runner_task_id": latest.task_id,
+                    "last_work_generation": self._runner_generation(latest),
+                    "owner_action_required": True,
+                }
 
         generation = self._runner_generation(latest) + 1 if latest is not None else 1
         objective = (
