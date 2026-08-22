@@ -1,10 +1,15 @@
 from __future__ import annotations
 
+from types import MethodType
+
 from .autonomous_engineering import AutonomousEngineeringLoop
 from .intelligence_router import IntelligenceRouter
 
 
 INSTALL_MARKER = "_genesis_provider_fallback_installed"
+LEARNED_CAPABILITY_TARGET = "genesis/learned_capabilities.py"
+_ORIGINAL_CODING_PROVIDER = AutonomousEngineeringLoop._coding_provider
+_ORIGINAL_ATTEMPT_TASK = AutonomousEngineeringLoop._attempt_task
 
 
 def _is_qwen(provider) -> bool:
@@ -48,9 +53,52 @@ def _select_eligible_coding_provider(self: AutonomousEngineeringLoop):
     return candidates[0][4]
 
 
+def _requires_grounded_capability_builder(task) -> bool:
+    """Keep open-ended learned capability creation on its deterministic builder."""
+    payload = getattr(task, "payload", {}) or {}
+    if not isinstance(payload, dict):
+        payload = {}
+    target = str(payload.get("target_path") or "").replace("\\", "/").lstrip("./")
+    task_type = str(payload.get("task_type") or "").strip().lower()
+    finding = payload.get("finding")
+    discovery = payload.get("discovery")
+    if not isinstance(finding, dict) and isinstance(discovery, dict):
+        finding = discovery.get("finding")
+    new_capability = bool(finding.get("new_capability")) if isinstance(finding, dict) else False
+    return target == LEARNED_CAPABILITY_TARGET or task_type == "new_capability" or new_capability
+
+
+def _attempt_task_with_provider_fallback(self: AutonomousEngineeringLoop, task, runtime):
+    """Use Qwen for grounded code work but not unsupported capability invention."""
+    if not _requires_grounded_capability_builder(task):
+        result = _ORIGINAL_ATTEMPT_TASK(self, task, runtime)
+        result["provider_policy"] = "eligible_provider_with_qwen_fallback"
+        if result.get("coding_strategy") == "external_non_qwen_provider":
+            result["coding_strategy"] = "eligible_model_provider"
+        if result.get("error") == "no_non_qwen_coding_provider_available":
+            result["error"] = "no_eligible_coding_provider_available"
+        return result
+
+    # New learned capabilities remain evidence-gated: the deterministic builder
+    # gets first chance inside the original attempt. If it cannot ground a safe
+    # implementation, restore the previous non-Qwen selector for this one task so
+    # a small local model cannot fabricate an unsupported capability.
+    had_override = "_coding_provider" in self.__dict__
+    previous_override = self.__dict__.get("_coding_provider")
+    self._coding_provider = MethodType(_ORIGINAL_CODING_PROVIDER, self)
+    try:
+        return _ORIGINAL_ATTEMPT_TASK(self, task, runtime)
+    finally:
+        if had_override:
+            self.__dict__["_coding_provider"] = previous_override
+        else:
+            self.__dict__.pop("_coding_provider", None)
+
+
 def install_provider_fallback() -> None:
     """Install the provider-selection repair once for every Genesis entrypoint."""
     if getattr(AutonomousEngineeringLoop, INSTALL_MARKER, False):
         return
     AutonomousEngineeringLoop._coding_provider = _select_eligible_coding_provider
+    AutonomousEngineeringLoop._attempt_task = _attempt_task_with_provider_fallback
     setattr(AutonomousEngineeringLoop, INSTALL_MARKER, True)
