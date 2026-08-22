@@ -81,6 +81,9 @@ def test_agents_last_exam_task_gets_pinned_deterministic_candidate(tmp_path: Pat
     assert DeterministicBenchmarkIntegrationProvider.ALE_TASK_LIST_BLOB_SHA in adapter
     assert "ALE_TASK_COUNT = 152" in adapter
     assert "score = 100.0 * sum(scores) / ALE_TASK_COUNT" in adapter
+    generated_tests = proposal["files"]["tests/test_agents_last_exam_evidence.py"]
+    assert 'f"task/{index:03d}"' in generated_tests
+    assert 'f"task/{{index:03d}}"' not in generated_tests
     assert 'EVIDENCE_ADAPTER_BENCHMARKS = {"agents_last_exam", "terminal_bench_2_1"}' in proposal["files"]["genesis/benchmark_execution.py"]
 
 
