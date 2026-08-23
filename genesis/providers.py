@@ -10,8 +10,21 @@ from typing import Protocol
 
 MAX_PROVIDER_TIMEOUT_SECONDS = 360.0
 LOCAL_REASONING_ROLE_TOKEN_BUDGETS = {
+    "planner": 160,
+    "researcher": 192,
+    "model_scout": 160,
+    "engineer": 192,
+    "scientist": 192,
+    "reviewer": 160,
+    "validator": 160,
+    "network_steward": 160,
+    "genesis_communicator": 256,
     "genesis_research_comprehension": 128,
     "genesis_learning_upgrade_planner": 160,
+    "genesis_learning_transfer_planner": 160,
+    "genesis_internal_code_reviewer": 128,
+    "genesis_self_reviewer": 128,
+    "bounded_coding_engineer": 256,
 }
 
 # Model checking is advisory on timeout only. These are the model-backed checking
@@ -42,12 +55,7 @@ def _reasoning_role(prompt: str) -> str:
 
 
 def _reasoning_token_budget(prompt: str) -> int | None:
-    """Return a small output budget for bounded learning roles only.
-
-    Coding and other reasoning roles keep the provider's configured default.
-    This prevents short JSON learning decisions from consuming a full coding
-    generation budget on CPU-backed local models.
-    """
+    """Return a compact role-specific output budget for local foundation models."""
     return LOCAL_REASONING_ROLE_TOKEN_BUDGETS.get(_reasoning_role(prompt))
 
 
@@ -67,14 +75,12 @@ def _model_check_timeout_response(prompt: str) -> str | None:
 
 
 def _deterministic_learning_transfer(prompt: str) -> str | None:
-    """Route a verified lesson without asking the language model to map it.
+    """Fallback route for a verified lesson when the foundation model times out.
 
-    `PulseEvolutionLearningEngine` already ranks same-domain executable targets
-    before it emits this prompt and independently verifies target evidence after
-    the response. Selecting the first supplied target therefore removes an
-    unnecessary model gate while preserving the existing grounding checks. If
-    that deterministic target is not grounded, the caller's validated fallback
-    creates a new learned capability instead.
+    Qwen/Genesis-model cognition gets the first opportunity to reason about the
+    transfer. This deterministic path exists only for graceful degradation after
+    a failed model call and still relies on the caller's independent grounding
+    checks before any implementation can proceed.
     """
     if _reasoning_role(prompt) != "genesis_learning_transfer_planner":
         return None
@@ -108,7 +114,7 @@ def _deterministic_learning_transfer(prompt: str) -> str | None:
                 "and the full repository test suite passes."
             ),
             "confidence": 0.8,
-            "reason": "deterministic_ranked_target",
+            "reason": "deterministic_timeout_fallback",
         },
         sort_keys=True,
     )
@@ -200,10 +206,6 @@ class GenesisHTTPProvider:
             return False
 
     def reason(self, prompt: str) -> str:
-        deterministic = _deterministic_learning_transfer(prompt)
-        if deterministic is not None:
-            return deterministic
-
         request_payload: dict[str, object] = {"prompt": prompt}
         token_budget = _reasoning_token_budget(prompt)
         if token_budget is not None:
@@ -222,6 +224,9 @@ class GenesisHTTPProvider:
             advisory = _model_check_timeout_response(prompt)
             if advisory is not None:
                 return advisory
+            deterministic = _deterministic_learning_transfer(prompt)
+            if deterministic is not None:
+                return deterministic
             raise
         value = payload.get("response")
         if not isinstance(value, str) or not value.strip():
