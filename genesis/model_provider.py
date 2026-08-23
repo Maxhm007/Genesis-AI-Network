@@ -10,6 +10,7 @@ from .model_lab import ModelLab, ModelLineage
 _ALLOWED_CAPABILITIES = frozenset({"reasoning", "coding", "research", "planning", "review"})
 _RUNTIME_KIND = "local_transformers_causal_lm"
 _MODEL_ARTIFACT_ROOT = Path("runtime/model_artifacts")
+_TRAINING_PROVENANCE_TYPE = "training_provenance"
 
 
 def _sha256_file(path: Path) -> str:
@@ -20,14 +21,32 @@ def _sha256_file(path: Path) -> str:
     return digest.hexdigest()
 
 
+def _normalized_hashes(value: object) -> dict[str, str] | None:
+    if not isinstance(value, dict) or not value:
+        return None
+    result: dict[str, str] = {}
+    for raw_name, raw_hash in value.items():
+        name = str(raw_name).strip()
+        digest = str(raw_hash).strip().lower()
+        if not name or len(digest) != 64 or any(ch not in "0123456789abcdef" for ch in digest):
+            return None
+        result[name] = digest
+    return result
+
+
 class ActiveGenesisModelProvider:
     """Lazy local provider backed only by an independently activated Genesis model.
 
     Model Lab activation alone is not enough. Runtime evidence must explicitly
     identify a local Transformers causal-LM artifact under runtime/model_artifacts,
     declare the qualified capabilities, and bind every model weight file plus the
-    config to an exact SHA-256. The provider never downloads weights and never
-    enables trust_remote_code.
+    config to an exact SHA-256. A separate training-provenance record must prove
+    that Genesis produced new weights/adapters from the recorded base model and
+    dataset and must bind to those same output hashes. The provider never
+    downloads weights and never enables trust_remote_code.
+
+    A Qwen base is allowed as ancestry only after this derivation proof exists;
+    raw Qwen weights are not treated as a Genesis-owned model.
     """
 
     def __init__(self, root: Path, model: ModelLineage, runtime_evidence: dict[str, Any]) -> None:
@@ -58,6 +77,34 @@ class ActiveGenesisModelProvider:
             )
         )
 
+    @staticmethod
+    def _training_provenance_valid(
+        model: ModelLineage,
+        evidence: list[dict[str, Any]],
+        runtime_evidence: dict[str, Any],
+    ) -> bool:
+        runtime_hashes = _normalized_hashes(runtime_evidence.get("files"))
+        if runtime_hashes is None:
+            return False
+        rows = [row for row in evidence if row.get("evidence_type") == _TRAINING_PROVENANCE_TYPE]
+        if not rows:
+            return False
+        payload = rows[-1].get("payload")
+        if not isinstance(payload, dict):
+            return False
+        if payload.get("produced_new_weights") is not True:
+            return False
+        if str(payload.get("output_model_id") or "").strip() != model.model_id:
+            return False
+        if str(payload.get("base_model") or "").strip() != model.base_model:
+            return False
+        if str(payload.get("method") or "").strip() != model.method:
+            return False
+        if str(payload.get("dataset_hash") or "").strip() != model.dataset_hash:
+            return False
+        output_hashes = _normalized_hashes(payload.get("files"))
+        return output_hashes is not None and output_hashes == runtime_hashes
+
     @classmethod
     def discover(cls, root: Path) -> list["ActiveGenesisModelProvider"]:
         root = Path(root).resolve()
@@ -66,18 +113,18 @@ class ActiveGenesisModelProvider:
         for model in lab.list():
             if model.state != "active" or model.benchmark_score is None:
                 continue
-            # Owner policy currently excludes Qwen from the active Genesis runtime,
-            # including a checkpoint whose recorded foundation is Qwen-derived.
-            if "qwen" in model.base_model.lower():
-                continue
+            evidence = lab.evidence(model.model_id)
             runtime_rows = [
                 row
-                for row in lab.evidence(model.model_id)
+                for row in evidence
                 if row.get("evidence_type") == "runtime"
             ]
             if not runtime_rows:
                 continue
-            provider = cls(root, model, dict(runtime_rows[-1].get("payload", {}) or {}))
+            runtime_evidence = dict(runtime_rows[-1].get("payload", {}) or {})
+            if not cls._training_provenance_valid(model, evidence, runtime_evidence):
+                continue
+            provider = cls(root, model, runtime_evidence)
             if provider.available():
                 providers.append(provider)
         providers.sort(key=lambda item: (item.resource_cost, item.name))
@@ -101,10 +148,8 @@ class ActiveGenesisModelProvider:
         return artifact
 
     def _verified_files(self, artifact: Path) -> bool:
-        expected = self.runtime_evidence.get("files")
-        if not isinstance(expected, dict) or not expected:
-            return False
-        if "config.json" not in expected:
+        expected = _normalized_hashes(self.runtime_evidence.get("files"))
+        if expected is None or "config.json" not in expected:
             return False
 
         actual_weights = {
@@ -115,11 +160,7 @@ class ActiveGenesisModelProvider:
         if not actual_weights or not actual_weights.issubset(set(expected)):
             return False
 
-        for relative_name, expected_hash in expected.items():
-            name = str(relative_name).strip()
-            wanted = str(expected_hash).strip().lower()
-            if not name or len(wanted) != 64 or any(ch not in "0123456789abcdef" for ch in wanted):
-                return False
+        for name, wanted in expected.items():
             relative = Path(name)
             if relative.is_absolute() or ".." in relative.parts:
                 return False
@@ -241,4 +282,7 @@ class ActiveGenesisModelProvider:
             "provider_independent": True,
             "remote_downloads_allowed": False,
             "artifact_hashes_required": True,
+            "training_provenance_required": True,
+            "genesis_owned_derivative": True,
+            "qwen_foundation_allowed_after_derivation": True,
         }
