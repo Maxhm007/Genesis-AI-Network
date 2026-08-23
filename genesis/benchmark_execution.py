@@ -22,7 +22,7 @@ class BenchmarkExecutionPlanner:
     """
 
     TERMINAL_RUNNER_STATES = {"complete", "quarantined", "cancelled"}
-    MAX_RUNNER_INTEGRATION_GENERATIONS = 2
+    MAX_RUNNER_INTEGRATION_GENERATIONS = 4
     EVIDENCE_ADAPTER_BENCHMARKS = {"agents_last_exam", "terminal_bench_2_1"}
     TERMINAL_BENCH_ENV = (
         "GENESIS_BENCHMARK_AGENT",
@@ -155,12 +155,24 @@ class BenchmarkExecutionPlanner:
                 }
 
         generation = self._runner_generation(latest) + 1 if latest is not None else 1
+        prior_failure = ""
+        if latest is not None:
+            prior_failure = str(latest.last_error or "").strip()
+            if not prior_failure and latest.failure_history:
+                prior_failure = str(latest.failure_history[-1].get("error") or "").strip()
         objective = (
             f"Make benchmark {benchmark_id} executable for Genesis using the official/comparable benchmark runner and pinned dataset. "
             "Produce real raw benchmark output with provenance; never invent, estimate, hard-code or self-award a score. "
             "Integrate the smallest reproducible runner/adapter needed so BenchmarkExecutionPlanner can stage independently validated evidence. "
             "Do not embed provider credentials or lock Genesis identity to a model/provider."
         )
+        if generation > 1:
+            objective += (
+                f" This is integration generation {generation}. Do not repeat the previous implementation approach; "
+                "use different repository evidence, adapter boundaries, or execution strategy while preserving all validation rules."
+            )
+            if prior_failure:
+                objective += f" Previous bounded attempt ended with: {prior_failure[:500]}"
         dedupe_key = f"benchmark-runner:{benchmark_id}" if generation == 1 else f"benchmark-runner:{benchmark_id}:generation:{generation}"
         child, created = self.queue.create_unique(
             dedupe_key,
@@ -175,6 +187,7 @@ class BenchmarkExecutionPlanner:
                 "score_fabrication_forbidden": True,
                 "requires_independent_validation": True,
                 "work_generation": generation,
+                "strategy_change_required": generation > 1,
             },
         )
         return {
