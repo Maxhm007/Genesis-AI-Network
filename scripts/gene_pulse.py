@@ -9,6 +9,7 @@ provider is called during research intake or capability mapping.  Development,
 review, validation, provenance, and promotion gates remain unchanged.
 """
 
+import re
 from dataclasses import asdict, replace
 
 from genesis.evolution_learning import ResearchItem
@@ -25,6 +26,7 @@ class PulseEvolutionLearningEngine(_CorePulseEvolutionLearningEngine):
     POLICY_REPLAY_META_KEY = "open_ended_new_capability_policy_v1_replayed"
     DIRECT_ROUTING_REPLAY_META_KEY = "direct_research_routing_v2_replayed"
     DIRECT_ROUTING_CONFIDENCE = 0.80
+    MAX_UNKNOWN_RELEASE_FRAGMENT_CHARS = 240
 
     @classmethod
     def _capability_domains(
@@ -62,6 +64,38 @@ class PulseEvolutionLearningEngine(_CorePulseEvolutionLearningEngine):
             f"{item.title}\n{item.summary}"
         )
 
+    @classmethod
+    def _looks_like_non_transferable_release_fragment(
+        cls,
+        item: ResearchItem,
+        technical_source: str,
+        known_domains: dict[str, list[str]],
+    ) -> bool:
+        """Reject short product-release fragments that do not establish a capability.
+
+        Open-ended discovery stays enabled for unknown-domain papers and technical prose.
+        This gate is intentionally narrow: it applies only to GitHub release material with
+        no known capability-domain evidence and with source-specific release syntax such as
+        PR numbers, subsystem prefixes, or implementation identifiers.
+        """
+        if known_domains:
+            return False
+        source = str(item.source or "").lower()
+        url = str(item.url or "").lower()
+        if not (source.startswith("github:") or "github.com/" in url):
+            return False
+        if "/releases/" not in url and "/releases/tag/" not in url:
+            return False
+        compact = " ".join(str(technical_source or "").split())
+        if not compact or len(compact) > cls.MAX_UNKNOWN_RELEASE_FRAGMENT_CHARS:
+            return False
+
+        issue_or_pr = re.search(r"\(#\d+\)|\b(?:pr|issue)\s*#?\d+\b", compact, flags=re.IGNORECASE)
+        subsystem_prefix = re.match(r"^[A-Za-z0-9_.+/-]{2,24}\s*:\s+", compact)
+        implementation_identifier = re.search(r"\b[A-Z][A-Z0-9]+_[A-Z0-9_]+\b", compact)
+        release_like_title = re.fullmatch(r"(?:v?\d[\w.-]*|b\d+)", str(item.title or "").strip(), flags=re.IGNORECASE)
+        return bool(issue_or_pr or subsystem_prefix or implementation_identifier or release_like_title)
+
     def _source_driven_lesson(self, item: ResearchItem) -> dict:
         """Build a grounded capability proposal directly from source text.
 
@@ -71,6 +105,16 @@ class PulseEvolutionLearningEngine(_CorePulseEvolutionLearningEngine):
         technical_source = self._technical_excerpt(item)
         if len(technical_source) < 24:
             return {"decision": "skip", "reason": "no_technical_source"}
+
+        known_domains = self._known_research_domains(item)
+        if self._looks_like_non_transferable_release_fragment(item, technical_source, known_domains):
+            return {
+                "decision": "skip",
+                "reason": "release_fragment_not_transferable",
+                "technical_source": technical_source,
+                "research_domains": [],
+                "routing_mode": "direct_source_evidence",
+            }
 
         evidence, overlap = self._best_exact_anchor(
             str(item.summary or ""),
@@ -83,7 +127,6 @@ class PulseEvolutionLearningEngine(_CorePulseEvolutionLearningEngine):
         if not evidence:
             return {"decision": "skip", "reason": "no_exact_source_evidence"}
 
-        known_domains = self._known_research_domains(item)
         capability_domains = sorted(known_domains) or [self.EMERGING_CAPABILITY_DOMAIN]
         topics: list[str] = []
         for domain in sorted(known_domains):
