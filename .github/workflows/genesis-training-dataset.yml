@@ -7,6 +7,15 @@ on:
         description: Maximum validated autonomous examples to materialize
         required: false
         default: "10000"
+  push:
+    branches: [main]
+    paths:
+      - "genesis/model_training_dataset.py"
+      - "scripts/build_genesis_training_dataset.py"
+      - ".github/workflows/genesis-training-dataset.yml"
+  workflow_run:
+    workflows: ["Genesis Record Validated Update"]
+    types: [completed]
 
 permissions:
   contents: read
@@ -17,11 +26,13 @@ concurrency:
 
 jobs:
   build:
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 0
 
       - uses: actions/setup-python@v5
@@ -30,6 +41,8 @@ jobs:
 
       - name: Build provenance-qualified dataset
         shell: bash
+        env:
+          MAX_EXAMPLES: ${{ github.event.inputs.max_examples || '10000' }}
         run: |
           set -euo pipefail
           mkdir -p runtime/model_datasets
@@ -37,7 +50,7 @@ jobs:
             --root . \
             --head HEAD \
             --output-name genesis-validated-autonomous.jsonl \
-            --max-examples "${{ inputs.max_examples || '10000' }}" \
+            --max-examples "${MAX_EXAMPLES}" \
             | tee runtime/model_datasets/build-result.json
 
       - name: Show dataset evidence
