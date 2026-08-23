@@ -1,0 +1,8 @@
+# Optional heavy dependencies for a self-hosted/local Genesis Model Lab trainer.
+# These are deliberately separate from requirements.txt so normal Gene Pulse and
+# validation runners do not download a model-training stack.
+torch>=2.6,<3
+transformers>=4.51,<5
+peft>=0.15,<1
+accelerate>=1.2,<2
+safetensors>=0.5,<1
