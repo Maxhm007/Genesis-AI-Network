@@ -18,8 +18,15 @@ def test_live_repository_history_yields_provenance_qualified_training_examples()
     for example in collection.examples:
         provenance = example["provenance"]
         assert provenance["classification"] == "genesis_autonomous_validated_promotion"
-        assert provenance["validated_commit"] in collection.included_commits
-        assert provenance["author_name"] == "Genesis AI"
-        assert provenance["committer_name"] == "Genesis Promotion Stager"
+        assert provenance["promoted_commit"] in collection.included_commits
+        assert provenance["source_author_name"] == "Genesis AI"
+        assert provenance["promoted_author_name"] == "Genesis AI"
+        assert provenance["promotion_mapping"] in {
+            "validated_commit_is_current_head_ancestor",
+            "stable_patch_id+message+files+promotion_identity",
+        }
+        if provenance["promoted_commit"] != provenance["validated_source_commit"]:
+            assert provenance["promoted_committer_name"] == "Genesis Promotion Stager"
+        assert provenance["stable_patch_id"]
         assert example["prompt"].startswith("Implement the following independently validated Genesis self-development task.")
         assert example["response"].strip()
