@@ -1,0 +1,25 @@
+name: Owner Qwen Coding Fix Validation
+
+on:
+  push:
+    branches:
+      - owner/fix-qwen-coding-line-hints-v1
+
+permissions:
+  contents: read
+
+jobs:
+  validate:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+      - name: Targeted coding regression
+        run: pytest -q tests/test_coding_module.py
+      - name: Full repository tests
+        run: pytest -q
