@@ -17,6 +17,7 @@ on:
 permissions:
   contents: read
   actions: write
+  issues: write
 
 env:
   PYTHONPATH: ${{ github.workspace }}
@@ -24,7 +25,7 @@ env:
 
 concurrency:
   group: genesis-swe-bench-pro-bootstrap-baseline
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   measure:
@@ -198,3 +199,34 @@ jobs:
           --ref main
           -f gene=${GENE_ID}
           -f continue_chain=true
+
+  report:
+    name: Report benchmark baseline outcome
+    if: always()
+    needs: [measure, validator_a, validator_b, promote]
+    runs-on: ubuntu-latest
+    steps:
+      - name: Post result to Genesis hourly report issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          MEASURE: ${{ needs.measure.result }}
+          VALIDATOR_A: ${{ needs.validator_a.result }}
+          VALIDATOR_B: ${{ needs.validator_b.result }}
+          PROMOTE: ${{ needs.promote.result }}
+        shell: bash
+        run: |
+          body=$(cat <<EOF
+          <!-- genesis-swe-bench-pro-baseline:${GITHUB_RUN_ID} -->
+          ## Genesis benchmark unblock run
+
+          - Run: ${GITHUB_RUN_ID}
+          - Commit: ${GITHUB_SHA}
+          - Measure: ${MEASURE}
+          - Validator A: ${VALIDATOR_A}
+          - Validator B: ${VALIDATOR_B}
+          - Promote/unblock: ${PROMOTE}
+
+          A successful promote means SWE-bench Pro is now a validated measured baseline in Genesis runtime state and capability-growth has been re-evaluated. A failed stage means the score remains unchanged; no benchmark credit is fabricated.
+          EOF
+          )
+          gh issue comment 190 --repo "$GITHUB_REPOSITORY" --body "$body"
