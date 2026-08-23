@@ -25,10 +25,11 @@ class RouteDecision:
 class IntelligenceRouter:
     """Choose the preferred available cognitive provider for a task.
 
-    Qwen is treated as Genesis's initial cognitive ancestor and is preferred when
-    it satisfies the task and reliability threshold. Other trained providers are
-    valid fallbacks. The deterministic bootstrap provider is only a last-resort
-    control-plane fallback, never preferred over an available trained model.
+    Trained providers may declare a bounded capability set plus resource and
+    reliability metadata. The router respects those declarations instead of
+    silently granting every trained provider coding/reasoning authority. The
+    deterministic bootstrap provider remains a last-resort control-plane
+    fallback and is never preferred over an eligible trained model.
 
     Conservative defaults bootstrap routing. Once at least three evidence-backed
     provider observations exist, measured reliability/resource telemetry may
@@ -41,19 +42,44 @@ class IntelligenceRouter:
         self.telemetry = ProviderTelemetryStore(telemetry_path) if telemetry_path is not None else None
 
     @staticmethod
-    def profile(provider: IntelligenceProvider) -> ProviderProfile:
+    def _bounded_float(value: object, default: float, *, minimum: float, maximum: float) -> float:
+        try:
+            return max(minimum, min(float(value), maximum))
+        except (TypeError, ValueError):
+            return default
+
+    @staticmethod
+    def _declared_capabilities(provider: IntelligenceProvider) -> tuple[str, ...] | None:
+        raw = getattr(provider, "capabilities", None)
+        if raw is None:
+            return None
+        if not isinstance(raw, (tuple, list, set, frozenset)):
+            return ()
+        allowed = {"reasoning", "coding", "research", "planning", "review", "routing"}
+        return tuple(sorted({str(item).strip().lower() for item in raw if str(item).strip().lower() in allowed}))
+
+    @classmethod
+    def profile(cls, provider: IntelligenceProvider) -> ProviderProfile:
         name = getattr(provider, "name", "unknown")
         lowered = name.lower()
+        declared = cls._declared_capabilities(provider)
         if name == "genesis-bootstrap":
-            return ProviderProfile(name, 0.05, 0.35, ("planning", "review", "routing"))
+            return ProviderProfile(name, 0.05, 0.35, declared or ("planning", "review", "routing"))
+        default_capabilities = ("reasoning", "coding", "research", "planning", "review")
+        capabilities = default_capabilities if declared is None else declared
         if "qwen" in lowered:
             return ProviderProfile(
                 name,
-                1.0,
-                0.72,
-                ("reasoning", "coding", "research", "planning", "review"),
+                cls._bounded_float(getattr(provider, "resource_cost", 1.0), 1.0, minimum=0.05, maximum=100.0),
+                cls._bounded_float(getattr(provider, "reliability", 0.72), 0.72, minimum=0.0, maximum=1.0),
+                capabilities,
             )
-        return ProviderProfile(name, 2.0, 0.75, ("reasoning", "coding", "research", "planning", "review"))
+        return ProviderProfile(
+            name,
+            cls._bounded_float(getattr(provider, "resource_cost", 2.0), 2.0, minimum=0.05, maximum=100.0),
+            cls._bounded_float(getattr(provider, "reliability", 0.75), 0.75, minimum=0.0, maximum=1.0),
+            capabilities,
+        )
 
     def _effective_profile(self, provider: IntelligenceProvider) -> tuple[ProviderProfile, str]:
         default = self.profile(provider)
