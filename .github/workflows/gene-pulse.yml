@@ -63,62 +63,46 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
-      - name: Detect whether coding intelligence is required
+      - name: Detect provider-bound coding work
         id: provider_gate
         shell: bash
         run: python scripts/pulse_provider_recovery.py inspect --github-output "$GITHUB_OUTPUT"
 
-      - name: Restore replaceable local model cache
-        if: steps.provider_gate.outputs.needs_local_provider == 'true'
-        uses: actions/cache@v4
-        with:
-          path: ~/.cache/huggingface
-          key: genesis-pulse-local-coding-fallback-v1
-
-      - name: Install on-demand local coding runtime
-        if: steps.provider_gate.outputs.needs_local_provider == 'true'
-        run: |
-          python -m pip install --upgrade pip
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install 'transformers>=4.48,<5' safetensors
-
-      - name: Boot replaceable local coding provider
-        if: steps.provider_gate.outputs.needs_local_provider == 'true'
-        shell: bash
-        run: |
-          set -euo pipefail
-          nohup python scripts/pulse_coding_provider.py \
-            --port 8766 \
-            --max-new-tokens 384 \
-            > local-pulse-provider.log 2>&1 &
-          echo $! > local-pulse-provider.pid
-          for i in $(seq 1 120); do
-            if curl -fsS http://127.0.0.1:8766/health >/dev/null 2>&1; then
-              echo "GENESIS_PROVIDER_URL=http://127.0.0.1:8766" >> "$GITHUB_ENV"
-              echo "GENESIS_PROVIDER_NAME=genesis-pulse-local-coding-fallback" >> "$GITHUB_ENV"
-              echo "GENESIS_PROVIDER_TIMEOUT_SECONDS=300" >> "$GITHUB_ENV"
-              echo "Genesis replaceable local coding provider is ready"
-              exit 0
-            fi
-            sleep 2
-          done
-          cat local-pulse-provider.log || true
-          exit 1
-
-      - name: Resume one provider-waiting coding task
-        if: steps.provider_gate.outputs.needs_local_provider == 'true'
-        run: python scripts/pulse_provider_recovery.py resume-one
-
       - name: Configure Genesis Git identity
+        if: steps.provider_gate.outputs.needs_local_provider != 'true'
         run: |
           git config user.name "Genesis AI"
           git config user.email "genesis-ai@users.noreply.github.com"
 
       - name: Execute one bounded queue transition
+        if: steps.provider_gate.outputs.needs_local_provider != 'true'
         run: python scripts/gene_pulse.py --gene "$GENE_ID" --output runtime/pulse_result.json
 
       - name: Advance one bounded frontier benchmark task
+        if: steps.provider_gate.outputs.needs_local_provider != 'true'
         run: python scripts/benchmark_task_worker.py
+
+      - name: Record delegated provider pulse
+        if: steps.provider_gate.outputs.needs_local_provider == 'true'
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          payload = {
+              "action": "provider_bound_pulse_delegated",
+              "gene_id": os.environ["GENE_ID"],
+              "needs_next_pulse": False,
+              "next_pulse_reason": "provider_bound_coding_work",
+              "payload": {
+                  "coding_work_count": int("${{ steps.provider_gate.outputs.coding_work_count }}" or "0"),
+                  "next_task_id": "${{ steps.provider_gate.outputs.next_task_id }}",
+              },
+          }
+          Path("runtime").mkdir(exist_ok=True)
+          Path("runtime/pulse_result.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
+          PY
 
       - name: Read pulse and specialist handoffs
         id: pulse
@@ -272,8 +256,18 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Delegate provider-bound pulse
+        if: steps.provider_gate.outputs.needs_local_provider == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run coding-intelligence-pulse.yml --ref main \
+            -f gene="$GENE_ID" \
+            -f continue_chain="$CONTINUE_CHAIN" \
+            -f chain_budget="$IDLE_DISCOVERY_BUDGET"
+
       - name: Request next pulse
-        if: env.CONTINUE_CHAIN == 'true' && (steps.pulse.outputs.continue == 'true' || steps.pulse.outputs.idle_continue == 'true')
+        if: steps.provider_gate.outputs.needs_local_provider != 'true' && env.CONTINUE_CHAIN == 'true' && (steps.pulse.outputs.continue == 'true' || steps.pulse.outputs.idle_continue == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
