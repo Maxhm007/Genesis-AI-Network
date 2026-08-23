@@ -1,0 +1,52 @@
+{
+  "schema_version": 1,
+  "identity": "Genesis AI Network",
+  "current_stage": "foundation_model_bootstrap",
+  "active_foundation": {
+    "family": "Qwen",
+    "model_id": "Qwen/Qwen3-0.6B",
+    "runtime_provider_name": "qwen3-0.6b-genesis-core",
+    "license": "Apache-2.0",
+    "relationship": "initial_foundation_ancestor",
+    "genesis_owned_weights": false,
+    "notes": "Qwen supplies the initial trainable cognitive foundation. Using Qwen does not by itself make those weights a Genesis model."
+  },
+  "cognitive_roles": [
+    "planning",
+    "research",
+    "learning",
+    "coding",
+    "repair",
+    "internal_review",
+    "self_review",
+    "communication"
+  ],
+  "independent_authority": [
+    "syntax_and_compile_checks",
+    "repository_test_suite",
+    "security_gate",
+    "validator_a",
+    "validator_b",
+    "signed_quorum",
+    "promotion_boundary",
+    "external_benchmark_graders"
+  ],
+  "evolution_path": [
+    "Qwen foundation weights",
+    "validated Genesis interaction and engineering traces",
+    "Genesis adapters or fine-tuned checkpoints",
+    "benchmark-qualified Genesis specialist checkpoints",
+    "distilled or consolidated Genesis checkpoint",
+    "Genesis Model v1"
+  ],
+  "naming_rule": "A checkpoint may be called a Genesis model only after Genesis has produced new weights or adapters with recorded lineage and independent benchmark validation.",
+  "promotion_policy": {
+    "training_data_requires_provenance": true,
+    "candidate_weights_start_quarantined": true,
+    "independent_validation_required": true,
+    "benchmark_regression_blocks_promotion": true,
+    "promotion_does_not_equal_capability_improvement": true,
+    "capability_improvement_requires_validated_remeasurement": true,
+    "rollback_required": true
+  }
+}
