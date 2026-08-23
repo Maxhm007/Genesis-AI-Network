@@ -121,4 +121,27 @@ register_capability(
 )
 
 
+def _learned_c7c0eb9aa26f(
+    requested: str | None,
+    available,
+    fallback: str | None = None,
+) -> str | None:
+    """Prefer an explicit supported runtime device, then a compatible fallback."""
+    choices = tuple(str(item).strip() for item in available if str(item).strip())
+    preferred = str(requested).strip() if requested is not None else ""
+    if preferred and preferred in choices:
+        return preferred
+    fallback_name = str(fallback).strip() if fallback is not None else ""
+    if fallback_name and fallback_name in choices:
+        return fallback_name
+    return choices[0] if choices else None
+
+register_capability(
+    'runtime_device_selection_c7c0eb9aa26f',
+    "Select an explicit supported runtime device while preserving a compatible fallback path. Verified lesson: Research-backed capability candidate from 'b10594': <details open> common : skip device_info loop if it's not going to be printed (#26692) The device_info loop iterates over the discovered devices and gets the available and total memory counts. With the CUDA backend (and possibly others too) this requires creating a GPU context, which, in case of CUDA, results in a 550 MB VRAM allocation. For this information to be used in any way, the log verbosity must be set to LOG_LEVEL_TRACE. If it's not, including in the default configuration, the contexts get created, memory sizes get queried, then the",
+    "<details open> common : skip device_info loop if it's not going to be printed (#26692) The device_info loop iterates over the discovered devices and gets the available and total memory counts. With the CUDA backend (and possibly others too) this requires creating a GPU context, which, in case of CUDA, results in a 550 MB VRAM allocation. For this information to be used in any way, the log verbosity must be set to LOG_LEVEL_TRACE. If it's not, including in the default configuration, the contexts get created, memory sizes get queried, then the log function quietly discards the data. In certain cases the user may not want to use any GPU resources. The device_loop iteration is the only place touching the GPU that cannot be skipped. Fix by checking the verbosity level and skipping the loop if there would be no output. </details> **Website:** - <https://llama.app> **Attestations:** - <https://github.com/ggml-org/llama.cpp/attestations/42421792> **macOS/iOS:** - [macOS Apple Silicon (arm64)](https://github.com/ggml-org/llama.cpp/releases/download/b10594/llama-b10594-bin-macos-arm64.tar.gz) - macOS Apple Silicon (arm64, KleidiAI enabled) [DISABLED](https://github.com/ggml-org/llama.cpp/pul",
+    _learned_c7c0eb9aa26f,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
