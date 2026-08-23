@@ -30,6 +30,34 @@ def _item(*, fingerprint: str = "a" * 64) -> ResearchItem:
     )
 
 
+def _release_fragment(*, fingerprint: str = "b" * 64) -> ResearchItem:
+    return ResearchItem(
+        fingerprint=fingerprint,
+        source="github:ggml-org/llama.cpp",
+        title="b10590",
+        summary=(
+            "<details open> vendor : update subprocess.h (#27409) </details> "
+            "**Website:** - <https://llama.app> **Attestations:** release artifacts"
+        ),
+        url="https://github.com/ggml-org/llama.cpp/releases/tag/b10590",
+        published_at="2026-08-23T08:20:51Z",
+    )
+
+
+def _known_domain_release(*, fingerprint: str = "c" * 64) -> ResearchItem:
+    return ResearchItem(
+        fingerprint=fingerprint,
+        source="github:huggingface/transformers",
+        title="v5.15.1",
+        summary=(
+            "Transformer inference fixes token device mismatch during decoding and tensor placement (#47877). "
+            "The runtime now keeps candidate tokens aligned with the selected inference device."
+        ),
+        url="https://github.com/huggingface/transformers/releases/tag/v5.15.1",
+        published_at="2026-08-22T20:13:48Z",
+    )
+
+
 def _engine(tmp_path, provider: _ExplodingProvider | None = None) -> PulseEvolutionLearningEngine:
     genesis = tmp_path / "genesis"
     genesis.mkdir(parents=True, exist_ok=True)
@@ -70,6 +98,31 @@ def test_extract_lesson_is_direct_source_evidence(tmp_path) -> None:
     assert lesson["routing_mode"] == "direct_source_evidence"
     assert lesson["lesson_evidence"] in _item().summary
     assert lesson["confidence_normalized"] == engine.DIRECT_ROUTING_CONFIDENCE
+    assert provider.calls == 0
+
+
+def test_product_release_fragment_without_capability_evidence_is_skipped(tmp_path) -> None:
+    provider = _ExplodingProvider()
+    engine = _engine(tmp_path, provider)
+
+    lesson = engine._extract_lesson(_release_fragment())
+    finding = engine._assess(_release_fragment(fingerprint="d" * 64))
+
+    assert lesson["decision"] == "skip"
+    assert lesson["reason"] == "release_fragment_not_transferable"
+    assert finding["decision"] == "skip"
+    assert finding["reason"] == "release_fragment_not_transferable"
+    assert provider.calls == 0
+
+
+def test_known_capability_release_is_not_blocked_by_fragment_gate(tmp_path) -> None:
+    provider = _ExplodingProvider()
+    engine = _engine(tmp_path, provider)
+
+    lesson = engine._extract_lesson(_known_domain_release())
+
+    assert lesson["decision"] == "learn"
+    assert "model_runtime" in lesson["capability_domains"]
     assert provider.calls == 0
 
 
