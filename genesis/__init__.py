@@ -13,6 +13,14 @@ from .benchmark_state import hydrate_validated_benchmark_state as _hydrate_valid
 _hydrate_validated_benchmark_state(Path(__file__).resolve().parents[1])
 del _hydrate_validated_benchmark_state
 
+# A paused shared-queue task must stay durable without masquerading as runnable
+# pipeline work. This prevents provider-wait tasks from blocking higher-priority
+# measured capability growth; resuming the task makes it active again.
+from .pipeline_task_state_guard import install_pipeline_task_state_guard as _install_pipeline_task_state_guard
+
+_install_pipeline_task_state_guard()
+del _install_pipeline_task_state_guard
+
 # Install the bounded new-capability extension at package initialization so every
 # Genesis entrypoint (Pulse, tests, CLI, and workers) uses the same evolution
 # routing without a second promotion path.
