@@ -44,7 +44,9 @@ class ModelLab:
     This module records training/fine-tuning/distillation lineage and evidence.
     It deliberately does not execute arbitrary training commands or activate a
     model by recommendation alone. Model execution remains delegated to bounded
-    adapters and promotion requires measured evidence.
+    adapters and promotion requires measured evidence. ``active`` additionally
+    requires stored training provenance and a runtime artifact record; those
+    records are integrity-checked again by the runtime provider before use.
     """
 
     def __init__(self, root: Path) -> None:
@@ -196,11 +198,20 @@ class ModelLab:
             raise ValueError("model lifecycle transition is not allowed")
         score = current.benchmark_score if benchmark_score is None else float(benchmark_score)
         cost = current.resource_cost if resource_cost is None else float(resource_cost)
+        evidence = self.evidence(model_id)
+        evidence_types = {row["evidence_type"] for row in evidence}
         if new_state in {"validated", "trusted", "active"}:
             if score is None:
                 raise ValueError("validated-or-higher model requires benchmark evidence")
-            if not any(row["evidence_type"] == "benchmark" for row in self.evidence(model_id)):
+            if "benchmark" not in evidence_types:
                 raise ValueError("validated-or-higher model requires stored benchmark evidence")
+        if new_state == "active":
+            missing = [kind for kind in ("training_provenance", "runtime") if kind not in evidence_types]
+            if missing:
+                raise ValueError(
+                    "active model requires stored training provenance and runtime evidence: missing "
+                    + ", ".join(missing)
+                )
         now = utc_now()
         with self._connect() as db:
             db.execute(
@@ -217,7 +228,10 @@ class ModelLab:
             "module": "genesis.model_lab",
             "models": [item.as_dict() for item in items],
             "counts": {state: sum(1 for item in items if item.state == state) for state in MODEL_STATES},
-            "rule": "Genesis-owned models remain replaceable capabilities and cannot self-promote without measured evidence.",
+            "rule": (
+                "Genesis-owned models remain replaceable capabilities; activation requires measured benchmark evidence, "
+                "training provenance and a runtime artifact record."
+            ),
         }
 
     @staticmethod
