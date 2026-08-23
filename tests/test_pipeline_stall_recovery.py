@@ -248,7 +248,13 @@ def test_gene_pulse_runtime_and_stale_cleanup_are_bounded() -> None:
     control = (root / ".github" / "workflows" / "pulse-control.yml").read_text(encoding="utf-8")
     worker = (root / "scripts" / "gene_continuous_work.py").read_text(encoding="utf-8")
 
-    assert "GENESIS_PROVIDER_TIMEOUT_SECONDS: '60'" in pulse
+    assert "timeout-minutes: 35" in pulse
+    assert "Qwen/Qwen2.5-Coder-1.5B-Instruct" not in pulse
+    assert "GENESIS_PROVIDER_NAME: qwen" not in pulse
+    assert "Restore reasoning caches" not in pulse
+    assert "Install local reasoning runtime" not in pulse
+    assert "Start Gene reasoning provider" not in pulse
+    assert "pip install torch" not in pulse
     assert "freshness_seconds=7200" in control
     assert "for workflow in gene-pulse.yml file-self-review.yml manual-self-repair.yml" in control
     assert "for status in queued in_progress" in control
