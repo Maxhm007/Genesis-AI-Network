@@ -10,7 +10,7 @@ from genesis.selfdev import SelfDevResult
 
 
 class TrackingQwenProvider:
-    name = "qwen2.5-coder-1.5b-gene-pulse"
+    name = "qwen3-0.6b-genesis-core"
 
     def __init__(self, payload: dict | None = None) -> None:
         self.calls = 0
@@ -180,7 +180,7 @@ def test_transformers_device_mismatch_release_builds_candidate_without_qwen(tmp_
     assert "device-map mismatches" in rendered
 
 
-def test_grounded_unknown_template_waits_without_non_qwen_provider(tmp_path: Path) -> None:
+def test_grounded_unknown_template_uses_qwen_when_no_deterministic_template_exists(tmp_path: Path) -> None:
     _write_learned_target(tmp_path)
     qwen = TrackingQwenProvider({"edits": []})
     registry = ProviderRegistry(include_bootstrap=False)
@@ -195,18 +195,13 @@ def test_grounded_unknown_template_waits_without_non_qwen_provider(tmp_path: Pat
 
     attempt = loop._attempt_task(task, tmp_path / "runtime")
 
-    assert qwen.calls == 0
-    assert attempt["coding_status"] == "waiting_for_coding_provider"
-    assert attempt["error"] == "no_non_qwen_coding_provider_available"
-    assert attempt["provider_policy"] == "grounded_agentic_capability_non_qwen_only"
+    assert qwen.calls == 3
+    assert attempt["provider_policy"] == "grounded_agentic_capability_qwen_preferred"
     assert attempt["capability_scope"] == "append_only_learned_capability"
-    current = queue.get(task.task_id)
-    assert current is not None
-    assert current.state == "paused"
-    assert current.attempt_count == 0
+    assert attempt["coding_status"] != "waiting_for_coding_provider"
 
 
-def test_ungrounded_new_capability_still_blocks_qwen_invention(tmp_path: Path) -> None:
+def test_ungrounded_new_capability_still_blocks_model_invention(tmp_path: Path) -> None:
     _write_learned_target(tmp_path)
     qwen = TrackingQwenProvider({"edits": []})
     registry = ProviderRegistry(include_bootstrap=False)
@@ -224,7 +219,7 @@ def test_ungrounded_new_capability_still_blocks_qwen_invention(tmp_path: Path) -
 
     assert qwen.calls == 0
     assert attempt["coding_status"] == "waiting_for_coding_provider"
-    assert attempt["provider_policy"] == "ungrounded_capability_requires_stronger_provider"
+    assert attempt["provider_policy"] == "ungrounded_capability_requires_grounded_evidence"
     current = queue.get(task.task_id)
     assert current is not None
     assert current.state == "paused"
