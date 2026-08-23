@@ -34,7 +34,8 @@ class GenesisOperations:
     VALID_SEVERITY = {"info", "low", "medium", "high", "critical"}
     ACTIVE_TASK_STATES = {"new", "assigned", "running", "blocked", "review"}
     EMBEDDED_HISTORY_LIMIT = 50
-    EXTERNAL_BENCHMARK_BLOCKER_PREFIX = "External authority required for real benchmark execution:"
+    OWNER_EXTERNAL_BENCHMARK_BLOCKER_PREFIX = "External owner authority required for real benchmark execution:"
+    BENCHMARK_TERMINAL_STATES = {"complete", "cancelled"}
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root).resolve()
@@ -97,27 +98,56 @@ class GenesisOperations:
     def _tasks_for_issue(self, issue_key: str):
         return [task for task in self.queue.list(limit=5000) if task.payload.get("issue_key") == issue_key]
 
-    def _delegated_external_blocker(self, issue: OperationalIssue) -> GenesisTask | None:
-        """Return the durable benchmark blocker that already owns an AI capability gap.
-
-        Gene 0 should not create generic repair generations while a frontier benchmark
-        evaluation is explicitly paused at an external authority boundary. The issue
-        stays visible and becomes autonomously eligible again as soon as the delegated
-        evaluation leaves that paused blocker state.
-        """
+    def _unresolved_benchmark_tasks(self, issue: OperationalIssue) -> list[GenesisTask]:
         if issue.title != "AI capability below target":
-            return None
-        blockers = [
+            return []
+        return [
             task
             for task in self.queue.list(limit=5000)
             if task.module_id == "genesis.evaluation"
             and task.payload.get("task_type") == "frontier_benchmark_measurement"
-            and task.state == "paused"
-            and str(task.state_reason or "").startswith(self.EXTERNAL_BENCHMARK_BLOCKER_PREFIX)
+            and task.state not in self.BENCHMARK_TERMINAL_STATES
         ]
-        if not blockers:
+
+    def _delegated_external_blocker(self, issue: OperationalIssue) -> GenesisTask | None:
+        """Return an owner blocker only when every unresolved benchmark needs owner authority.
+
+        A single paused benchmark must not freeze the entire AI-capability program.
+        Non-owner evidence gaps and autonomous runner-integration work remain delegated
+        Genesis work, so the operational issue stays open rather than falsely asking
+        the owner to resolve the whole capability problem.
+        """
+        unresolved = self._unresolved_benchmark_tasks(issue)
+        if not unresolved:
             return None
-        return max(blockers, key=lambda task: task.updated_at)
+        owner_blockers = [
+            task
+            for task in unresolved
+            if task.state == "paused"
+            and str(task.state_reason or "").startswith(self.OWNER_EXTERNAL_BENCHMARK_BLOCKER_PREFIX)
+        ]
+        if len(owner_blockers) != len(unresolved):
+            return None
+        return max(owner_blockers, key=lambda task: task.updated_at)
+
+    def _delegated_benchmark_work(self, issue: OperationalIssue) -> GenesisTask | None:
+        unresolved = self._unresolved_benchmark_tasks(issue)
+        if not unresolved:
+            return None
+        state_rank = {
+            "running": 0,
+            "assigned": 1,
+            "new": 2,
+            "review": 3,
+            "blocked": 4,
+            "failed": 5,
+            "paused": 6,
+            "quarantined": 7,
+        }
+        return min(
+            unresolved,
+            key=lambda task: (state_rank.get(task.state, 99), -int(task.priority), task.created_at),
+        )
 
     def _ensure_issue_work(self, issue: OperationalIssue) -> tuple[str | None, int]:
         tasks = self._tasks_for_issue(issue.issue_key)
@@ -255,6 +285,7 @@ class GenesisOperations:
             row["first_seen_at"] = prior.get("first_seen_at", now)
             row["last_seen_at"] = now
             blocker = self._delegated_external_blocker(issue)
+            benchmark_work = None if blocker is not None else self._delegated_benchmark_work(issue)
 
             if prior.get("status") == "resolved":
                 row["reopened_at"] = now
@@ -268,7 +299,7 @@ class GenesisOperations:
                     title=issue.title,
                     delegated_task_id=prior.get("delegated_task_id"),
                 )
-            elif blocker is None:
+            elif blocker is None and benchmark_work is None:
                 self._append_history("observed_open", issue.issue_key, title=issue.title, evidence=issue.evidence)
 
             if blocker is not None:
@@ -284,6 +315,20 @@ class GenesisOperations:
                     delegated_task_id=blocker.task_id,
                     blocker_reason=blocker.state_reason,
                 )
+            elif benchmark_work is not None:
+                row["status"] = "open"
+                row["owner_action_required"] = False
+                row["delegated_task_id"] = benchmark_work.task_id
+                row["delegated_task_state"] = benchmark_work.state
+                row["work_generation"] = len(self._tasks_for_issue(issue.issue_key))
+                if prior.get("delegated_task_id") != benchmark_work.task_id or prior.get("status") == "blocked":
+                    self._append_history(
+                        "delegated_benchmark_work",
+                        issue.issue_key,
+                        title=issue.title,
+                        delegated_task_id=benchmark_work.task_id,
+                        delegated_task_state=benchmark_work.state,
+                    )
             elif not issue.owner_action_required:
                 task_id, generation = self._ensure_issue_work(issue)
                 if task_id:
