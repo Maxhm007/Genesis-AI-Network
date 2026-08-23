@@ -5,6 +5,7 @@ import os
 import re
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Protocol
 
 
@@ -77,10 +78,10 @@ def _model_check_timeout_response(prompt: str) -> str | None:
 def _deterministic_learning_transfer(prompt: str) -> str | None:
     """Fallback route for a verified lesson when the foundation model times out.
 
-    Qwen/Genesis-model cognition gets the first opportunity to reason about the
-    transfer. This deterministic path exists only for graceful degradation after
-    a failed model call and still relies on the caller's independent grounding
-    checks before any implementation can proceed.
+    A trained Genesis/provider model gets the first opportunity to reason about
+    the transfer. This deterministic path exists only for graceful degradation
+    after a failed model call and still relies on the caller's independent
+    grounding checks before any implementation can proceed.
     """
     if _reasoning_role(prompt) != "genesis_learning_transfer_planner":
         return None
@@ -291,16 +292,43 @@ def _configured_http_providers() -> list[GenesisHTTPProvider]:
     return configured
 
 
+def _model_lab_root(explicit_root: Path | None) -> Path | None:
+    if explicit_root is not None:
+        return Path(explicit_root).resolve()
+    raw = (
+        os.environ.get("GENESIS_MODEL_LAB_ROOT", "").strip()
+        or os.environ.get("GITHUB_WORKSPACE", "").strip()
+    )
+    return Path(raw).resolve() if raw else None
+
+
 class ProviderRegistry:
-    def __init__(self, include_bootstrap: bool = True) -> None:
+    def __init__(self, include_bootstrap: bool = True, root: Path | None = None) -> None:
         self._providers: list[IntelligenceProvider] = []
+        self._discovery_errors: list[str] = []
         if include_bootstrap:
             self.register(BootstrapProvider())
+
+        runtime_root = _model_lab_root(root)
+        if runtime_root is not None:
+            try:
+                from .model_provider import ActiveGenesisModelProvider
+
+                for provider in ActiveGenesisModelProvider.discover(runtime_root):
+                    self.register(provider)
+            except Exception as exc:
+                self._discovery_errors.append(
+                    f"active_genesis_model_discovery:{type(exc).__name__}:{exc}"[:1000]
+                )
+
         for provider in _configured_http_providers():
             self.register(provider)
 
     def register(self, provider: IntelligenceProvider) -> None:
         self._providers.append(provider)
+
+    def discovery_errors(self) -> tuple[str, ...]:
+        return tuple(self._discovery_errors)
 
     def statuses(self) -> list[ProviderStatus]:
         statuses: list[ProviderStatus] = []
