@@ -1,16 +1,21 @@
 {
-  "schema_version": 1,
+  "schema_version": 2,
   "identity": "Genesis AI Network",
-  "current_stage": "foundation_model_bootstrap",
-  "active_foundation": {
-    "family": "Qwen",
-    "model_id": "Qwen/Qwen3-0.6B",
-    "runtime_provider_name": "qwen3-0.6b-genesis-core",
-    "license": "Apache-2.0",
-    "relationship": "initial_foundation_ancestor",
-    "genesis_owned_weights": false,
-    "notes": "Qwen supplies the initial trainable cognitive foundation. Using Qwen does not by itself make those weights a Genesis model."
-  },
+  "current_stage": "provider_independent_bootstrap",
+  "active_foundation": null,
+  "foundation_history": [
+    {
+      "family": "Qwen",
+      "model_id": "Qwen/Qwen3-0.6B",
+      "runtime_provider_name": "qwen3-0.6b-genesis-core",
+      "license": "Apache-2.0",
+      "relationship": "initial_foundation_ancestor",
+      "genesis_owned_weights": false,
+      "runtime_enabled": false,
+      "retired_reason": "owner_policy_skip_qwen",
+      "notes": "Qwen was used as an initial external cognitive foundation. It is retained only as lineage history and is not an active Gene Pulse runtime."
+    }
+  ],
   "cognitive_roles": [
     "planning",
     "research",
@@ -32,7 +37,7 @@
     "external_benchmark_graders"
   ],
   "evolution_path": [
-    "Qwen foundation weights",
+    "provider-independent deterministic capability runtime",
     "validated Genesis interaction and engineering traces",
     "Genesis adapters or fine-tuned checkpoints",
     "benchmark-qualified Genesis specialist checkpoints",
