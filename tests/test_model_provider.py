@@ -147,3 +147,15 @@ def test_runtime_artifact_must_stay_under_model_artifact_root(tmp_path: Path) ->
     )
 
     assert ActiveGenesisModelProvider.discover(tmp_path) == []
+
+
+def test_artifact_is_reverified_immediately_before_first_load(tmp_path: Path) -> None:
+    model = _activate_model(tmp_path)
+    provider = ActiveGenesisModelProvider.discover(tmp_path)[0]
+    assert provider.available() is True
+
+    artifact = tmp_path / "runtime" / "model_artifacts" / model.model_id
+    (artifact / "model.safetensors").write_bytes(b"swapped-after-admission")
+
+    with pytest.raises(RuntimeError, match="failed integrity verification"):
+        provider._load()
