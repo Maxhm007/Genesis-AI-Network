@@ -1,0 +1,23 @@
+{
+  "benchmarks": {
+    "swe_bench_pro": {
+      "benchmark_id": "swe_bench_pro",
+      "candidate_sha256": "516a602b34d9f9665d98247a8fc94f55b6afaba6fd34a5147d3d5f00b212fffc",
+      "family": "software_engineering",
+      "provenance": {
+        "measured_at": "2026-08-23T17:07:02.366945+00:00",
+        "source": "https://huggingface.co/datasets/ScaleAI/SWE-bench_Pro/tree/a3fe51450709732f5d99ceb2b9de5adcc8d80b7e"
+      },
+      "raw_result_sha256": "a6b8effe84921244cc11750f49ece310ddc96c98db0cbd7f5a14356c05c06872",
+      "requires_independent_validation": false,
+      "score": 0.0,
+      "status": "validated",
+      "validated_at": "2026-08-23T17:07:50.577844+00:00",
+      "validated_by": [
+        "github-benchmark-validator-a-32653773723",
+        "github-benchmark-validator-b-32653773723"
+      ]
+    }
+  },
+  "updated_at": "2026-08-23T17:07:50.577844+00:00"
+}
