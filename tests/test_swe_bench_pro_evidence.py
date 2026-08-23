@@ -87,7 +87,7 @@ def test_providerless_baseline_rejects_non_bootstrap_provider(tmp_path) -> None:
     adapter = SWEBenchProEvidenceAdapter(tmp_path)
     job = make_job(tmp_path)
     job["available_providers"] = ["genesis-bootstrap", "genesis-local-model"]
-    with pytest.raises(BenchmarkEvidenceError, match="sole available provider"):
+    with pytest.raises(BenchmarkEvidenceError, match="only available provider"):
         adapter.stage(job)
 
 
