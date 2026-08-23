@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import ast
 import json
+import re
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -90,6 +91,41 @@ class CodingModule:
         return "\n".join(f"{index}|{line}" for index, line in enumerate(text.splitlines(), start=1))
 
     @staticmethod
+    def _tokens(text: str) -> set[str]:
+        return {token.lower() for token in re.findall(r"[A-Za-z_][A-Za-z0-9_]{2,}", text)}
+
+    @classmethod
+    def _best_edit_hint(cls, objective: str, context: dict[str, str]) -> tuple[str, int]:
+        """Ground the JSON example on the most objective-relevant repository line.
+
+        Small local models often copy schema examples literally. A hard-coded line 1 therefore
+        becomes an accidental instruction. Derive the example locator from the actual numbered
+        context so copying the example is at least grounded in repository evidence.
+        """
+        if not context:
+            return "", 1
+        objective_lower = objective.lower()
+        objective_tokens = cls._tokens(objective)
+        best: tuple[int, int, int, str, int] | None = None
+        for path_index, (path, text) in enumerate(context.items()):
+            lines = text.splitlines()
+            for line_number, line in enumerate(lines, start=1):
+                stripped = line.strip()
+                if not stripped:
+                    continue
+                overlap = len(objective_tokens & cls._tokens(stripped))
+                exact_bonus = 100 if stripped.lower() in objective_lower else 0
+                marker_bonus = 200 if "INSERTION_POINT" in stripped and stripped.lower() in objective_lower else 0
+                score = overlap + exact_bonus + marker_bonus
+                candidate = (score, marker_bonus, exact_bonus, -path_index, -line_number)
+                if best is None or candidate > best[:5]:
+                    best = (*candidate, path, line_number)  # type: ignore[assignment]
+        if best is not None:
+            return best[5], best[6]
+        first_path, first_text = next(iter(context.items()))
+        return first_path, max(1, len(first_text.splitlines()))
+
+    @staticmethod
     def _balanced_json_object(text: str) -> str | None:
         start = text.find("{")
         while start >= 0:
@@ -160,6 +196,8 @@ class CodingModule:
             raise ValueError(f"line edit range exceeds file length: {path}")
 
         removed = "".join(lines[start_line - 1 : end_line])
+        if path.endswith(".py") and "from __future__ import" in removed and "from __future__ import" not in new:
+            raise ValueError("line edit may not overwrite a Python __future__ import")
         replacement = new
         if removed.endswith(("\n", "\r")) and replacement and not replacement.endswith(("\n", "\r")):
             replacement += "\n"
@@ -248,20 +286,25 @@ class CodingModule:
         error: Exception,
         attempt: int,
         allowed_paths: tuple[str, ...],
+        edit_hint: tuple[str, int],
     ) -> str:
         previous = raw.encode("utf-8", errors="replace")[: self.MAX_REPAIR_ECHO_BYTES].decode("utf-8", errors="replace")
-        preferred_path = allowed_paths[0] if allowed_paths else ""
+        preferred_path, preferred_line = edit_hint
+        if not preferred_path and allowed_paths:
+            preferred_path = allowed_paths[0]
         example = json.dumps(
-            {"edits": [{"path": preferred_path, "start_line": 1, "end_line": 1, "new": "replacement text"}]},
+            {"edits": [{"path": preferred_path, "start_line": preferred_line, "end_line": preferred_line, "new": "replacement text"}]},
             separators=(",", ":"),
         )
         return (
             original_prompt
-            + "\nRETRY: previous JSON was invalid.\n"
+            + "\nRETRY: previous JSON was invalid. Change strategy using ERROR and repository evidence; do not repeat the rejected edit.\n"
             + f"ERROR: {type(error).__name__}: {str(error)[:500]}\n"
             + f"PREVIOUS: {previous}\n"
             + f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
-            + f"Return ONLY: {example}. "
+            + f"GROUNDED_LINE_HINT: {preferred_path}:{preferred_line}\n"
+            + f"Return ONLY the same JSON shape as: {example}. "
+            + "The hint is derived from OBJECTIVE/NUMBERED_CONTEXT; verify it before using it and never copy an unrelated line number. "
             + "Copy the path exactly from VALID_PATHS/NUMBERED_CONTEXT. Do not invent, summarize, rename, or substitute the path. "
             + "Choose line numbers exactly from NUMBERED_CONTEXT. Exactly one edit. Do not copy old source text. "
             + "No title, rationale, markdown, commentary, new files, policy changes, test weakening, or protected paths.\n"
@@ -283,17 +326,23 @@ class CodingModule:
         context = self.read_context(context_paths or [])
         numbered_context = {path: self._number_context(text) for path, text in context.items()}
         allowed_paths = tuple(numbered_context)
-        preferred_path = allowed_paths[0] if allowed_paths else ""
+        edit_hint = self._best_edit_hint(objective, context)
+        preferred_path, preferred_line = edit_hint
+        if not preferred_path and allowed_paths:
+            preferred_path = allowed_paths[0]
+            edit_hint = (preferred_path, preferred_line)
         output_example = json.dumps(
-            {"edits": [{"path": preferred_path, "start_line": 1, "end_line": 1, "new": "replacement text"}]},
+            {"edits": [{"path": preferred_path, "start_line": preferred_line, "end_line": preferred_line, "new": "replacement text"}]},
             separators=(",", ":"),
         )
         prompt = (
             "ROLE: bounded_coding_engineer\n"
             "TASK: Make exactly ONE smallest useful edit toward OBJECTIVE using only NUMBERED_CONTEXT.\n"
-            f"OUTPUT: JSON only: {output_example}\n"
+            f"OUTPUT: JSON only in this shape: {output_example}\n"
             f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
+            f"GROUNDED_LINE_HINT: {preferred_path}:{preferred_line}\n"
             "RULES: exactly one edit; path must match one key from VALID_PATHS exactly; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text; "
+            "the example/hint is grounded but must be verified against OBJECTIVE and NUMBERED_CONTEXT; never copy an unrelated example line number; "
             "never emit placeholder path text; no title/rationale/markdown/explanation; do not create files. The local executor resolves those lines against the repository. "
             "Allowed path prefixes: genesis/, tests/, docs/, config/, desktop/, mobile/. Never change Constitution, Genesis Block, .github, validation/quorum, permissions, secrets, or weaken tests.\n"
             f"OBJECTIVE: {objective}\n"
@@ -309,7 +358,7 @@ class CodingModule:
                 last_error = exc
                 if attempt >= self.MAX_PROPOSAL_ATTEMPTS:
                     break
-                current_prompt = self._repair_prompt(prompt, raw, exc, attempt, allowed_paths)
+                current_prompt = self._repair_prompt(prompt, raw, exc, attempt, allowed_paths, edit_hint)
         raise ValueError(
             f"coding provider failed to produce a valid proposal after {self.MAX_PROPOSAL_ATTEMPTS} bounded attempts: {last_error}"
         )
