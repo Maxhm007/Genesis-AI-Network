@@ -42,11 +42,31 @@ def _init_repo(tmp_path: Path) -> Path:
     return repo
 
 
+def _actor_env(actor: str) -> dict[str, str] | None:
+    if actor == "source":
+        return {
+            "GIT_AUTHOR_NAME": "Genesis AI",
+            "GIT_AUTHOR_EMAIL": "genesis-ai@users.noreply.github.com",
+            "GIT_COMMITTER_NAME": "Genesis AI",
+            "GIT_COMMITTER_EMAIL": "genesis-ai@users.noreply.github.com",
+        }
+    if actor == "staged":
+        return {
+            "GIT_AUTHOR_NAME": "Genesis AI",
+            "GIT_AUTHOR_EMAIL": "genesis-ai@users.noreply.github.com",
+            "GIT_COMMITTER_NAME": "Genesis Promotion Stager",
+            "GIT_COMMITTER_EMAIL": "genesis-promotion@users.noreply.github.com",
+        }
+    if actor == "owner":
+        return None
+    raise ValueError(actor)
+
+
 def _commit(
     repo: Path,
     *,
     message: str,
-    genesis_actor: bool,
+    actor: str,
     files: dict[str, str],
 ) -> str:
     for relative, content in files.items():
@@ -54,15 +74,7 @@ def _commit(
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
     _git(repo, "add", *files.keys())
-    env = None
-    if genesis_actor:
-        env = {
-            "GIT_AUTHOR_NAME": "Genesis AI",
-            "GIT_AUTHOR_EMAIL": "genesis-ai@users.noreply.github.com",
-            "GIT_COMMITTER_NAME": "Genesis Promotion Stager",
-            "GIT_COMMITTER_EMAIL": "genesis-promotion@users.noreply.github.com",
-        }
-    _git(repo, "commit", "-m", message, env=env)
+    _git(repo, "commit", "-m", message, env=_actor_env(actor))
     return _git(repo, "rev-parse", "HEAD")
 
 
@@ -94,18 +106,18 @@ def _write_blockchain(repo: Path, rows: list[dict]) -> None:
     )
 
 
-def test_build_includes_only_validated_promoted_genesis_code(tmp_path: Path) -> None:
+def test_build_includes_validated_genesis_candidate_already_on_main(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     autonomous = _commit(
         repo,
         message="Genesis self-development candidate: Add bounded selection",
-        genesis_actor=True,
+        actor="source",
         files={"genesis/sample.py": "VALUE = 2\n"},
     )
     owner = _commit(
         repo,
         message="Owner infrastructure change",
-        genesis_actor=False,
+        actor="owner",
         files={"genesis/sample.py": "VALUE = 3\n"},
     )
     _write_blockchain(
@@ -121,9 +133,11 @@ def test_build_includes_only_validated_promoted_genesis_code(tmp_path: Path) -> 
     row = json.loads(dataset.read_text(encoding="utf-8").strip())
 
     assert manifest["example_count"] == 1
-    assert manifest["included_commits"] == [autonomous]
-    assert manifest["excluded_by_reason"]["not_genesis_autonomous_promotion"] == 1
-    assert row["provenance"]["validated_commit"] == autonomous
+    assert manifest["included_promoted_commits"] == [autonomous]
+    assert manifest["excluded_by_reason"]["not_genesis_autonomous_candidate"] == 1
+    assert row["provenance"]["validated_source_commit"] == autonomous
+    assert row["provenance"]["promoted_commit"] == autonomous
+    assert row["provenance"]["promotion_mapping"] == "validated_commit_is_current_head_ancestor"
     assert row["provenance"]["classification"] == "genesis_autonomous_validated_promotion"
     assert "Genesis self-development candidate" in row["prompt"]
     assert "VALUE = 2" in row["response"]
@@ -131,18 +145,59 @@ def test_build_includes_only_validated_promoted_genesis_code(tmp_path: Path) -> 
     assert manifest["capability_claim"].startswith("none")
 
 
+def test_validated_source_candidate_maps_to_patch_identical_staged_main_commit(tmp_path: Path) -> None:
+    repo = _init_repo(tmp_path)
+    base = _git(repo, "rev-parse", "HEAD")
+    _git(repo, "checkout", "-b", "genesis/candidate-test")
+    source = _commit(
+        repo,
+        message="Genesis self-development candidate: Rebased capability",
+        actor="source",
+        files={"genesis/sample.py": "VALUE = 20\n"},
+    )
+
+    _git(repo, "checkout", "main")
+    assert _git(repo, "rev-parse", "HEAD") == base
+    _commit(
+        repo,
+        message="Unrelated owner change",
+        actor="owner",
+        files={"tests/test_unrelated.py": "def test_unrelated():\n    assert True\n"},
+    )
+    committer_env = {
+        "GIT_COMMITTER_NAME": "Genesis Promotion Stager",
+        "GIT_COMMITTER_EMAIL": "genesis-promotion@users.noreply.github.com",
+    }
+    _git(repo, "cherry-pick", source, env=committer_env)
+    promoted = _git(repo, "rev-parse", "HEAD")
+    assert promoted != source
+    _write_blockchain(repo, [_validation_row(repo, source, marker="c", run="103")])
+
+    collection = GenesisTrainingDatasetBuilder(repo).collect()
+
+    assert collection.included_commits == (promoted,)
+    assert len(collection.examples) == 1
+    provenance = collection.examples[0]["provenance"]
+    assert provenance["validated_source_commit"] == source
+    assert provenance["promoted_commit"] == promoted
+    assert provenance["promotion_mapping"] == "stable_patch_id+message+files+promotion_identity"
+    assert provenance["source_committer_name"] == "Genesis AI"
+    assert provenance["promoted_committer_name"] == "Genesis Promotion Stager"
+    assert provenance["stable_patch_id"]
+
+
 def test_unvalidated_genesis_commit_is_not_training_data(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     _commit(
         repo,
         message="Genesis self-development candidate: Unvalidated work",
-        genesis_actor=True,
+        actor="source",
         files={"genesis/sample.py": "VALUE = 9\n"},
     )
     owner = _commit(
         repo,
         message="Owner validated change",
-        genesis_actor=False,
+        actor="owner",
         files={"genesis/sample.py": "VALUE = 10\n"},
     )
     _write_blockchain(repo, [_validation_row(repo, owner)])
@@ -151,14 +206,14 @@ def test_unvalidated_genesis_commit_is_not_training_data(tmp_path: Path) -> None
         GenesisTrainingDatasetBuilder(repo).build(output_name="genesis.jsonl")
 
 
-def test_validated_genesis_commit_not_on_current_head_is_rejected(tmp_path: Path) -> None:
+def test_validated_genesis_candidate_without_promotion_is_rejected(tmp_path: Path) -> None:
     repo = _init_repo(tmp_path)
     base = _git(repo, "rev-parse", "HEAD")
     _git(repo, "checkout", "-b", "orphan-work")
     orphan = _commit(
         repo,
         message="Genesis self-development candidate: Branch-only work",
-        genesis_actor=True,
+        actor="source",
         files={"genesis/sample.py": "VALUE = 7\n"},
     )
     _git(repo, "checkout", "main")
@@ -168,7 +223,7 @@ def test_validated_genesis_commit_not_on_current_head_is_rejected(tmp_path: Path
     collection = GenesisTrainingDatasetBuilder(repo).collect()
 
     assert collection.examples == ()
-    assert collection.excluded_by_reason["not_promoted_to_current_head"] == 1
+    assert collection.excluded_by_reason["validated_candidate_not_promoted_to_current_head"] == 1
 
 
 def test_mixed_workflow_or_config_commit_is_outside_training_scope(tmp_path: Path) -> None:
@@ -176,7 +231,7 @@ def test_mixed_workflow_or_config_commit_is_outside_training_scope(tmp_path: Pat
     commit = _commit(
         repo,
         message="Genesis self-development candidate: Unsafe mixed scope",
-        genesis_actor=True,
+        actor="source",
         files={
             "genesis/sample.py": "VALUE = 4\n",
             ".github/workflows/example.yml": "name: example\n",
@@ -195,7 +250,7 @@ def test_blockchain_changed_files_must_match_commit(tmp_path: Path) -> None:
     commit = _commit(
         repo,
         message="Genesis self-development candidate: Exact evidence",
-        genesis_actor=True,
+        actor="source",
         files={"genesis/sample.py": "VALUE = 5\n"},
     )
     row = _validation_row(repo, commit)
@@ -221,7 +276,7 @@ def test_dataset_artifacts_are_deterministic_and_not_overwritten(tmp_path: Path)
     commit = _commit(
         repo,
         message="Genesis self-development candidate: Deterministic data",
-        genesis_actor=True,
+        actor="source",
         files={"genesis/sample.py": "VALUE = 6\n"},
     )
     _write_blockchain(repo, [_validation_row(repo, commit)])
@@ -242,7 +297,7 @@ def test_manifest_binds_blockchain_and_dataset_hashes(tmp_path: Path) -> None:
     commit = _commit(
         repo,
         message="Genesis self-development candidate: Bind provenance",
-        genesis_actor=True,
+        actor="source",
         files={"genesis/sample.py": "VALUE = 8\n"},
     )
     _write_blockchain(repo, [_validation_row(repo, commit)])

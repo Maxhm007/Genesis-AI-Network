@@ -11,15 +11,17 @@ from typing import Any
 
 COMMIT_RE = re.compile(r"^[0-9a-f]{40}$")
 HASH_RE = re.compile(r"^[0-9a-f]{64}$")
+PATCH_ID_RE = re.compile(r"^[0-9a-f]{40}$")
 OUTPUT_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]*\.jsonl$")
 GENESIS_AUTHOR = ("Genesis AI", "genesis-ai@users.noreply.github.com")
-GENESIS_COMMITTER = ("Genesis Promotion Stager", "genesis-promotion@users.noreply.github.com")
+GENESIS_SOURCE_COMMITTER = GENESIS_AUTHOR
+GENESIS_PROMOTION_COMMITTER = ("Genesis Promotion Stager", "genesis-promotion@users.noreply.github.com")
 GENESIS_MESSAGE_PREFIX = "Genesis self-development candidate:"
 VALIDATION_PRODUCER = "genesis-independent-validator-gate"
 VALIDATION_PAYLOAD_TYPE = "validated_update"
 MAX_PATCH_BYTES = 256 * 1024
 MAX_EXAMPLES = 10_000
-POLICY_VERSION = "genesis-validated-autonomous-code-v1"
+POLICY_VERSION = "genesis-validated-autonomous-code-v2"
 
 
 def sha256_file(path: Path) -> str:
@@ -46,14 +48,19 @@ class DatasetCollection:
 class GenesisTrainingDatasetBuilder:
     """Build SFT data only from independently validated Genesis-owned promotions.
 
+    Candidate validation and promotion use different Git identities and, after a
+    rebase, different commit SHAs. A validated source candidate is therefore
+    eligible only when either:
+
+    1. that exact Genesis-authored candidate is already an ancestor of the chosen
+       main/head; or
+    2. it maps uniquely to a current-head Genesis promotion-stager commit with the
+       exact same message, changed-file set, and stable Git patch-id.
+
     This deliberately excludes owner/assistant PRs, unvalidated Genesis branches,
     failed candidates, workflow/config changes and arbitrary repository history.
-    Eligibility is the intersection of current-main ancestry, the independent
-    validator blockchain ledger and the exact identities used by the autonomous
-    promotion stager.
-
-    The produced JSONL remains a *training input*, not evidence that a model has
-    been trained or improved. Benchmarking and Model Lab promotion stay separate.
+    The JSONL is a training input only, never evidence that a model was trained or
+    that capability improved.
     """
 
     def __init__(
@@ -129,11 +136,7 @@ class GenesisTrainingDatasetBuilder:
 
     def _is_ancestor(self, commit: str, head: str) -> bool:
         completed = self._git("merge-base", "--is-ancestor", commit, head, check=False)
-        if completed.returncode == 0:
-            return True
-        if completed.returncode == 1:
-            return False
-        return False
+        return completed.returncode == 0
 
     def _commit_metadata(self, commit: str) -> dict[str, str] | None:
         completed = self._git(
@@ -155,6 +158,22 @@ class GenesisTrainingDatasetBuilder:
             "committer_email": parts[3].strip(),
             "message": parts[4].strip(),
         }
+
+    @staticmethod
+    def _is_genesis_source(metadata: dict[str, str]) -> bool:
+        return (
+            (metadata["author_name"], metadata["author_email"]) == GENESIS_AUTHOR
+            and (metadata["committer_name"], metadata["committer_email"]) == GENESIS_SOURCE_COMMITTER
+            and metadata["message"].startswith(GENESIS_MESSAGE_PREFIX)
+        )
+
+    @staticmethod
+    def _is_genesis_staged_promotion(metadata: dict[str, str]) -> bool:
+        return (
+            (metadata["author_name"], metadata["author_email"]) == GENESIS_AUTHOR
+            and (metadata["committer_name"], metadata["committer_email"]) == GENESIS_PROMOTION_COMMITTER
+            and metadata["message"].startswith(GENESIS_MESSAGE_PREFIX)
+        )
 
     def _changed_files(self, commit: str) -> tuple[str, ...]:
         completed = self._git(
@@ -185,7 +204,7 @@ class GenesisTrainingDatasetBuilder:
             return False
         return has_genesis_source
 
-    def _patch(self, commit: str) -> str | None:
+    def _patch_text(self, commit: str) -> str | None:
         completed = self._git(
             "show",
             "--format=",
@@ -201,10 +220,53 @@ class GenesisTrainingDatasetBuilder:
         if completed.returncode != 0:
             return None
         patch = completed.stdout.strip()
-        encoded = patch.encode("utf-8")
-        if not patch or len(encoded) > MAX_PATCH_BYTES:
+        if not patch or len(patch.encode("utf-8")) > MAX_PATCH_BYTES:
             return None
         return patch
+
+    def _patch_id(self, patch: str) -> str | None:
+        completed = subprocess.run(
+            ["git", "patch-id", "--stable"],
+            cwd=self.root,
+            input=patch + "\n",
+            check=False,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            encoding="utf-8",
+            errors="replace",
+        )
+        if completed.returncode != 0 or not completed.stdout.strip():
+            return None
+        value = completed.stdout.split()[0].strip().lower()
+        return value if PATCH_ID_RE.fullmatch(value) else None
+
+    def _promoted_index(
+        self,
+        head_commit: str,
+    ) -> dict[tuple[str, tuple[str, ...], str], tuple[str, ...]]:
+        """Index exact autonomous staged promotions reachable from current head."""
+        hashes = self._git("rev-list", head_commit).stdout.splitlines()
+        bucket: dict[tuple[str, tuple[str, ...], str], list[str]] = {}
+        for raw in hashes:
+            commit = raw.strip().lower()
+            if not COMMIT_RE.fullmatch(commit):
+                continue
+            metadata = self._commit_metadata(commit)
+            if metadata is None or not self._is_genesis_staged_promotion(metadata):
+                continue
+            changed_files = self._changed_files(commit)
+            if not self._safe_code_paths(changed_files):
+                continue
+            patch = self._patch_text(commit)
+            if patch is None:
+                continue
+            patch_id = self._patch_id(patch)
+            if patch_id is None:
+                continue
+            key = (metadata["message"], changed_files, patch_id)
+            bucket.setdefault(key, []).append(commit)
+        return {key: tuple(values) for key, values in bucket.items()}
 
     @staticmethod
     def _increment(bucket: dict[str, int], reason: str) -> None:
@@ -217,8 +279,10 @@ class GenesisTrainingDatasetBuilder:
         head_commit = self._resolve_head(head)
         rows = self._load_validation_rows()
         blockchain_hash = sha256_file(self.blockchain_path)
+        promoted_index = self._promoted_index(head_commit)
         excluded: dict[str, int] = {}
-        seen: set[str] = set()
+        seen_validations: set[str] = set()
+        included_promotions: set[str] = set()
         examples: list[dict[str, Any]] = []
         included: list[str] = []
 
@@ -227,80 +291,130 @@ class GenesisTrainingDatasetBuilder:
                 self._increment(excluded, "not_independent_validator_record")
                 continue
 
-            commit = str(row.get("validated_commit") or "").strip().lower()
-            if not COMMIT_RE.fullmatch(commit):
+            validated_commit = str(row.get("validated_commit") or "").strip().lower()
+            if not COMMIT_RE.fullmatch(validated_commit):
                 self._increment(excluded, "invalid_validated_commit")
                 continue
-            if commit in seen:
+            if validated_commit in seen_validations:
                 self._increment(excluded, "duplicate_validation_record")
                 continue
-            seen.add(commit)
+            seen_validations.add(validated_commit)
 
             block_hash = str(row.get("block_hash") or "").strip().lower()
             validation_run_id = str(row.get("validation_run_id") or "").strip()
             if not HASH_RE.fullmatch(block_hash) or not validation_run_id:
                 self._increment(excluded, "incomplete_validation_provenance")
                 continue
-            if not self._is_ancestor(commit, head_commit):
-                self._increment(excluded, "not_promoted_to_current_head")
-                continue
 
-            metadata = self._commit_metadata(commit)
-            if metadata is None:
+            source_metadata = self._commit_metadata(validated_commit)
+            if source_metadata is None:
                 self._increment(excluded, "commit_metadata_unavailable")
                 continue
-            if (
-                (metadata["author_name"], metadata["author_email"]) != GENESIS_AUTHOR
-                or (metadata["committer_name"], metadata["committer_email"]) != GENESIS_COMMITTER
-            ):
-                self._increment(excluded, "not_genesis_autonomous_promotion")
-                continue
-            if not metadata["message"].startswith(GENESIS_MESSAGE_PREFIX):
-                self._increment(excluded, "unexpected_genesis_commit_format")
+            source_is_genesis = self._is_genesis_source(source_metadata)
+            source_is_staged = self._is_genesis_staged_promotion(source_metadata)
+            if not source_is_genesis and not source_is_staged:
+                self._increment(excluded, "not_genesis_autonomous_candidate")
                 continue
 
-            changed_files = self._changed_files(commit)
+            source_files = self._changed_files(validated_commit)
             recorded_files = row.get("changed_files")
             if not isinstance(recorded_files, list):
                 self._increment(excluded, "validation_changed_files_missing")
                 continue
             normalized_recorded = tuple(sorted({str(item).strip() for item in recorded_files if str(item).strip()}))
-            if normalized_recorded != changed_files:
+            if normalized_recorded != source_files:
                 self._increment(excluded, "validation_changed_files_mismatch")
                 continue
-            if not self._safe_code_paths(changed_files):
+            if not self._safe_code_paths(source_files):
                 self._increment(excluded, "outside_bounded_python_training_scope")
                 continue
 
-            patch = self._patch(commit)
-            if patch is None:
+            source_patch = self._patch_text(validated_commit)
+            if source_patch is None:
                 self._increment(excluded, "patch_empty_or_over_budget")
+                continue
+            source_patch_id = self._patch_id(source_patch)
+            if source_patch_id is None:
+                self._increment(excluded, "patch_identity_unavailable")
+                continue
+
+            promoted_commit: str | None = None
+            promotion_mapping = ""
+            if self._is_ancestor(validated_commit, head_commit):
+                # A fast-forward promotion can leave the original Genesis AI
+                # candidate SHA unchanged; an already staged SHA may also have
+                # been independently validated directly.
+                promoted_commit = validated_commit
+                promotion_mapping = "validated_commit_is_current_head_ancestor"
+            else:
+                key = (source_metadata["message"], source_files, source_patch_id)
+                matches = promoted_index.get(key, ())
+                if len(matches) == 1:
+                    promoted_commit = matches[0]
+                    promotion_mapping = "stable_patch_id+message+files+promotion_identity"
+                elif len(matches) > 1:
+                    self._increment(excluded, "ambiguous_promoted_patch_mapping")
+                    continue
+                else:
+                    self._increment(excluded, "validated_candidate_not_promoted_to_current_head")
+                    continue
+
+            if promoted_commit in included_promotions:
+                self._increment(excluded, "duplicate_promoted_training_example")
+                continue
+            promoted_metadata = self._commit_metadata(promoted_commit)
+            if promoted_metadata is None:
+                self._increment(excluded, "promoted_commit_metadata_unavailable")
+                continue
+            # For a rebased/staged mapping, promotion identity is mandatory. For
+            # an unchanged fast-forward candidate, exact Genesis source identity
+            # plus independent validation and current-head ancestry is sufficient.
+            if promoted_commit != validated_commit and not self._is_genesis_staged_promotion(promoted_metadata):
+                self._increment(excluded, "mapped_commit_missing_promotion_identity")
+                continue
+            promoted_files = self._changed_files(promoted_commit)
+            promoted_patch = self._patch_text(promoted_commit)
+            if promoted_files != source_files or promoted_patch is None:
+                self._increment(excluded, "promoted_patch_scope_mismatch")
+                continue
+            promoted_patch_id = self._patch_id(promoted_patch)
+            if promoted_patch_id != source_patch_id:
+                self._increment(excluded, "promoted_patch_identity_mismatch")
+                continue
+            if promoted_metadata["message"] != source_metadata["message"]:
+                self._increment(excluded, "promoted_message_mismatch")
                 continue
 
             prompt = (
                 "Implement the following independently validated Genesis self-development task.\n"
-                f"Objective: {metadata['message']}\n"
-                f"Allowed files: {', '.join(changed_files)}\n"
+                f"Objective: {source_metadata['message']}\n"
+                f"Allowed files: {', '.join(source_files)}\n"
                 "Return the minimal code patch that satisfies the objective while preserving existing tests, "
                 "security boundaries, independent validation and promotion safeguards."
             )
             examples.append(
                 {
                     "prompt": prompt,
-                    "response": patch,
+                    "response": promoted_patch,
                     "provenance": {
                         "classification": "genesis_autonomous_validated_promotion",
                         "policy_version": POLICY_VERSION,
-                        "validated_commit": commit,
+                        "validated_source_commit": validated_commit,
+                        "promoted_commit": promoted_commit,
                         "validation_run_id": validation_run_id,
                         "block_hash": block_hash,
-                        "changed_files": list(changed_files),
-                        "author_name": metadata["author_name"],
-                        "committer_name": metadata["committer_name"],
+                        "changed_files": list(source_files),
+                        "stable_patch_id": source_patch_id,
+                        "promotion_mapping": promotion_mapping,
+                        "source_author_name": source_metadata["author_name"],
+                        "source_committer_name": source_metadata["committer_name"],
+                        "promoted_author_name": promoted_metadata["author_name"],
+                        "promoted_committer_name": promoted_metadata["committer_name"],
                     },
                 }
             )
-            included.append(commit)
+            included_promotions.add(promoted_commit)
+            included.append(promoted_commit)
             if len(examples) >= max_examples:
                 break
 
@@ -337,20 +451,20 @@ class GenesisTrainingDatasetBuilder:
         )
         dataset_sha = sha256_bytes(dataset_bytes)
         manifest = {
-            "schema_version": 1,
+            "schema_version": 2,
             "policy_version": POLICY_VERSION,
             "dataset_kind": "genesis_validated_autonomous_code_sft",
             "dataset_path": dataset_path.relative_to(self.root).as_posix(),
             "dataset_sha256": dataset_sha,
             "example_count": len(collection.examples),
-            "included_commits": list(collection.included_commits),
+            "included_promoted_commits": list(collection.included_commits),
             "excluded_by_reason": collection.excluded_by_reason,
             "source_head_commit": collection.head_commit,
             "blockchain_path": self.blockchain_path.relative_to(self.root).as_posix(),
             "blockchain_sha256": collection.blockchain_sha256,
             "eligibility_rule": (
-                "current-main ancestor + independent validator blockchain record + Genesis AI author + "
-                "Genesis Promotion Stager committer + bounded genesis/tests Python patch"
+                "independently validated Genesis AI candidate + current-head ancestry OR unique stable-patch-id/message/files "
+                "mapping to Genesis Promotion Stager commit + bounded genesis/tests Python patch"
             ),
             "capability_claim": "none; dataset construction is not model training or benchmark evidence",
         }
