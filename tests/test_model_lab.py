@@ -33,6 +33,13 @@ def test_model_lab_records_lineage_and_blocks_unmeasured_promotion(tmp_path: Pat
     assert validated.benchmark_score == 0.81
     assert validated.resource_cost == 0.4
     assert lab.transition(model.model_id, "trusted").state == "trusted"
+
+    with pytest.raises(ValueError, match="training provenance and runtime evidence"):
+        lab.transition(model.model_id, "active")
+    lab.add_evidence(model.model_id, "training_provenance", {"produced_new_weights": True})
+    with pytest.raises(ValueError, match="runtime"):
+        lab.transition(model.model_id, "active")
+    lab.add_evidence(model.model_id, "runtime", {"kind": "local_transformers_causal_lm"})
     assert lab.transition(model.model_id, "active").state == "active"
 
 
@@ -54,4 +61,5 @@ def test_model_lab_rejects_lifecycle_skips_and_keeps_provenance(tmp_path: Path) 
     assert rejected.state == "rejected"
     status = lab.export_status()
     assert status["counts"]["rejected"] == 1
-    assert "cannot self-promote" in status["rule"]
+    assert "training provenance" in status["rule"]
+    assert "runtime artifact" in status["rule"]
