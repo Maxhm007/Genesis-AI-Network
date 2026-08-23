@@ -1,6 +1,17 @@
 """Genesis AI Network runtime package."""
 
+from pathlib import Path
+
 __version__ = "0.1.0"
+
+# Validated benchmark evidence is correctness-critical state, not a cache detail.
+# Restore repository-backed measurements before installing routing/evolution hooks
+# so every Genesis entrypoint sees the same independently validated baseline even
+# if an Actions runtime cache is stale, missing, or restored out of order.
+from .benchmark_state import hydrate_validated_benchmark_state as _hydrate_validated_benchmark_state
+
+_hydrate_validated_benchmark_state(Path(__file__).resolve().parents[1])
+del _hydrate_validated_benchmark_state
 
 # Install the bounded new-capability extension at package initialization so every
 # Genesis entrypoint (Pulse, tests, CLI, and workers) uses the same evolution
