@@ -26,17 +26,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Restore and return Genesis runtime task state
+      - name: Restore and return shared Gene runtime state
         uses: actions/cache@v4
         with:
-          path: |
-            runtime/genesis_tasks.sqlite3
-            runtime/competitive_benchmark_inputs/
-            runtime/competitive_benchmark_candidates/
-          key: genesis-runtime-${{ runner.os }}-benchmark-${{ github.run_id }}
+          path: runtime
+          key: gene-runtime-gene-node-1-${{ github.run_id }}-benchmark-evaluation
           restore-keys: |
-            genesis-runtime-${{ runner.os }}-${{ github.event.workflow_run.id }}
-            genesis-runtime-${{ runner.os }}-
+            gene-runtime-gene-node-1-
       - run: pip install -r requirements.txt
       - name: Advance one frontier benchmark evaluation task
         run: python scripts/benchmark_task_worker.py
