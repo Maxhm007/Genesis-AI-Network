@@ -7,6 +7,7 @@ from dataclasses import asdict
 from pathlib import Path
 from typing import Any
 
+from .agents_last_exam_evidence import AgentsLastExamEvidenceAdapter
 from .modules.task_queue import GenesisTask, PersistentTaskQueue
 from .terminal_bench_evidence import TerminalBench21EvidenceAdapter
 
@@ -22,7 +23,7 @@ class BenchmarkExecutionPlanner:
 
     TERMINAL_RUNNER_STATES = {"complete", "quarantined", "cancelled"}
     MAX_RUNNER_INTEGRATION_GENERATIONS = 2
-    EVIDENCE_ADAPTER_BENCHMARKS = {"terminal_bench_2_1"}
+    EVIDENCE_ADAPTER_BENCHMARKS = {"agents_last_exam", "terminal_bench_2_1"}
     TERMINAL_BENCH_ENV = (
         "GENESIS_BENCHMARK_AGENT",
         "GENESIS_BENCHMARK_MODEL",
@@ -191,6 +192,20 @@ class BenchmarkExecutionPlanner:
             return {"status": "invalid_task", "reason": "benchmark_id missing", "task": asdict(task)}
 
         input_path = self.input_dir / f"{benchmark_id}.json"
+        if benchmark_id == "agents_last_exam":
+            if input_path.is_file():
+                job = json.loads(input_path.read_text(encoding="utf-8"))
+                staged = AgentsLastExamEvidenceAdapter(self.root).stage(job)
+                return {"status": "evidence_staged", "benchmark_id": benchmark_id, "candidate_path": str(staged)}
+            return {
+                "status": "external_execution_required",
+                "benchmark_id": benchmark_id,
+                "reason": "deterministic ALE evidence adapter is ready; a complete official pinned ALE run is still required",
+                "missing": ["official_ale_full_experiment_result"],
+                "readiness": AgentsLastExamEvidenceAdapter.execution_readiness(),
+                "engineering_assistance_required": True,
+                "owner_action_required": False,
+            }
         if benchmark_id == "terminal_bench_2_1" and input_path.is_file():
             job = json.loads(input_path.read_text(encoding="utf-8"))
             staged = TerminalBench21EvidenceAdapter(self.root).stage(job)
