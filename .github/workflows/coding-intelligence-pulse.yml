@@ -1,4 +1,4 @@
-name: Gene Pulse
+name: Genesis Coding Intelligence Pulse
 
 on:
   workflow_dispatch:
@@ -8,41 +8,32 @@ on:
         required: false
         default: gene-node-1
       continue_chain:
-        description: Request the next pulse when this pulse finishes
+        description: Return to normal Gene Pulse after this bounded coding pulse
         required: false
         default: "true"
       chain_budget:
-        description: Remaining bounded idle-discovery pulses before checkpointing
+        description: Remaining bounded idle-discovery pulses
         required: false
         default: "4"
-  repository_dispatch:
-    types: [gene-pulse]
-  push:
-    branches: [main]
-    paths:
-      - "genesis/**"
-      - "scripts/**"
-      - "config/**"
-      - "GENE_REGISTRY.json"
-      - ".github/workflows/gene-pulse.yml"
 
 permissions:
   contents: write
   actions: write
 
 concurrency:
-  group: gene-pulse-${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
+  group: gene-pulse-${{ inputs.gene || 'gene-node-1' }}
   cancel-in-progress: false
 
 jobs:
-  pulse:
+  coding-pulse:
     runs-on: ubuntu-latest
     timeout-minutes: 35
     env:
-      GENE_ID: ${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
-      CONTINUE_CHAIN: ${{ inputs.continue_chain || github.event.client_payload.continue_chain || 'true' }}
-      IDLE_DISCOVERY_BUDGET: ${{ inputs.chain_budget || github.event.client_payload.chain_budget || '4' }}
+      GENE_ID: ${{ inputs.gene || 'gene-node-1' }}
+      CONTINUE_CHAIN: ${{ inputs.continue_chain || 'true' }}
+      IDLE_DISCOVERY_BUDGET: ${{ inputs.chain_budget || '4' }}
       PYTHONPATH: ${{ github.workspace }}
+      GENESIS_PULSE_FALLBACK_MODEL: ${{ vars.GENESIS_PULSE_FALLBACK_MODEL || 'Qwen/Qwen2.5-Coder-0.5B-Instruct' }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,51 +51,66 @@ jobs:
           restore-keys: |
             gene-runtime-${{ env.GENE_ID }}-
 
-      - name: Install dependencies
+      - name: Install Genesis dependencies
         run: pip install -r requirements.txt
 
-      - name: Detect provider-bound coding work
+      - name: Inspect provider-bound coding work
         id: provider_gate
-        shell: bash
         run: python scripts/pulse_provider_recovery.py inspect --github-output "$GITHUB_OUTPUT"
 
+      - name: Restore replaceable coding-model cache
+        if: steps.provider_gate.outputs.needs_local_provider == 'true'
+        uses: actions/cache@v4
+        with:
+          path: ~/.cache/huggingface
+          key: genesis-coding-intelligence-${{ runner.os }}-v1
+
+      - name: Install bounded local coding runtime
+        if: steps.provider_gate.outputs.needs_local_provider == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.48,<5' safetensors
+
+      - name: Start replaceable coding provider
+        if: steps.provider_gate.outputs.needs_local_provider == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python scripts/pulse_coding_provider.py \
+            --model "$GENESIS_PULSE_FALLBACK_MODEL" \
+            --port 8766 \
+            --max-new-tokens 384 \
+            > coding-intelligence-provider.log 2>&1 &
+          echo $! > coding-intelligence-provider.pid
+          for i in $(seq 1 120); do
+            if curl -fsS http://127.0.0.1:8766/health >/dev/null 2>&1; then
+              echo "GENESIS_PROVIDER_URL=http://127.0.0.1:8766" >> "$GITHUB_ENV"
+              echo "GENESIS_PROVIDER_NAME=genesis-pulse-local-coding-fallback" >> "$GITHUB_ENV"
+              echo "Genesis replaceable coding provider is ready"
+              exit 0
+            fi
+            sleep 2
+          done
+          cat coding-intelligence-provider.log || true
+          exit 1
+
+      - name: Resume one provider-waiting coding task
+        if: steps.provider_gate.outputs.needs_local_provider == 'true'
+        run: python scripts/pulse_provider_recovery.py resume-one
+
       - name: Configure Genesis Git identity
-        if: steps.provider_gate.outputs.needs_local_provider != 'true'
         run: |
           git config user.name "Genesis AI"
           git config user.email "genesis-ai@users.noreply.github.com"
 
-      - name: Execute one bounded queue transition
-        if: steps.provider_gate.outputs.needs_local_provider != 'true'
+      - name: Execute one bounded coding-aware queue transition
         run: python scripts/gene_pulse.py --gene "$GENE_ID" --output runtime/pulse_result.json
 
       - name: Advance one bounded frontier benchmark task
-        if: steps.provider_gate.outputs.needs_local_provider != 'true'
         run: python scripts/benchmark_task_worker.py
 
-      - name: Record delegated provider pulse
-        if: steps.provider_gate.outputs.needs_local_provider == 'true'
-        run: |
-          python - <<'PY'
-          import json
-          import os
-          from pathlib import Path
-
-          payload = {
-              "action": "provider_bound_pulse_delegated",
-              "gene_id": os.environ["GENE_ID"],
-              "needs_next_pulse": False,
-              "next_pulse_reason": "provider_bound_coding_work",
-              "payload": {
-                  "coding_work_count": int("${{ steps.provider_gate.outputs.coding_work_count }}" or "0"),
-                  "next_task_id": "${{ steps.provider_gate.outputs.next_task_id }}",
-              },
-          }
-          Path("runtime").mkdir(exist_ok=True)
-          Path("runtime/pulse_result.json").write_text(json.dumps(payload, indent=2), encoding="utf-8")
-          PY
-
-      - name: Read pulse and specialist handoffs
+      - name: Read pulse handoffs
         id: pulse
         shell: bash
         run: |
@@ -121,7 +127,6 @@ jobs:
           review_candidate = dict(pipeline.get('review_candidate', {}) or {})
           validation_candidate = dict(pipeline.get('validation_candidate', {}) or {})
           record = dict(pipeline.get('record', {}) or {})
-
           attempt = dict(payload.get('attempt', {}) or {})
           legacy_candidate = dict(attempt.get('candidate', {}) or {})
           legacy_security = dict(attempt.get('candidate_security', {}) or {})
@@ -131,7 +136,6 @@ jobs:
               and bool(legacy_candidate.get('commit_sha'))
               and legacy_security.get('status') == 'pass'
           )
-
           review_actions = {'pipeline_development_completed', 'pipeline_repair_completed'}
           has_review = action in review_actions and bool(review_candidate.get('candidate_sha')) and bool(review_candidate.get('review_ref'))
           has_validation = action == 'pipeline_internal_review_approved' and bool(validation_candidate.get('candidate_sha')) and bool(validation_candidate.get('branch'))
@@ -141,22 +145,16 @@ jobs:
               'pipeline_quarantined',
           }
           rejected_review_ref = str(record.get('review_ref') or '') if action in rejected_review_actions else ''
-
           try:
               idle_budget = int(os.environ.get('IDLE_DISCOVERY_BUDGET', str(DEFAULT_IDLE_DISCOVERY_BURST)))
           except ValueError:
               idle_budget = DEFAULT_IDLE_DISCOVERY_BURST
-          idle_budget = max(0, idle_budget)
           dispatch_next, next_budget, chain_reason = workflow_chain_decision(
               needs_next_pulse=bool(p.get('needs_next_pulse')),
               next_pulse_reason=str(p.get('next_pulse_reason') or ''),
-              idle_budget=idle_budget,
+              idle_budget=max(0, idle_budget),
           )
-          idle_continue = dispatch_next and not bool(p.get('needs_next_pulse'))
-
           with open(os.environ['GITHUB_OUTPUT'], 'a', encoding='utf-8') as f:
-              f.write('continue=' + ('true' if p.get('needs_next_pulse') else 'false') + '\n')
-              f.write('idle_continue=' + ('true' if idle_continue else 'false') + '\n')
               f.write('dispatch_next=' + ('true' if dispatch_next else 'false') + '\n')
               f.write('next_budget=' + str(next_budget) + '\n')
               f.write('chain_reason=' + chain_reason + '\n')
@@ -240,11 +238,11 @@ jobs:
           path: runtime
           key: gene-runtime-${{ env.GENE_ID }}-${{ github.run_id }}
 
-      - name: Upload pulse and queue evidence
+      - name: Upload coding pulse evidence
         if: always()
         uses: actions/upload-artifact@v4
         with:
-          name: gene-pulse-${{ env.GENE_ID }}-${{ github.run_id }}
+          name: coding-intelligence-pulse-${{ env.GENE_ID }}-${{ github.run_id }}
           path: |
             runtime/pulse_result.json
             runtime/discovery/
@@ -252,26 +250,16 @@ jobs:
             runtime/genesis_tasks.sqlite3
             runtime/competitive_benchmark_inputs/
             runtime/competitive_benchmark_candidates/
-            runtime/grce/${{ env.GENE_ID }}/candidate_handoff.json
+            coding-intelligence-provider.log
           if-no-files-found: warn
           retention-days: 30
 
-      - name: Delegate provider-bound pulse
-        if: steps.provider_gate.outputs.needs_local_provider == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh workflow run coding-intelligence-pulse.yml --ref main \
-            -f gene="$GENE_ID" \
-            -f continue_chain="$CONTINUE_CHAIN" \
-            -f chain_budget="$IDLE_DISCOVERY_BUDGET"
-
-      - name: Request next pulse
-        if: steps.provider_gate.outputs.needs_local_provider != 'true' && env.CONTINUE_CHAIN == 'true' && (steps.pulse.outputs.continue == 'true' || steps.pulse.outputs.idle_continue == 'true')
+      - name: Return to normal Gene Pulse
+        if: env.CONTINUE_CHAIN == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh workflow run gene-pulse.yml --ref main \
             -f gene="$GENE_ID" \
             -f continue_chain=true \
-            -f chain_budget='${{ steps.pulse.outputs.next_budget }}'
+            -f chain_budget='${{ steps.pulse.outputs.next_budget || env.IDLE_DISCOVERY_BUDGET }}'
