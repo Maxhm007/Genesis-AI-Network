@@ -71,19 +71,19 @@ def test_exhausted_terminal_runner_work_surfaces_execution_readiness_blocker(tmp
 
     task = make_task(tmp_path)
     planner = BenchmarkExecutionPlanner(tmp_path)
-    first = planner.advance(task)
-    quarantine(planner.queue, first["task_id"])
-    second = planner.advance(task)
-    assert second["work_generation"] == 2
-    quarantine(planner.queue, second["task_id"])
+    for expected in range(1, BenchmarkExecutionPlanner.MAX_RUNNER_INTEGRATION_GENERATIONS + 1):
+        attempt = planner.advance(task)
+        assert attempt["status"] == "runner_work_queued"
+        assert attempt["work_generation"] == expected
+        quarantine(planner.queue, attempt["task_id"])
 
     result = planner.advance(task)
     assert result["status"] == "external_execution_required"
     assert result["owner_action_required"] is True
-    assert result["last_work_generation"] == 2
+    assert result["last_work_generation"] == BenchmarkExecutionPlanner.MAX_RUNNER_INTEGRATION_GENERATIONS
     assert "harbor_cli" in result["missing"]
     assert "GENESIS_BENCHMARK_MODEL" in result["missing"]
-    assert len(planner._runner_tasks("terminal_bench_2_1")) == 2
+    assert len(planner._runner_tasks("terminal_bench_2_1")) == BenchmarkExecutionPlanner.MAX_RUNNER_INTEGRATION_GENERATIONS
 
 
 def test_unknown_benchmark_still_queues_bounded_runner_work(tmp_path: Path) -> None:
@@ -106,18 +106,19 @@ def test_unknown_benchmark_stops_after_bounded_runner_generations(tmp_path: Path
     task = make_task(tmp_path, "new_frontier_benchmark")
     planner = BenchmarkExecutionPlanner(tmp_path)
 
-    first = planner.advance(task)
-    quarantine(planner.queue, first["task_id"])
-    second = planner.advance(task)
-    quarantine(planner.queue, second["task_id"])
+    for expected in range(1, BenchmarkExecutionPlanner.MAX_RUNNER_INTEGRATION_GENERATIONS + 1):
+        attempt = planner.advance(task)
+        assert attempt["status"] == "runner_work_queued"
+        assert attempt["work_generation"] == expected
+        quarantine(planner.queue, attempt["task_id"])
 
     result = planner.advance(task)
     assert result["status"] == "runner_integration_exhausted"
     assert result["engineering_assistance_required"] is True
     assert result["owner_action_required"] is False
-    assert result["last_work_generation"] == 2
+    assert result["last_work_generation"] == BenchmarkExecutionPlanner.MAX_RUNNER_INTEGRATION_GENERATIONS
     assert result["missing"] == ["benchmark_specific_evidence_adapter"]
-    assert len(planner._runner_tasks("new_frontier_benchmark")) == 2
+    assert len(planner._runner_tasks("new_frontier_benchmark")) == BenchmarkExecutionPlanner.MAX_RUNNER_INTEGRATION_GENERATIONS
 
 
 def test_invalid_evaluation_task_does_not_create_work(tmp_path: Path) -> None:
