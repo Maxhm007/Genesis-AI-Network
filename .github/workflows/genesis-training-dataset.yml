@@ -1,0 +1,58 @@
+name: Genesis Training Dataset
+
+on:
+  workflow_dispatch:
+    inputs:
+      max_examples:
+        description: Maximum validated autonomous examples to materialize
+        required: false
+        default: "10000"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: genesis-training-dataset
+  cancel-in-progress: false
+
+jobs:
+  build:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Build provenance-qualified dataset
+        shell: bash
+        run: |
+          set -euo pipefail
+          python scripts/build_genesis_training_dataset.py \
+            --root . \
+            --head HEAD \
+            --output-name genesis-validated-autonomous.jsonl \
+            --max-examples "${{ inputs.max_examples || '10000' }}" \
+            | tee runtime/model_datasets/build-result.json
+
+      - name: Show dataset evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          cat runtime/model_datasets/genesis-validated-autonomous.jsonl.manifest.json
+          wc -l runtime/model_datasets/genesis-validated-autonomous.jsonl
+          sha256sum runtime/model_datasets/genesis-validated-autonomous.jsonl
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: genesis-validated-autonomous-training-dataset
+          path: |
+            runtime/model_datasets/genesis-validated-autonomous.jsonl
+            runtime/model_datasets/genesis-validated-autonomous.jsonl.manifest.json
+            runtime/model_datasets/build-result.json
+          if-no-files-found: error
+          retention-days: 30
