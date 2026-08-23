@@ -150,6 +150,36 @@ def test_grounded_device_learning_retries_after_pipeline_feedback_without_qwen(t
     assert "runtime_device_selection_f92ab6ae15c7" in captured["proposal"].files["genesis/learned_capabilities.py"]
 
 
+def test_transformers_device_mismatch_release_builds_candidate_without_qwen(tmp_path: Path) -> None:
+    _write_learned_target(tmp_path)
+    qwen = TrackingQwenProvider()
+    registry = ProviderRegistry(include_bootstrap=False)
+    registry.register(qwen)
+    loop = AutonomousEngineeringLoop(tmp_path, registry)
+    queue, task = _learning_task(
+        tmp_path,
+        lesson="Patch release v5.15.1 fixes DFlash candidate token device mismatch with device_map=auto.",
+        evidence=(
+            "Fix DFlash candidate token device mismatch with device_map=\"auto\". "
+            "Fix MTP config when mlp_layer_types is absent. "
+            "Fallback from lanczos to bicubic when on cuda."
+        ),
+    )
+    loop.queue = queue
+
+    captured = {}
+    _pass_candidate(loop, captured)
+
+    attempt = loop._attempt_task(task, tmp_path / "runtime")
+
+    assert qwen.calls == 0
+    assert attempt["coding_status"] == "candidate_created"
+    assert attempt["coding_strategy"] == "deterministic_learned_capability"
+    rendered = captured["proposal"].files["genesis/learned_capabilities.py"]
+    assert "runtime_device_alignment_f92ab6ae15c7" in rendered
+    assert "device-map mismatches" in rendered
+
+
 def test_grounded_unknown_template_waits_without_non_qwen_provider(tmp_path: Path) -> None:
     _write_learned_target(tmp_path)
     qwen = TrackingQwenProvider({"edits": []})
