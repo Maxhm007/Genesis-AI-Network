@@ -21,6 +21,7 @@ def _activate_model(
     base_model: str = "open-weight/base",
     capabilities: list[str] | None = None,
     tamper_hash: bool = False,
+    include_training_provenance: bool = True,
 ):
     lab = ModelLab(root)
     model = lab.plan(
@@ -43,6 +44,23 @@ def _activate_model(
     weights = b"validated-local-weights"
     (artifact / "config.json").write_bytes(config)
     (artifact / "model.safetensors").write_bytes(weights)
+    files = {
+        "config.json": _sha256(config),
+        "model.safetensors": "0" * 64 if tamper_hash else _sha256(weights),
+    }
+    if include_training_provenance:
+        lab.add_evidence(
+            model.model_id,
+            "training_provenance",
+            {
+                "output_model_id": model.model_id,
+                "base_model": model.base_model,
+                "method": model.method,
+                "dataset_hash": model.dataset_hash,
+                "produced_new_weights": True,
+                "files": files,
+            },
+        )
     lab.add_evidence(
         model.model_id,
         "runtime",
@@ -51,10 +69,7 @@ def _activate_model(
             "artifact_path": str(artifact.relative_to(root)),
             "capabilities": capabilities or ["coding", "reasoning"],
             "max_new_tokens": 256,
-            "files": {
-                "config.json": _sha256(config),
-                "model.safetensors": "0" * 64 if tamper_hash else _sha256(weights),
-            },
+            "files": files,
         },
     )
     return model
@@ -71,6 +86,7 @@ def test_registry_discovers_only_integrity_bound_active_model(tmp_path: Path) ->
     provider = available[0]
     assert provider.capabilities == ("coding",)
     assert provider.status()["artifact_hashes_required"] is True
+    assert provider.status()["training_provenance_required"] is True
     assert provider.status()["remote_downloads_allowed"] is False
 
 
@@ -83,12 +99,36 @@ def test_wrong_runtime_hash_is_not_admitted(tmp_path: Path) -> None:
     assert registry.discovery_errors() == ()
 
 
-def test_qwen_derived_active_model_remains_excluded_by_owner_policy(tmp_path: Path) -> None:
-    _activate_model(tmp_path, base_model="Qwen/Qwen3-0.6B")
+def test_qwen_derived_model_is_allowed_only_after_genesis_derivation_proof(tmp_path: Path) -> None:
+    model = _activate_model(tmp_path, base_model="Qwen/Qwen3-0.6B")
+
+    registry = ProviderRegistry(include_bootstrap=False, root=tmp_path)
+    available = registry.available_providers()
+
+    assert [provider.name for provider in available] == [f"genesis-active:{model.model_id}"]
+    status = available[0].status()
+    assert status["base_model"] == "Qwen/Qwen3-0.6B"
+    assert status["genesis_owned_derivative"] is True
+    assert status["qwen_foundation_allowed_after_derivation"] is True
+
+
+def test_active_model_without_training_provenance_is_not_genesis_owned_provider(tmp_path: Path) -> None:
+    _activate_model(tmp_path, include_training_provenance=False)
 
     registry = ProviderRegistry(include_bootstrap=False, root=tmp_path)
 
     assert registry.available_providers() == []
+    assert registry.discovery_errors() == ()
+
+
+def test_qwen_base_without_training_provenance_is_not_admitted(tmp_path: Path) -> None:
+    _activate_model(
+        tmp_path,
+        base_model="Qwen/Qwen3-0.6B",
+        include_training_provenance=False,
+    )
+
+    assert ProviderRegistry(include_bootstrap=False, root=tmp_path).available_providers() == []
 
 
 def test_active_model_without_runtime_evidence_is_not_a_provider(tmp_path: Path) -> None:
@@ -132,6 +172,22 @@ def test_runtime_artifact_must_stay_under_model_artifact_root(tmp_path: Path) ->
     weights = b"weights"
     (outside / "config.json").write_bytes(config)
     (outside / "model.safetensors").write_bytes(weights)
+    files = {
+        "config.json": _sha256(config),
+        "model.safetensors": _sha256(weights),
+    }
+    lab.add_evidence(
+        model.model_id,
+        "training_provenance",
+        {
+            "output_model_id": model.model_id,
+            "base_model": model.base_model,
+            "method": model.method,
+            "dataset_hash": model.dataset_hash,
+            "produced_new_weights": True,
+            "files": files,
+        },
+    )
     lab.add_evidence(
         model.model_id,
         "runtime",
@@ -139,10 +195,41 @@ def test_runtime_artifact_must_stay_under_model_artifact_root(tmp_path: Path) ->
             "kind": "local_transformers_causal_lm",
             "artifact_path": "outside",
             "capabilities": ["coding"],
-            "files": {
-                "config.json": _sha256(config),
-                "model.safetensors": _sha256(weights),
-            },
+            "files": files,
+        },
+    )
+
+    assert ActiveGenesisModelProvider.discover(tmp_path) == []
+
+
+def test_training_provenance_hashes_must_match_runtime_artifact_hashes(tmp_path: Path) -> None:
+    model = _activate_model(tmp_path)
+    lab = ModelLab(tmp_path)
+    artifact = tmp_path / "runtime" / "model_artifacts" / model.model_id
+    runtime_files = {
+        "config.json": _sha256((artifact / "config.json").read_bytes()),
+        "model.safetensors": _sha256((artifact / "model.safetensors").read_bytes()),
+    }
+    lab.add_evidence(
+        model.model_id,
+        "training_provenance",
+        {
+            "output_model_id": model.model_id,
+            "base_model": model.base_model,
+            "method": model.method,
+            "dataset_hash": model.dataset_hash,
+            "produced_new_weights": True,
+            "files": {**runtime_files, "model.safetensors": "f" * 64},
+        },
+    )
+    lab.add_evidence(
+        model.model_id,
+        "runtime",
+        {
+            "kind": "local_transformers_causal_lm",
+            "artifact_path": str(artifact.relative_to(tmp_path)),
+            "capabilities": ["coding"],
+            "files": runtime_files,
         },
     )
 
