@@ -105,4 +105,20 @@ register_capability(
 )
 
 
+def _learned_b3621110d8ad(items, limit: int = 64) -> tuple[object, ...]:
+    """Retain the newest bounded linear-memory window without external side effects."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 1024:
+        raise ValueError("linear memory limit is out of bounds")
+    values = tuple(items)
+    return values[-limit_i:]
+
+register_capability(
+    'bounded_linear_memory_b3621110d8ad',
+    "Maintain a bounded linear-memory window while preserving insertion order. Verified lesson: Research-backed capability candidate from 'python-v0.7.5': ## What's Changed * Fix docs dotnet core typo by @lach-g in https://github.com/microsoft/autogen/pull/6950 * Fix loading streaming Bedrock response with tool usage with empty argument by @pawel-dabro in https://github.com/microsoft/autogen/pull/6979 * Support linear memory in RedisMemory by @justin-cechmanek in https://github.com/microsoft/autogen/pull/6972 * Fix message ID for correlation between streaming chunks and final mes… by @smalltalkman in https://github.com/microsoft/autogen/pull/6969 * fix: extra args not work to disable t",
+    "## What's Changed * Fix docs dotnet core typo by @lach-g in https://github.com/microsoft/autogen/pull/6950 * Fix loading streaming Bedrock response with tool usage with empty argument by @pawel-dabro in https://github.com/microsoft/autogen/pull/6979 * Support linear memory in RedisMemory by @justin-cechmanek in https://github.com/microsoft/autogen/pull/6972 * Fix message ID for correlation between streaming chunks and final mes… by @smalltalkman in https://github.com/microsoft/autogen/pull/6969 * fix: extra args not work to disable thinking by @liuyunrui123 in https://github.com/microsoft/autogen/pull/7006 * Add thinking mode support for anthropic client by @SrikarMannepalli in https://github.com/microsoft/autogen/pull/7002 * Fix spurious </think> tags caused by empty string reasoning_content in streaming by @Copilot in https://github.com/microsoft/autogen/pull/7025 * Fix GraphFlow cycle detection to properly clean up recursion state by @Copilot in https://github.com/microsoft/autogen/pull/7026 * Add comprehensive GitHub Copilot instructions for AutoGen development by @Copilot in https://github.com/microsoft/autogen/pull/7029 * Fix Redis caching always returning False due to unhand",
+    _learned_b3621110d8ad,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
