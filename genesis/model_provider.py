@@ -147,7 +147,10 @@ class ActiveGenesisModelProvider:
         if self._model is not None:
             return
         artifact = self._artifact_path()
-        if artifact is None or not self.available():
+        # Re-check hashes immediately before the first load. Availability may have
+        # been cached during registry discovery, and the artifact must not be
+        # swappable between admission and execution.
+        if artifact is None or not self.available() or not self._verified_files(artifact):
             raise RuntimeError("active Genesis model runtime artifact is unavailable or failed integrity verification")
         try:
             import torch
