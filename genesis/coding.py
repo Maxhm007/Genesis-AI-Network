@@ -106,10 +106,9 @@ class CodingModule:
             return "", 1
         objective_lower = objective.lower()
         objective_tokens = cls._tokens(objective)
-        best: tuple[int, int, int, str, int] | None = None
+        best: tuple[int, int, int, int, int, str, int] | None = None
         for path_index, (path, text) in enumerate(context.items()):
-            lines = text.splitlines()
-            for line_number, line in enumerate(lines, start=1):
+            for line_number, line in enumerate(text.splitlines(), start=1):
                 stripped = line.strip()
                 if not stripped:
                     continue
@@ -117,9 +116,9 @@ class CodingModule:
                 exact_bonus = 100 if stripped.lower() in objective_lower else 0
                 marker_bonus = 200 if "INSERTION_POINT" in stripped and stripped.lower() in objective_lower else 0
                 score = overlap + exact_bonus + marker_bonus
-                candidate = (score, marker_bonus, exact_bonus, -path_index, -line_number)
-                if best is None or candidate > best[:5]:
-                    best = (*candidate, path, line_number)  # type: ignore[assignment]
+                rank = (score, marker_bonus, exact_bonus, -path_index, -line_number)
+                if best is None or rank > best[:5]:
+                    best = (*rank, path, line_number)
         if best is not None:
             return best[5], best[6]
         first_path, first_text = next(iter(context.items()))
