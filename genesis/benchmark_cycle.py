@@ -41,6 +41,7 @@ def _paused_task_ready(
     evidence arrived, or a newly expanded bounded integration budget permits a new
     strategy generation.
     """
+    del queue
     reason = str(task.state_reason or "")
     benchmark_id = _benchmark_id(task)
     if not benchmark_id:
@@ -114,11 +115,11 @@ def advance_one_benchmark(root: Path) -> dict[str, Any]:
         return {"status": "idle", "reason": "no executable benchmark evaluation task"}
 
     task = candidates[0]
-    if task.state in {"new", "blocked", "failed", "paused"}:
+    if task.state == "paused":
+        task = queue.resume(task.task_id, module_id="genesis.evaluation")
+    elif task.state in {"new", "blocked", "failed"}:
         if task.state == "failed" and not queue.retryable(task):
             return {"status": "not_retryable", "task": asdict(task)}
-        if task.state == "paused":
-            task = queue.resume(task.task_id)
         task = queue.transition(task.task_id, "assigned", module_id="genesis.evaluation")
 
     task = queue.transition(task.task_id, "running", module_id="genesis.evaluation")
