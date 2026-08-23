@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import re
 from typing import Any
 
 from .bounded_autonomy_pipeline import BoundedAutonomyPipelineCoordinator
@@ -25,6 +26,21 @@ class GoalDirectedPipelineCoordinator(BoundedAutonomyPipelineCoordinator):
         "discovered",
         "validation_ready",
     }
+    _STALE_LEARNING_STAGES = {
+        "discovered",
+        "development_ready",
+        "needs_development_revision",
+    }
+    _MAX_UNKNOWN_RELEASE_FRAGMENT_CHARS = 240
+    _RELEASE_PACKAGING_MARKERS = (
+        "**Website:**",
+        "**Attestations:**",
+        "**macOS/iOS:**",
+        "**Linux:**",
+        "**Android:**",
+        "**Windows:**",
+        "### Assets",
+    )
 
     def _run_record(self, record: Any) -> dict:
         stage = str(record.stage)
@@ -55,6 +71,117 @@ class GoalDirectedPipelineCoordinator(BoundedAutonomyPipelineCoordinator):
             and str(getattr(record, "candidate_sha", "") or "")
             and str(getattr(record, "review_ref", "") or "").startswith("genesis/review-")
         )
+
+    @classmethod
+    def _release_technical_excerpt(cls, summary: object) -> str:
+        text = str(summary or "")
+        text = re.sub(r"<details[^>]*>", " ", text, flags=re.IGNORECASE)
+        text = re.sub(r"</details>", " ", text, flags=re.IGNORECASE)
+        positions = [
+            text.find(marker)
+            for marker in cls._RELEASE_PACKAGING_MARKERS
+            if text.find(marker) >= 0
+        ]
+        if positions:
+            text = text[: min(positions)]
+        text = re.sub(r"\[([^\]]+)\]\([^\)]+\)", r"\1", text)
+        text = re.sub(r"<https?://[^>]+>", " ", text)
+        return re.sub(r"\s+", " ", text).strip()
+
+    @classmethod
+    def _is_stale_non_transferable_release_task(cls, task: Any, record: Any) -> bool:
+        """Recognize only old queued items that the current intake policy would skip."""
+        if str(getattr(record, "stage", "")) not in cls._STALE_LEARNING_STAGES:
+            return False
+        payload = dict(getattr(task, "payload", {}) or {})
+        if str(payload.get("source") or "") != "genesis.evolution_learning":
+            return False
+
+        discovery = dict(payload.get("discovery") or {})
+        finding = dict(discovery.get("finding") or {})
+        if not finding:
+            record_discovery = dict(getattr(record, "discovery", {}) or {})
+            finding = dict(record_discovery.get("finding") or {})
+        if not bool(finding.get("new_capability")):
+            return False
+        if str(finding.get("fallback_from") or "") != "no_existing_capability_domain":
+            return False
+        capability_domains = {
+            str(value).strip()
+            for value in (finding.get("capability_domains") or [])
+            if str(value).strip()
+        }
+        if capability_domains != {"emerging_capability"}:
+            return False
+
+        learning = dict(payload.get("learning") or {})
+        source = str(learning.get("source") or "").lower()
+        url = str(learning.get("url") or "").lower()
+        if not (source.startswith("github:") or "github.com/" in url):
+            return False
+        if "/releases/" not in url and "/releases/tag/" not in url:
+            return False
+
+        compact = cls._release_technical_excerpt(learning.get("summary"))
+        if not compact or len(compact) > cls._MAX_UNKNOWN_RELEASE_FRAGMENT_CHARS:
+            return False
+        issue_or_pr = re.search(
+            r"\(#\d+\)|\b(?:pr|issue)\s*#?\d+\b",
+            compact,
+            flags=re.IGNORECASE,
+        )
+        subsystem_prefix = re.match(r"^[A-Za-z0-9_.+/-]{2,24}\s*:\s+", compact)
+        implementation_identifier = re.search(r"\b[A-Z][A-Z0-9]+_[A-Z0-9_]+\b", compact)
+        release_like_title = re.fullmatch(
+            r"(?:v?\d[\w.-]*|b\d+)",
+            str(learning.get("title") or "").strip(),
+            flags=re.IGNORECASE,
+        )
+        return bool(
+            issue_or_pr
+            or subsystem_prefix
+            or implementation_identifier
+            or release_like_title
+        )
+
+    def _retire_one_stale_learning_task(self) -> dict | None:
+        """Stop one obsolete pre-development task before it consumes another coder call."""
+        for record in sorted(
+            self.store.list_active(),
+            key=lambda item: (str(getattr(item, "updated_at", "")), str(item.task_id)),
+        ):
+            if str(getattr(record, "stage", "")) not in self._STALE_LEARNING_STAGES:
+                continue
+            task = self.engineering.queue.get(str(record.task_id))
+            if task is None or not self._is_stale_non_transferable_release_task(task, record):
+                continue
+
+            reason = "release_fragment_not_transferable_policy"
+            task_state = str(getattr(task, "state", ""))
+            if task_state not in {"complete", "cancelled"}:
+                task = self.engineering.queue.cancel(str(record.task_id), reason)
+            updated = self.store.transition(
+                str(record.task_id),
+                "quarantined",
+                worker="learning_policy",
+                feedback=reason,
+            )
+            return {
+                "handled": True,
+                "action": "pipeline_learning_task_retired",
+                "record": {
+                    "task_id": str(updated.task_id),
+                    "stage": str(updated.stage),
+                    "last_feedback": str(getattr(updated, "last_feedback", "") or ""),
+                },
+                "task": {
+                    "task_id": str(getattr(task, "task_id", record.task_id)),
+                    "state": str(getattr(task, "state", task_state)),
+                    "state_reason": str(getattr(task, "state_reason", "") or ""),
+                },
+                "retirement_reason": reason,
+            }
+        return None
 
     def _resume_existing_durable_review(self, preferred_task_id: str) -> dict | None:
         """Finish a represented review before scheduling unrelated goal work."""
@@ -99,6 +226,15 @@ class GoalDirectedPipelineCoordinator(BoundedAutonomyPipelineCoordinator):
                 result["preferred_task_id"] = preferred_task_id or None
                 result["orphan_review_recovery"] = recovered
                 return result
+
+        # Intake policy can become stricter after work was queued. Retire only old
+        # pre-development release fragments here so they cannot burn another model
+        # attempt. Review/validation/promoted work is deliberately outside this gate.
+        retired = self._retire_one_stale_learning_task()
+        if retired is not None:
+            retired["goal_directed"] = False
+            retired["preferred_task_id"] = preferred_task_id or None
+            return retired
 
         if preferred_task_id:
             active = list(self.store.list_active())
