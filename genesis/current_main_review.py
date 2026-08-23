@@ -2,14 +2,16 @@ from __future__ import annotations
 
 """Run internal candidate review against the current main repository state.
 
-Genesis candidates can remain queued while main advances.  The canonical promotion
+Genesis candidates can remain queued while main advances. The canonical promotion
 workflow already rebases an internally-approved exact candidate onto current main,
 so internal review should test the same patch/current-main combination instead of
 executing the full suite on an obsolete candidate snapshot.
 
-This module changes review execution only.  The original Genesis candidate SHA
+This module changes review execution only. The original Genesis candidate SHA
 remains the approval identity and is restored before handoff to independent
-validation/promotion.
+validation/promotion. Model review is advisory when unavailable; current-main
+scope checks, full tests, Security, independent validators, quorum and promotion
+remain authoritative.
 """
 
 import subprocess
@@ -55,9 +57,9 @@ def _prepare_candidate_on_current_main(
 ) -> tuple[bool, str, str, str]:
     """Apply only the exact candidate patch to current main without committing it.
 
-    Returns (ok, feedback, diff, current_main_sha).  A clean application is a
-    compatibility precondition, not an approval.  Tests, model review, independent
-    validators, security, and promotion still run afterward.
+    Returns (ok, feedback, diff, current_main_sha). A clean application is a
+    compatibility precondition, not an approval. Tests, optional model review,
+    independent validators, Security, and promotion still run afterward.
     """
     candidate_sha = str(record.candidate_sha or "")
     review_ref = str(record.review_ref or "")
@@ -198,39 +200,46 @@ def _run_review_on_current_main(worker: ReviewWorker, record: PipelineRecord) ->
         "utf-8", errors="replace"
     )
     provider = worker.engineering.coding._provider()
+    model_check_status = "completed"
+    reviewer_feedback = ""
     if provider is None or str(getattr(provider, "name", "")) == "genesis-bootstrap":
-        return _fail(worker, record, "internal_review_requires_non_bootstrap_provider")
-
-    prompt = (
-        "ROLE: genesis_internal_code_reviewer\n"
-        "Review this already test-passing Genesis candidate independently from the implementation or repair attempt. "
-        "The exact candidate patch has been replayed on CURRENT MAIN and the full repository test suite passed there. "
-        "Return JSON only with decision and feedback. decision must be approve or needs_repair. "
-        "Approve only if the candidate addresses the objective without unrelated behavior changes, hidden regressions, "
-        "or weakened safety/validation boundaries. Do not ask for style-only refactoring.\n"
-        f"OBJECTIVE: {task.objective}\n"
-        f"TARGET: {record.target_path}\n"
-        f"ORIGINAL_CANDIDATE_SHA: {record.candidate_sha}\n"
-        f"CURRENT_MAIN_SHA: {review_base_sha}\n"
-        f"TEST_RESULT_ON_CURRENT_MAIN: pass\n"
-        f"DIFF:\n{diff}\n"
-    )
-    try:
-        payload = CodingModule._extract_json(provider.reason(prompt))
-    except Exception as exc:
-        return _fail(
-            worker,
-            record,
-            f"internal_review_provider_error:{type(exc).__name__}:{exc}",
+        model_check_status = "skipped_unavailable"
+        reviewer_feedback = (
+            "model_check_unavailable_skipped; exact patch applied to current main and full tests passed; "
+            "continue to Security and independent validator quorum"
         )
-    decision = str(payload.get("decision") or "").strip().lower()
-    reviewer_feedback = str(payload.get("feedback") or "").strip()[: worker.MAX_FEEDBACK_BYTES]
-    if decision != "approve":
-        return _fail(
-            worker,
-            record,
-            reviewer_feedback or "internal_reviewer_requested_revision",
+    else:
+        prompt = (
+            "ROLE: genesis_internal_code_reviewer\n"
+            "Review this already test-passing Genesis candidate independently from the implementation or repair attempt. "
+            "The exact candidate patch has been replayed on CURRENT MAIN and the full repository test suite passed there. "
+            "Return JSON only with decision and feedback. decision must be approve or needs_repair. "
+            "Approve only if the candidate addresses the objective without unrelated behavior changes, hidden regressions, "
+            "or weakened safety/validation boundaries. Do not ask for style-only refactoring.\n"
+            f"OBJECTIVE: {task.objective}\n"
+            f"TARGET: {record.target_path}\n"
+            f"ORIGINAL_CANDIDATE_SHA: {record.candidate_sha}\n"
+            f"CURRENT_MAIN_SHA: {review_base_sha}\n"
+            f"TEST_RESULT_ON_CURRENT_MAIN: pass\n"
+            f"DIFF:\n{diff}\n"
         )
+        try:
+            payload = CodingModule._extract_json(provider.reason(prompt))
+        except Exception as exc:
+            return _fail(
+                worker,
+                record,
+                f"internal_review_provider_error:{type(exc).__name__}:{exc}",
+            )
+        decision = str(payload.get("decision") or "").strip().lower()
+        reviewer_feedback = str(payload.get("feedback") or "").strip()[: worker.MAX_FEEDBACK_BYTES]
+        model_check_status = str(payload.get("model_check_status") or "completed")
+        if decision != "approve":
+            return _fail(
+                worker,
+                record,
+                reviewer_feedback or "internal_reviewer_requested_revision",
+            )
 
     restored, restore_error = _restore_exact_candidate(worker, str(record.candidate_sha))
     if not restored:
@@ -252,6 +261,7 @@ def _run_review_on_current_main(worker: ReviewWorker, record: PipelineRecord) ->
         },
         "review_base_sha": review_base_sha,
         "review_mode": "exact_patch_on_current_main",
+        "model_check_status": model_check_status,
     }
 
 

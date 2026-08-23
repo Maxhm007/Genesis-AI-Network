@@ -55,6 +55,60 @@ class DeterministicLearnedCapabilityProvider:
     def _render_template(cls, token: str, combined: str) -> tuple[str, str, str] | None:
         function_name = f"_learned_{token}"
 
+        if (
+            ("device mismatch" in combined or "device_map" in combined or "token device" in combined)
+            and ("candidate" in combined or "dflash" in combined or "mtp" in combined)
+        ):
+            capability_name = f"runtime_device_alignment_{token}"
+            handler = f'''def {function_name}(
+    reference_device: str | None,
+    candidate_device: str | None,
+    available,
+) -> str | None:
+    """Align generated candidate work to a known available runtime device."""
+    choices = tuple(str(item).strip() for item in available if str(item).strip())
+    reference = str(reference_device).strip() if reference_device is not None else ""
+    candidate = str(candidate_device).strip() if candidate_device is not None else ""
+    if reference and reference in choices:
+        return reference
+    if candidate and candidate in choices:
+        return candidate
+    return choices[0] if choices else None
+'''
+            description = "Align candidate/generated work to an available reference runtime device to avoid device-map mismatches."
+            return capability_name, description, handler
+
+        if "lanczos" in combined and "bicubic" in combined and (
+            "cuda" in combined or "accelerator" in combined or "device" in combined
+        ):
+            capability_name = f"accelerator_resample_fallback_{token}"
+            handler = f'''def {function_name}(requested: str, device: str | None) -> str:
+    """Use a compatible image resampling fallback on accelerator devices."""
+    method = str(requested).strip().lower()
+    device_name = str(device or "").strip().lower()
+    if method == "lanczos" and ("cuda" in device_name or "gpu" in device_name or "accelerator" in device_name):
+        return "bicubic"
+    return method
+'''
+            description = "Fallback from Lanczos to bicubic on accelerator devices when the requested filter is unsupported."
+            return capability_name, description, handler
+
+        if "mlp_layer_types" in combined and ("absent" in combined or "missing" in combined):
+            capability_name = f"optional_sequence_default_{token}"
+            handler = f'''def {function_name}(config, key: str = "mlp_layer_types", default=()) -> tuple[object, ...]:
+    """Return a bounded tuple default when an optional sequence config is absent."""
+    values = dict(config)
+    current = values.get(str(key))
+    if current is None:
+        current = default
+    result = tuple(current)
+    if len(result) > 256:
+        raise ValueError("optional sequence config exceeds bounded size")
+    return result
+'''
+            description = "Preserve compatibility when an optional sequence configuration field is absent."
+            return capability_name, description, handler
+
         if "mmproj-device" in combined or "--mmproj-device" in combined or (
             "device" in combined and "backend" in combined
         ):
