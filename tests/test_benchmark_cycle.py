@@ -1,6 +1,10 @@
 from pathlib import Path
 
-from genesis.benchmark_cycle import advance_one_benchmark
+from genesis.benchmark_cycle import (
+    NON_OWNER_EXTERNAL_PREFIX,
+    RUNNER_EXHAUSTED_PREFIX,
+    advance_one_benchmark,
+)
 from genesis.benchmark_execution import BenchmarkExecutionPlanner
 from genesis.modules.task_queue import PersistentTaskQueue
 
@@ -58,6 +62,19 @@ def test_benchmark_cycle_prioritizes_fresh_measurement_over_paused_one(tmp_path:
     assert second["status"] == "runner_work_queued"
 
 
+def test_non_owner_external_evidence_blocker_does_not_monopolize_cycle(tmp_path: Path) -> None:
+    queue, task = make_evaluation(tmp_path, "agents_last_exam")
+    first = advance_one_benchmark(tmp_path)
+    assert first["status"] == "external_execution_required"
+    paused = queue.get(task.task_id)
+    assert paused.state == "paused"
+    assert paused.state_reason.startswith(NON_OWNER_EXTERNAL_PREFIX)
+
+    second = advance_one_benchmark(tmp_path)
+    assert second["status"] == "idle"
+    assert queue.get(task.task_id).state == "paused"
+
+
 def test_benchmark_cycle_surfaces_durable_external_blocker_after_bounded_runner_work(
     tmp_path: Path, monkeypatch
 ) -> None:
@@ -66,38 +83,63 @@ def test_benchmark_cycle_surfaces_durable_external_blocker_after_bounded_runner_
     monkeypatch.setattr("genesis.benchmark_execution.shutil.which", lambda _: None)
 
     queue, task = make_evaluation(tmp_path)
-    first = advance_one_benchmark(tmp_path)
-    quarantine_runner(queue, first["result"]["task_id"])
+    generations = []
+    for expected in range(1, BenchmarkExecutionPlanner.MAX_RUNNER_INTEGRATION_GENERATIONS + 1):
+        result = advance_one_benchmark(tmp_path)
+        assert result["status"] == "runner_work_queued"
+        assert result["result"]["work_generation"] == expected
+        generations.append(result["result"]["task_id"])
+        quarantine_runner(queue, result["result"]["task_id"])
 
-    second = advance_one_benchmark(tmp_path)
-    assert second["result"]["work_generation"] == 2
-    quarantine_runner(queue, second["result"]["task_id"])
-
-    third = advance_one_benchmark(tmp_path)
-    assert third["status"] == "external_execution_required"
+    final = advance_one_benchmark(tmp_path)
+    assert final["status"] == "external_execution_required"
     blocked = queue.get(task.task_id)
     assert blocked.state == "paused"
-    assert blocked.state_reason.startswith("External authority required for real benchmark execution:")
+    assert blocked.state_reason.startswith("External owner authority required for real benchmark execution:")
     assert "harbor_cli" in blocked.state_reason
+    assert len(generations) == BenchmarkExecutionPlanner.MAX_RUNNER_INTEGRATION_GENERATIONS
 
 
 def test_benchmark_cycle_pauses_when_runner_integration_is_exhausted(tmp_path: Path) -> None:
     queue, task = make_evaluation(tmp_path, "swe_bench_pro")
-    first = advance_one_benchmark(tmp_path)
-    quarantine_runner(queue, first["result"]["task_id"])
+    for expected in range(1, BenchmarkExecutionPlanner.MAX_RUNNER_INTEGRATION_GENERATIONS + 1):
+        result = advance_one_benchmark(tmp_path)
+        assert result["status"] == "runner_work_queued"
+        assert result["result"]["work_generation"] == expected
+        quarantine_runner(queue, result["result"]["task_id"])
 
-    second = advance_one_benchmark(tmp_path)
-    quarantine_runner(queue, second["result"]["task_id"])
-
-    third = advance_one_benchmark(tmp_path)
-    assert third["status"] == "runner_integration_exhausted"
+    final = advance_one_benchmark(tmp_path)
+    assert final["status"] == "runner_integration_exhausted"
     blocked = queue.get(task.task_id)
     assert blocked.state == "paused"
-    assert blocked.state_reason.startswith("Bounded benchmark runner integration is exhausted.")
+    assert blocked.state_reason.startswith(RUNNER_EXHAUSTED_PREFIX)
     runner_tasks = [
         item
         for item in queue.list(limit=100)
         if item.payload.get("task_type") == "benchmark_runner_integration"
         and item.payload.get("benchmark_id") == "swe_bench_pro"
     ]
-    assert len(runner_tasks) == 2
+    assert len(runner_tasks) == BenchmarkExecutionPlanner.MAX_RUNNER_INTEGRATION_GENERATIONS
+
+
+def test_previously_exhausted_two_generation_task_reopens_under_expanded_budget(tmp_path: Path) -> None:
+    queue, task = make_evaluation(tmp_path, "swe_bench_pro")
+    for expected in (1, 2):
+        result = advance_one_benchmark(tmp_path)
+        assert result["result"]["work_generation"] == expected
+        quarantine_runner(queue, result["result"]["task_id"])
+
+    # Simulate the durable state created by the previous two-generation policy.
+    current = queue.get(task.task_id)
+    if current.state == "paused":
+        current = queue.resume(task.task_id)
+    if current.state == "assigned":
+        current = queue.transition(task.task_id, "running", module_id="genesis.evaluation")
+    queue.pause(
+        task.task_id,
+        RUNNER_EXHAUSTED_PREFIX + " Legacy two-generation budget exhausted.",
+    )
+
+    reopened = advance_one_benchmark(tmp_path)
+    assert reopened["status"] == "runner_work_queued"
+    assert reopened["result"]["work_generation"] == 3
