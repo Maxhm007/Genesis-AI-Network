@@ -4,27 +4,99 @@ on:
   push:
     branches:
       - 'genesis/candidate-*'
+  workflow_dispatch:
+    inputs:
+      candidate_branch:
+        description: Candidate branch to recover into validation
+        required: false
+        default: ''
+  workflow_run:
+    workflows: ['Gene Pulse']
+    types: [completed]
 
 permissions:
   contents: read
   pull-requests: write
+  actions: read
 
 jobs:
   open_pr:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
-      - name: Open one PR for exact Genesis candidate branch
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Resolve exact Genesis candidate branch
+        id: resolve
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          branch='${{ github.ref_name }}'
-          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base main --state open --json number --jq '.[0].number // empty')
-          if [[ -n "$existing" ]]; then
-            echo "Candidate PR already open: #$existing"
+          branch=''
+          if [[ '${{ github.event_name }}' == 'push' ]]; then
+            branch='${{ github.ref_name }}'
+          elif [[ '${{ github.event_name }}' == 'workflow_dispatch' ]]; then
+            branch='${{ inputs.candidate_branch }}'
+          else
+            run_id='${{ github.event.workflow_run.id }}'
+            workdir=$(mktemp -d)
+            if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --dir "$workdir"; then
+              branch=$(python - "$workdir" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          for path in sorted(root.rglob('candidate_handoff.json')):
+              try:
+                  payload = json.loads(path.read_text(encoding='utf-8'))
+              except Exception:
+                  continue
+              branch = str(payload.get('branch') or '').strip()
+              state = str(payload.get('state') or '').strip()
+              if state == 'waiting_validation' and branch.startswith('genesis/candidate-'):
+                  print(branch)
+                  break
+          PY
+              )
+            fi
+          fi
+
+          if [[ -z "$branch" ]]; then
+            echo 'No waiting Genesis candidate handoff found.'
+            echo 'candidate_branch=' >> "$GITHUB_OUTPUT"
             exit 0
           fi
+          if [[ "$branch" != genesis/candidate-* ]]; then
+            echo "Rejected non-candidate branch: $branch" >&2
+            exit 1
+          fi
+          echo "candidate_branch=$branch" >> "$GITHUB_OUTPUT"
+
+      - name: Open one PR for exact Genesis candidate branch
+        if: steps.resolve.outputs.candidate_branch != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch='${{ steps.resolve.outputs.candidate_branch }}'
+          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$branch" --base main --state all --json number --jq '.[0].number // empty')
+          if [[ -n "$existing" ]]; then
+            echo "Candidate branch already represented by PR #$existing"
+            exit 0
+          fi
+
+          git fetch origin "$branch"
+          if git merge-base --is-ancestor "origin/$branch" origin/main; then
+            echo 'Candidate is already represented in main.'
+            exit 0
+          fi
+
           gh pr create \
             --repo "$GITHUB_REPOSITORY" \
             --head "$branch" \
