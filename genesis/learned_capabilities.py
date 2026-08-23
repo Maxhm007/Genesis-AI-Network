@@ -88,4 +88,21 @@ register_capability(
 )
 
 
+def _learned_1b55f2a58266(total: int, parts: int) -> tuple[int, ...]:
+    """Split a non-negative tensor/work extent into balanced deterministic parts."""
+    total_i = int(total)
+    parts_i = int(parts)
+    if total_i < 0 or parts_i < 1 or parts_i > 256:
+        raise ValueError("tensor split inputs are out of bounds")
+    base, extra = divmod(total_i, parts_i)
+    return tuple(base + (1 if index < extra else 0) for index in range(parts_i))
+
+register_capability(
+    'balanced_tensor_split_1b55f2a58266',
+    "Split a bounded tensor/work extent deterministically across multiple execution parts. Verified lesson: Research-backed capability candidate from 'v0.27.0': # vLLM v0.27.0 Release Notes ## Highlights This release features 561 commits from 242 contributors (64 new)! * **Kimi K3 support** with a full stack landing in one release: core model files and kernels (#50089, #50000), Python (#50093) and Rust (#50104) frontends, AttnRes kernels (#50090), DeepGEMM support (#50458), compressed-tensors quantized checkpoints (#50500), DSpark AR fusion (#50242), and an option to shard the shared expert instead of replicating it (#50656). * **More new models**: Qwen3.5 text-only dense and MoE models (#50210) wit",
+    '# vLLM v0.27.0 Release Notes ## Highlights This release features 561 commits from 242 contributors (64 new)! * **Kimi K3 support** with a full stack landing in one release: core model files and kernels (#50089, #50000), Python (#50093) and Rust (#50104) frontends, AttnRes kernels (#50090), DeepGEMM support (#50458), compressed-tensors quantized checkpoints (#50500), DSpark AR fusion (#50242), and an option to shard the shared expert instead of replicating it (#50656). * **More new models**: Qwen3.5 text-only dense and MoE models (#50210) with EVS video token pruning (#48912), K-EXAONE-2.0-750B-A37B (#50524), VaultGemma via the Transformers modeling backend (#49803), and jina-embeddings-v5-text-nano (#50688). * **PyTorch 2.13.0 upgrade** along with torchvision 0.28.0 and Triton 3.7.1 (#48155) — this is a breaking environment change; XPU (#48677) and CPU (#50412) followed to torch 2.13 as well. * **FlashAttention 4 integration deepens on SM100**: FP8 KV cache support (#42569) and headdim-256 support (#42669), backed by a new JIT warmup infrastructure (#47451) and runner-owned Triton kernel warmup (#49903) that remove first-request compilation stalls. * **DeepSeek-V4 performance push*',
+    _learned_1b55f2a58266,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
