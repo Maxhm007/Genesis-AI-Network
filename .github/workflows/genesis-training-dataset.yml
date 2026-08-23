@@ -32,6 +32,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          mkdir -p runtime/model_datasets
           python scripts/build_genesis_training_dataset.py \
             --root . \
             --head HEAD \
