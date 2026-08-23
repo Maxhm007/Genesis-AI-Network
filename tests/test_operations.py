@@ -115,7 +115,7 @@ def test_unresolved_issue_gets_new_work_generation_after_previous_task_ends(tmp_
     assert [row["work_generation"] for row in events] == [1, 2]
 
 
-def test_external_benchmark_blocker_stops_duplicate_ai_repair_generations(tmp_path: Path):
+def test_all_unresolved_owner_benchmark_blockers_stop_duplicate_ai_repair_generations(tmp_path: Path):
     ops = GenesisOperations(tmp_path)
     issue = ops.detect(scorecard(ai=37, samples=4))[0]
     first = ops.persist_and_queue([issue])
@@ -137,7 +137,7 @@ def test_external_benchmark_blocker_stops_duplicate_ai_repair_generations(tmp_pa
     ops.queue.transition(benchmark.task_id, "assigned")
     ops.queue.transition(benchmark.task_id, "running")
     blocker_reason = (
-        "External authority required for real benchmark execution: harbor_cli, GENESIS_BENCHMARK_AGENT. "
+        "External owner authority required for real benchmark execution: harbor_cli, GENESIS_BENCHMARK_AGENT. "
         "No score may change until validated evidence is staged."
     )
     ops.queue.pause(benchmark.task_id, blocker_reason)
@@ -153,7 +153,52 @@ def test_external_benchmark_blocker_stops_duplicate_ai_repair_generations(tmp_pa
     assert any(event["event"] == "delegated_external_blocker" for event in ops.history(issue.issue_key))
 
 
-def test_ai_repair_eligibility_returns_when_delegated_blocker_clears(tmp_path: Path):
+def test_one_owner_blocked_benchmark_does_not_freeze_other_autonomous_benchmark_work(tmp_path: Path):
+    ops = GenesisOperations(tmp_path)
+    issue = ops.detect(scorecard(ai=37, samples=4))[0]
+    first = ops.persist_and_queue([issue])
+    first_task_id = first["created_tasks"][0]
+    ops.queue.transition(first_task_id, "assigned")
+    ops.queue.transition(first_task_id, "running")
+    ops.queue.transition(first_task_id, "review")
+    ops.queue.transition(first_task_id, "complete")
+
+    owner_blocked = ops.queue.create(
+        "Measure Terminal-Bench with real provenance.",
+        module_id="genesis.evaluation",
+        priority=92,
+        payload={
+            "task_type": "frontier_benchmark_measurement",
+            "benchmark": {"benchmark_id": "terminal_bench_2_1"},
+        },
+    )
+    ops.queue.transition(owner_blocked.task_id, "assigned")
+    ops.queue.transition(owner_blocked.task_id, "running")
+    ops.queue.pause(
+        owner_blocked.task_id,
+        "External owner authority required for real benchmark execution: harbor_cli. No score may change until validated evidence is staged.",
+    )
+    autonomous = ops.queue.create(
+        "Measure SWE-Bench Pro with real provenance.",
+        module_id="genesis.evaluation",
+        priority=92,
+        payload={
+            "task_type": "frontier_benchmark_measurement",
+            "benchmark": {"benchmark_id": "swe_bench_pro"},
+        },
+    )
+
+    delegated = ops.persist_and_queue([issue])
+    assert delegated["created_tasks"] == []
+    row = ops.report()["issues"][0]
+    assert row["status"] == "open"
+    assert row["owner_action_required"] is False
+    assert row["delegated_task_id"] == autonomous.task_id
+    assert row["delegated_task_state"] == "new"
+    assert any(event["event"] == "delegated_benchmark_work" for event in ops.history(issue.issue_key))
+
+
+def test_ai_issue_returns_to_open_delegated_work_when_owner_blocker_clears(tmp_path: Path):
     ops = GenesisOperations(tmp_path)
     issue = ops.detect(scorecard(ai=37, samples=4))[0]
     first = ops.persist_and_queue([issue])
@@ -173,15 +218,17 @@ def test_ai_repair_eligibility_returns_when_delegated_blocker_clears(tmp_path: P
     ops.queue.transition(benchmark.task_id, "running")
     ops.queue.pause(
         benchmark.task_id,
-        "External authority required for real benchmark execution: harbor_cli. No score may change until validated evidence is staged.",
+        "External owner authority required for real benchmark execution: harbor_cli. No score may change until validated evidence is staged.",
     )
     ops.persist_and_queue([issue])
     ops.queue.resume(benchmark.task_id)
 
     resumed = ops.persist_and_queue([issue])
-    assert len(resumed["created_tasks"]) == 1
+    assert resumed["created_tasks"] == []
     row = ops.report()["issues"][0]
     assert row["status"] == "open"
     assert row["owner_action_required"] is False
-    assert row["work_generation"] == 2
+    assert row["delegated_task_id"] == benchmark.task_id
+    assert row["delegated_task_state"] == "assigned"
+    assert row["work_generation"] == 1
     assert any(event["event"] == "delegated_blocker_cleared" for event in ops.history(issue.issue_key))
