@@ -114,35 +114,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Restore persistent Genesis runtime state
+      - name: Restore validated shared Genesis runtime state
         uses: actions/cache@v4
         with:
-          path: |
-            runtime/genesis_tasks.sqlite3
-            runtime/todo.json
-            runtime/task_route.json
-            runtime/model_scout_recommendations.json
-            runtime/ai_team_dispatch.json
-            runtime/self_learning.sqlite3
-            runtime/self_learning_status.json
-            runtime/memory.sqlite3
-            runtime/memory_status.json
-            runtime/ai_score_history.jsonl
-            runtime/efficiency.jsonl
-            runtime/provider_telemetry.json
-            runtime/capability_growth_sync.json
-            runtime/operations_issues.jsonl
-            runtime/github_issue_sync.json
-            runtime/email_delivery_status.json
-            runtime/automation_state.json
-            runtime/automation_report.json
-            runtime/chatgpt_escalation_sync.json
-            runtime/github_hourly_report_status.json
-            runtime/research_reviews/
-            runtime/task_reviews/
-          key: genesis-runtime-${{ runner.os }}-${{ github.run_id }}
+          path: runtime
+          key: gene-runtime-gene-node-1-${{ github.run_id }}-proactive
           restore-keys: |
-            genesis-runtime-${{ runner.os }}-
+            gene-runtime-gene-node-1-
       - name: Restore Genesis reasoning caches
         uses: actions/cache@v4
         with:
