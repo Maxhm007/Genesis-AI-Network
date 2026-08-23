@@ -5,7 +5,7 @@ import json
 import re
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, Iterable
 
 from .benchmark_evidence import BenchmarkEvidenceError, CompetitiveBenchmarkEvidenceStore
 
@@ -55,6 +55,24 @@ class SWEBenchProEvidenceAdapter:
             json.dumps(value, sort_keys=True, separators=(",", ":"), ensure_ascii=False).encode("utf-8")
         ).hexdigest()
 
+    @classmethod
+    def dataset_identity(cls, row: dict[str, Any]) -> dict[str, str]:
+        instance_id = str(row.get("instance_id") or "").strip()
+        if not instance_id:
+            raise BenchmarkEvidenceError("dataset record instance_id is required")
+        problem = str(row.get("problem_statement") or "")
+        return {
+            "instance_id": instance_id,
+            "repo": str(row.get("repo") or "").strip(),
+            "base_commit": str(row.get("base_commit") or "").strip(),
+            "dockerhub_tag": str(row.get("dockerhub_tag") or "").strip(),
+            "problem_statement_sha256": hashlib.sha256(problem.encode("utf-8")).hexdigest(),
+        }
+
+    @classmethod
+    def dataset_record_sha256(cls, row: dict[str, Any]) -> str:
+        return cls._canonical_hash(cls.dataset_identity(row))
+
     def build_evidence(self, job: dict[str, Any]) -> dict[str, Any]:
         if self._required_text(job, "dataset") != SWE_BENCH_PRO_DATASET:
             raise BenchmarkEvidenceError("dataset must match pinned SWE-bench Pro dataset")
@@ -89,22 +107,37 @@ class SWEBenchProEvidenceAdapter:
         for item in results:
             if not isinstance(item, dict):
                 raise BenchmarkEvidenceError("each SWE-bench Pro task record must be an object")
-            instance_id = self._required_text(item, "instance_id")
+            identity = item.get("dataset_identity")
+            if not isinstance(identity, dict):
+                raise BenchmarkEvidenceError("each SWE-bench Pro task record requires dataset_identity")
+            normalized_identity = {
+                "instance_id": self._required_text(identity, "instance_id"),
+                "repo": str(identity.get("repo") or "").strip(),
+                "base_commit": str(identity.get("base_commit") or "").strip(),
+                "dockerhub_tag": str(identity.get("dockerhub_tag") or "").strip(),
+                "problem_statement_sha256": self._required_text(identity, "problem_statement_sha256").lower(),
+            }
+            if not _SHA256_RE.fullmatch(normalized_identity["problem_statement_sha256"]):
+                raise BenchmarkEvidenceError("problem_statement_sha256 must be lowercase SHA-256")
+            instance_id = normalized_identity["instance_id"]
             if instance_id in seen:
                 raise BenchmarkEvidenceError(f"duplicate SWE-bench Pro instance_id: {instance_id}")
             seen.add(instance_id)
+            if str(item.get("instance_id") or "").strip() != instance_id:
+                raise BenchmarkEvidenceError("task instance_id must match dataset_identity")
             if str(item.get("patch", "")) != "":
                 raise BenchmarkEvidenceError("providerless baseline task patches must be empty")
             if self._required_text(item, "outcome") != "no_patch":
                 raise BenchmarkEvidenceError("providerless baseline outcomes must be no_patch")
             record_sha256 = self._required_text(item, "record_sha256").lower()
-            if not _SHA256_RE.fullmatch(record_sha256):
-                raise BenchmarkEvidenceError("record_sha256 must be lowercase SHA-256")
+            if record_sha256 != self._canonical_hash(normalized_identity):
+                raise BenchmarkEvidenceError("record_sha256 does not match dataset_identity")
             normalized_results.append(
                 {
                     "instance_id": instance_id,
                     "patch": "",
                     "outcome": "no_patch",
+                    "dataset_identity": normalized_identity,
                     "record_sha256": record_sha256,
                 }
             )
@@ -155,3 +188,29 @@ class SWEBenchProEvidenceAdapter:
         if candidate != rebuilt:
             raise BenchmarkEvidenceError("staged SWE-bench Pro candidate does not match independently rebuilt evidence")
         return rebuilt
+
+    def verify_against_dataset(self, candidate: dict[str, Any], rows: Iterable[dict[str, Any]]) -> None:
+        validated = self.validate_staged_candidate(candidate)
+        raw = dict(validated["raw_result"])
+        candidate_results = {
+            str(item["instance_id"]): item
+            for item in raw.get("results", [])
+            if isinstance(item, dict) and str(item.get("instance_id") or "").strip()
+        }
+        source_rows = list(rows)
+        if len(source_rows) != SWE_BENCH_PRO_TASK_COUNT:
+            raise BenchmarkEvidenceError(
+                f"pinned source dataset must contain exactly {SWE_BENCH_PRO_TASK_COUNT} records"
+            )
+        if len(candidate_results) != SWE_BENCH_PRO_TASK_COUNT:
+            raise BenchmarkEvidenceError("candidate task count does not match source dataset")
+        for row in source_rows:
+            identity = self.dataset_identity(row)
+            instance_id = identity["instance_id"]
+            candidate_row = candidate_results.get(instance_id)
+            if candidate_row is None:
+                raise BenchmarkEvidenceError(f"candidate missing pinned dataset task {instance_id}")
+            if candidate_row.get("dataset_identity") != identity:
+                raise BenchmarkEvidenceError(f"candidate dataset identity mismatch for {instance_id}")
+            if candidate_row.get("record_sha256") != self._canonical_hash(identity):
+                raise BenchmarkEvidenceError(f"candidate dataset hash mismatch for {instance_id}")
