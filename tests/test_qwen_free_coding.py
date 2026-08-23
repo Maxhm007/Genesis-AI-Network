@@ -5,13 +5,14 @@ from pathlib import Path
 from genesis.autonomous_engineering import AutonomousEngineeringLoop
 from genesis.autonomy_pipeline import PipelineStore
 from genesis.bounded_autonomy_pipeline import SingleAttemptRepairWorker
+from genesis.intelligence_router import IntelligenceRouter
 from genesis.modules.task_queue import PersistentTaskQueue
-from genesis.providers import ProviderRegistry
+from genesis.providers import BootstrapProvider, ProviderRegistry
 from genesis.pulse import GenePulse
 
 
 class TrackingQwenProvider:
-    name = "qwen2.5-coder-1.5b-gene-pulse"
+    name = "qwen3-0.6b-genesis-core"
 
     def __init__(self) -> None:
         self.calls = 0
@@ -55,7 +56,7 @@ def _task(root: Path):
     return queue, task
 
 
-def test_qwen_is_not_selected_when_it_is_the_only_coder(tmp_path: Path) -> None:
+def test_qwen_is_selected_when_it_is_the_only_trained_coder(tmp_path: Path) -> None:
     _write_target(tmp_path)
     qwen = TrackingQwenProvider()
     registry = ProviderRegistry(include_bootstrap=False)
@@ -64,44 +65,36 @@ def test_qwen_is_not_selected_when_it_is_the_only_coder(tmp_path: Path) -> None:
 
     selected = loop._coding_provider()
 
-    assert selected is None
+    assert selected is qwen
     assert qwen.calls == 0
 
 
-def test_autonomous_task_waits_instead_of_calling_qwen(tmp_path: Path) -> None:
-    _write_target(tmp_path)
-    qwen = TrackingQwenProvider()
-    registry = ProviderRegistry(include_bootstrap=False)
-    registry.register(qwen)
-    loop = AutonomousEngineeringLoop(tmp_path, registry)
-    queue, task = _task(tmp_path)
-    loop.queue = queue
-
-    attempt = loop._attempt_task(task, tmp_path / "runtime")
-
-    assert qwen.calls == 0
-    assert attempt["coding_status"] == "waiting_for_coding_provider"
-    assert attempt["error"] == "no_non_qwen_coding_provider_available"
-    assert attempt["provider_policy"] == "qwen_excluded_from_coding"
-    current = queue.get(task.task_id)
-    assert current is not None
-    assert current.state == "paused"
-    assert current.attempt_count == 0
-
-
-def test_stronger_non_qwen_coder_wins_an_equal_reliability_tie(tmp_path: Path) -> None:
+def test_qwen_is_preferred_over_other_coder_for_genesis_lineage(tmp_path: Path) -> None:
     _write_target(tmp_path)
     qwen = TrackingQwenProvider()
     strong = StrongCodingProvider()
     registry = ProviderRegistry(include_bootstrap=False)
-    registry.register(qwen)
     registry.register(strong)
+    registry.register(qwen)
     loop = AutonomousEngineeringLoop(tmp_path, registry)
 
     selected = loop._coding_provider()
 
-    assert selected is strong
+    assert selected is qwen
     assert qwen.calls == 0
+
+
+def test_router_prefers_qwen_over_bootstrap_for_cognitive_work() -> None:
+    qwen = TrackingQwenProvider()
+    registry = ProviderRegistry(include_bootstrap=False)
+    registry.register(BootstrapProvider())
+    registry.register(qwen)
+    router = IntelligenceRouter(registry)
+
+    decision = router.select("planning", complexity=0.1)
+
+    assert decision.provider is qwen
+    assert decision.reason.startswith("qwen_cognitive_ancestor")
 
 
 def test_true_provider_absence_does_not_spend_pipeline_repair_budget(tmp_path: Path) -> None:

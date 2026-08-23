@@ -18,19 +18,15 @@ def _is_qwen(provider) -> bool:
 
 
 def _select_eligible_coding_provider(self: AutonomousEngineeringLoop):
-    """Choose the best available bounded non-Qwen coding provider.
+    """Choose the best available bounded model coding provider.
 
-    Selection is capability- and evidence-driven: bootstrap and Qwen providers are
-    excluded, measured reliability wins first, then lower resource cost/name break
-    remaining ties. This preserves the core AutonomousEngineeringLoop policy that
-    Qwen is not an autonomous coding/generation provider after repeated bounded
-    timeout failures. Normal edit limits, tests, Security, review, validation,
-    provenance, and promotion gates still apply.
+    Qwen is the preferred cognitive ancestor for Genesis when it is available and
+    capable. Other non-bootstrap providers remain valid fallbacks. Selection does
+    not weaken edit limits, tests, Security, review, independent validation,
+    provenance, signed quorum, or promotion gates.
     """
     candidates = []
     for provider in self.providers.available_providers():
-        if _is_qwen(provider):
-            continue
         try:
             profile, _source = self.coding.router._effective_profile(provider)
         except Exception:
@@ -41,6 +37,7 @@ def _select_eligible_coding_provider(self: AutonomousEngineeringLoop):
             continue
         candidates.append(
             (
+                0 if _is_qwen(provider) else 1,
                 -float(profile.reliability),
                 float(profile.resource_cost),
                 profile.name,
@@ -49,8 +46,8 @@ def _select_eligible_coding_provider(self: AutonomousEngineeringLoop):
         )
     if not candidates:
         return None
-    candidates.sort(key=lambda item: item[:3])
-    return candidates[0][3]
+    candidates.sort(key=lambda item: item[:4])
+    return candidates[0][4]
 
 
 def _task_payload_and_finding(task) -> tuple[dict, dict]:
@@ -159,10 +156,10 @@ def _install_scoped_capability_guards(self: AutonomousEngineeringLoop, task):
 
 
 def _attempt_task_with_provider_fallback(self: AutonomousEngineeringLoop, task, runtime):
-    """Use the best eligible non-Qwen provider while keeping creation bounded."""
+    """Use Qwen-first cognitive coding while keeping all execution gates bounded."""
     if not _is_new_capability_task(task):
         result = _ORIGINAL_ATTEMPT_TASK(self, task, runtime)
-        result["provider_policy"] = "qwen_excluded_from_coding"
+        result["provider_policy"] = "qwen_preferred_cognitive_coding"
         return result
 
     if _is_grounded_agentic_capability_task(task):
@@ -171,21 +168,22 @@ def _attempt_task_with_provider_fallback(self: AutonomousEngineeringLoop, task, 
             result = _ORIGINAL_ATTEMPT_TASK(self, task, runtime)
         finally:
             restore()
-        result["provider_policy"] = "grounded_agentic_capability_non_qwen_only"
+        result["provider_policy"] = "grounded_agentic_capability_qwen_preferred"
         result["capability_scope"] = "append_only_learned_capability"
         if result.get("coding_strategy") == "external_non_qwen_provider":
             result["coding_strategy"] = "agentic_grounded_capability_provider"
         return result
 
-    # Ungrounded capability invention remains blocked. Genesis may reason about the
-    # gap, but implementation requires evidence strong enough to enter the grounded
-    # evolution-learning lane or a stronger non-Qwen provider.
+    # Ungrounded capability invention remains blocked from the scoped learned-
+    # capability lane. Qwen can reason about the gap elsewhere, but autonomous
+    # implementation still requires grounded evidence or an explicitly supported
+    # ordinary engineering task.
     had_override = "_coding_provider" in self.__dict__
     previous_override = self.__dict__.get("_coding_provider")
     self._coding_provider = MethodType(_ORIGINAL_CODING_PROVIDER, self)
     try:
         result = _ORIGINAL_ATTEMPT_TASK(self, task, runtime)
-        result["provider_policy"] = "ungrounded_capability_requires_stronger_provider"
+        result["provider_policy"] = "ungrounded_capability_requires_grounded_evidence"
         return result
     finally:
         if had_override:
@@ -195,7 +193,7 @@ def _attempt_task_with_provider_fallback(self: AutonomousEngineeringLoop, task, 
 
 
 def install_provider_fallback() -> None:
-    """Install capability-driven provider selection once for every Genesis entrypoint."""
+    """Install Qwen-first capability-driven provider selection once."""
     if getattr(AutonomousEngineeringLoop, INSTALL_MARKER, False):
         return
     AutonomousEngineeringLoop._coding_provider = _select_eligible_coding_provider

@@ -43,6 +43,12 @@ jobs:
       CONTINUE_CHAIN: ${{ inputs.continue_chain || github.event.client_payload.continue_chain || 'true' }}
       IDLE_DISCOVERY_BUDGET: ${{ inputs.chain_budget || github.event.client_payload.chain_budget || '4' }}
       PYTHONPATH: ${{ github.workspace }}
+      GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+      GENESIS_PROVIDER_NAME: qwen3-0.6b-genesis-core
+      GENESIS_PROVIDER_TIMEOUT_SECONDS: '180'
+      GENESIS_PROVIDER_MAX_NEW_TOKENS: '384'
+      HF_HOME: ~/.cache/huggingface
+      PIP_CACHE_DIR: ~/.cache/pip
     steps:
       - uses: actions/checkout@v4
         with:
@@ -60,8 +66,54 @@ jobs:
           restore-keys: |
             gene-runtime-${{ env.GENE_ID }}-
 
+      - name: Restore Qwen cognitive caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/pip
+          key: genesis-qwen3-0.6b-${{ runner.os }}-py312-pulse-v1
+          restore-keys: |
+            genesis-qwen3-0.6b-${{ runner.os }}-py312-
+
       - name: Install dependencies
         run: pip install -r requirements.txt
+
+      - name: Install Qwen cognitive runtime
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors
+
+      - name: Start Genesis Qwen cognitive provider
+        shell: bash
+        run: |
+          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen3-0.6B --host 127.0.0.1 --port 8766 --max-new-tokens 384 > /tmp/genesis-qwen-core.log 2>&1 &
+          ready=false
+          for i in {1..300}; do
+            if python - <<'PY'
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=2) as response:
+                  raise SystemExit(0 if response.status == 200 else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ready" != true ]]; then
+            cat /tmp/genesis-qwen-core.log || true
+            exit 1
+          fi
+          python - <<'PY'
+          import json, urllib.request
+          with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=3) as response:
+              payload = json.loads(response.read().decode('utf-8'))
+          print(json.dumps({'genesis_cognitive_core': payload}, sort_keys=True))
+          PY
 
       - name: Configure Genesis Git identity
         run: |
@@ -92,7 +144,6 @@ jobs:
           validation_candidate = dict(pipeline.get('validation_candidate', {}) or {})
           record = dict(pipeline.get('record', {}) or {})
 
-          # Legacy non-pipeline tasks keep their existing direct candidate handoff.
           attempt = dict(payload.get('attempt', {}) or {})
           legacy_candidate = dict(attempt.get('candidate', {}) or {})
           legacy_security = dict(attempt.get('candidate_security', {}) or {})
@@ -224,6 +275,7 @@ jobs:
             runtime/competitive_benchmark_inputs/
             runtime/competitive_benchmark_candidates/
             runtime/grce/${{ env.GENE_ID }}/candidate_handoff.json
+            /tmp/genesis-qwen-core.log
           if-no-files-found: warn
           retention-days: 30
 

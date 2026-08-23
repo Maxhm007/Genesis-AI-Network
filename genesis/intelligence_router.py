@@ -23,7 +23,12 @@ class RouteDecision:
 
 
 class IntelligenceRouter:
-    """Choose the lowest-resource available provider likely to satisfy a task.
+    """Choose the preferred available cognitive provider for a task.
+
+    Qwen is treated as Genesis's initial cognitive ancestor and is preferred when
+    it satisfies the task and reliability threshold. Other trained providers are
+    valid fallbacks. The deterministic bootstrap provider is only a last-resort
+    control-plane fallback, never preferred over an available trained model.
 
     Conservative defaults bootstrap routing. Once at least three evidence-backed
     provider observations exist, measured reliability/resource telemetry may
@@ -41,8 +46,13 @@ class IntelligenceRouter:
         lowered = name.lower()
         if name == "genesis-bootstrap":
             return ProviderProfile(name, 0.05, 0.35, ("planning", "review", "routing"))
-        if "qwen3-0.6b" in lowered:
-            return ProviderProfile(name, 1.0, 0.72, ("reasoning", "coding", "research", "planning"))
+        if "qwen" in lowered:
+            return ProviderProfile(
+                name,
+                1.0,
+                0.72,
+                ("reasoning", "coding", "research", "planning", "review"),
+            )
         return ProviderProfile(name, 2.0, 0.75, ("reasoning", "coding", "research", "planning", "review"))
 
     def _effective_profile(self, provider: IntelligenceProvider) -> tuple[ProviderProfile, str]:
@@ -66,7 +76,8 @@ class IntelligenceRouter:
     def select(self, task_type: str, *, complexity: float = 0.5, require_non_bootstrap: bool = False) -> RouteDecision:
         task_type = task_type.strip().lower() or "reasoning"
         complexity = max(0.0, min(1.0, float(complexity)))
-        candidates: list[tuple[float, IntelligenceProvider, ProviderProfile, str]] = []
+        trained: list[tuple[int, float, IntelligenceProvider, ProviderProfile, str]] = []
+        bootstrap: list[tuple[float, IntelligenceProvider, ProviderProfile, str]] = []
         for provider in self.registry.available_providers():
             profile, source = self._effective_profile(provider)
             if require_non_bootstrap and profile.name == "genesis-bootstrap":
@@ -77,13 +88,29 @@ class IntelligenceRouter:
             if profile.reliability < required_reliability:
                 continue
             score = profile.resource_cost / max(profile.reliability, 0.05)
-            candidates.append((score, provider, profile, source))
-        if not candidates:
-            raise RuntimeError(f"no suitable intelligence provider for {task_type}")
-        candidates.sort(key=lambda item: (item[0], item[2].name))
-        _, provider, profile, source = candidates[0]
-        return RouteDecision(
-            provider=provider,
-            profile=profile,
-            reason=f"lowest resource cost meeting reliability threshold for {task_type}; profile={source}",
-        )
+            if profile.name == "genesis-bootstrap":
+                bootstrap.append((score, provider, profile, source))
+                continue
+            qwen_priority = 0 if "qwen" in profile.name.lower() else 1
+            trained.append((qwen_priority, score, provider, profile, source))
+
+        if trained:
+            trained.sort(key=lambda item: (item[0], item[1], item[3].name))
+            qwen_priority, _, provider, profile, source = trained[0]
+            lineage = "qwen_cognitive_ancestor" if qwen_priority == 0 else "trained_provider_fallback"
+            return RouteDecision(
+                provider=provider,
+                profile=profile,
+                reason=f"{lineage} selected for {task_type}; profile={source}",
+            )
+
+        if bootstrap:
+            bootstrap.sort(key=lambda item: (item[0], item[2].name))
+            _, provider, profile, source = bootstrap[0]
+            return RouteDecision(
+                provider=provider,
+                profile=profile,
+                reason=f"deterministic bootstrap fallback for {task_type}; profile={source}",
+            )
+
+        raise RuntimeError(f"no suitable intelligence provider for {task_type}")
