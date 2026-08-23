@@ -70,6 +70,21 @@ class PromptCaptureProvider(CompactEditProvider):
         return super().reason(prompt)
 
 
+class LineOneThenGroundedProvider(FakeCodingProvider):
+    name = "line-one-then-grounded"
+
+    def __init__(self) -> None:
+        self.calls = 0
+        self.prompts: list[str] = []
+
+    def reason(self, prompt: str) -> str:
+        self.calls += 1
+        self.prompts.append(prompt)
+        if self.calls == 1:
+            return '{"edits":[{"path":"genesis/learned_capabilities.py","start_line":1,"end_line":1,"new":"BROKEN = True"}]}'
+        return '{"edits":[{"path":"genesis/learned_capabilities.py","start_line":5,"end_line":5,"new":"# GENESIS_LEARNED_CAPABILITY_INSERTION_POINT\\nLEARNED = True"}]}'
+
+
 def _load_local_provider_module():
     path = Path(__file__).resolve().parents[1] / "scripts" / "local_reasoning_provider.py"
     spec = importlib.util.spec_from_file_location("genesis_local_reasoning_provider", path)
@@ -140,6 +155,29 @@ def test_coding_prompt_requires_exactly_one_small_edit(tmp_path: Path):
     assert "existing allowed path" not in provider.prompt
     assert module.MAX_EDITS == 1
     assert module.MAX_CONTEXT_BYTES <= 12_000
+
+
+def test_coding_prompt_grounds_example_on_objective_marker_not_line_one(tmp_path: Path):
+    (tmp_path / "genesis").mkdir()
+    target = tmp_path / "genesis" / "learned_capabilities.py"
+    target.write_text(
+        "from __future__ import annotations\n\nVALUE = 1\n\n# GENESIS_LEARNED_CAPABILITY_INSERTION_POINT\n",
+        encoding="utf-8",
+    )
+    provider = LineOneThenGroundedProvider()
+    module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
+    proposal = module.propose(
+        "Add a capability at # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT",
+        ["genesis/learned_capabilities.py"],
+        provider=provider,
+    )
+    assert provider.calls == 2
+    assert "GROUNDED_LINE_HINT: genesis/learned_capabilities.py:5" in provider.prompts[0]
+    assert '"start_line":5,"end_line":5' in provider.prompts[0]
+    assert "line edit may not overwrite a Python __future__ import" in provider.prompts[1]
+    assert "Change strategy" in provider.prompts[1]
+    assert proposal.files["genesis/learned_capabilities.py"].startswith("from __future__ import annotations")
+    assert "LEARNED = True" in proposal.files["genesis/learned_capabilities.py"]
 
 
 def test_local_provider_compacts_large_prompt_without_losing_ends():
