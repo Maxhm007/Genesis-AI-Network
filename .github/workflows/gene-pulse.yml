@@ -37,7 +37,7 @@ concurrency:
 jobs:
   pulse:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 35
     env:
       GENE_ID: ${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
       CONTINUE_CHAIN: ${{ inputs.continue_chain || github.event.client_payload.continue_chain || 'true' }}
@@ -73,7 +73,7 @@ jobs:
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: genesis-pulse-qwen25-coder-05b-v1
+          key: genesis-pulse-local-coding-fallback-v1
 
       - name: Install on-demand local coding runtime
         if: steps.provider_gate.outputs.needs_local_provider == 'true'
@@ -87,8 +87,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          nohup python scripts/local_reasoning_provider.py \
-            --model Qwen/Qwen2.5-Coder-0.5B-Instruct \
+          nohup python scripts/pulse_coding_provider.py \
             --port 8766 \
             --max-new-tokens 384 \
             > local-pulse-provider.log 2>&1 &
@@ -96,7 +95,7 @@ jobs:
           for i in $(seq 1 120); do
             if curl -fsS http://127.0.0.1:8766/health >/dev/null 2>&1; then
               echo "GENESIS_PROVIDER_URL=http://127.0.0.1:8766" >> "$GITHUB_ENV"
-              echo "GENESIS_PROVIDER_NAME=qwen2.5-coder-0.5b-pulse-fallback" >> "$GITHUB_ENV"
+              echo "GENESIS_PROVIDER_NAME=genesis-pulse-local-coding-fallback" >> "$GITHUB_ENV"
               echo "GENESIS_PROVIDER_TIMEOUT_SECONDS=300" >> "$GITHUB_ENV"
               echo "Genesis replaceable local coding provider is ready"
               exit 0
