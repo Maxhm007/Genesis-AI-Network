@@ -15,13 +15,14 @@ def _sha256(data: bytes) -> str:
     return hashlib.sha256(data).hexdigest()
 
 
-def _activate_model(
+def _prepare_model(
     root: Path,
     *,
     base_model: str = "open-weight/base",
     capabilities: list[str] | None = None,
     tamper_hash: bool = False,
     include_training_provenance: bool = True,
+    include_runtime: bool = True,
 ):
     lab = ModelLab(root)
     model = lab.plan(
@@ -36,7 +37,6 @@ def _activate_model(
     lab.add_evidence(model.model_id, "benchmark", {"suite": "coding-v2", "score": 0.82})
     lab.transition(model.model_id, "validated", benchmark_score=0.82, resource_cost=0.4)
     lab.transition(model.model_id, "trusted")
-    model = lab.transition(model.model_id, "active")
 
     artifact = root / "runtime" / "model_artifacts" / model.model_id
     artifact.mkdir(parents=True)
@@ -61,22 +61,29 @@ def _activate_model(
                 "files": files,
             },
         )
-    lab.add_evidence(
-        model.model_id,
-        "runtime",
-        {
-            "kind": "local_transformers_causal_lm",
-            "artifact_path": str(artifact.relative_to(root)),
-            "capabilities": capabilities or ["coding", "reasoning"],
-            "max_new_tokens": 256,
-            "files": files,
-        },
-    )
-    return model
+    if include_runtime:
+        lab.add_evidence(
+            model.model_id,
+            "runtime",
+            {
+                "kind": "local_transformers_causal_lm",
+                "artifact_path": str(artifact.relative_to(root)),
+                "capabilities": capabilities or ["coding", "reasoning"],
+                "max_new_tokens": 256,
+                "files": files,
+            },
+        )
+    return lab, model, artifact, files
+
+
+def _activate_model(root: Path, **kwargs):
+    lab, model, artifact, files = _prepare_model(root, **kwargs)
+    model = lab.transition(model.model_id, "active")
+    return lab, model, artifact, files
 
 
 def test_registry_discovers_only_integrity_bound_active_model(tmp_path: Path) -> None:
-    model = _activate_model(tmp_path, capabilities=["coding"])
+    _, model, _, _ = _activate_model(tmp_path, capabilities=["coding"])
 
     registry = ProviderRegistry(include_bootstrap=False, root=tmp_path)
     available = registry.available_providers()
@@ -100,7 +107,7 @@ def test_wrong_runtime_hash_is_not_admitted(tmp_path: Path) -> None:
 
 
 def test_qwen_derived_model_is_allowed_only_after_genesis_derivation_proof(tmp_path: Path) -> None:
-    model = _activate_model(tmp_path, base_model="Qwen/Qwen3-0.6B")
+    _, model, _, _ = _activate_model(tmp_path, base_model="Qwen/Qwen3-0.6B")
 
     registry = ProviderRegistry(include_bootstrap=False, root=tmp_path)
     available = registry.available_providers()
@@ -112,41 +119,31 @@ def test_qwen_derived_model_is_allowed_only_after_genesis_derivation_proof(tmp_p
     assert status["qwen_foundation_allowed_after_derivation"] is True
 
 
-def test_active_model_without_training_provenance_is_not_genesis_owned_provider(tmp_path: Path) -> None:
-    _activate_model(tmp_path, include_training_provenance=False)
+def test_model_without_training_provenance_cannot_become_active(tmp_path: Path) -> None:
+    lab, model, _, _ = _prepare_model(tmp_path, include_training_provenance=False)
 
-    registry = ProviderRegistry(include_bootstrap=False, root=tmp_path)
+    with pytest.raises(ValueError, match="training provenance"):
+        lab.transition(model.model_id, "active")
+    assert ProviderRegistry(include_bootstrap=False, root=tmp_path).available_providers() == []
 
-    assert registry.available_providers() == []
-    assert registry.discovery_errors() == ()
 
-
-def test_qwen_base_without_training_provenance_is_not_admitted(tmp_path: Path) -> None:
-    _activate_model(
+def test_qwen_base_without_training_provenance_cannot_become_genesis_model(tmp_path: Path) -> None:
+    lab, model, _, _ = _prepare_model(
         tmp_path,
         base_model="Qwen/Qwen3-0.6B",
         include_training_provenance=False,
     )
 
+    with pytest.raises(ValueError, match="training provenance"):
+        lab.transition(model.model_id, "active")
     assert ProviderRegistry(include_bootstrap=False, root=tmp_path).available_providers() == []
 
 
-def test_active_model_without_runtime_evidence_is_not_a_provider(tmp_path: Path) -> None:
-    lab = ModelLab(tmp_path)
-    model = lab.plan(
-        name="genesis-no-runtime",
-        base_model="open-weight/base",
-        method="fine_tune",
-        dataset_ref="datasets/grounded.jsonl",
-        dataset_hash="grounded-hash",
-    )
-    lab.transition(model.model_id, "training")
-    lab.transition(model.model_id, "tested")
-    lab.add_evidence(model.model_id, "benchmark", {"suite": "reasoning-v1", "score": 0.8})
-    lab.transition(model.model_id, "validated", benchmark_score=0.8)
-    lab.transition(model.model_id, "trusted")
-    lab.transition(model.model_id, "active")
+def test_model_without_runtime_evidence_cannot_become_active(tmp_path: Path) -> None:
+    lab, model, _, _ = _prepare_model(tmp_path, include_runtime=False)
 
+    with pytest.raises(ValueError, match="runtime"):
+        lab.transition(model.model_id, "active")
     assert ActiveGenesisModelProvider.discover(tmp_path) == []
 
 
@@ -164,8 +161,7 @@ def test_router_respects_qualified_model_capabilities(tmp_path: Path) -> None:
 
 
 def test_runtime_artifact_must_stay_under_model_artifact_root(tmp_path: Path) -> None:
-    model = _activate_model(tmp_path)
-    lab = ModelLab(tmp_path)
+    lab, model, _, _ = _prepare_model(tmp_path)
     outside = tmp_path / "outside"
     outside.mkdir()
     config = b"{}"
@@ -198,18 +194,13 @@ def test_runtime_artifact_must_stay_under_model_artifact_root(tmp_path: Path) ->
             "files": files,
         },
     )
+    lab.transition(model.model_id, "active")
 
     assert ActiveGenesisModelProvider.discover(tmp_path) == []
 
 
 def test_training_provenance_hashes_must_match_runtime_artifact_hashes(tmp_path: Path) -> None:
-    model = _activate_model(tmp_path)
-    lab = ModelLab(tmp_path)
-    artifact = tmp_path / "runtime" / "model_artifacts" / model.model_id
-    runtime_files = {
-        "config.json": _sha256((artifact / "config.json").read_bytes()),
-        "model.safetensors": _sha256((artifact / "model.safetensors").read_bytes()),
-    }
+    lab, model, artifact, runtime_files = _prepare_model(tmp_path)
     lab.add_evidence(
         model.model_id,
         "training_provenance",
@@ -232,16 +223,16 @@ def test_training_provenance_hashes_must_match_runtime_artifact_hashes(tmp_path:
             "files": runtime_files,
         },
     )
+    lab.transition(model.model_id, "active")
 
     assert ActiveGenesisModelProvider.discover(tmp_path) == []
 
 
 def test_artifact_is_reverified_immediately_before_first_load(tmp_path: Path) -> None:
-    model = _activate_model(tmp_path)
+    _, model, artifact, _ = _activate_model(tmp_path)
     provider = ActiveGenesisModelProvider.discover(tmp_path)[0]
     assert provider.available() is True
 
-    artifact = tmp_path / "runtime" / "model_artifacts" / model.model_id
     (artifact / "model.safetensors").write_bytes(b"swapped-after-admission")
 
     with pytest.raises(RuntimeError, match="failed integrity verification"):
