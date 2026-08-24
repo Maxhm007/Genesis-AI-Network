@@ -29,7 +29,8 @@ def workflow_chain_decision(
 ) -> tuple[bool, int, str]:
     """Decide whether GitHub Actions should dispatch another Gene Pulse.
 
-    Executable work keeps chaining and resets the idle-discovery budget. A pulse
+    if needs_next_pulse:
+        return True, default_idle_budget, "executable_work_continues"
     that checkpointed only because discovery was idle may receive a small bounded
     burst of extra reassessment pulses. This gives Genesis enough consecutive
     opportunities to discover/route work without creating an unbounded workflow
