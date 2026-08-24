@@ -39,6 +39,7 @@ jobs:
       RUNTIME_PARENT_RUN_ID: ${{ inputs.runtime_parent_run_id || '' }}
       PYTHONPATH: ${{ github.workspace }}
       GENESIS_PULSE_FALLBACK_MODEL: ${{ vars.GENESIS_PULSE_FALLBACK_MODEL || 'Qwen/Qwen2.5-Coder-0.5B-Instruct' }}
+      GENESIS_PULSE_ESCALATION_MODEL: ${{ vars.GENESIS_PULSE_ESCALATION_MODEL || 'Qwen/Qwen2.5-Coder-1.5B-Instruct' }}
       GENESIS_PROVIDER_TIMEOUT_SECONDS: ${{ vars.GENESIS_PULSE_PROVIDER_TIMEOUT_SECONDS || '300' }}
     steps:
       - uses: actions/checkout@v4
@@ -73,12 +74,34 @@ jobs:
         id: provider_gate
         run: python scripts/pulse_provider_recovery.py inspect --github-output "$GITHUB_OUTPUT"
 
+      - name: Compute configured model cache key
+        id: model_cache_key
+        if: steps.provider_gate.outputs.needs_local_provider == 'true'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+
+          models = "\0".join(
+              [
+                  os.environ.get("GENESIS_PULSE_FALLBACK_MODEL", ""),
+                  os.environ.get("GENESIS_PULSE_ESCALATION_MODEL", ""),
+              ]
+          )
+          digest = hashlib.sha256(models.encode("utf-8")).hexdigest()[:16]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"model_key={digest}\n")
+          PY
+
       - name: Restore replaceable coding-model cache
         if: steps.provider_gate.outputs.needs_local_provider == 'true'
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
-          key: genesis-coding-intelligence-${{ runner.os }}-v1
+          key: genesis-coding-intelligence-${{ runner.os }}-${{ steps.model_cache_key.outputs.model_key }}-v2
+          restore-keys: |
+            genesis-coding-intelligence-${{ runner.os }}-
 
       - name: Install bounded local coding runtime
         if: steps.provider_gate.outputs.needs_local_provider == 'true'
@@ -87,6 +110,24 @@ jobs:
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install 'transformers>=4.48,<5' safetensors
 
+      - name: Prefetch configured coding models
+        if: steps.provider_gate.outputs.needs_local_provider == 'true'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import snapshot_download
+
+          model_ids = []
+          for env_name in ("GENESIS_PULSE_FALLBACK_MODEL", "GENESIS_PULSE_ESCALATION_MODEL"):
+              model_id = os.environ.get(env_name, "").strip()
+              if model_id and model_id not in model_ids:
+                  model_ids.append(model_id)
+          for model_id in model_ids:
+              print(f"Prefetching configured coding model: {model_id}", flush=True)
+              snapshot_download(model_id)
+          PY
+
       - name: Start replaceable coding provider
         if: steps.provider_gate.outputs.needs_local_provider == 'true'
         shell: bash
@@ -94,8 +135,10 @@ jobs:
           set -euo pipefail
           nohup python scripts/pulse_coding_provider.py \
             --model "$GENESIS_PULSE_FALLBACK_MODEL" \
+            --escalation-model "$GENESIS_PULSE_ESCALATION_MODEL" \
             --port 8766 \
             --max-new-tokens 384 \
+            --escalation-max-new-tokens 128 \
             > coding-intelligence-provider.log 2>&1 &
           echo $! > coding-intelligence-provider.pid
           for i in $(seq 1 120); do
