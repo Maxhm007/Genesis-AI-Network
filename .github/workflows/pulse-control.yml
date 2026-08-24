@@ -42,7 +42,7 @@ jobs:
           stale_cancelled=()
           stale_cancel_failures=()
 
-          for workflow in gene-pulse.yml file-self-review.yml manual-self-repair.yml; do
+          for workflow in gene-pulse.yml coding-intelligence-pulse.yml file-self-review.yml manual-self-repair.yml; do
             for status in queued in_progress; do
               payload=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?branch=main&status=${status}&per_page=100")
               while IFS=$'\t' read -r run_id run_status run_url run_sha run_event created; do

@@ -260,7 +260,7 @@ def test_gene_pulse_runtime_and_stale_cleanup_are_bounded() -> None:
     assert "python scripts/gene_pulse.py" in pulse
     assert "python scripts/benchmark_task_worker.py" in pulse
     assert "freshness_seconds=7200" in control
-    assert "for workflow in gene-pulse.yml file-self-review.yml manual-self-repair.yml" in control
+    assert "for workflow in gene-pulse.yml coding-intelligence-pulse.yml file-self-review.yml manual-self-repair.yml" in control
     assert "for status in queued in_progress" in control
     assert "gh run cancel" in control
     assert "/force-cancel" in control
