@@ -204,7 +204,7 @@ class CodingModule:
 
     @staticmethod
     def _has_executable_python_text(text: str) -> bool:
-        """Comments and whitespace cannot satisfy a required Python suite body."""
+        return any(line.strip() and not line.lstrip().startswith("#") for line in text.splitlines())
         return any(line.strip() and not line.lstrip().startswith("#") for line in text.splitlines())
 
     @staticmethod
