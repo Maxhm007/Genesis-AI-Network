@@ -15,6 +15,10 @@ on:
         description: Remaining bounded idle-discovery pulses
         required: false
         default: "4"
+      runtime_parent_run_id:
+        description: Exact predecessor run id whose saved runtime state must be restored
+        required: false
+        default: ""
 
 permissions:
   contents: write
@@ -32,6 +36,7 @@ jobs:
       GENE_ID: ${{ inputs.gene || 'gene-node-1' }}
       CONTINUE_CHAIN: ${{ inputs.continue_chain || 'true' }}
       IDLE_DISCOVERY_BUDGET: ${{ inputs.chain_budget || '4' }}
+      RUNTIME_PARENT_RUN_ID: ${{ inputs.runtime_parent_run_id || '' }}
       PYTHONPATH: ${{ github.workspace }}
       GENESIS_PULSE_FALLBACK_MODEL: ${{ vars.GENESIS_PULSE_FALLBACK_MODEL || 'Qwen/Qwen2.5-Coder-0.5B-Instruct' }}
       GENESIS_PROVIDER_TIMEOUT_SECONDS: ${{ vars.GENESIS_PULSE_PROVIDER_TIMEOUT_SECONDS || '300' }}
@@ -44,7 +49,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Restore Gene persistent pulse state
+      - name: Restore exact predecessor Gene state
+        if: env.RUNTIME_PARENT_RUN_ID != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: runtime
+          key: gene-runtime-${{ env.GENE_ID }}-${{ env.RUNTIME_PARENT_RUN_ID }}
+          fail-on-cache-miss: true
+
+      - name: Restore latest Gene state for standalone coding pulse
+        if: env.RUNTIME_PARENT_RUN_ID == ''
         uses: actions/cache/restore@v4
         with:
           path: runtime
@@ -263,4 +277,5 @@ jobs:
           gh workflow run gene-pulse.yml --ref main \
             -f gene="$GENE_ID" \
             -f continue_chain=true \
-            -f chain_budget='${{ steps.pulse.outputs.next_budget || env.IDLE_DISCOVERY_BUDGET }}'
+            -f chain_budget='${{ steps.pulse.outputs.next_budget || env.IDLE_DISCOVERY_BUDGET }}' \
+            -f runtime_parent_run_id="$GITHUB_RUN_ID"
