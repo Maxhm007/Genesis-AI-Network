@@ -17,6 +17,7 @@ DEFAULT_ESCALATION_MODEL = os.environ.get(
     "Qwen/Qwen2.5-Coder-1.5B-Instruct",
 )
 DEFAULT_MAX_NEW_TOKENS = 384
+MAX_NOOP_CORRECTIONS = 2
 REVISION_MARKERS = (
     "PREVIOUS_DEVELOPMENT_FEEDBACK:",
     "PREVIOUS_PIPELINE_FEEDBACK:",
@@ -25,12 +26,12 @@ REVISION_MARKERS = (
 
 
 class AdaptiveCodingModel:
-    """Use a stronger replaceable coding model only when prior evidence says revision is needed.
+    """Use stronger bounded reasoning when prior evidence says a coding revision is needed.
 
-    First-pass coding remains on the small bounded model. A revision/retry prompt escalates to
-    a stronger model so Genesis does not repeatedly ask the same weak model to repair its own
-    failed candidate. Both model IDs remain configuration-driven and the primary model is used
-    as an availability fallback if the escalation model cannot load or reason successfully.
+    First-pass coding remains on the small replaceable model. Revision/retry prompts escalate to
+    a stronger replaceable model. The provider also detects compact edits that would reproduce
+    the exact repository text from NUMBERED_CONTEXT and self-corrects them inside the same pulse,
+    so a harmless no-op does not consume an entire autonomous development generation.
     """
 
     def __init__(
@@ -58,14 +59,179 @@ class AdaptiveCodingModel:
             self._models[model_id] = model
         return model
 
-    def reason(self, prompt: str, max_new_tokens: int | None = None) -> str:
+    def _reason_once(self, prompt: str, max_new_tokens: int | None) -> str:
         selected_model_id = self._selected_model_id(prompt)
+        print(
+            json.dumps(
+                {
+                    "event": "coding_model_selected",
+                    "model": selected_model_id,
+                    "revision": selected_model_id != self.primary_model_id,
+                }
+            ),
+            flush=True,
+        )
         try:
             return self._model(selected_model_id).reason(prompt, max_new_tokens=max_new_tokens)
-        except Exception:
+        except Exception as exc:
             if selected_model_id == self.primary_model_id:
                 raise
+            print(
+                json.dumps(
+                    {
+                        "event": "coding_model_fallback",
+                        "from_model": selected_model_id,
+                        "to_model": self.primary_model_id,
+                        "error": type(exc).__name__,
+                    }
+                ),
+                flush=True,
+            )
             return self._model(self.primary_model_id).reason(prompt, max_new_tokens=max_new_tokens)
+
+    @staticmethod
+    def _proposal_object(raw: str) -> dict | None:
+        text = raw.strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError:
+            start = text.find("{")
+            end = text.rfind("}")
+            if start < 0 or end <= start:
+                return None
+            try:
+                value = json.loads(text[start : end + 1])
+            except json.JSONDecodeError:
+                return None
+        return value if isinstance(value, dict) else None
+
+    @staticmethod
+    def _numbered_context(prompt: str) -> dict[str, str]:
+        marker = "NUMBERED_CONTEXT: "
+        for line in prompt.splitlines():
+            if not line.startswith(marker):
+                continue
+            try:
+                value = json.loads(line[len(marker) :])
+            except json.JSONDecodeError:
+                return {}
+            if isinstance(value, dict):
+                return {str(path): str(text) for path, text in value.items()}
+        return {}
+
+    @staticmethod
+    def _source_range(numbered_text: str, start_line: int, end_line: int) -> str | None:
+        source_lines: dict[int, str] = {}
+        for entry in numbered_text.splitlines():
+            number, separator, text = entry.partition("|")
+            if not separator:
+                continue
+            try:
+                source_lines[int(number)] = text
+            except ValueError:
+                continue
+        if start_line < 1 or end_line < start_line:
+            return None
+        try:
+            return "\n".join(source_lines[line] for line in range(start_line, end_line + 1))
+        except KeyError:
+            return None
+
+    @classmethod
+    def _is_noop_edit(cls, prompt: str, raw: str) -> bool:
+        proposal = cls._proposal_object(raw)
+        if proposal is None:
+            return False
+
+        edits = proposal.get("edits")
+        if isinstance(edits, dict):
+            edits = [edits]
+        elif not isinstance(edits, list):
+            edit = proposal.get("edit")
+            if isinstance(edit, dict):
+                edits = [edit]
+            elif isinstance(proposal.get("path"), str) and isinstance(proposal.get("new"), str):
+                edits = [proposal]
+            else:
+                edits = None
+
+        if isinstance(edits, list) and len(edits) == 1 and isinstance(edits[0], dict):
+            edit = edits[0]
+            old = edit.get("old")
+            new = edit.get("new")
+            if isinstance(old, str) and isinstance(new, str) and old == new:
+                return True
+            path = edit.get("path")
+            start_line = edit.get("start_line")
+            end_line = edit.get("end_line")
+            if (
+                isinstance(path, str)
+                and isinstance(start_line, int)
+                and not isinstance(start_line, bool)
+                and isinstance(end_line, int)
+                and not isinstance(end_line, bool)
+                and isinstance(new, str)
+            ):
+                numbered = cls._numbered_context(prompt).get(path)
+                if numbered is not None:
+                    existing = cls._source_range(numbered, start_line, end_line)
+                    if existing is not None and new.strip() == existing.strip():
+                        return True
+
+        files = proposal.get("files")
+        if isinstance(files, dict) and len(files) == 1:
+            path, new_content = next(iter(files.items()))
+            if isinstance(path, str) and isinstance(new_content, str):
+                numbered = cls._numbered_context(prompt).get(path)
+                if numbered is not None:
+                    existing_lines = []
+                    for entry in numbered.splitlines():
+                        _, separator, text = entry.partition("|")
+                        if separator:
+                            existing_lines.append(text)
+                    if new_content.strip() == "\n".join(existing_lines).strip():
+                        return True
+        return False
+
+    @staticmethod
+    def _noop_retry_prompt(prompt: str, raw: str, correction: int) -> str:
+        previous = raw.encode("utf-8", errors="replace")[:1200].decode("utf-8", errors="replace")
+        return (
+            prompt
+            + "\nRETRY: previous edit was a NO-OP and would make no repository change. "
+            + "Use OBJECTIVE and NUMBERED_CONTEXT to choose a materially different replacement or a different relevant line. "
+            + "Do not repeat the same line/replacement and do not broaden scope. Return only the required one-edit JSON.\n"
+            + f"NOOP_CORRECTION_ATTEMPT: {correction}\n"
+            + f"PREVIOUS_NOOP: {previous}\n"
+        )
+
+    def reason(self, prompt: str, max_new_tokens: int | None = None) -> str:
+        current_prompt = prompt
+        raw = ""
+        for correction in range(MAX_NOOP_CORRECTIONS + 1):
+            raw = self._reason_once(current_prompt, max_new_tokens)
+            if not self._is_noop_edit(current_prompt, raw):
+                return raw
+            if correction >= MAX_NOOP_CORRECTIONS:
+                break
+            print(
+                json.dumps(
+                    {
+                        "event": "coding_noop_detected",
+                        "correction": correction + 1,
+                    }
+                ),
+                flush=True,
+            )
+            current_prompt = self._noop_retry_prompt(current_prompt, raw, correction + 1)
+        return raw
 
 
 def main() -> None:
@@ -99,6 +265,7 @@ def main() -> None:
                 "escalation_model": args.escalation_model,
                 "replaceable": True,
                 "adaptive_retry_escalation": True,
+                "noop_self_correction": True,
             }
         ),
         flush=True,

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import importlib.util
+import json
 import sys
 from pathlib import Path
 
@@ -79,3 +80,98 @@ def test_adaptive_coding_model_can_disable_escalation(monkeypatch):
     model = module.AdaptiveCodingModel("small-coder", "", max_new_tokens=384)
 
     assert model.reason("PREVIOUS_DEVELOPMENT_FEEDBACK: tests failed") == "small-coder"
+
+
+def _coding_prompt(line_text: str = "        return None") -> str:
+    numbered = {"genesis/coding.py": f"1|class CodingModule:\n2|    def _provider(self):\n3|{line_text}"}
+    return (
+        "ROLE: bounded_coding_engineer\n"
+        "OBJECTIVE: improve provider fallback reliability\n"
+        f"NUMBERED_CONTEXT: {json.dumps(numbered, sort_keys=True)}\n"
+    )
+
+
+def test_noop_line_edit_is_corrected_inside_same_provider_call(monkeypatch):
+    module = _load_provider_module()
+    calls: list[tuple[str, str]] = []
+    outputs = [
+        json.dumps(
+            {
+                "edits": [
+                    {
+                        "path": "genesis/coding.py",
+                        "start_line": 3,
+                        "end_line": 3,
+                        "new": "return None",
+                    }
+                ]
+            }
+        ),
+        json.dumps(
+            {
+                "edits": [
+                    {
+                        "path": "genesis/coding.py",
+                        "start_line": 3,
+                        "end_line": 3,
+                        "new": "return self.providers.available_providers()[0] if self.providers.available_providers() else None",
+                    }
+                ]
+            }
+        ),
+    ]
+
+    class FakeLocalReasoningModel:
+        def __init__(self, model_id: str, *, max_new_tokens: int) -> None:
+            self.model_id = model_id
+
+        def reason(self, prompt: str, max_new_tokens: int | None = None) -> str:
+            calls.append((self.model_id, prompt))
+            return outputs.pop(0)
+
+    monkeypatch.setattr(module, "LocalReasoningModel", FakeLocalReasoningModel)
+    model = module.AdaptiveCodingModel("small-coder", "strong-coder", max_new_tokens=384)
+
+    result = model.reason(_coding_prompt())
+
+    assert "available_providers" in result
+    assert [model_id for model_id, _ in calls] == ["small-coder", "strong-coder"]
+    assert "previous edit was a NO-OP" in calls[1][1]
+
+
+def test_noop_correction_is_bounded(monkeypatch):
+    module = _load_provider_module()
+    calls: list[str] = []
+    noop = json.dumps(
+        {
+            "edits": [
+                {
+                    "path": "genesis/coding.py",
+                    "start_line": 3,
+                    "end_line": 3,
+                    "new": "return None",
+                }
+            ]
+        }
+    )
+
+    class FakeLocalReasoningModel:
+        def __init__(self, model_id: str, *, max_new_tokens: int) -> None:
+            self.model_id = model_id
+
+        def reason(self, prompt: str, max_new_tokens: int | None = None) -> str:
+            calls.append(self.model_id)
+            return noop
+
+    monkeypatch.setattr(module, "LocalReasoningModel", FakeLocalReasoningModel)
+    model = module.AdaptiveCodingModel("small-coder", "strong-coder", max_new_tokens=384)
+
+    assert model.reason(_coding_prompt()) == noop
+    assert calls == ["small-coder", "strong-coder", "strong-coder"]
+
+
+def test_noop_detection_supports_legacy_identical_old_new():
+    module = _load_provider_module()
+    raw = json.dumps({"edits": [{"path": "genesis/coding.py", "old": "return None", "new": "return None"}]})
+
+    assert module.AdaptiveCodingModel._is_noop_edit(_coding_prompt(), raw) is True
