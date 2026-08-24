@@ -269,9 +269,55 @@ class CodingModule:
             rendered[path] = current.replace(old, new, 1)
         return rendered
 
+    @staticmethod
+    def _looks_like_single_edit(value: object) -> bool:
+        if not isinstance(value, dict):
+            return False
+        if not isinstance(value.get("path"), str) or not isinstance(value.get("new"), str):
+            return False
+        line_shape = isinstance(value.get("start_line"), int) and not isinstance(value.get("start_line"), bool)
+        line_shape = line_shape and isinstance(value.get("end_line"), int) and not isinstance(value.get("end_line"), bool)
+        legacy_shape = isinstance(value.get("old"), str) and bool(value.get("old"))
+        return line_shape or legacy_shape
+
+    @classmethod
+    def _normalize_proposal_shape(cls, proposal: dict) -> dict:
+        """Recover only narrow, unambiguous one-edit wrappers from small providers.
+
+        This never invents a path, range, old text, or replacement. It only wraps a complete
+        edit the provider already supplied. All ordinary path, byte, Python AST, protected-file,
+        review, validation, and promotion gates still run after normalization.
+        """
+        if isinstance(proposal.get("files"), dict):
+            return proposal
+        edits = proposal.get("edits")
+        if isinstance(edits, list):
+            return proposal
+        if isinstance(edits, dict):
+            normalized = dict(proposal)
+            normalized["edits"] = [edits]
+            return normalized
+        edit = proposal.get("edit")
+        if isinstance(edit, dict):
+            normalized = dict(proposal)
+            normalized["edits"] = [edit]
+            return normalized
+        if cls._looks_like_single_edit(proposal):
+            normalized = dict(proposal)
+            normalized["edits"] = [
+                {
+                    key: proposal[key]
+                    for key in ("path", "start_line", "end_line", "old", "new")
+                    if key in proposal
+                }
+            ]
+            return normalized
+        return proposal
+
     def validate_proposal(self, proposal: dict, provider_name: str) -> CodingProposal:
         if not isinstance(proposal, dict):
             raise ValueError("coding proposal must be a JSON object")
+        proposal = self._normalize_proposal_shape(proposal)
         raw_files = proposal.get("files")
         if isinstance(raw_files, dict):
             files = raw_files
