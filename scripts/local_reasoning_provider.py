@@ -67,6 +67,30 @@ def balanced_json_object_complete(text: str) -> bool:
     return False
 
 
+def json_completion_reserve_tokens(
+    text: str,
+    *,
+    generated_tokens: int,
+    requested_budget: int,
+    configured_budget: int,
+) -> int:
+    """Return a bounded reserve only when JSON was cut off by the request cap.
+
+    Coding roles intentionally start with a compact request budget. If the model
+    actually consumes that whole budget and has begun, but not completed, a JSON
+    object, allow it to use only the remaining configured provider budget. This
+    recovers token-limit truncation without extending garbage, early-EOS output,
+    or already-complete JSON, and never exceeds the provider's configured cap.
+    """
+    requested = max(0, int(requested_budget))
+    configured = max(0, int(configured_budget))
+    if configured <= requested or generated_tokens < requested:
+        return 0
+    if "{" not in text or balanced_json_object_complete(text):
+        return 0
+    return configured - requested
+
+
 class LocalReasoningModel:
     def __init__(self, model_id: str, *, max_new_tokens: int = DEFAULT_MAX_NEW_TOKENS) -> None:
         import torch
@@ -97,6 +121,17 @@ class LocalReasoningModel:
 
         return self.StoppingCriteriaList([StopAfterBalancedJSONObject()])
 
+    def _generate(self, input_ids, *, max_new_tokens: int, prompt_tokens: int, **inputs):
+        return self.model.generate(
+            input_ids=input_ids,
+            **inputs,
+            max_new_tokens=max_new_tokens,
+            do_sample=False,
+            repetition_penalty=1.03,
+            pad_token_id=self.tokenizer.eos_token_id,
+            stopping_criteria=self._json_stopping_criteria(prompt_tokens),
+        )
+
     def reason(self, prompt: str, max_new_tokens: int | None = None) -> str:
         system = (
             "You are a replaceable reasoning provider for Genesis AI Network. "
@@ -118,19 +153,35 @@ class LocalReasoningModel:
         except TypeError:
             text = self.tokenizer.apply_chat_template(messages, tokenize=False, add_generation_prompt=True)
         inputs = self.tokenizer(text, return_tensors="pt", truncation=True, max_length=4096)
-        prompt_tokens = inputs["input_ids"].shape[-1]
+        input_ids = inputs.pop("input_ids")
+        prompt_tokens = input_ids.shape[-1]
         budget = self.max_new_tokens if max_new_tokens is None else max(64, min(int(max_new_tokens), MAX_ALLOWED_NEW_TOKENS))
         with self.torch.no_grad():
-            output = self.model.generate(
-                **inputs,
+            output = self._generate(
+                input_ids,
                 max_new_tokens=budget,
-                do_sample=False,
-                repetition_penalty=1.03,
-                pad_token_id=self.tokenizer.eos_token_id,
-                stopping_criteria=self._json_stopping_criteria(prompt_tokens),
+                prompt_tokens=prompt_tokens,
+                **inputs,
             )
-        generated = output[0][prompt_tokens:]
-        return self.tokenizer.decode(generated, skip_special_tokens=True).strip()
+            generated = output[0][prompt_tokens:]
+            decoded = self.tokenizer.decode(generated, skip_special_tokens=True).strip()
+            reserve = json_completion_reserve_tokens(
+                decoded,
+                generated_tokens=int(generated.shape[-1]),
+                requested_budget=budget,
+                configured_budget=self.max_new_tokens,
+            )
+            eos_token_id = self.tokenizer.eos_token_id
+            ended_with_eos = bool(generated.shape[-1]) and eos_token_id is not None and int(generated[-1]) == int(eos_token_id)
+            if reserve and not ended_with_eos:
+                output = self._generate(
+                    output,
+                    max_new_tokens=reserve,
+                    prompt_tokens=prompt_tokens,
+                )
+                generated = output[0][prompt_tokens:]
+                decoded = self.tokenizer.decode(generated, skip_special_tokens=True).strip()
+        return decoded
 
 
 class Handler(BaseHTTPRequestHandler):
