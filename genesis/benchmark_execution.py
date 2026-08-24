@@ -160,12 +160,7 @@ class BenchmarkExecutionPlanner:
             prior_failure = str(latest.last_error or "").strip()
             if not prior_failure and latest.failure_history:
                 prior_failure = str(latest.failure_history[-1].get("error") or "").strip()
-        objective = (
-            f"Make benchmark {benchmark_id} executable for Genesis using the official/comparable benchmark runner and pinned dataset. "
-            "Produce real raw benchmark output with provenance; never invent, estimate, hard-code or self-award a score. "
-            "Integrate the smallest reproducible runner/adapter needed so BenchmarkExecutionPlanner can stage independently validated evidence. "
-            "Do not embed provider credentials or lock Genesis identity to a model/provider."
-        )
+        objective = f"Make benchmark {benchmark_id} executable for Genesis using the official/comparable benchmark runner and pinned dataset. Produce real raw benchmark output with provenance; never invent, estimate, hard-code or self-award a score. Integrate the smallest reproducible runner/adapter needed so BenchmarkExecutionPlanner can stage independently validated evidence. Do not embed provider credentials or lock Genesis identity to a model/provider."
         if generation > 1:
             objective += (
                 f" This is integration generation {generation}. Do not repeat the previous implementation approach; "
