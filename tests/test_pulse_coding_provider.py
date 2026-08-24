@@ -175,3 +175,76 @@ def test_noop_detection_supports_legacy_identical_old_new():
     raw = json.dumps({"edits": [{"path": "genesis/coding.py", "old": "return None", "new": "return None"}]})
 
     assert module.AdaptiveCodingModel._is_noop_edit(_coding_prompt(), raw) is True
+
+
+def test_noop_detection_accounts_for_python_indent_normalization():
+    module = _load_provider_module()
+    raw = json.dumps(
+        {
+            "edits": [
+                {
+                    "path": "genesis/coding.py",
+                    "start_line": 3,
+                    "end_line": 3,
+                    "new": "return None",
+                }
+            ]
+        }
+    )
+
+    assert module.AdaptiveCodingModel._is_noop_edit(_coding_prompt(), raw) is True
+
+
+def test_noop_detection_preserves_meaningful_python_indentation_change():
+    module = _load_provider_module()
+    raw = json.dumps(
+        {
+            "edits": [
+                {
+                    "path": "genesis/coding.py",
+                    "start_line": 3,
+                    "end_line": 3,
+                    "new": "    second()",
+                }
+            ]
+        }
+    )
+
+    assert module.AdaptiveCodingModel._is_noop_edit(_coding_prompt("second()"), raw) is False
+
+
+def test_noop_detection_preserves_nonpython_whitespace_change():
+    module = _load_provider_module()
+    numbered = {"docs/note.md": "1|item"}
+    prompt = (
+        "ROLE: bounded_coding_engineer\n"
+        "OBJECTIVE: indent a nested Markdown item\n"
+        f"NUMBERED_CONTEXT: {json.dumps(numbered, sort_keys=True)}\n"
+    )
+    raw = json.dumps(
+        {
+            "edits": [
+                {
+                    "path": "docs/note.md",
+                    "start_line": 1,
+                    "end_line": 1,
+                    "new": "    item",
+                }
+            ]
+        }
+    )
+
+    assert module.AdaptiveCodingModel._is_noop_edit(prompt, raw) is False
+
+
+def test_full_file_noop_detection_does_not_strip_whitespace():
+    module = _load_provider_module()
+    numbered = {"docs/note.md": "1|item"}
+    prompt = (
+        "ROLE: bounded_coding_engineer\n"
+        "OBJECTIVE: preserve formatting evidence\n"
+        f"NUMBERED_CONTEXT: {json.dumps(numbered, sort_keys=True)}\n"
+    )
+    raw = json.dumps({"files": {"docs/note.md": " item"}})
+
+    assert module.AdaptiveCodingModel._is_noop_edit(prompt, raw) is False
