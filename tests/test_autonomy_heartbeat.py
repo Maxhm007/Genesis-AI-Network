@@ -1,6 +1,11 @@
 from pathlib import Path
 
 
+ACTIVE_AUTONOMY_WORKFLOWS = (
+    "gene-pulse.yml coding-intelligence-pulse.yml file-self-review.yml manual-self-repair.yml"
+)
+
+
 def test_autonomy_heartbeat_restarts_idle_pipeline_without_duplicate_work() -> None:
     root = Path(__file__).resolve().parents[1]
     workflow = (root / ".github" / "workflows" / "autonomy-heartbeat.yml").read_text(encoding="utf-8")
@@ -12,7 +17,7 @@ def test_autonomy_heartbeat_restarts_idle_pipeline_without_duplicate_work() -> N
     assert "cancel-in-progress: false" in workflow
     assert "GH_REPO: ${{ github.repository }}" in workflow
 
-    assert "for workflow in gene-pulse.yml file-self-review.yml manual-self-repair.yml" in workflow
+    assert f"for workflow in {ACTIVE_AUTONOMY_WORKFLOWS}" in workflow
     assert "for status in queued in_progress" in workflow
     assert "freshness_seconds=7200" in workflow
     assert "age <= freshness_seconds" in workflow
@@ -38,7 +43,8 @@ def test_manual_and_scheduled_pulse_controls_share_stale_safety_invariants() -> 
 
     for workflow in (heartbeat, manual):
         assert "GH_REPO: ${{ github.repository }}" in workflow
-        assert "for workflow in gene-pulse.yml file-self-review.yml manual-self-repair.yml" in workflow
+        assert f"for workflow in {ACTIVE_AUTONOMY_WORKFLOWS}" in workflow
+        assert "coding-intelligence-pulse.yml" in workflow
         assert "for status in queued in_progress" in workflow
         assert "freshness_seconds=7200" in workflow
         assert "gh run cancel" in workflow
