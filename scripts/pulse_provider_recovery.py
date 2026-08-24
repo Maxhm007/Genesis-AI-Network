@@ -81,12 +81,30 @@ def _rebalance_work_priority(queue: PersistentTaskQueue) -> dict:
     }
 
 
+def _coding_owned_work(task: GenesisTask) -> bool:
+    """Return work that needs a coding-capable provider, regardless of queue owner.
+
+    Capability-growth tasks are owned by ``genesis.improvement`` after the
+    improvement/merge split, but their bounded implementation still runs through
+    the coding worker. Filtering only on ``module_id == genesis.coding`` makes a
+    measured benchmark deficit invisible to the delegated coding pulse and lets
+    speculative learning work take its slot.
+    """
+    return bool(
+        task.module_id == "genesis.coding"
+        or task.payload.get("task_type") == "capability_growth"
+    )
+
+
 def _coding_work(queue: PersistentTaskQueue) -> list[GenesisTask]:
     rows: list[GenesisTask] = []
     for task in queue.list(limit=5000):
-        if task.module_id != "genesis.coding":
+        if not _coding_owned_work(task):
             continue
         if task.state in RUNNABLE_STATES:
+            rows.append(task)
+            continue
+        if task.state == "failed" and queue.retryable(task):
             rows.append(task)
             continue
         if task.state == "paused" and str(task.state_reason or "") in PROVIDER_WAIT_REASONS:

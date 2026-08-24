@@ -46,6 +46,28 @@ def test_coding_work_includes_legacy_and_provider_neutral_waits(tmp_path: Path) 
     assert unrelated.task_id not in {task.task_id for task in work}
 
 
+def test_coding_work_includes_improvement_owned_measured_growth(tmp_path: Path) -> None:
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    speculative = queue.create(
+        "Speculative learned capability",
+        module_id="genesis.coding",
+        priority=78,
+        payload={"task_type": "new_capability"},
+    )
+    growth = queue.create(
+        "Improve measured SWE-Bench deficit",
+        module_id="genesis.improvement",
+        priority=95,
+        payload={"task_type": "capability_growth", "target_path": "genesis/coding.py"},
+    )
+    queue.transition(growth.task_id, "assigned", module_id="genesis.improvement")
+
+    work = _coding_work(queue)
+
+    assert work[0].task_id == growth.task_id
+    assert speculative.task_id in {task.task_id for task in work[1:]}
+
+
 def test_measured_capability_growth_outranks_higher_priority_speculative_coding(tmp_path: Path) -> None:
     queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
     speculative = queue.create(

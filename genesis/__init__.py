@@ -43,6 +43,13 @@ from .improvement_merge_routing import install_improvement_merge_submodules as _
 _install_improvement_merge_submodules()
 del _install_improvement_merge_submodules
 
+# Preserve pipeline completion priority while ensuring measured benchmark-growth
+# work outranks speculative learning when both need the same bounded coding lane.
+from .goal_priority import install_measured_growth_goal_priority as _install_measured_growth_goal_priority
+
+_install_measured_growth_goal_priority()
+del _install_measured_growth_goal_priority
+
 # Keep autonomous coding capability-driven rather than provider-name-driven.
 # Repeatedly timing-out Qwen runtimes remain excluded from autonomous coding;
 # tests/Security/review/validation gates still apply before promotion.
