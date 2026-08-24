@@ -202,6 +202,41 @@ class CodingModule:
         dedented = textwrap.dedent(replacement)
         return textwrap.indent(dedented, target_indent, predicate=lambda line: bool(line.strip()))
 
+    @staticmethod
+    def _has_executable_python_text(text: str) -> bool:
+        """Comments and whitespace cannot satisfy a required Python suite body."""
+        return any(line.strip() and not line.lstrip().startswith("#") for line in text.splitlines())
+
+    @staticmethod
+    def _removes_only_python_suite_statement(source: str, start_line: int, end_line: int) -> bool:
+        """Detect a line edit that removes the sole statement beneath a retained compound block.
+
+        The check is structural and intentionally narrow. If the edit also replaces the parent
+        header, normal AST validation decides whether the new structure is valid. This guard only
+        catches edits such as replacing the sole ``pass`` inside an ``except`` with comments or
+        whitespace, which can never form a syntactically valid suite.
+        """
+        try:
+            tree = ast.parse(source)
+        except SyntaxError:
+            return False
+        for node in ast.walk(tree):
+            parent_line = getattr(node, "lineno", None)
+            if not isinstance(parent_line, int) or parent_line >= start_line:
+                continue
+            for field in ("body", "orelse", "finalbody"):
+                suite = getattr(node, field, None)
+                if not isinstance(suite, list) or len(suite) != 1:
+                    continue
+                statement = suite[0]
+                if not isinstance(statement, ast.stmt):
+                    continue
+                first = getattr(statement, "lineno", None)
+                last = getattr(statement, "end_lineno", first)
+                if isinstance(first, int) and isinstance(last, int) and start_line <= first and last <= end_line:
+                    return True
+        return False
+
     def _apply_line_edit(self, path: str, start_line: object, end_line: object, new: object) -> str:
         if not isinstance(start_line, int) or isinstance(start_line, bool):
             raise ValueError("line edit start_line must be an integer")
@@ -223,6 +258,15 @@ class CodingModule:
         removed = "".join(lines[start_line - 1 : end_line])
         if path.endswith(".py") and "from __future__ import" in removed and "from __future__ import" not in new:
             raise ValueError("line edit may not overwrite a Python __future__ import")
+        if (
+            path.endswith(".py")
+            and self._removes_only_python_suite_statement(current, start_line, end_line)
+            and not self._has_executable_python_text(new)
+        ):
+            raise ValueError(
+                "Python line edit may not remove the only executable statement from a retained compound block; "
+                "provide executable replacement code or choose a different line"
+            )
         replacement = self._normalize_python_replacement(removed, new) if path.endswith(".py") else new
         if removed.endswith(("\n", "\r")) and replacement and not replacement.endswith(("\n", "\r")):
             replacement += "\n"
@@ -379,6 +423,7 @@ class CodingModule:
             + "Copy the path exactly from VALID_PATHS/NUMBERED_CONTEXT. Do not invent, summarize, rename, or substitute the path. "
             + "Choose line numbers exactly from NUMBERED_CONTEXT. Exactly one edit. Do not copy old source text. "
             + "For Python, prefer replacing one complete standalone statement; do not remove the only body of try/except/if/for/while/with/class/def blocks. "
+            + "If the selected line is the sole body statement, new must contain executable Python, not only whitespace or comments. "
             + "No title, rationale, markdown, commentary, new files, policy changes, test weakening, or protected paths.\n"
         )
 
@@ -416,7 +461,7 @@ class CodingModule:
             "RULES: exactly one edit; path must match one key from VALID_PATHS exactly; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text; "
             "the example/hint is grounded but must be verified against OBJECTIVE and NUMBERED_CONTEXT; never copy an unrelated example line number; "
             "never emit placeholder path text; no title/rationale/markdown/explanation; do not create files. The local executor resolves those lines against the repository and preserves local Python indentation. "
-            "For Python, replace a complete standalone statement rather than deleting the only body of a compound block. "
+            "For Python, replace a complete standalone statement rather than deleting the only body of a compound block; a sole body replacement must contain executable code, not only comments or whitespace. "
             "Allowed path prefixes: genesis/, tests/, docs/, config/, desktop/, mobile/. Never change Constitution, Genesis Block, .github, validation/quorum, permissions, secrets, or weaken tests.\n"
             f"OBJECTIVE: {objective}\n"
             f"NUMBERED_CONTEXT: {json.dumps(numbered_context, sort_keys=True)}\n"
