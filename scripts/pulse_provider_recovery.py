@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import argparse
 import json
-import os
 from pathlib import Path
 
 from genesis.intelligence_router import IntelligenceRouter
@@ -16,10 +15,70 @@ PROVIDER_WAIT_REASONS = {
     "waiting_for_eligible_coding_provider",
 }
 RUNNABLE_STATES = {"new", "assigned", "blocked"}
+MEASURED_GROWTH_DEFER_REASON = "deferred_for_measured_capability_growth"
 
 
 def _queue(root: Path = ROOT) -> PersistentTaskQueue:
     return PersistentTaskQueue(Path(root) / "runtime" / "genesis_tasks.sqlite3")
+
+
+def _growth_is_executable(queue: PersistentTaskQueue, task: GenesisTask) -> bool:
+    if task.payload.get("task_type") != "capability_growth":
+        return False
+    if task.state in {"new", "assigned", "running", "blocked"}:
+        return True
+    if task.state == "failed":
+        return queue.retryable(task)
+    return task.state == "paused" and str(task.state_reason or "") in PROVIDER_WAIT_REASONS
+
+
+def _active_measured_growth(queue: PersistentTaskQueue) -> list[GenesisTask]:
+    rows = [task for task in queue.list(limit=5000) if _growth_is_executable(queue, task)]
+    rows.sort(key=lambda task: (-int(task.priority), task.created_at, task.task_id))
+    return rows
+
+
+def _rebalance_work_priority(queue: PersistentTaskQueue) -> dict:
+    """Prevent benchmark plumbing from starving measured capability improvement.
+
+    A validated below-reference benchmark creates capability_growth work. While that
+    work is executable (or merely waiting for the coding provider), benchmark runner
+    integration stays durable but paused. As soon as no executable measured growth
+    remains, one deferred runner is resumed so benchmark coverage continues.
+    """
+    growth = _active_measured_growth(queue)
+    deferred: list[str] = []
+    resumed: str | None = None
+
+    if growth:
+        for task in queue.list(limit=5000):
+            if task.payload.get("task_type") != "benchmark_runner_integration":
+                continue
+            if task.state not in {"new", "assigned", "running", "blocked", "failed"}:
+                continue
+            if task.state == "failed" and not queue.retryable(task):
+                continue
+            paused = queue.pause(task.task_id, MEASURED_GROWTH_DEFER_REASON)
+            deferred.append(paused.task_id)
+    else:
+        candidates = [
+            task
+            for task in queue.list(limit=5000)
+            if task.payload.get("task_type") == "benchmark_runner_integration"
+            and task.state == "paused"
+            and str(task.state_reason or "") == MEASURED_GROWTH_DEFER_REASON
+        ]
+        candidates.sort(key=lambda task: (-int(task.priority), task.created_at, task.task_id))
+        if candidates:
+            task = candidates[0]
+            resumed_task = queue.resume(task.task_id, module_id=task.module_id or "genesis.coding")
+            resumed = resumed_task.task_id
+
+    return {
+        "active_growth_task_ids": [task.task_id for task in growth],
+        "deferred_benchmark_runner_ids": deferred,
+        "resumed_benchmark_runner_id": resumed,
+    }
 
 
 def _coding_work(queue: PersistentTaskQueue) -> list[GenesisTask]:
@@ -32,7 +91,14 @@ def _coding_work(queue: PersistentTaskQueue) -> list[GenesisTask]:
             continue
         if task.state == "paused" and str(task.state_reason or "") in PROVIDER_WAIT_REASONS:
             rows.append(task)
-    rows.sort(key=lambda task: (-int(task.priority), task.created_at, task.task_id))
+    rows.sort(
+        key=lambda task: (
+            0 if task.payload.get("task_type") == "capability_growth" else 1,
+            -int(task.priority),
+            task.created_at,
+            task.task_id,
+        )
+    )
     return rows
 
 
@@ -51,6 +117,7 @@ def _eligible_provider_names(root: Path = ROOT) -> list[str]:
 
 def inspect(root: Path = ROOT) -> dict:
     queue = _queue(root)
+    priority = _rebalance_work_priority(queue)
     work = _coding_work(queue)
     providers = _eligible_provider_names(root)
     return {
@@ -61,6 +128,7 @@ def inspect(root: Path = ROOT) -> dict:
         "next_task_id": work[0].task_id if work else None,
         "next_task_type": work[0].payload.get("task_type") if work else None,
         "next_task_priority": work[0].priority if work else None,
+        "priority_rebalance": priority,
     }
 
 
@@ -70,13 +138,19 @@ def resume_one(root: Path = ROOT) -> dict:
         return {"status": "no_eligible_provider", "resumed": False}
 
     queue = _queue(root)
+    priority = _rebalance_work_priority(queue)
     candidates = [
         task
         for task in _coding_work(queue)
         if task.state == "paused" and str(task.state_reason or "") in PROVIDER_WAIT_REASONS
     ]
     if not candidates:
-        return {"status": "nothing_to_resume", "resumed": False, "provider_names": providers}
+        return {
+            "status": "nothing_to_resume",
+            "resumed": False,
+            "provider_names": providers,
+            "priority_rebalance": priority,
+        }
 
     task = candidates[0]
     resumed = queue.resume(task.task_id, module_id=task.module_id or "genesis.coding")
@@ -89,6 +163,7 @@ def resume_one(root: Path = ROOT) -> dict:
         "provider_names": providers,
         "previous_reason": task.state_reason,
         "state": resumed.state,
+        "priority_rebalance": priority,
     }
 
 

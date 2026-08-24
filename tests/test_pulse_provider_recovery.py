@@ -3,7 +3,13 @@ from __future__ import annotations
 from pathlib import Path
 
 from genesis.modules.task_queue import PersistentTaskQueue
-from scripts.pulse_provider_recovery import PROVIDER_WAIT_REASONS, _coding_work, resume_one
+from scripts.pulse_provider_recovery import (
+    MEASURED_GROWTH_DEFER_REASON,
+    PROVIDER_WAIT_REASONS,
+    _coding_work,
+    _rebalance_work_priority,
+    resume_one,
+)
 
 
 class AvailableProvider:
@@ -38,6 +44,62 @@ def test_coding_work_includes_legacy_and_provider_neutral_waits(tmp_path: Path) 
 
     assert [task.task_id for task in work] == [second.task_id, first.task_id]
     assert unrelated.task_id not in {task.task_id for task in work}
+
+
+def test_measured_capability_growth_outranks_higher_priority_speculative_coding(tmp_path: Path) -> None:
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    speculative = queue.create(
+        "Speculative learned capability",
+        module_id="genesis.coding",
+        priority=100,
+        payload={"task_type": "new_capability"},
+    )
+    growth = queue.create(
+        "Improve measured software engineering deficit",
+        module_id="genesis.coding",
+        priority=95,
+        payload={"task_type": "capability_growth"},
+    )
+
+    work = _coding_work(queue)
+
+    assert work[0].task_id == growth.task_id
+    assert speculative.task_id in {task.task_id for task in work[1:]}
+
+
+def test_active_measured_growth_defers_benchmark_runner_until_growth_checkpoints(tmp_path: Path) -> None:
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    runner = queue.create(
+        "Integrate next benchmark runner",
+        module_id="genesis.coding",
+        priority=99,
+        payload={"task_type": "benchmark_runner_integration", "benchmark_id": "agents_last_exam"},
+    )
+    growth = queue.create(
+        "Improve measured SWE-Bench deficit",
+        module_id="genesis.coding",
+        priority=95,
+        payload={"task_type": "capability_growth", "benchmark_id": "swe_bench_pro"},
+    )
+    queue.transition(growth.task_id, "assigned", module_id="genesis.coding")
+
+    first = _rebalance_work_priority(queue)
+
+    deferred = queue.get(runner.task_id)
+    assert deferred is not None
+    assert deferred.state == "paused"
+    assert deferred.state_reason == MEASURED_GROWTH_DEFER_REASON
+    assert first["active_growth_task_ids"] == [growth.task_id]
+    assert runner.task_id in first["deferred_benchmark_runner_ids"]
+
+    queue.transition(growth.task_id, "running", module_id="genesis.coding")
+    queue.transition(growth.task_id, "review", module_id="genesis.coding")
+    second = _rebalance_work_priority(queue)
+
+    resumed = queue.get(runner.task_id)
+    assert resumed is not None
+    assert resumed.state == "assigned"
+    assert second["resumed_benchmark_runner_id"] == runner.task_id
 
 
 def test_resume_one_prefers_highest_priority_provider_wait(monkeypatch, tmp_path: Path) -> None:
