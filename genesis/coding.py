@@ -3,6 +3,7 @@ from __future__ import annotations
 import ast
 import json
 import re
+import textwrap
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -176,6 +177,31 @@ class CodingModule:
             raise ValueError("coding proposal must be a JSON object")
         return value
 
+    @staticmethod
+    def _first_nonblank_indent(text: str) -> str:
+        for line in text.splitlines():
+            if line.strip():
+                return line[: len(line) - len(line.lstrip(" \t"))]
+        return ""
+
+    @classmethod
+    def _normalize_python_replacement(cls, removed: str, replacement: str) -> str:
+        """Keep a compact Python line edit at the indentation level it replaces.
+
+        Small local coding models often return syntactically useful statements without the
+        repository indentation shown in NUMBERED_CONTEXT. Replacing an indented statement with
+        that raw text can erase the only body of a try/except/if block. Preserve relative
+        indentation locally; broader structural edits must explicitly replace the parent lines.
+        """
+        target_indent = cls._first_nonblank_indent(removed)
+        replacement_indent = cls._first_nonblank_indent(replacement)
+        if not target_indent or not replacement.strip():
+            return replacement
+        if len(replacement_indent.expandtabs(8)) >= len(target_indent.expandtabs(8)):
+            return replacement
+        dedented = textwrap.dedent(replacement)
+        return textwrap.indent(dedented, target_indent, predicate=lambda line: bool(line.strip()))
+
     def _apply_line_edit(self, path: str, start_line: object, end_line: object, new: object) -> str:
         if not isinstance(start_line, int) or isinstance(start_line, bool):
             raise ValueError("line edit start_line must be an integer")
@@ -197,7 +223,7 @@ class CodingModule:
         removed = "".join(lines[start_line - 1 : end_line])
         if path.endswith(".py") and "from __future__ import" in removed and "from __future__ import" not in new:
             raise ValueError("line edit may not overwrite a Python __future__ import")
-        replacement = new
+        replacement = self._normalize_python_replacement(removed, new) if path.endswith(".py") else new
         if removed.endswith(("\n", "\r")) and replacement and not replacement.endswith(("\n", "\r")):
             replacement += "\n"
         return "".join(lines[: start_line - 1]) + replacement + "".join(lines[end_line:])
@@ -306,6 +332,7 @@ class CodingModule:
             + "The hint is derived from OBJECTIVE/NUMBERED_CONTEXT; verify it before using it and never copy an unrelated line number. "
             + "Copy the path exactly from VALID_PATHS/NUMBERED_CONTEXT. Do not invent, summarize, rename, or substitute the path. "
             + "Choose line numbers exactly from NUMBERED_CONTEXT. Exactly one edit. Do not copy old source text. "
+            + "For Python, prefer replacing one complete standalone statement; do not remove the only body of try/except/if/for/while/with/class/def blocks. "
             + "No title, rationale, markdown, commentary, new files, policy changes, test weakening, or protected paths.\n"
         )
 
@@ -342,7 +369,8 @@ class CodingModule:
             f"GROUNDED_LINE_HINT: {preferred_path}:{preferred_line}\n"
             "RULES: exactly one edit; path must match one key from VALID_PATHS exactly; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text; "
             "the example/hint is grounded but must be verified against OBJECTIVE and NUMBERED_CONTEXT; never copy an unrelated example line number; "
-            "never emit placeholder path text; no title/rationale/markdown/explanation; do not create files. The local executor resolves those lines against the repository. "
+            "never emit placeholder path text; no title/rationale/markdown/explanation; do not create files. The local executor resolves those lines against the repository and preserves local Python indentation. "
+            "For Python, replace a complete standalone statement rather than deleting the only body of a compound block. "
             "Allowed path prefixes: genesis/, tests/, docs/, config/, desktop/, mobile/. Never change Constitution, Genesis Block, .github, validation/quorum, permissions, secrets, or weaken tests.\n"
             f"OBJECTIVE: {objective}\n"
             f"NUMBERED_CONTEXT: {json.dumps(numbered_context, sort_keys=True)}\n"
