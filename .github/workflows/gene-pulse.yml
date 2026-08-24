@@ -15,6 +15,10 @@ on:
         description: Remaining bounded idle-discovery pulses before checkpointing
         required: false
         default: "4"
+      runtime_parent_run_id:
+        description: Exact predecessor run id whose saved runtime state must be restored
+        required: false
+        default: ""
   repository_dispatch:
     types: [gene-pulse]
   push:
@@ -42,6 +46,7 @@ jobs:
       GENE_ID: ${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
       CONTINUE_CHAIN: ${{ inputs.continue_chain || github.event.client_payload.continue_chain || 'true' }}
       IDLE_DISCOVERY_BUDGET: ${{ inputs.chain_budget || github.event.client_payload.chain_budget || '4' }}
+      RUNTIME_PARENT_RUN_ID: ${{ inputs.runtime_parent_run_id || github.event.client_payload.runtime_parent_run_id || '' }}
       PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
@@ -52,7 +57,16 @@ jobs:
         with:
           python-version: "3.12"
 
-      - name: Restore Gene persistent pulse state
+      - name: Restore exact predecessor Gene state
+        if: env.RUNTIME_PARENT_RUN_ID != ''
+        uses: actions/cache/restore@v4
+        with:
+          path: runtime
+          key: gene-runtime-${{ env.GENE_ID }}-${{ env.RUNTIME_PARENT_RUN_ID }}
+          fail-on-cache-miss: true
+
+      - name: Restore latest Gene state for standalone pulse
+        if: env.RUNTIME_PARENT_RUN_ID == ''
         uses: actions/cache/restore@v4
         with:
           path: runtime
@@ -264,7 +278,8 @@ jobs:
           gh workflow run coding-intelligence-pulse.yml --ref main \
             -f gene="$GENE_ID" \
             -f continue_chain="$CONTINUE_CHAIN" \
-            -f chain_budget="$IDLE_DISCOVERY_BUDGET"
+            -f chain_budget="$IDLE_DISCOVERY_BUDGET" \
+            -f runtime_parent_run_id="$GITHUB_RUN_ID"
 
       - name: Request next pulse
         if: steps.provider_gate.outputs.needs_local_provider != 'true' && env.CONTINUE_CHAIN == 'true' && (steps.pulse.outputs.continue == 'true' || steps.pulse.outputs.idle_continue == 'true')
@@ -274,4 +289,5 @@ jobs:
           gh workflow run gene-pulse.yml --ref main \
             -f gene="$GENE_ID" \
             -f continue_chain=true \
-            -f chain_budget='${{ steps.pulse.outputs.next_budget }}'
+            -f chain_budget='${{ steps.pulse.outputs.next_budget }}' \
+            -f runtime_parent_run_id="$GITHUB_RUN_ID"
