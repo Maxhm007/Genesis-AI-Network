@@ -6,6 +6,15 @@ runtime/
 *.sqlite
 *.sqlite3
 
+# Public challenge diagnostics are intentionally versioned on the diagnostics branch.
+# Keep every other nested runtime artifact ignored.
+!docs/runtime/
+docs/runtime/*
+!docs/runtime/GENESIS_CHALLENGE_STAGE.json
+!docs/runtime/GENESIS_CHALLENGE_LAST_RESULT.json
+!docs/runtime/GENESIS_PROVIDER_LAST_LOG.txt
+!docs/runtime/GENESIS_CHALLENGE_LAST_RUN.json
+
 # Private keys and certificate bundles
 *.key
 *.pem
