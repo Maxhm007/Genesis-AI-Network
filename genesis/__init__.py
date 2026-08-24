@@ -83,3 +83,11 @@ from .current_main_review import install_current_main_review as _install_current
 
 _install_current_main_review()
 del _install_current_main_review
+
+# Compatibility is not capability. Reject newly introduced duplicate/unreachable
+# Python statements before model review, and require measured capability-growth
+# patches to change reachable runtime behavior before validation/promotion.
+from .review_materiality import install_review_materiality_gate as _install_review_materiality_gate
+
+_install_review_materiality_gate()
+del _install_review_materiality_gate
