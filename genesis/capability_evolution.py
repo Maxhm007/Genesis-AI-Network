@@ -478,17 +478,17 @@ class CapabilityEvolutionController:
         if focus.get("status") != "measured_below_reference":
             return {"status": "measurement_required", "benchmark_id": focus.get("benchmark_id")}
 
-        active_pipeline = self.pipeline.list_active()
-        if active_pipeline:
-            return {
-                "status": "deferred_active_pipeline",
-                "active_task_ids": [record.task_id for record in active_pipeline[:20]],
-                "benchmark_id": focus.get("benchmark_id"),
-            }
-
         ready, reason, generation = self._growth_readiness(focus, assessments)
         if not ready:
             return {"status": "deferred", "reason": reason, "benchmark_id": focus.get("benchmark_id")}
+
+        # A validated benchmark deficit is durable priority-95 work. Do not let an
+        # unrelated lower-priority pipeline record prevent a new growth generation
+        # from being registered after the previous generation was quarantined or
+        # cancelled. The shared scheduler/review gates still serialize execution and
+        # preserve review/validation priority; this only removes the creation-time
+        # starvation point.
+        concurrent_pipeline_task_ids = [record.task_id for record in self.pipeline.list_active()[:20]]
 
         target = self.root / str(focus["target_path"])
         if not target.is_file():
@@ -587,6 +587,7 @@ class CapabilityEvolutionController:
                 capability_key=focus["capability_key"],
                 generation=generation,
                 baseline_score=focus.get("actual_score"),
+                concurrent_pipeline_task_ids=concurrent_pipeline_task_ids,
             )
         return {
             "status": "created" if created else "existing",
@@ -595,6 +596,7 @@ class CapabilityEvolutionController:
             "capability_key": focus["capability_key"],
             "capability_generation": generation,
             "readiness_reason": reason,
+            "concurrent_pipeline_task_ids": concurrent_pipeline_task_ids,
         }
 
     def _event(self, event: str, **details: object) -> None:
