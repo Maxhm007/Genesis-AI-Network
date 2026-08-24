@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import textwrap
 from http.server import ThreadingHTTPServer
 
 from local_reasoning_provider import Handler, LocalReasoningModel
@@ -144,6 +145,33 @@ class AdaptiveCodingModel:
         except KeyError:
             return None
 
+    @staticmethod
+    def _first_nonblank_indent(text: str) -> str:
+        for line in text.splitlines():
+            if line.strip():
+                return line[: len(line) - len(line.lstrip(" \t"))]
+        return ""
+
+    @classmethod
+    def _normalized_line_replacement(cls, path: str, existing: str, replacement: str) -> str:
+        """Mirror only the line-replacement normalization performed by CodingModule.
+
+        Python compact edits may omit repository indentation; CodingModule restores it when the
+        replacement is less indented than the statement being replaced. No-op detection must
+        account for that exact transformation, but must not erase meaningful whitespace changes
+        such as intentionally adding indentation to an unindented statement or Markdown line.
+        """
+        if not path.endswith(".py"):
+            return replacement
+        target_indent = cls._first_nonblank_indent(existing)
+        replacement_indent = cls._first_nonblank_indent(replacement)
+        if not target_indent or not replacement.strip():
+            return replacement
+        if len(replacement_indent.expandtabs(8)) >= len(target_indent.expandtabs(8)):
+            return replacement
+        dedented = textwrap.dedent(replacement)
+        return textwrap.indent(dedented, target_indent, predicate=lambda line: bool(line.strip()))
+
     @classmethod
     def _is_noop_edit(cls, prompt: str, raw: str) -> bool:
         proposal = cls._proposal_object(raw)
@@ -182,8 +210,10 @@ class AdaptiveCodingModel:
                 numbered = cls._numbered_context(prompt).get(path)
                 if numbered is not None:
                     existing = cls._source_range(numbered, start_line, end_line)
-                    if existing is not None and new.strip() == existing.strip():
-                        return True
+                    if existing is not None:
+                        normalized_new = cls._normalized_line_replacement(path, existing, new)
+                        if normalized_new == existing:
+                            return True
 
         files = proposal.get("files")
         if isinstance(files, dict) and len(files) == 1:
@@ -196,7 +226,7 @@ class AdaptiveCodingModel:
                         _, separator, text = entry.partition("|")
                         if separator:
                             existing_lines.append(text)
-                    if new_content.strip() == "\n".join(existing_lines).strip():
+                    if new_content == "\n".join(existing_lines):
                         return True
         return False
 
