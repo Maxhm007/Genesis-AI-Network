@@ -68,14 +68,6 @@ from .deterministic_coding_fallback import (
 _install_deterministic_coding_fallback()
 del _install_deterministic_coding_fallback
 
-# A failed benchmark coding attempt must consume bounded retry budget. Without
-# durable failure accounting, a task can remain "blocked" forever and repeatedly
-# run the same model strategy instead of reaching quarantine/next generation.
-from .benchmark_failure_recovery import install_benchmark_failure_recovery as _install_benchmark_failure_recovery
-
-_install_benchmark_failure_recovery()
-del _install_benchmark_failure_recovery
-
 # Git review refs are durable evidence even if an ephemeral Actions runtime cache
 # is lost. Reconstruct only strict Genesis-owned orphaned review work, then resume
 # the existing tests, internal review, independent validation, and promotion gates.
