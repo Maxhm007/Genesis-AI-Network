@@ -96,6 +96,65 @@ def _is_grounded_agentic_capability_task(task) -> bool:
     )
 
 
+def _marker_replacement(text: str) -> str:
+    stripped = str(text).rstrip("\n")
+    if not stripped.strip():
+        return stripped
+    return stripped + "\n\n" + LEARNED_CAPABILITY_MARKER
+
+
+def _normalize_learned_capability_proposal(proposal: dict, current: str) -> dict:
+    """Repair only the mechanical marker preservation for a scoped insertion.
+
+    The model still owns the implementation text. Genesis locally preserves the
+    single trusted insertion marker when the proposal clearly replaces that marker
+    or supplies an otherwise append-only full-file candidate. No unrelated edit is
+    widened or rewritten, and the normal syntax/scope/size validation still runs.
+    """
+    if not isinstance(proposal, dict) or current.count(LEARNED_CAPABILITY_MARKER) != 1:
+        return proposal
+
+    normalized = dict(proposal)
+    prefix, suffix = current.split(LEARNED_CAPABILITY_MARKER, 1)
+    marker_line = current[: current.index(LEARNED_CAPABILITY_MARKER)].count("\n") + 1
+
+    edits = proposal.get("edits")
+    if isinstance(edits, list) and len(edits) == 1 and isinstance(edits[0], dict):
+        edit = dict(edits[0])
+        path = str(edit.get("path") or "").replace("\\", "/").lstrip("./")
+        replacement = edit.get("new")
+        if path == LEARNED_CAPABILITY_TARGET and isinstance(replacement, str):
+            try:
+                start_line = int(edit.get("start_line"))
+                end_line = int(edit.get("end_line"))
+            except Exception:
+                start_line = end_line = -1
+            old = edit.get("old")
+            replaces_marker = bool(
+                (start_line == marker_line and end_line == marker_line)
+                or str(old or "").strip() == LEARNED_CAPABILITY_MARKER
+            )
+            if replaces_marker and replacement.count(LEARNED_CAPABILITY_MARKER) == 0:
+                edit["new"] = _marker_replacement(replacement)
+                normalized["edits"] = [edit]
+
+    files = proposal.get("files")
+    if isinstance(files, dict) and set(files) == {LEARNED_CAPABILITY_TARGET}:
+        proposed = files.get(LEARNED_CAPABILITY_TARGET)
+        if isinstance(proposed, str) and proposed.count(LEARNED_CAPABILITY_MARKER) == 0:
+            append_only_shape = proposed.startswith(prefix)
+            if suffix:
+                append_only_shape = append_only_shape and proposed.endswith(suffix)
+            if append_only_shape:
+                insertion_end = len(proposed) - len(suffix) if suffix else len(proposed)
+                insertion = proposed[len(prefix):insertion_end]
+                if insertion.strip():
+                    repaired = prefix + insertion.rstrip("\n") + "\n\n" + LEARNED_CAPABILITY_MARKER + suffix
+                    normalized["files"] = {LEARNED_CAPABILITY_TARGET: repaired}
+
+    return normalized
+
+
 def _install_scoped_capability_guards(self: AutonomousEngineeringLoop, task):
     """Restrict agentic capability synthesis to append-only incubator insertion."""
     original_context = self._context_paths_for_task
@@ -109,12 +168,13 @@ def _install_scoped_capability_guards(self: AutonomousEngineeringLoop, task):
         return original_context(candidate_task)
 
     def scoped_validate(_coding, proposal, provider_name):
-        validated = original_validate(proposal, provider_name)
+        target = self.root / LEARNED_CAPABILITY_TARGET
+        current = target.read_text(encoding="utf-8")
+        normalized = _normalize_learned_capability_proposal(proposal, current)
+        validated = original_validate(normalized, provider_name)
         if set(validated.files) != {LEARNED_CAPABILITY_TARGET}:
             raise ValueError("agentic new capability may edit only the learned capability incubator")
 
-        target = self.root / LEARNED_CAPABILITY_TARGET
-        current = target.read_text(encoding="utf-8")
         proposed = validated.files[LEARNED_CAPABILITY_TARGET]
         if current.count(LEARNED_CAPABILITY_MARKER) != 1:
             raise ValueError("learned capability insertion marker is missing or ambiguous")
