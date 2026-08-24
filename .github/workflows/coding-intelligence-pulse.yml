@@ -34,6 +34,7 @@ jobs:
       IDLE_DISCOVERY_BUDGET: ${{ inputs.chain_budget || '4' }}
       PYTHONPATH: ${{ github.workspace }}
       GENESIS_PULSE_FALLBACK_MODEL: ${{ vars.GENESIS_PULSE_FALLBACK_MODEL || 'Qwen/Qwen2.5-Coder-0.5B-Instruct' }}
+      GENESIS_PROVIDER_TIMEOUT_SECONDS: ${{ vars.GENESIS_PULSE_PROVIDER_TIMEOUT_SECONDS || '300' }}
     steps:
       - uses: actions/checkout@v4
         with:
