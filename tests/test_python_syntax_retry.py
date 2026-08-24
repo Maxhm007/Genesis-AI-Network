@@ -1,3 +1,4 @@
+import json
 from pathlib import Path
 
 from genesis.coding import CodingModule
@@ -17,19 +18,34 @@ class InteriorStatementRetryProvider:
     def reason(self, prompt: str) -> str:
         self.prompts.append(prompt)
         if len(self.prompts) == 1:
-            return (
-                '{"edits":[{"path":"genesis/example.py",'
-                '"start_line":3,"end_line":3,"new":"return 3"}]}'
+            return json.dumps(
+                {
+                    "edits": [
+                        {
+                            "path": "genesis/example.py",
+                            "start_line": 3,
+                            "end_line": 3,
+                            "new": "return 3",
+                        }
+                    ]
+                }
             )
         assert "REJECTED_EDIT_RANGE: genesis/example.py:3-3" in prompt
         assert "AST_SAFE_STATEMENT_RANGE: genesis/example.py:2-5" in prompt
         assert "2|    config = {" in prompt
         assert "5|    }" in prompt
         assert "Do not edit only an interior line of this statement" in prompt
-        return (
-            '{"edits":[{"path":"genesis/example.py",'
-            '"start_line":2,"end_line":5,'
-            '"new":"config = {\\n    \\"a\\": 1,\\n    \\"b\\": 2,\\n    \\"c\\": 3,\\n}"}]}'
+        return json.dumps(
+            {
+                "edits": [
+                    {
+                        "path": "genesis/example.py",
+                        "start_line": 2,
+                        "end_line": 5,
+                        "new": 'config = {\n    "a": 1,\n    "b": 2,\n    "c": 3,\n}',
+                    }
+                ]
+            }
         )
 
 
