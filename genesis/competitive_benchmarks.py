@@ -5,7 +5,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 from typing import Any
 
-from .modules.task_queue import PersistentTaskQueue
+from .modules.task_queue import GenesisTask, PersistentTaskQueue
 
 
 @dataclass(frozen=True)
@@ -27,6 +27,8 @@ class CompetitiveBenchmarkPlanner:
     name as benchmark evidence. A benchmark stops being a gap only when runtime
     results contain a score plus explicit provenance and validated status.
     """
+
+    TERMINAL_TASK_STATES = {"complete", "quarantined", "cancelled"}
 
     def __init__(self, root: Path) -> None:
         self.root = Path(root).resolve()
@@ -76,6 +78,55 @@ class CompetitiveBenchmarkPlanner:
             ))
         return gaps
 
+    @staticmethod
+    def _work_generation(task: GenesisTask) -> int:
+        try:
+            return max(1, int(task.payload.get("work_generation", 1)))
+        except Exception:
+            return 1
+
+    def _tasks_for_benchmark(self, benchmark_id: str) -> list[GenesisTask]:
+        return [
+            task
+            for task in self.queue.list(limit=5000)
+            if task.module_id == "genesis.evaluation"
+            and task.payload.get("task_type") == "frontier_benchmark_measurement"
+            and str(dict(task.payload.get("benchmark") or {}).get("benchmark_id") or "") == benchmark_id
+        ]
+
+    def _is_live_task(self, task: GenesisTask) -> bool:
+        if task.state in self.TERMINAL_TASK_STATES:
+            return False
+        if task.state == "failed" and not self.queue.retryable(task):
+            return False
+        return True
+
+    def _ensure_gap_task(self, gap: BenchmarkGap, objective: str) -> tuple[GenesisTask, bool]:
+        existing = self._tasks_for_benchmark(gap.benchmark_id)
+        live = [task for task in existing if self._is_live_task(task)]
+        if live:
+            live.sort(key=lambda task: (-int(task.priority), task.created_at, task.task_id))
+            return live[0], False
+
+        generation = max((self._work_generation(task) for task in existing), default=0) + 1
+        base_key = f"frontier-benchmark:{gap.benchmark_id}"
+        dedupe_key = base_key if generation == 1 else f"{base_key}:generation:{generation}"
+        return self.queue.create_unique(
+            dedupe_key,
+            objective,
+            module_id="genesis.evaluation",
+            priority=92,
+            payload={
+                "task_type": "frontier_benchmark_measurement",
+                "benchmark": gap.as_dict(),
+                "requires_provenance": True,
+                "requires_independent_validation": True,
+                "score_fabrication_forbidden": True,
+                "work_generation": generation,
+                "strategy_change_required": generation > 1,
+            },
+        )
+
     def ensure_tasks(self) -> dict[str, Any]:
         created: list[str] = []
         task_ids: list[str] = []
@@ -86,19 +137,7 @@ class CompetitiveBenchmarkPlanner:
                 "Record the real measured score only with source provenance, measurement timestamp, runner/config details, and independent validation. "
                 "Do not estimate or infer benchmark credit from architecture or model identity."
             )
-            task, was_created = self.queue.create_unique(
-                f"frontier-benchmark:{gap.benchmark_id}",
-                objective,
-                module_id="genesis.evaluation",
-                priority=92,
-                payload={
-                    "task_type": "frontier_benchmark_measurement",
-                    "benchmark": gap.as_dict(),
-                    "requires_provenance": True,
-                    "requires_independent_validation": True,
-                    "score_fabrication_forbidden": True,
-                },
-            )
+            task, was_created = self._ensure_gap_task(gap, objective)
             task_ids.append(task.task_id)
             if was_created:
                 created.append(task.task_id)
