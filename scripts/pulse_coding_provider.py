@@ -18,6 +18,8 @@ DEFAULT_ESCALATION_MODEL = os.environ.get(
     "Qwen/Qwen2.5-Coder-1.5B-Instruct",
 )
 DEFAULT_MAX_NEW_TOKENS = 384
+DEFAULT_ESCALATION_MAX_NEW_TOKENS = 128
+ESCALATION_MAX_PROMPT_CHARS = 8_000
 MAX_NOOP_CORRECTIONS = 2
 REVISION_MARKERS = (
     "PREVIOUS_DEVELOPMENT_FEEDBACK:",
@@ -30,9 +32,10 @@ class AdaptiveCodingModel:
     """Use stronger bounded reasoning when prior evidence says a coding revision is needed.
 
     First-pass coding remains on the small replaceable model. Revision/retry prompts escalate to
-    a stronger replaceable model. The provider also detects compact edits that would reproduce
-    the exact repository text from NUMBERED_CONTEXT and self-corrects them inside the same pulse,
-    so a harmless no-op does not consume an entire autonomous development generation.
+    a stronger replaceable model. The stronger model has its own compact generation budget so a
+    bounded one-edit correction does not consume the whole provider request deadline. The provider
+    also detects compact edits that would reproduce the exact repository text from NUMBERED_CONTEXT
+    and self-corrects them inside the same pulse.
     """
 
     def __init__(
@@ -41,11 +44,13 @@ class AdaptiveCodingModel:
         escalation_model_id: str | None,
         *,
         max_new_tokens: int,
+        escalation_max_new_tokens: int = DEFAULT_ESCALATION_MAX_NEW_TOKENS,
     ) -> None:
         self.primary_model_id = primary_model_id
         self.escalation_model_id = (escalation_model_id or "").strip() or None
         self.model_id = primary_model_id
         self.max_new_tokens = max_new_tokens
+        self.escalation_max_new_tokens = max(64, min(int(escalation_max_new_tokens), max_new_tokens))
         self._models: dict[str, LocalReasoningModel] = {}
 
     def _selected_model_id(self, prompt: str) -> str:
@@ -53,27 +58,49 @@ class AdaptiveCodingModel:
             return self.escalation_model_id
         return self.primary_model_id
 
+    def _model_budget(self, model_id: str) -> int:
+        if self.escalation_model_id and model_id == self.escalation_model_id:
+            return self.escalation_max_new_tokens
+        return self.max_new_tokens
+
     def _model(self, model_id: str) -> LocalReasoningModel:
         model = self._models.get(model_id)
         if model is None:
-            model = LocalReasoningModel(model_id, max_new_tokens=self.max_new_tokens)
+            model = LocalReasoningModel(model_id, max_new_tokens=self._model_budget(model_id))
             self._models[model_id] = model
         return model
 
+    @staticmethod
+    def _compact_escalation_prompt(prompt: str) -> str:
+        if len(prompt) <= ESCALATION_MAX_PROMPT_CHARS:
+            return prompt
+        head = ESCALATION_MAX_PROMPT_CHARS // 2
+        tail = ESCALATION_MAX_PROMPT_CHARS - head
+        return prompt[:head] + "\n[...escalation context elided...]\n" + prompt[-tail:]
+
     def _reason_once(self, prompt: str, max_new_tokens: int | None) -> str:
         selected_model_id = self._selected_model_id(prompt)
+        is_escalation = selected_model_id != self.primary_model_id
+        selected_prompt = self._compact_escalation_prompt(prompt) if is_escalation else prompt
+        selected_budget = max_new_tokens
+        if is_escalation:
+            selected_budget = self.escalation_max_new_tokens if max_new_tokens is None else min(
+                int(max_new_tokens), self.escalation_max_new_tokens
+            )
         print(
             json.dumps(
                 {
                     "event": "coding_model_selected",
                     "model": selected_model_id,
-                    "revision": selected_model_id != self.primary_model_id,
+                    "revision": is_escalation,
+                    "max_new_tokens": selected_budget,
+                    "prompt_chars": len(selected_prompt),
                 }
             ),
             flush=True,
         )
         try:
-            return self._model(selected_model_id).reason(prompt, max_new_tokens=max_new_tokens)
+            return self._model(selected_model_id).reason(selected_prompt, max_new_tokens=selected_budget)
         except Exception as exc:
             if selected_model_id == self.primary_model_id:
                 raise
@@ -154,13 +181,7 @@ class AdaptiveCodingModel:
 
     @classmethod
     def _normalized_line_replacement(cls, path: str, existing: str, replacement: str) -> str:
-        """Mirror only the line-replacement normalization performed by CodingModule.
-
-        Python compact edits may omit repository indentation; CodingModule restores it when the
-        replacement is less indented than the statement being replaced. No-op detection must
-        account for that exact transformation, but must not erase meaningful whitespace changes
-        such as intentionally adding indentation to an unindented statement or Markdown line.
-        """
+        """Mirror only the line-replacement normalization performed by CodingModule."""
         if not path.endswith(".py"):
             return replacement
         target_indent = cls._first_nonblank_indent(existing)
@@ -243,11 +264,12 @@ class AdaptiveCodingModel:
         )
 
     def reason(self, prompt: str, max_new_tokens: int | None = None) -> str:
-        current_prompt = prompt
+        base_prompt = prompt
+        current_prompt = base_prompt
         raw = ""
         for correction in range(MAX_NOOP_CORRECTIONS + 1):
             raw = self._reason_once(current_prompt, max_new_tokens)
-            if not self._is_noop_edit(current_prompt, raw):
+            if not self._is_noop_edit(base_prompt, raw):
                 return raw
             if correction >= MAX_NOOP_CORRECTIONS:
                 break
@@ -260,7 +282,7 @@ class AdaptiveCodingModel:
                 ),
                 flush=True,
             )
-            current_prompt = self._noop_retry_prompt(current_prompt, raw, correction + 1)
+            current_prompt = self._noop_retry_prompt(base_prompt, raw, correction + 1)
         return raw
 
 
@@ -275,15 +297,23 @@ def main() -> None:
         type=int,
         default=int(os.environ.get("GENESIS_PROVIDER_MAX_NEW_TOKENS", str(DEFAULT_MAX_NEW_TOKENS))),
     )
+    parser.add_argument(
+        "--escalation-max-new-tokens",
+        type=int,
+        default=int(
+            os.environ.get(
+                "GENESIS_PULSE_ESCALATION_MAX_NEW_TOKENS",
+                str(DEFAULT_ESCALATION_MAX_NEW_TOKENS),
+            )
+        ),
+    )
     args = parser.parse_args()
 
-    # This entrypoint is intentionally separate from the retired historical
-    # foundation runtime. It exposes only the existing provider protocol and both
-    # selected models remain replaceable through environment/CLI configuration.
     Handler.model = AdaptiveCodingModel(
         args.model,
         args.escalation_model,
         max_new_tokens=args.max_new_tokens,
+        escalation_max_new_tokens=args.escalation_max_new_tokens,
     )
     server = ThreadingHTTPServer((args.host, args.port), Handler)
     print(
@@ -293,6 +323,7 @@ def main() -> None:
                 "provider": "genesis-pulse-local-coding-fallback",
                 "model": args.model,
                 "escalation_model": args.escalation_model,
+                "escalation_max_new_tokens": Handler.model.escalation_max_new_tokens,
                 "replaceable": True,
                 "adaptive_retry_escalation": True,
                 "noop_self_correction": True,
