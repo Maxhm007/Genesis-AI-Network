@@ -68,6 +68,14 @@ from .deterministic_coding_fallback import (
 _install_deterministic_coding_fallback()
 del _install_deterministic_coding_fallback
 
+# When a bounded Python edit fails syntax validation, derive the smallest complete
+# statement from the original repository AST and feed that structural range into
+# the next retry. Genesis still authors the replacement and every normal gate runs.
+from .python_syntax_retry import install_python_syntax_retry_guidance as _install_python_syntax_retry_guidance
+
+_install_python_syntax_retry_guidance()
+del _install_python_syntax_retry_guidance
+
 # Git review refs are durable evidence even if an ephemeral Actions runtime cache
 # is lost. Reconstruct only strict Genesis-owned orphaned review work, then resume
 # the existing tests, internal review, independent validation, and promotion gates.
