@@ -7,7 +7,14 @@ class QuorumFileSelfReviewLoop(FileSelfReviewLoop):
     """Add bounded independent-method confirmation before accepting no-change.
 
     A single reasoning pass must not be able to mark a source file complete just
-    by returning ``no_change``. Genesis preserves the first no-change finding,
+        if len(confirmations) < self.NO_CHANGE_QUORUM:
+            current["no_change_confirmations"] = confirmations
+            current["status"] = "retry"
+            current["method_index"] = (int(current.get("method_index", 0)) + 1) % len(REVIEW_METHODS)
+            current["last_error"] = "no-change requires confirmation by a second independent review method"
+            state["current"] = current
+            self._save(state)
+            return
     rotates to a different review method, and advances only after two distinct
     methods independently agree that no meaningful improvement is justified.
 
