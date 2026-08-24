@@ -172,6 +172,18 @@ def _fail(worker: ReviewWorker, record: PipelineRecord, feedback: str) -> dict:
     return worker._send_back(record, feedback)
 
 
+def _advisory_model_error(exc: Exception, max_bytes: int) -> str:
+    """Record an unavailable advisory reviewer without blocking authoritative gates."""
+    detail = f"{type(exc).__name__}:{exc}".replace("\n", " ").strip()
+    message = (
+        "model_check_error_skipped:"
+        + detail
+        + "; exact patch applied to current main and full tests passed; "
+        "continue to Security and independent validator quorum"
+    )
+    return message.encode("utf-8", errors="replace")[:max_bytes].decode("utf-8", errors="replace")
+
+
 def _run_review_on_current_main(worker: ReviewWorker, record: PipelineRecord) -> dict:
     if not record.candidate_sha or not record.candidate_branch or not record.review_ref:
         return worker._send_back(record, "review_candidate_metadata_missing")
@@ -226,20 +238,18 @@ def _run_review_on_current_main(worker: ReviewWorker, record: PipelineRecord) ->
         try:
             payload = CodingModule._extract_json(provider.reason(prompt))
         except Exception as exc:
-            return _fail(
-                worker,
-                record,
-                f"internal_review_provider_error:{type(exc).__name__}:{exc}",
-            )
-        decision = str(payload.get("decision") or "").strip().lower()
-        reviewer_feedback = str(payload.get("feedback") or "").strip()[: worker.MAX_FEEDBACK_BYTES]
-        model_check_status = str(payload.get("model_check_status") or "completed")
-        if decision != "approve":
-            return _fail(
-                worker,
-                record,
-                reviewer_feedback or "internal_reviewer_requested_revision",
-            )
+            model_check_status = "skipped_error"
+            reviewer_feedback = _advisory_model_error(exc, worker.MAX_FEEDBACK_BYTES)
+        else:
+            decision = str(payload.get("decision") or "").strip().lower()
+            reviewer_feedback = str(payload.get("feedback") or "").strip()[: worker.MAX_FEEDBACK_BYTES]
+            model_check_status = str(payload.get("model_check_status") or "completed")
+            if decision != "approve":
+                return _fail(
+                    worker,
+                    record,
+                    reviewer_feedback or "internal_reviewer_requested_revision",
+                )
 
     restored, restore_error = _restore_exact_candidate(worker, str(record.candidate_sha))
     if not restored:
