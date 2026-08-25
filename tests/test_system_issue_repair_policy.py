@@ -52,8 +52,10 @@ def test_requested_system_issue_can_ground_in_privileged_script_and_test(tmp_pat
 
     grounded = _ground_requested_issue_context(module, objective, context)
 
-    assert grounded[0] == "scripts/github_issue_autorepair.py"
-    assert "tests/test_github_issue_autorepair.py" in grounded
+    assert grounded == [
+        "scripts/github_issue_autorepair.py",
+        "tests/test_github_issue_autorepair.py",
+    ]
     assert context == grounded
 
 
