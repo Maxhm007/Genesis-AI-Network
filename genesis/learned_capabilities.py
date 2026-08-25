@@ -152,4 +152,6 @@ def learned_8b7a22c14b8a383e(self):
     # Your implementation here
     pass
 
+pass
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
