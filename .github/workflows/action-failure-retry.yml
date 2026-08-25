@@ -1,0 +1,30 @@
+name: Genesis Action Failure Retry
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '4,14,24,34,44,54 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+concurrency:
+  group: genesis-action-failure-retry
+  cancel-in-progress: false
+
+jobs:
+  retry:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Retry one first-attempt failure once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/action_failure_watchdog.py --repository "$GITHUB_REPOSITORY" --retry-once
