@@ -147,4 +147,4 @@ def test_publish_discovery_opens_authorized_issue_when_new():
     assert len(calls) == 2
     create_args = calls[1]
     assert "genesis-autonomous" in create_args
-    assert "Genesis discovered:" in create_args
+    assert any(str(arg).startswith("Genesis discovered:") for arg in create_args)
