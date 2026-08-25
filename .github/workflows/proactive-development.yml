@@ -30,6 +30,8 @@ on:
       - 'genesis/security.py'
       - 'genesis/coding.py'
       - 'genesis/autonomous_engineering.py'
+      - 'genesis/efficient_engineering.py'
+      - 'genesis/provider_fallback.py'
       - 'genesis/core_vitality.py'
       - 'genesis/modules/**'
       - 'genesis/devlab/**'
@@ -85,8 +87,9 @@ permissions:
 env:
   PYTHONPATH: ${{ github.workspace }}
   GENESIS_PROVIDER_URL: http://127.0.0.1:8766
-  GENESIS_PROVIDER_NAME: qwen3-0.6b-local
-  GENESIS_PROVIDER_TIMEOUT_SECONDS: '180'
+  GENESIS_PROVIDER_NAME: qwen3-1.7b-proactive
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '240'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '768'
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
   GENESIS_EMAIL_FROM: ${{ secrets.GENESIS_EMAIL_FROM }}
@@ -101,7 +104,7 @@ concurrency:
 jobs:
   develop:
     runs-on: ubuntu-latest
-    timeout-minutes: 35
+    timeout-minutes: 45
     outputs:
       has_candidate: ${{ steps.candidate.outputs.has_candidate }}
       candidate_branch: ${{ steps.candidate.outputs.candidate_branch }}
@@ -127,7 +130,7 @@ jobs:
           path: |
             ~/.cache/huggingface
             ~/.cache/pip
-          key: genesis-qwen3-0.6b-${{ runner.os }}-py312-v1
+          key: genesis-qwen3-1.7b-${{ runner.os }}-py312-v1
       - run: pip install -r requirements.txt
       - name: Verify stable baseline
         run: python -m pytest -q
@@ -140,9 +143,9 @@ jobs:
       - name: Start validated reasoning provider
         shell: bash
         run: |
-          nohup python scripts/local_reasoning_provider.py --host 127.0.0.1 --port 8766 > /tmp/genesis-reasoning.log 2>&1 &
+          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen3-1.7B --host 127.0.0.1 --port 8766 --max-new-tokens 768 > /tmp/genesis-reasoning.log 2>&1 &
           ready=false
-          for i in {1..60}; do
+          for i in {1..120}; do
             if python - <<'PY'
           import urllib.request
           try:
