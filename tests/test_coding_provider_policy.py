@@ -7,6 +7,7 @@ from genesis.coding_provider_policy import (
     CODING_ROLE,
     MAX_BOUNDED_EDITS,
     TRANSPORT_CODING_ROLE,
+    _ground_issue_context_paths,
     _transport_prompt,
 )
 from genesis.providers import GenesisHTTPProvider, ProviderRegistry, _reasoning_token_budget
@@ -27,6 +28,12 @@ class TwoEditHTTPProvider(GenesisHTTPProvider):
             '{"path":"genesis/example.py","old":"B = 2","new":"B = 3"}'
             ']}'
         )
+
+
+def _write(tmp_path: Path, relative: str, text: str) -> None:
+    target = tmp_path / relative
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text(text, encoding="utf-8")
 
 
 def test_coding_transport_role_uses_configured_provider_budget() -> None:
@@ -67,3 +74,55 @@ def test_http_repair_lane_allows_two_related_edits_without_widening_default(tmp_
     assert MAX_BOUNDED_EDITS == 2
     assert CodingModule.MAX_EDITS == 1
     assert "MAX_EDITS" not in module.__dict__
+
+
+def test_historical_file_mention_does_not_override_requested_system_improvement(tmp_path: Path) -> None:
+    _write(tmp_path, "genesis/budget.py", "class CycleBudget:\n    pass\n")
+    _write(
+        tmp_path,
+        "genesis/semantic_validation.py",
+        "def verify_issue_satisfaction(candidate, acceptance, evidence):\n"
+        "    # reject semantic no-op candidate changes without acceptance evidence\n"
+        "    return candidate and acceptance and evidence\n",
+    )
+    module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
+    context = ["genesis/budget.py"]
+    objective = (
+        "Resolve exactly the described software defect.\n"
+        "ISSUE_EVIDENCE:\n"
+        "TITLE: Autorepair can promote semantic no-op fixes\n"
+        "BODY:\n"
+        "A previous failure changed `genesis/budget.py` but did not solve the reported defect.\n\n"
+        "Required system improvement:\n"
+        "- require semantic issue satisfaction and issue-specific acceptance evidence;\n"
+        "- reject no-op candidates before promotion.\n"
+    )
+
+    grounded = _ground_issue_context_paths(module, objective, context)
+
+    assert grounded[0] == "genesis/semantic_validation.py"
+    assert context[0] == "genesis/semantic_validation.py"
+
+
+def test_explicit_path_in_requested_fix_remains_highest_priority(tmp_path: Path) -> None:
+    _write(tmp_path, "genesis/alpha.py", "def repair_alpha():\n    return False\n")
+    _write(
+        tmp_path,
+        "genesis/semantic_validation.py",
+        "def verify_issue_satisfaction(candidate, acceptance):\n    return candidate and acceptance\n",
+    )
+    module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
+    context = ["genesis/semantic_validation.py"]
+    objective = (
+        "ISSUE_EVIDENCE:\n"
+        "TITLE: Alpha repair is wrong\n"
+        "BODY:\n"
+        "Historical diagnostics mention semantic validation.\n\n"
+        "Required fix:\n"
+        "Update `genesis/alpha.py` so the alpha repair returns the correct result.\n"
+    )
+
+    grounded = _ground_issue_context_paths(module, objective, context)
+
+    assert grounded[0] == "genesis/alpha.py"
+    assert context[0] == "genesis/alpha.py"
