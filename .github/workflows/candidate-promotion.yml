@@ -192,8 +192,23 @@ jobs:
           name: candidate-validator-b
           path: validator-b.json
 
+  secret_guard:
+    needs: prepare
+    if: needs.prepare.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Scan exact staged candidate and reachable history for secrets
+        run: python scripts/secret_guard.py --history
+
   promote:
-    needs: [prepare, validator_a, validator_b]
+    needs: [prepare, validator_a, validator_b, secret_guard]
     if: needs.prepare.outputs.has_candidate == 'true'
     runs-on: ubuntu-latest
     steps:
