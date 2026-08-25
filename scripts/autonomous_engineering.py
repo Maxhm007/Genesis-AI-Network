@@ -38,6 +38,7 @@ EXTERNAL_BLOCKER_PHRASES = (
     "remaining work is **not ordinary coding**",
 )
 MAX_GENERIC_GENERATIONS = 8
+MAX_DEVLAB_GENERATIONS = 8
 ACTIVE_TASK_STATES = {"new", "assigned", "running", "paused", "blocked", "review", "failed"}
 
 
@@ -171,6 +172,25 @@ def _existing_issue_tasks(queue: PersistentTaskQueue, issue_number: int, task_ty
     return rows
 
 
+def _task_is_active(queue: PersistentTaskQueue, task) -> bool:
+    """Return whether an existing issue task still has a usable execution path."""
+    if task.state not in ACTIVE_TASK_STATES:
+        return False
+    if task.state == "failed" and not queue.retryable(task):
+        return False
+    return True
+
+
+def _next_generation(queue: PersistentTaskQueue, issue_number: int, task_type: str) -> tuple[object | None, int]:
+    existing = _existing_issue_tasks(queue, issue_number, task_type)
+    if not existing:
+        return None, 1
+    latest = existing[-1]
+    if _task_is_active(queue, latest):
+        return latest, int(latest.payload.get("work_generation") or 1)
+    return None, int(latest.payload.get("work_generation") or 1) + 1
+
+
 def _queue_devlab_issue(root: Path, queue: PersistentTaskQueue, issue: dict, classification: dict) -> tuple[str | None, str]:
     number = int(issue.get("number") or 0)
     body = str(issue.get("body") or "")
@@ -185,6 +205,12 @@ def _queue_devlab_issue(root: Path, queue: PersistentTaskQueue, issue: dict, cla
     if not target_path.is_file():
         return None, "devlab_target_missing"
 
+    active, generation = _next_generation(queue, number, "devlab_issue")
+    if active is not None:
+        return active.task_id, f"existing_{active.state}"
+    if generation > MAX_DEVLAB_GENERATIONS:
+        return None, "generation_budget_exhausted"
+
     module_id = str(classification.get("module_id") or "genesis.coding")
     title = str(issue.get("title") or "").strip()
     objective = (
@@ -193,7 +219,7 @@ def _queue_devlab_issue(root: Path, queue: PersistentTaskQueue, issue: dict, cla
         f"{body[:8000]}"
     )
     task, created = queue.create_unique(
-        f"github-devlab-issue:{number}",
+        f"github-devlab-issue:{number}:generation:{generation}",
         objective,
         module_id=module_id,
         priority=95,
@@ -209,6 +235,7 @@ def _queue_devlab_issue(root: Path, queue: PersistentTaskQueue, issue: dict, cla
             "source": "owner_marked_github_issue",
             "attribution": "owner_initiated",
             "golden_path": True,
+            "work_generation": generation,
             "close_github_issue_after_promotion": True,
         },
     )
@@ -217,20 +244,9 @@ def _queue_devlab_issue(root: Path, queue: PersistentTaskQueue, issue: dict, cla
 
 def _queue_generic_issue(queue: PersistentTaskQueue, issue: dict, classification: dict) -> tuple[str | None, str]:
     number = int(issue.get("number") or 0)
-    existing = _existing_issue_tasks(queue, number, "github_issue_development")
-    if existing:
-        latest = existing[-1]
-        if latest.state in ACTIVE_TASK_STATES:
-            return latest.task_id, f"existing_{latest.state}"
-        if latest.state == "complete":
-            generation = int(latest.payload.get("work_generation") or 1) + 1
-        elif latest.state in {"quarantined", "cancelled"}:
-            generation = int(latest.payload.get("work_generation") or 1) + 1
-        else:
-            return latest.task_id, f"existing_{latest.state}"
-    else:
-        generation = 1
-
+    active, generation = _next_generation(queue, number, "github_issue_development")
+    if active is not None:
+        return active.task_id, f"existing_{active.state}"
     if generation > MAX_GENERIC_GENERATIONS:
         return None, "generation_budget_exhausted"
 
@@ -300,7 +316,8 @@ def ingest_open_issue_backlog(root: Path) -> dict:
         "issues": rows,
         "policy": (
             "Every open issue must have an owning lane: specialist repair, persistent engineering, "
-            "tracked external blocker, or intentional persistent channel."
+            "tracked external blocker, or intentional persistent channel. Exhausted engineering tasks "
+            "receive a bounded new generation while the originating issue remains open."
         ),
     }
 
