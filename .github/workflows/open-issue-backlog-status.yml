@@ -134,7 +134,6 @@ jobs:
           marker="<!-- genesis-backlog-progress:$candidate -->"
           existing=$(gh issue view "$issue" --repo "$GITHUB_REPOSITORY" --json comments --jq '.comments[].body' | grep -F "$marker" || true)
           if [[ -z "$existing" ]]; then
-            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "$marker
-
-Genesis promoted validated backlog work generation ${generation:-unknown} at exact candidate SHA \`$candidate\`. This broader issue remains open; a later Genesis cycle will continue it until completion is demonstrably satisfied."
+            printf -v message '%s\n\n%s' "$marker" "Genesis promoted validated backlog work generation ${generation:-unknown} at exact candidate SHA \`$candidate\`. This broader issue remains open; a later Genesis cycle will continue it until completion is demonstrably satisfied."
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "$message"
           fi
