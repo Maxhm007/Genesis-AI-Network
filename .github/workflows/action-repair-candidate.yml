@@ -1,0 +1,111 @@
+name: Genesis Action Repair Candidate
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Optional Genesis Action issue number
+        required: false
+        default: ''
+  schedule:
+    - cron: '6,16,26,36,46,56 * * * *'
+
+permissions:
+  actions: read
+  contents: write
+  issues: read
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8768
+  GENESIS_PROVIDER_NAME: qwen3-1.7b-action-autorepair
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '240'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '1024'
+  HF_HOME: ~/.cache/huggingface
+  PIP_CACHE_DIR: ~/.cache/pip
+
+concurrency:
+  group: genesis-action-repair-candidate
+  cancel-in-progress: false
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Verify stable baseline
+        run: python -m pytest -q
+      - name: Resolve one authorized Action issue
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          n="$REQUESTED"
+          if [[ -z "$n" ]]; then
+            n=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label genesis-action-autonomous --limit 1 --json number --jq '.[0].number // empty')
+          fi
+          [[ -z "$n" || "$n" =~ ^[0-9]+$ ]]
+          echo "issue_number=$n" >> "$GITHUB_OUTPUT"
+      - name: Restore open-model caches
+        if: steps.issue.outputs.issue_number != ''
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/pip
+          key: genesis-qwen3-1.7b-${{ runner.os }}-py312-v1
+          restore-keys: |
+            genesis-qwen3-1.7b-${{ runner.os }}-py312-
+      - name: Install local repair intelligence
+        if: steps.issue.outputs.issue_number != ''
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors
+      - name: Start Genesis Action repair provider
+        if: steps.issue.outputs.issue_number != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen3-1.7B --host 127.0.0.1 --port 8768 --max-new-tokens 1024 > /tmp/genesis-action-repair.log 2>&1 &
+          ready=false
+          for i in {1..120}; do
+            python - <<'PY' && ready=true && break || true
+          import urllib.request
+          with urllib.request.urlopen('http://127.0.0.1:8768/health', timeout=2) as response:
+              raise SystemExit(0 if response.status == 200 else 1)
+          PY
+            sleep 2
+          done
+          [[ "$ready" == true ]] || { cat /tmp/genesis-action-repair.log || true; exit 1; }
+      - name: Configure Genesis Git identity
+        if: steps.issue.outputs.issue_number != ''
+        run: |
+          git config user.name "Genesis AI"
+          git config user.email "genesis-ai@users.noreply.github.com"
+      - name: Let Genesis create one privileged Action repair candidate
+        if: steps.issue.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/action_issue_autorepair.py --issue-number '${{ steps.issue.outputs.issue_number }}' --repository "$GITHUB_REPOSITORY"
+      - name: Preserve Action candidate handoff
+        if: always() && steps.issue.outputs.issue_number != ''
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-action-repair-candidate-${{ github.run_id }}
+          path: |
+            runtime/action_repair_candidate.json
+            /tmp/genesis-action-repair.log
+          if-no-files-found: ignore
+          retention-days: 30

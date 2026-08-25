@@ -1,0 +1,232 @@
+name: Genesis Action Repair Privileged Recovery
+
+on:
+  workflow_run:
+    workflows: ["Genesis Action Repair Candidate"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: write
+  issues: read
+
+concurrency:
+  group: genesis-action-repair-privileged-recovery
+  cancel-in-progress: false
+
+jobs:
+  resolve:
+    if: github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    outputs:
+      has_candidate: ${{ steps.resolve.outputs.has_candidate }}
+      issue_number: ${{ steps.resolve.outputs.issue_number }}
+      candidate_branch: ${{ steps.resolve.outputs.candidate_branch }}
+      candidate_sha: ${{ steps.resolve.outputs.candidate_sha }}
+      workflow_id: ${{ steps.resolve.outputs.workflow_id }}
+      workflow_path: ${{ steps.resolve.outputs.workflow_path }}
+      repair_cycles: ${{ steps.resolve.outputs.repair_cycles }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/download-artifact@v4
+        with:
+          name: genesis-action-repair-candidate-${{ github.event.workflow_run.id }}
+          path: handoff
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Resolve exact privileged candidate
+        id: resolve
+        shell: bash
+        run: |
+          python - <<'PY' >> "$GITHUB_OUTPUT"
+          import json
+          import subprocess
+          from pathlib import Path
+          payload = json.loads(Path('handoff/runtime/action_repair_candidate.json').read_text(encoding='utf-8'))
+          ok = payload.get('status') == 'candidate_created'
+          branch = str(payload.get('candidate_branch') or '')
+          sha = str(payload.get('candidate_sha') or '')
+          if ok and (not branch.startswith('genesis/privileged-candidate-') or len(sha) != 40):
+              raise SystemExit('invalid privileged Action candidate handoff')
+          if ok:
+              subprocess.run(['git', 'fetch', 'origin', 'main', branch], check=True)
+              actual = subprocess.check_output(['git', 'rev-parse', f'origin/{branch}'], text=True).strip()
+              if actual != sha:
+                  raise SystemExit('candidate branch head changed after generation')
+          print(f"has_candidate={'true' if ok else 'false'}")
+          print(f"issue_number={int(payload.get('issue_number') or 0)}")
+          print(f"candidate_branch={branch if ok else ''}")
+          print(f"candidate_sha={sha if ok else ''}")
+          print(f"workflow_id={int(payload.get('workflow_id') or 0)}")
+          print(f"workflow_path={str(payload.get('workflow_path') or '')}")
+          print(f"repair_cycles={int(payload.get('repair_cycles') or 0)}")
+          PY
+
+  validator_a:
+    needs: resolve
+    if: needs.resolve.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite A
+        run: python -m pytest -q
+      - name: Privileged Action boundary A
+        run: |
+          git fetch origin main
+          python scripts/action_repair_guard.py origin/main
+      - name: Security review A
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('origin/main')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
+      - name: Sign Action validator A approval
+        run: python genesis/ephemeral_validator.py --validator-id action-repair-validator-a --candidate ${{ needs.resolve.outputs.candidate_sha }} --output validator-a.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: action-repair-validator-a-${{ github.run_id }}
+          path: validator-a.json
+
+  validator_b:
+    needs: resolve
+    if: needs.resolve.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite B
+        run: python -m pytest -q
+      - name: Privileged Action boundary B
+        run: |
+          git fetch origin main
+          python scripts/action_repair_guard.py origin/main
+      - name: Security review B
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('origin/main')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
+      - name: Sign Action validator B approval
+        run: python genesis/ephemeral_validator.py --validator-id action-repair-validator-b --candidate ${{ needs.resolve.outputs.candidate_sha }} --output validator-b.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: action-repair-validator-b-${{ github.run_id }}
+          path: validator-b.json
+
+  secret_guard:
+    needs: resolve
+    if: needs.resolve.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.resolve.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Secret Guard on Action candidate and history
+        run: python scripts/secret_guard.py --history
+
+  promote:
+    needs: [resolve, validator_a, validator_b, secret_guard]
+    if: needs.resolve.outputs.has_candidate == 'true'
+    runs-on: ubuntu-latest
+    outputs:
+      promoted_sha: ${{ steps.promote.outputs.promoted_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: action-repair-validator-a-${{ github.run_id }}
+          path: votes/a
+      - uses: actions/download-artifact@v4
+        with:
+          name: action-repair-validator-b-${{ github.run_id }}
+          path: votes/b
+      - name: Verify independent signed quorum
+        run: python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
+      - name: Promote exact validated Action candidate
+        id: promote
+        env:
+          BRANCH: ${{ needs.resolve.outputs.candidate_branch }}
+          CANDIDATE_SHA: ${{ needs.resolve.outputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          [[ "$BRANCH" == genesis/privileged-candidate-* ]]
+          git fetch origin main "$BRANCH"
+          test "$(git rev-parse origin/$BRANCH)" = "$CANDIDATE_SHA"
+          main_sha=$(git rev-parse origin/main)
+          git merge-base --is-ancestor "$main_sha" "$CANDIDATE_SHA"
+          python scripts/action_repair_guard.py origin/main
+          git push origin "$CANDIDATE_SHA:refs/heads/main"
+          echo "promoted_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
+
+  report:
+    needs: [resolve, validator_a, validator_b, secret_guard, promote]
+    if: always()
+    runs-on: ubuntu-latest
+    steps:
+      - name: Build recovery status handoff
+        shell: bash
+        env:
+          ISSUE_NUMBER: ${{ needs.resolve.outputs.issue_number }}
+          WORKFLOW_ID: ${{ needs.resolve.outputs.workflow_id }}
+          WORKFLOW_PATH: ${{ needs.resolve.outputs.workflow_path }}
+          REPAIR_CYCLES: ${{ needs.resolve.outputs.repair_cycles }}
+          PROMOTED_SHA: ${{ needs.promote.outputs.promoted_sha }}
+          PROMOTE_RESULT: ${{ needs.promote.result }}
+          VALIDATOR_A: ${{ needs.validator_a.result }}
+          VALIDATOR_B: ${{ needs.validator_b.result }}
+          SECRET_GUARD: ${{ needs.secret_guard.result }}
+        run: |
+          mkdir -p runtime
+          python - <<'PY'
+          import json, os
+          success = os.environ.get('PROMOTE_RESULT') == 'success' and bool(os.environ.get('PROMOTED_SHA'))
+          payload = {
+              'status': 'promoted' if success else 'validation_failed',
+              'issue_number': int(os.environ.get('ISSUE_NUMBER') or 0),
+              'workflow_id': int(os.environ.get('WORKFLOW_ID') or 0),
+              'workflow_path': os.environ.get('WORKFLOW_PATH') or '',
+              'repair_cycles': int(os.environ.get('REPAIR_CYCLES') or 0),
+              'promoted_sha': os.environ.get('PROMOTED_SHA') or '',
+              'failure_excerpt': f"validator_a={os.environ.get('VALIDATOR_A')} validator_b={os.environ.get('VALIDATOR_B')} secret_guard={os.environ.get('SECRET_GUARD')} promote={os.environ.get('PROMOTE_RESULT')}",
+          }
+          open('runtime/action_repair_recovery_status.json', 'w', encoding='utf-8').write(json.dumps(payload, indent=2, sort_keys=True) + '\n')
+          PY
+      - uses: actions/upload-artifact@v4
+        with:
+          name: genesis-action-repair-status-${{ github.run_id }}
+          path: runtime/action_repair_recovery_status.json
+          retention-days: 30
