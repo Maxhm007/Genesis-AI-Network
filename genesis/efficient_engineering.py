@@ -14,9 +14,10 @@ from .velocity import AdaptiveVelocityController
 class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
     """Autonomous engineering with one preferred software-development path.
 
-    Explicit DevLab tasks are selected before generic engineering work and retain
-    failure/retry evidence across cycles. All successful candidates still leave
-    DevLab and pass through the existing Security and independent-validator path.
+    Explicit DevLab and managed GitHub issue tasks are selected before generic
+    engineering work and retain failure/retry evidence across cycles. All successful
+    candidates still leave DevLab/Coding and pass through the existing Security and
+    independent-validator path.
     """
 
     MAX_SAFE_BURST = 5
@@ -35,6 +36,13 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
     @staticmethod
     def _is_devlab_task(task) -> bool:
         return str(task.payload.get("executor") or "") == "genesis.devlab"
+
+    @staticmethod
+    def _is_github_backlog_task(task) -> bool:
+        return (
+            int(task.payload.get("github_issue_number") or 0) > 0
+            and str(task.payload.get("task_type") or "") == "github_issue_development"
+        )
 
     def _eligible_task(self, task, attempted: set[str]) -> bool:
         if task.task_id in attempted or task.module_id not in ENGINEERING_MODULES:
@@ -62,6 +70,23 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
                 "score": None,
                 "reason": "golden_path_devlab_priority",
                 "eligible": len(devlab_candidates),
+                "considered": len(candidates),
+            })
+            return task
+
+        # Solve-first backlog policy: a concrete open GitHub issue is user-visible
+        # unresolved work. Do not let recurring model-scout/score/capability tasks
+        # outrank it merely because the efficiency governor has more historical
+        # telemetry for the background task. The issue task remains bounded and
+        # still passes all normal coding, Security, validator and promotion gates.
+        backlog_candidates = [task for task in candidates if self._is_github_backlog_task(task)]
+        if backlog_candidates:
+            task = sorted(backlog_candidates, key=lambda item: (-item.priority, item.created_at, item.task_id))[0]
+            self._selection_trace.append({
+                "selected": task.task_id,
+                "score": None,
+                "reason": "github_issue_backlog_priority",
+                "eligible": len(backlog_candidates),
                 "considered": len(candidates),
             })
             return task
@@ -259,6 +284,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
                 "enabled": True,
                 "path": "task -> DevLab -> candidate -> Security -> Validator A/B -> promotion -> verify -> learn",
                 "devlab_tasks_have_priority": True,
+                "github_issue_backlog_has_priority_over_background_work": True,
                 "failed_methods_persist_across_cycles": True,
             },
             "self_evaluation_memory": {
@@ -267,7 +293,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
                 "max_items": self.SELF_EVALUATION_ITEMS,
                 "principle": "Use validated self-development history as advisory memory; never as self-awarded capability evidence.",
             },
-            "principle": "Prefer completed validated outcomes over workflow activity; recurring background gaps must not starve concrete bounded development work.",
+            "principle": "Prefer completed validated outcomes over workflow activity; concrete open issues must not be starved by recurring background work.",
         }
         runtime = self.root / "runtime"
         (runtime / "autonomous_engineering.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
