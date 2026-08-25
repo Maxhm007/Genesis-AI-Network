@@ -27,3 +27,16 @@ def test_budget_rejects_boolean_values(field, value):
     values[field] = value
     with pytest.raises(ValueError, match="must be an integer"):
         CycleBudget(**values).validate()
+
+
+@pytest.mark.parametrize("field", ("max_research_items", "max_model_candidates", "max_team_tasks"))
+@pytest.mark.parametrize("value", (1.5, "5", None))
+def test_budget_rejects_non_integer_values(field, value):
+    values = {
+        "max_research_items": 5,
+        "max_model_candidates": 10,
+        "max_team_tasks": 8,
+    }
+    values[field] = value
+    with pytest.raises(ValueError, match="must be an integer"):
+        CycleBudget(**values).validate()
