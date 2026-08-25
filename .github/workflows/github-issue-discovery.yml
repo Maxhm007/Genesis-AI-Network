@@ -9,6 +9,7 @@ on:
     paths:
       - '.github/workflows/github-issue-discovery.yml'
       - 'scripts/github_issue_discovery.py'
+      - 'scripts/github_issue_discovery_strict.py'
 
 permissions:
   contents: read
@@ -55,7 +56,7 @@ jobs:
       - run: pip install -r requirements.txt
 
       - name: Verify discovery and publication boundaries
-        run: python -m pytest -q tests/test_issue_discovery_engine.py tests/test_github_issue_discovery.py
+        run: python -m pytest -q tests/test_issue_discovery_engine.py tests/test_github_issue_discovery.py tests/test_github_issue_discovery_strict.py
 
       - name: Install free local discovery intelligence
         run: |
@@ -87,8 +88,8 @@ jobs:
             exit 1
           fi
 
-      - name: Let Genesis discover and publish one grounded issue
-        run: python scripts/github_issue_discovery.py
+      - name: Let Genesis discover and publish one reproduced issue
+        run: python scripts/github_issue_discovery_strict.py
 
       - name: Preserve discovery evidence
         if: always()
@@ -103,6 +104,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-# Issues created here receive genesis-autonomous. GitHub-token issue events are not
-# relied on to chain workflows; the existing autorepair schedule at minute 11
-# consumes the authorized queue after this bounded discovery cycle finishes.
+# Genesis may retain speculative discoveries internally, but GitHub issues become
+# authorized autonomous repair work only after a conventional target test fails
+# deterministically on the current repository state. GitHub-token issue events are
+# not relied on to chain workflows; the existing autorepair schedule at minute 11
+# consumes the verified authorized queue after this bounded discovery cycle finishes.
