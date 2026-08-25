@@ -32,9 +32,12 @@ CONTROL_PLANE_FILES = {
     "genesis/ephemeral_validator.py",
     "genesis/security.py",
     "genesis/selfdev.py",
+    "genesis/issue_solver.py",
     "genesis/file_self_review.py",
     "genesis/file_self_review_policy.py",
 }
+
+IMMUTABLE_IDENTITY_FILES = {"GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"}
 
 STOPWORDS = {
     "about",
@@ -119,6 +122,19 @@ def _explicit_genesis_paths(text: str) -> list[str]:
     return rows
 
 
+def restricted_issue_targets(text: str) -> list[str]:
+    rows: list[str] = []
+    for immutable in IMMUTABLE_IDENTITY_FILES:
+        if immutable in text and immutable not in rows:
+            rows.append(immutable)
+    for raw in re.findall(r"(?:^|[\s`'\"(])((?:\.github|genesis)/[A-Za-z0-9_./-]+(?:\.yml|\.yaml|\.py))", text):
+        normalized = raw.replace("\\", "/").lstrip("./")
+        if normalized.startswith(".github/") or normalized in CONTROL_PLANE_FILES:
+            if normalized not in rows:
+                rows.append(normalized)
+    return rows
+
+
 def candidate_context_paths(issue_text: str, root: Path = ROOT, limit: int = MAX_CONTEXT_FILES) -> list[str]:
     explicit = [
         path
@@ -168,6 +184,8 @@ def allowed_issue_repair_paths(context_paths: list[str]) -> set[str]:
 
 def solve_reported_issue(issue: dict, root: Path = ROOT) -> RepairAttempt:
     issue_text = build_issue_text(issue)
+    safe_explicit = _explicit_genesis_paths(issue_text)
+    restricted = restricted_issue_targets(issue_text)
     context_paths = candidate_context_paths(issue_text, root)
     diagnosis = Diagnosis(
         "github_reported_issue",
@@ -179,6 +197,8 @@ def solve_reported_issue(issue: dict, root: Path = ROOT) -> RepairAttempt:
             + "\n".join(context_paths)
         ),
     )
+    if restricted and not safe_explicit:
+        return RepairAttempt(diagnosis, None, None, "blocked_protected_or_unsupported_target")
     if not context_paths:
         return RepairAttempt(diagnosis, None, None, "blocked_no_safe_context")
 
@@ -262,8 +282,10 @@ def run(issue_number: int, repository: str, root: Path = ROOT) -> dict:
         EVIDENCE_PATH.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return evidence
 
-    context_paths = candidate_context_paths(build_issue_text(issue), root)
+    issue_text = build_issue_text(issue)
+    context_paths = candidate_context_paths(issue_text, root)
     evidence["context_paths"] = context_paths
+    evidence["restricted_targets"] = restricted_issue_targets(issue_text)
     attempt = solve_reported_issue(issue, root)
     evidence["repair_status"] = attempt.status
     evidence["diagnosis"] = {
@@ -305,7 +327,12 @@ def run(issue_number: int, repository: str, root: Path = ROOT) -> dict:
                 issue_number,
                 f"Genesis created candidate `{result.branch}` at `{result.commit_sha[:12]}`. Independent validation, Secret Guard, and exact-SHA promotion are now required before this issue can close.",
             )
-    elif attempt.status in {"blocked_no_safe_context", "repair_rejected_scope", "repair_rejected_test_only"}:
+    elif attempt.status in {
+        "blocked_no_safe_context",
+        "blocked_protected_or_unsupported_target",
+        "repair_rejected_scope",
+        "repair_rejected_test_only",
+    }:
         evidence.update({"status": "blocked", "reason": attempt.status})
         _set_labels(
             repository,
