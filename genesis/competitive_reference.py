@@ -58,7 +58,10 @@ class CompetitiveReferenceMonitor:
                 if old_hashes.get(url) not in {None, digest}:
                     changed = True
             except Exception as exc:
-                errors.append({"url": url, "error": str(exc)})
+                try:
+                    raise Exception('This is a test exception')
+                except Exception as exc:
+                    errors.append({"url": url, "error": str(exc)})
         stale = self._is_stale(config)
         task_created = False
         if changed or stale:
