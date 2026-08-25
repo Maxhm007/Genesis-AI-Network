@@ -91,15 +91,48 @@ jobs:
             exit 0
           fi
 
-          git fetch origin "$branch"
+          git fetch origin main "$branch"
           if git merge-base --is-ancestor "origin/$branch" origin/main; then
             echo 'Candidate is already represented in main.'
             exit 0
           fi
 
-          gh pr create \
+          set +e
+          pr_output=$(gh pr create \
             --repo "$GITHUB_REPOSITORY" \
             --head "$branch" \
             --base main \
             --title "Genesis autonomous candidate: $branch" \
-            --body "Autonomous Genesis candidate. Promotion requires the Genesis Candidate PR Gate: two independent full-test + Security validators, signed quorum verification, protected-boundary verification, and exact-head merge."
+            --body "Autonomous Genesis candidate. Promotion requires the Genesis Candidate PR Gate: two independent full-test + Security validators, signed quorum verification, protected-boundary verification, and exact-head merge." 2>&1)
+          pr_status=$?
+          set -e
+          if [[ "$pr_status" -eq 0 ]]; then
+            printf '%s\n' "$pr_output"
+            exit 0
+          fi
+
+          policy_error='GitHub Actions is not permitted to create or approve pull requests'
+          if ! grep -Fq "$policy_error" <<<"$pr_output"; then
+            printf '%s\n' "$pr_output" >&2
+            exit "$pr_status"
+          fi
+
+          candidate=$(git rev-parse "origin/$branch")
+          approval_ref="genesis/approved-${candidate}"
+          if git ls-remote --exit-code --heads origin "$approval_ref" >/dev/null 2>&1; then
+            echo 'Repository policy blocks Action-created PRs, but this exact candidate already has an internal-review approval ref.'
+            echo 'Deferring to Genesis Candidate Promotion, which independently revalidates the exact staged candidate before main.'
+            exit 0
+          fi
+
+          main_sha=$(git rev-parse origin/main)
+          base=$(git merge-base "$main_sha" "$candidate")
+          if [[ "$base" != "$main_sha" ]]; then
+            echo 'Repository policy blocks Action-created PRs and this candidate is stale and unapproved.'
+            echo 'Retiring this handoff for regeneration instead of bypassing review or replaying a stale candidate.'
+            exit 0
+          fi
+
+          printf '%s\n' "$pr_output" >&2
+          echo 'Current unapproved candidate cannot safely fall back without a PR or exact internal-review approval.' >&2
+          exit "$pr_status"
