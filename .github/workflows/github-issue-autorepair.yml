@@ -47,10 +47,16 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh label create genesis-autonomous --repo "$GITHUB_REPOSITORY" --color 1f883d --description 'Authorized for Genesis autonomous repair' --force
-          gh label create genesis-validating --repo "$GITHUB_REPOSITORY" --color 0969da --description 'Genesis candidate is under independent validation' --force
-          gh label create genesis-blocked --repo "$GITHUB_REPOSITORY" --color d1242f --description 'Genesis safely blocked this issue pending narrower context or review' --force
-          gh label create genesis-solved --repo "$GITHUB_REPOSITORY" --color 8250df --description 'Solved through validated Genesis autonomous repair' --force
+          ensure_label() {
+            local name="$1" color="$2" description="$3"
+            if ! gh label list --repo "$GITHUB_REPOSITORY" --limit 100 --json name --jq '.[].name' | grep -Fxq "$name"; then
+              gh label create "$name" --repo "$GITHUB_REPOSITORY" --color "$color" --description "$description"
+            fi
+          }
+          ensure_label genesis-autonomous 1f883d 'Authorized for Genesis autonomous repair'
+          ensure_label genesis-validating 0969da 'Genesis candidate is under independent validation'
+          ensure_label genesis-blocked d1242f 'Genesis safely blocked this issue pending narrower context or review'
+          ensure_label genesis-solved 8250df 'Solved through validated Genesis autonomous repair'
 
   solve:
     if: github.event_name != 'push' && (github.event_name != 'issues' || github.event.label.name == 'genesis-autonomous')
@@ -66,11 +72,9 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-
       - name: Resolve one authorized open issue
         id: issue
         env:
@@ -91,20 +95,13 @@ jobs:
             exit 1
           fi
           echo "issue_number=$n" >> "$GITHUB_OUTPUT"
-          if [[ -z "$n" ]]; then
-            echo 'No authorized Genesis issue is queued.'
-          else
-            echo "Genesis selected issue #$n"
-          fi
-
+          [[ -n "$n" ]] && echo "Genesis selected issue #$n" || echo 'No authorized Genesis issue is queued.'
       - name: Install repository dependencies
         if: steps.issue.outputs.issue_number != ''
         run: pip install -r requirements.txt
-
       - name: Verify stable baseline
         if: steps.issue.outputs.issue_number != ''
         run: python -m pytest -q
-
       - name: Restore open-model caches
         if: steps.issue.outputs.issue_number != ''
         uses: actions/cache@v4
@@ -115,14 +112,12 @@ jobs:
           key: genesis-qwen3-1.7b-${{ runner.os }}-py312-v1
           restore-keys: |
             genesis-qwen3-1.7b-${{ runner.os }}-py312-
-
       - name: Install free local repair intelligence
         if: steps.issue.outputs.issue_number != ''
         run: |
           python -m pip install --upgrade pip
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install 'transformers>=4.51,<5' safetensors
-
       - name: Start Genesis issue-repair provider
         if: steps.issue.outputs.issue_number != ''
         shell: bash
@@ -149,19 +144,16 @@ jobs:
             cat /tmp/genesis-github-issue-autorepair.log || true
             exit 1
           fi
-
       - name: Configure Genesis Git identity
         if: steps.issue.outputs.issue_number != ''
         run: |
           git config user.name "Genesis AI"
           git config user.email "genesis-ai@users.noreply.github.com"
-
       - name: Let Genesis solve the selected GitHub issue
         if: steps.issue.outputs.issue_number != ''
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/github_issue_autorepair.py --issue-number '${{ steps.issue.outputs.issue_number }}' --repository "$GITHUB_REPOSITORY"
-
       - name: Resolve generated candidate
         id: candidate
         if: always() && steps.issue.outputs.issue_number != ''
@@ -170,7 +162,6 @@ jobs:
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           from pathlib import Path
-
           path = Path('runtime/github_issue_autorepair.json')
           if not path.is_file():
               print('has_candidate=false')
@@ -185,7 +176,6 @@ jobs:
           print(f'candidate_branch={branch if valid else ""}')
           print(f'candidate_sha={sha if valid else ""}')
           PY
-
       - name: Preserve issue repair evidence
         if: always() && steps.issue.outputs.issue_number != ''
         uses: actions/upload-artifact@v4
