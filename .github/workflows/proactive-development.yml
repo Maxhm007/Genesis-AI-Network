@@ -104,7 +104,7 @@ concurrency:
 jobs:
   develop:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 35
     outputs:
       has_candidate: ${{ steps.candidate.outputs.has_candidate }}
       candidate_branch: ${{ steps.candidate.outputs.candidate_branch }}
