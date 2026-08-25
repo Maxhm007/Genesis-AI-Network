@@ -46,3 +46,30 @@ def test_candidate_promotion_revalidates_rebased_candidate_before_main() -> None
     assert 'git merge-base --is-ancestor "$main_sha" "$candidate"' in workflow
     assert 'git push origin "$candidate:refs/heads/main"' in workflow
     assert 'git push origin --delete "$approval" || true' in workflow
+
+
+def test_candidate_promotion_requires_secret_guard_before_main() -> None:
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "candidate-promotion.yml").read_text(encoding="utf-8")
+
+    assert "\n  secret_guard:\n" in workflow
+    assert "Scan exact staged candidate and reachable history for secrets" in workflow
+    assert "python scripts/secret_guard.py --history" in workflow
+    assert "needs: [prepare, validator_a, validator_b, secret_guard]" in workflow
+
+
+def test_candidate_pr_opener_fails_closed_or_uses_existing_guarded_fallback() -> None:
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github" / "workflows" / "candidate-pr-opener.yml").read_text(encoding="utf-8")
+
+    assert "GitHub Actions is not permitted to create or approve pull requests" in workflow
+    assert 'approval_ref="genesis/approved-${candidate}"' in workflow
+    assert 'git ls-remote --exit-code --heads origin "$approval_ref"' in workflow
+    assert "Deferring to Genesis Candidate Promotion" in workflow
+    assert 'base=$(git merge-base "$main_sha" "$candidate")' in workflow
+    assert "this candidate is stale and unapproved" in workflow
+    assert "Retiring this handoff for regeneration instead of bypassing review" in workflow
+    assert "Current unapproved candidate cannot safely fall back" in workflow
+    assert 'exit "$pr_status"' in workflow
+    assert "contents: read" in workflow
+    assert "contents: write" not in workflow
