@@ -19,6 +19,7 @@ _ORIGINAL_HTTP_REASON = GenesisHTTPProvider.reason
 _ORIGINAL_CODING_PROPOSE = CodingModule.propose
 
 ISSUE_EVIDENCE_MARKER = "ISSUE_EVIDENCE:"
+REPAIR_MEMORY_MARKER = "PRIOR_VALIDATION_EVIDENCE:"
 REQUEST_HEADING_RE = re.compile(
     r"(?im)^(?:#{1,6}\s*)?(?:required(?:\s+system)?\s+(?:improvement|fix|change)|requirements?|acceptance(?:\s+criteria)?|expected(?:\s+behavior)?|requested\s+change|remediation|fix)\s*:?\s*$"
 )
@@ -155,8 +156,16 @@ def _grounding_tokens(text: str) -> set[str]:
 
 
 def _request_focus_text(issue_evidence: str) -> str:
-    """Prefer the requested outcome over historical examples in an issue body."""
+    """Prefer the requested outcome over historical examples and repair memory.
+
+    Validation feedback is appended after the issue evidence so the coding model can
+    revise a rejected patch. It must not participate in repository target ranking,
+    otherwise repeated failed edits can drag future attempts back to the same wrong
+    file even when the issue's requested outcome points elsewhere.
+    """
     text = str(issue_evidence)
+    if REPAIR_MEMORY_MARKER in text:
+        text = text.split(REPAIR_MEMORY_MARKER, 1)[0]
     title = ""
     for line in text.splitlines()[:4]:
         if line.startswith("TITLE:"):
