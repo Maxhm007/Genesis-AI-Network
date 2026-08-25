@@ -1,0 +1,108 @@
+name: Genesis GitHub Issue Discovery
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '19 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/github-issue-discovery.yml'
+      - 'scripts/github_issue_discovery.py'
+
+permissions:
+  contents: read
+  issues: write
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8767
+  GENESIS_PROVIDER_NAME: qwen3-1.7b-github-issue-discovery
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '240'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '768'
+  HF_HOME: ~/.cache/huggingface
+  PIP_CACHE_DIR: ~/.cache/pip
+  GH_TOKEN: ${{ github.token }}
+
+concurrency:
+  group: genesis-github-issue-discovery
+  cancel-in-progress: false
+
+jobs:
+  discover:
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Restore open-model caches
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/pip
+          key: genesis-qwen3-1.7b-${{ runner.os }}-py312-v1
+          restore-keys: |
+            genesis-qwen3-1.7b-${{ runner.os }}-py312-
+
+      - run: pip install -r requirements.txt
+
+      - name: Verify discovery and publication boundaries
+        run: python -m pytest -q tests/test_issue_discovery_engine.py tests/test_github_issue_discovery.py
+
+      - name: Install free local discovery intelligence
+        run: |
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors
+
+      - name: Start Genesis discovery provider
+        shell: bash
+        run: |
+          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen3-1.7B --host 127.0.0.1 --port 8767 --max-new-tokens 768 > /tmp/genesis-github-issue-discovery.log 2>&1 &
+          ready=false
+          for i in {1..120}; do
+            if python - <<'PY'
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:8767/health', timeout=2) as response:
+                  raise SystemExit(0 if response.status == 200 else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ready" != true ]]; then
+            cat /tmp/genesis-github-issue-discovery.log || true
+            exit 1
+          fi
+
+      - name: Let Genesis discover and publish one grounded issue
+        run: python scripts/github_issue_discovery.py
+
+      - name: Preserve discovery evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-github-issue-discovery-${{ github.run_id }}
+          path: |
+            runtime/github_issue_discovery.json
+            runtime/discovery/last_result.json
+            runtime/discovery/history.jsonl
+            /tmp/genesis-github-issue-discovery.log
+          if-no-files-found: ignore
+          retention-days: 30
+
+# Issues created here receive genesis-autonomous. GitHub-token issue events are not
+# relied on to chain workflows; the existing autorepair schedule at minute 11
+# consumes the authorized queue after this bounded discovery cycle finishes.
