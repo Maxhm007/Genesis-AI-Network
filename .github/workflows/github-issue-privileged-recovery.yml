@@ -4,6 +4,9 @@ on:
   push:
     branches:
       - 'genesis/privileged-candidate-*'
+  workflow_run:
+    workflows: ['Genesis GitHub Issue Autorepair']
+    types: [completed]
   workflow_dispatch:
     inputs:
       candidate_branch:
@@ -45,6 +48,29 @@ jobs:
           branch=''
           if [[ '${{ github.event_name }}' == 'push' ]]; then
             branch='${{ github.ref_name }}'
+          elif [[ '${{ github.event_name }}' == 'workflow_run' ]]; then
+            run_id='${{ github.event.workflow_run.id }}'
+            workdir=$(mktemp -d)
+            if gh run download "$run_id" --repo "$GITHUB_REPOSITORY" --name "genesis-github-issue-autorepair-$run_id" --dir "$workdir"; then
+              branch=$(python - "$workdir" <<'PY'
+          import json
+          import sys
+          from pathlib import Path
+
+          root = Path(sys.argv[1])
+          for path in sorted(root.rglob('github_issue_autorepair.json')):
+              try:
+                  payload = json.loads(path.read_text(encoding='utf-8'))
+              except Exception:
+                  continue
+              branch = str(payload.get('candidate_branch') or '').strip()
+              status = str(payload.get('status') or '').strip()
+              if status == 'candidate_created' and branch.startswith('genesis/privileged-candidate-'):
+                  print(branch)
+                  break
+          PY
+              )
+            fi
           else
             branch="$REQUESTED"
           fi
