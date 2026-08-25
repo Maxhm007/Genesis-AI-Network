@@ -111,5 +111,6 @@ def test_issue_repair_reuses_bounded_compact_coding_contract(tmp_path: Path):
 
     assert "ROLE: bounded_coding_engineer" in provider.prompt
     assert "TASK: Make exactly ONE smallest useful edit" in provider.prompt
-    assert "VALID_PATHS: genesis/alpha.py" in provider.prompt
+    assert "VALID_PATHS:" in provider.prompt
+    assert '"genesis/alpha.py"' in provider.prompt
     assert proposal.files == {"genesis/alpha.py": "VALUE = 2\n"}
