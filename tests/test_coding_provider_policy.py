@@ -8,6 +8,7 @@ from genesis.coding_provider_policy import (
     MAX_BOUNDED_EDITS,
     TRANSPORT_CODING_ROLE,
     _ground_issue_context_paths,
+    _request_focus_text,
     _transport_prompt,
 )
 from genesis.providers import GenesisHTTPProvider, ProviderRegistry, _reasoning_token_budget
@@ -76,6 +77,22 @@ def test_http_repair_lane_allows_two_related_edits_without_widening_default(tmp_
     assert "MAX_EDITS" not in module.__dict__
 
 
+def test_request_focus_excludes_prior_validation_memory() -> None:
+    focus = _request_focus_text(
+        "TITLE: Autorepair can promote semantic no-op fixes\n"
+        "BODY:\n"
+        "A previous failure changed `genesis/budget.py`.\n\n"
+        "Required system improvement:\n"
+        "- require semantic issue satisfaction before promotion.\n\n"
+        "PRIOR_VALIDATION_EVIDENCE:\n"
+        "Rejected attempt repeatedly edited `genesis/budget.py`.\n"
+    )
+
+    assert "semantic issue satisfaction" in focus
+    assert "PRIOR_VALIDATION_EVIDENCE" not in focus
+    assert "genesis/budget.py" not in focus
+
+
 def test_historical_file_mention_does_not_override_requested_system_improvement(tmp_path: Path) -> None:
     _write(tmp_path, "genesis/budget.py", "class CycleBudget:\n    pass\n")
     _write(
@@ -95,7 +112,10 @@ def test_historical_file_mention_does_not_override_requested_system_improvement(
         "A previous failure changed `genesis/budget.py` but did not solve the reported defect.\n\n"
         "Required system improvement:\n"
         "- require semantic issue satisfaction and issue-specific acceptance evidence;\n"
-        "- reject no-op candidates before promotion.\n"
+        "- reject no-op candidates before promotion.\n\n"
+        "PRIOR_VALIDATION_EVIDENCE:\n"
+        "Earlier rejected attempts repeatedly edited `genesis/budget.py`.\n"
+        "Rejected target: `genesis/budget.py`.\n"
     )
 
     grounded = _ground_issue_context_paths(module, objective, context)
