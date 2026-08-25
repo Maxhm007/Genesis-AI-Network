@@ -11,6 +11,7 @@ CODING_ROLE = "bounded_coding_engineer"
 TRANSPORT_CODING_ROLE = "bounded_coding_engineer_full_budget"
 MAX_BOUNDED_EDITS = 2
 _ORIGINAL_HTTP_REASON = GenesisHTTPProvider.reason
+_ORIGINAL_CODING_PROPOSE = CodingModule.propose
 
 
 def _is_qwen(provider) -> bool:
@@ -64,12 +65,11 @@ def _transport_prompt(prompt: str) -> str:
     ``bounded_coding_engineer`` to 256 output tokens. The workflows already run
     with a bounded provider cap (768 tokens after the local server's hard cap), so
     a transport-only role alias removes the accidental 256-token choke point
-    without changing the task role or any execution/promotion boundary.
+    without changing any execution or promotion boundary.
 
-    The prompt is also reconciled with CodingModule.MAX_EDITS=2 so a single safe
-    candidate may contain a code edit plus its regression test when necessary.
-    Total edit bytes, allowed paths, AST validation, tests, Security and all
-    independent promotion gates remain unchanged.
+    HTTP repair providers are also allowed a second tightly related compact edit
+    when necessary for the same objective, such as implementation plus regression
+    coverage. The ordinary CodingModule contract stays one-edit by default.
     """
     if not _is_coding_prompt(prompt):
         return prompt
@@ -103,12 +103,36 @@ def _reason_with_resilient_coding_policy(self: GenesisHTTPProvider, prompt: str)
     return _ORIGINAL_HTTP_REASON(self, _transport_prompt(prompt))
 
 
+def _propose_with_scoped_http_edit_budget(
+    self: CodingModule,
+    objective: str,
+    context_paths: list[str] | None = None,
+    *,
+    provider=None,
+):
+    """Permit at most two compact edits only for the bounded HTTP repair lane."""
+    selected = provider or self._provider()
+    if selected is None or not isinstance(selected, GenesisHTTPProvider):
+        return _ORIGINAL_CODING_PROPOSE(self, objective, context_paths, provider=selected)
+
+    had_override = "MAX_EDITS" in self.__dict__
+    previous_override = self.__dict__.get("MAX_EDITS")
+    self.MAX_EDITS = MAX_BOUNDED_EDITS
+    try:
+        return _ORIGINAL_CODING_PROPOSE(self, objective, context_paths, provider=selected)
+    finally:
+        if had_override:
+            self.__dict__["MAX_EDITS"] = previous_override
+        else:
+            self.__dict__.pop("MAX_EDITS", None)
+
+
 def install_coding_provider_policy() -> None:
     """Install the bounded autonomous coding reliability policy once."""
     if getattr(AutonomousEngineeringLoop, INSTALL_MARKER, False):
         return
 
-    CodingModule.MAX_EDITS = max(int(CodingModule.MAX_EDITS), MAX_BOUNDED_EDITS)
     AutonomousEngineeringLoop._coding_provider = _select_quality_first_provider
     GenesisHTTPProvider.reason = _reason_with_resilient_coding_policy
+    CodingModule.propose = _propose_with_scoped_http_edit_budget
     setattr(AutonomousEngineeringLoop, INSTALL_MARKER, True)
