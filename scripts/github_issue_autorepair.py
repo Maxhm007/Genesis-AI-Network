@@ -114,7 +114,7 @@ def _tokens(text: str) -> set[str]:
 def _explicit_genesis_paths(text: str) -> list[str]:
     rows: list[str] = []
     for raw in re.findall(r"(?:^|[\s`'\"(])((?:genesis)/[A-Za-z0-9_./-]+\.py)", text):
-        normalized = raw.replace("\\", "/").lstrip("./")
+        normalized = raw.replace("\\", "/").removeprefix("./")
         if ".." in Path(normalized).parts or normalized in CONTROL_PLANE_FILES:
             continue
         if normalized not in rows:
@@ -128,7 +128,7 @@ def restricted_issue_targets(text: str) -> list[str]:
         if immutable in text and immutable not in rows:
             rows.append(immutable)
     for raw in re.findall(r"(?:^|[\s`'\"(])((?:\.github|genesis)/[A-Za-z0-9_./-]+(?:\.yml|\.yaml|\.py))", text):
-        normalized = raw.replace("\\", "/").lstrip("./")
+        normalized = raw.replace("\\", "/").removeprefix("./")
         if normalized.startswith(".github/") or normalized in CONTROL_PLANE_FILES:
             if normalized not in rows:
                 rows.append(normalized)
