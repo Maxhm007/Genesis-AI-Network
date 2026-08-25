@@ -58,6 +58,16 @@ from .provider_fallback import install_provider_fallback as _install_provider_fa
 _install_provider_fallback()
 del _install_provider_fallback
 
+# Reconcile the historical Qwen-first fallback with live repair evidence. Prefer
+# another eligible coder when one exists, keep Qwen as a usable last trained
+# provider, remove the accidental 256-token transport choke point, and permit at
+# most two tightly related bounded edits so implementation plus regression coverage
+# can travel through one candidate. All normal validation/promotion gates remain.
+from .coding_provider_policy import install_coding_provider_policy as _install_coding_provider_policy
+
+_install_coding_provider_policy()
+del _install_coding_provider_policy
+
 # Give known benchmark-integration tasks a deterministic, provider-independent
 # coding template before waiting for an external non-Qwen model. This lane cannot
 # fabricate scores and still uses the normal candidate/test/security/review path.

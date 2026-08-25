@@ -69,7 +69,7 @@ def test_qwen_is_selected_when_it_is_the_only_trained_coder(tmp_path: Path) -> N
     assert qwen.calls == 0
 
 
-def test_qwen_is_preferred_over_other_coder_for_genesis_lineage(tmp_path: Path) -> None:
+def test_non_qwen_coder_outranks_qwen_when_both_are_available(tmp_path: Path) -> None:
     _write_target(tmp_path)
     qwen = TrackingQwenProvider()
     strong = StrongCodingProvider()
@@ -80,7 +80,7 @@ def test_qwen_is_preferred_over_other_coder_for_genesis_lineage(tmp_path: Path) 
 
     selected = loop._coding_provider()
 
-    assert selected is qwen
+    assert selected is strong
     assert qwen.calls == 0
 
 
