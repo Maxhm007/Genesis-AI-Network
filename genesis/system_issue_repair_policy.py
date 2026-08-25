@@ -11,7 +11,10 @@ from .selfdev import SelfDevelopmentExecutor
 
 INSTALL_MARKER = "_genesis_system_issue_repair_policy_installed"
 PRIVILEGE_ANCHOR = ".github/workflows/github-issue-autorepair.yml"
-MAX_CONTEXT_FILES = 6
+# Keep privileged issue repair prompts deliberately narrow. The top-ranked source
+# plus its conventional regression test is enough context for a bounded repair and
+# avoids overloading the local CPU coding provider with unrelated system files.
+MAX_CONTEXT_FILES = 2
 EXPLICIT_REPAIR_PATH_RE = re.compile(
     r"(?:^|[\s`'\"(])((?:genesis|scripts)/[A-Za-z0-9_./-]+\.py)"
 )
