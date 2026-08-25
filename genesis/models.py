@@ -29,7 +29,7 @@ class ModelEvaluator:
 
     def assess(self, item: dict[str, Any]) -> ModelAssessment:
         model_id = str(item.get("id") or item.get("modelId") or item.get("name") or "unknown")
-        license_value = item.get("license")
+        license_value = item.get("license") or item.get("license", "unknown")
         if not license_value:
             card = item.get("cardData") or {}
             license_value = card.get("license") if isinstance(card, dict) else None
