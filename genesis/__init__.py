@@ -68,6 +68,15 @@ from .coding_provider_policy import install_coding_provider_policy as _install_c
 _install_coding_provider_policy()
 del _install_coding_provider_policy
 
+# System-level GitHub issues may legitimately point at bounded scripts rather than
+# ordinary package code. Keep scripts outside the normal self-development sandbox,
+# ground repair context in the requested outcome, and force any script proposal
+# through a privileged candidate lane without granting workflow-edit authority.
+from .system_issue_repair_policy import install_system_issue_repair_policy as _install_system_issue_repair_policy
+
+_install_system_issue_repair_policy()
+del _install_system_issue_repair_policy
+
 # Give known benchmark-integration tasks a deterministic, provider-independent
 # coding template before waiting for an external non-Qwen model. This lane cannot
 # fabricate scores and still uses the normal candidate/test/security/review path.

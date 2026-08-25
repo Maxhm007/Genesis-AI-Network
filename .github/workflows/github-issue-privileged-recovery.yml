@@ -1,0 +1,248 @@
+name: Genesis Privileged GitHub Issue Recovery
+
+on:
+  push:
+    branches:
+      - 'genesis/privileged-candidate-*'
+  workflow_dispatch:
+    inputs:
+      candidate_branch:
+        description: Optional privileged Genesis issue candidate branch
+        required: false
+        default: ''
+
+permissions:
+  contents: write
+  issues: write
+  actions: read
+
+concurrency:
+  group: genesis-privileged-issue-recovery
+  cancel-in-progress: false
+
+jobs:
+  prepare:
+    runs-on: ubuntu-latest
+    outputs:
+      eligible: ${{ steps.resolve.outputs.eligible }}
+      issue_number: ${{ steps.resolve.outputs.issue_number }}
+      candidate_sha: ${{ steps.resolve.outputs.candidate_sha }}
+      candidate_branch: ${{ steps.resolve.outputs.candidate_branch }}
+      base_sha: ${{ steps.resolve.outputs.base_sha }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - name: Resolve exact privileged issue candidate
+        id: resolve
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED: ${{ inputs.candidate_branch }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          branch=''
+          if [[ '${{ github.event_name }}' == 'push' ]]; then
+            branch='${{ github.ref_name }}'
+          else
+            branch="$REQUESTED"
+          fi
+          echo 'eligible=false' >> "$GITHUB_OUTPUT"
+          echo 'issue_number=' >> "$GITHUB_OUTPUT"
+          echo 'candidate_sha=' >> "$GITHUB_OUTPUT"
+          echo 'candidate_branch=' >> "$GITHUB_OUTPUT"
+          echo 'base_sha=' >> "$GITHUB_OUTPUT"
+          [[ "$branch" == genesis/privileged-candidate-* ]] || exit 0
+
+          git fetch origin main "$branch"
+          candidate=$(git rev-parse "origin/$branch")
+          subject=$(git log -1 --format=%s "$candidate")
+          if [[ ! "$subject" =~ ^Genesis\ self-development\ candidate:\ Genesis\ issue\ repair\ \#([0-9]+)$ ]]; then
+            echo 'Privileged candidate is not a GitHub issue-repair candidate.'
+            exit 0
+          fi
+          issue="${BASH_REMATCH[1]}"
+          state=$(gh issue view "$issue" --repo "$GITHUB_REPOSITORY" --json state --jq '.state')
+          validating=$(gh issue view "$issue" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | index("genesis-validating") != null')
+          if [[ "$state" != 'OPEN' || "$validating" != 'true' ]]; then
+            echo "Issue #$issue is not an open validating Genesis issue."
+            exit 0
+          fi
+
+          base=$(git rev-parse "$candidate^")
+          main=$(git rev-parse origin/main)
+          if [[ "$base" != "$main" ]]; then
+            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --remove-label genesis-validating || true
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "Genesis privileged candidate \`$candidate\` became stale before validation. It was not promoted; the issue was safely requeued against current main."
+            echo "Privileged issue candidate is stale: base=$base main=$main"
+            exit 0
+          fi
+
+          changed=$(git diff --name-only "$base..$candidate")
+          if grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)' <<<"$changed"; then
+            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-label genesis-blocked --remove-label genesis-validating --remove-label genesis-autonomous || true
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "Genesis blocked privileged issue candidate \`$candidate\`: identity/workflow files are outside this issue-repair lane."
+            exit 0
+          fi
+          if ! grep -Eq '^(genesis|scripts)/.+\.py$' <<<"$changed"; then
+            gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --remove-label genesis-validating || true
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "Genesis rejected privileged candidate \`$candidate\`: no bounded Python production change was present. The issue was requeued."
+            exit 0
+          fi
+
+          echo 'eligible=true' >> "$GITHUB_OUTPUT"
+          echo "issue_number=$issue" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$candidate" >> "$GITHUB_OUTPUT"
+          echo "candidate_branch=$branch" >> "$GITHUB_OUTPUT"
+          echo "base_sha=$base" >> "$GITHUB_OUTPUT"
+
+  validator_a:
+    needs: prepare
+    if: needs.prepare.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite A
+        run: python -m pytest -q
+      - name: Privileged autonomy boundary A
+        run: PYTHONPATH=. python scripts/privileged_change_gate.py '${{ needs.prepare.outputs.base_sha }}'
+      - name: Security review A
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('${{ needs.prepare.outputs.base_sha }}')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
+      - name: Require semantic regression evidence A
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/issue_acceptance_guard.py --base-ref '${{ needs.prepare.outputs.base_sha }}' --repository "$GITHUB_REPOSITORY" --issue-number '${{ needs.prepare.outputs.issue_number }}'
+      - name: Sign validator A approval
+        run: python genesis/ephemeral_validator.py --validator-id privileged-issue-validator-a --candidate '${{ needs.prepare.outputs.candidate_sha }}' --output validator-a.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: privileged-issue-validator-a-${{ github.run_id }}
+          path: validator-a.json
+
+  validator_b:
+    needs: prepare
+    if: needs.prepare.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - name: Independent full test suite B
+        run: python -m pytest -q
+      - name: Privileged autonomy boundary B
+        run: PYTHONPATH=. python scripts/privileged_change_gate.py '${{ needs.prepare.outputs.base_sha }}'
+      - name: Security review B
+        run: |
+          python - <<'PY'
+          from pathlib import Path
+          from genesis.security import SecurityModule
+          report = SecurityModule(Path('.')).review_candidate('${{ needs.prepare.outputs.base_sha }}')
+          print(report.as_dict())
+          raise SystemExit(0 if report.status == 'pass' else 1)
+          PY
+      - name: Require semantic regression evidence B
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/issue_acceptance_guard.py --base-ref '${{ needs.prepare.outputs.base_sha }}' --repository "$GITHUB_REPOSITORY" --issue-number '${{ needs.prepare.outputs.issue_number }}'
+      - name: Sign validator B approval
+        run: python genesis/ephemeral_validator.py --validator-id privileged-issue-validator-b --candidate '${{ needs.prepare.outputs.candidate_sha }}' --output validator-b.json
+      - uses: actions/upload-artifact@v4
+        with:
+          name: privileged-issue-validator-b-${{ github.run_id }}
+          path: validator-b.json
+
+  secret_guard:
+    needs: prepare
+    if: needs.prepare.outputs.eligible == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Secret Guard
+        run: python scripts/secret_guard.py --history
+
+  promote:
+    needs: [prepare, validator_a, validator_b, secret_guard]
+    if: needs.prepare.outputs.eligible == 'true' && needs.validator_a.result == 'success' && needs.validator_b.result == 'success' && needs.secret_guard.result == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ needs.prepare.outputs.candidate_sha }}
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: pip install -r requirements.txt
+      - uses: actions/download-artifact@v4
+        with:
+          name: privileged-issue-validator-a-${{ github.run_id }}
+          path: votes/a
+      - uses: actions/download-artifact@v4
+        with:
+          name: privileged-issue-validator-b-${{ github.run_id }}
+          path: votes/b
+      - name: Verify exact current base and signed quorum
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main '${{ needs.prepare.outputs.candidate_branch }}'
+          test "$(git rev-parse origin/main)" = '${{ needs.prepare.outputs.base_sha }}'
+          test "$(git rev-parse origin/${{ needs.prepare.outputs.candidate_branch }})" = '${{ needs.prepare.outputs.candidate_sha }}'
+          python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
+      - name: Reconfirm semantic acceptance before promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/issue_acceptance_guard.py --base-ref '${{ needs.prepare.outputs.base_sha }}' --repository "$GITHUB_REPOSITORY" --issue-number '${{ needs.prepare.outputs.issue_number }}'
+      - name: Promote exact privileged issue candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate='${{ needs.prepare.outputs.candidate_sha }}'
+          issue='${{ needs.prepare.outputs.issue_number }}'
+          git push origin "$candidate:refs/heads/main"
+          gh issue edit "$issue" --repo "$GITHUB_REPOSITORY" --add-label genesis-solved --remove-label genesis-validating --remove-label genesis-autonomous --remove-label genesis-blocked || true
+          gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --reason completed --comment "Genesis independently promoted privileged issue candidate \`$candidate\` only after semantic regression evidence, two signed validators, Security, Secret Guard, and exact-base verification."
+
+  recover_queue:
+    needs: [prepare, validator_a, validator_b, secret_guard, promote]
+    if: always() && needs.prepare.outputs.eligible == 'true' && needs.promote.result != 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Safely requeue unresolved privileged issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE: ${{ needs.prepare.outputs.issue_number }}
+          CANDIDATE: ${{ needs.prepare.outputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --remove-label genesis-validating || true
+          gh issue comment "$ISSUE" --repo "$GITHUB_REPOSITORY" --body "Privileged candidate \`$CANDIDATE\` did not satisfy every independent promotion gate. It was not promoted; Genesis requeued the original issue for another bounded repair attempt."
