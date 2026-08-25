@@ -1,0 +1,146 @@
+name: Genesis Open Issue Backlog Status
+
+on:
+  workflow_run:
+    workflows: ["Genesis Proactive Development"]
+    types: [completed]
+  workflow_dispatch:
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-open-issue-backlog-status
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Download exact proactive-development evidence
+        if: github.event_name == 'workflow_run'
+        uses: actions/download-artifact@v4
+        with:
+          name: genesis-autonomous-evidence-${{ github.event.workflow_run.id }}
+          path: evidence
+          github-token: ${{ github.token }}
+          repository: ${{ github.repository }}
+          run-id: ${{ github.event.workflow_run.id }}
+
+      - name: Resolve originating open issue and exact candidate
+        id: source
+        shell: bash
+        run: |
+          python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          roots = [Path('evidence'), Path('runtime')]
+          report = None
+          for root in roots:
+              if not root.exists():
+                  continue
+              for path in root.rglob('autonomous_engineering.json'):
+                  try:
+                      report = json.loads(path.read_text(encoding='utf-8'))
+                  except Exception:
+                      continue
+                  if isinstance(report, dict):
+                      break
+              if isinstance(report, dict):
+                  break
+
+          issue = ''
+          candidate = ''
+          close_issue = 'false'
+          task_type = ''
+          generation = ''
+          if isinstance(report, dict):
+              for attempt in report.get('attempted_tasks', []):
+                  if not isinstance(attempt, dict):
+                      continue
+                  if attempt.get('coding_status') != 'candidate_created':
+                      continue
+                  security = attempt.get('candidate_security') or {}
+                  if not isinstance(security, dict) or security.get('status') != 'pass':
+                      continue
+                  task = attempt.get('task') or {}
+                  payload = task.get('payload') or {}
+                  candidate_data = attempt.get('candidate') or {}
+                  source_issue = int(payload.get('github_issue_number') or 0)
+                  source_sha = str(candidate_data.get('commit_sha') or '')
+                  if source_issue > 0 and source_sha:
+                      issue = str(source_issue)
+                      candidate = source_sha
+                      close_issue = 'true' if bool(payload.get('close_github_issue_after_promotion')) else 'false'
+                      task_type = str(payload.get('task_type') or '')
+                      generation = str(payload.get('work_generation') or '')
+                      break
+
+          output = Path(os.environ['GITHUB_OUTPUT'])
+          with output.open('a', encoding='utf-8') as handle:
+              handle.write(f'issue_number={issue}\n')
+              handle.write(f'candidate_sha={candidate}\n')
+              handle.write(f'close_issue={close_issue}\n')
+              handle.write(f'task_type={task_type}\n')
+              handle.write(f'generation={generation}\n')
+          print(json.dumps({
+              'issue_number': issue,
+              'candidate_sha': candidate,
+              'close_issue': close_issue,
+              'task_type': task_type,
+              'generation': generation,
+          }, sort_keys=True))
+          PY
+
+      - name: Verify exact candidate is present on current main
+        id: promoted
+        if: steps.source.outputs.issue_number != '' && steps.source.outputs.candidate_sha != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          candidate='${{ steps.source.outputs.candidate_sha }}'
+          git fetch origin main
+          if git merge-base --is-ancestor "$candidate" origin/main; then
+            echo 'verified=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'Candidate is not on current main; issue state must not advance.' >&2
+            echo 'verified=false' >> "$GITHUB_OUTPUT"
+            exit 1
+          fi
+
+      - name: Close bounded issue only after exact validated promotion
+        if: steps.promoted.outputs.verified == 'true' && steps.source.outputs.close_issue == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          issue='${{ steps.source.outputs.issue_number }}'
+          candidate='${{ steps.source.outputs.candidate_sha }}'
+          gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --reason completed --comment "Genesis independently validated and promoted exact candidate SHA \`$candidate\` for this bounded issue. Closing only after promotion evidence was verified on current main."
+
+      - name: Record validated bounded progress for broader issue
+        if: steps.promoted.outputs.verified == 'true' && steps.source.outputs.close_issue != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          issue='${{ steps.source.outputs.issue_number }}'
+          candidate='${{ steps.source.outputs.candidate_sha }}'
+          generation='${{ steps.source.outputs.generation }}'
+          marker="<!-- genesis-backlog-progress:$candidate -->"
+          existing=$(gh issue view "$issue" --repo "$GITHUB_REPOSITORY" --json comments --jq '.comments[].body' | grep -F "$marker" || true)
+          if [[ -z "$existing" ]]; then
+            gh issue comment "$issue" --repo "$GITHUB_REPOSITORY" --body "$marker
+
+Genesis promoted validated backlog work generation ${generation:-unknown} at exact candidate SHA \`$candidate\`. This broader issue remains open; a later Genesis cycle will continue it until completion is demonstrably satisfied."
+          fi
