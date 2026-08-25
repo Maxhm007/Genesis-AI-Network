@@ -1,0 +1,36 @@
+name: Genesis Action Repair Status
+
+on:
+  workflow_run:
+    workflows: ["Genesis Action Repair Privileged Recovery"]
+    types: [completed]
+
+permissions:
+  actions: read
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-action-repair-status
+  cancel-in-progress: false
+
+jobs:
+  apply:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/download-artifact@v4
+        with:
+          name: genesis-action-repair-status-${{ github.event.workflow_run.id }}
+          path: handoff
+          github-token: ${{ github.token }}
+          run-id: ${{ github.event.workflow_run.id }}
+      - name: Keep issue open until fresh Action verification passes
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/action_failure_watchdog.py --repository "$GITHUB_REPOSITORY" --apply-recovery-status handoff/runtime/action_repair_recovery_status.json
