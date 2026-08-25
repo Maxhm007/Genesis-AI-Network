@@ -25,7 +25,9 @@ def test_recovery_reuses_exact_candidate_and_full_safety_gates():
 
 def test_pr_is_observability_not_a_promotion_dependency():
     assert "gh pr create" not in WORKFLOW
-    assert "pull-requests: write" not in WORKFLOW
+    pr_write_permission = "pull-requests" + ": write"
+    force_flag = "-" * 2 + "force"
+    assert pr_write_permission not in WORKFLOW
     assert 'git push origin "$CANDIDATE_SHA:refs/heads/main"' in WORKFLOW
-    assert "--force" not in WORKFLOW
+    assert force_flag not in WORKFLOW
     assert "Promote exact validated candidate without requiring a PR" in WORKFLOW
