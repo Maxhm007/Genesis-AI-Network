@@ -46,6 +46,22 @@ def test_coding_work_includes_legacy_and_provider_neutral_waits(tmp_path: Path) 
     assert unrelated.task_id not in {task.task_id for task in work}
 
 
+def test_blocked_coding_work_is_not_redispatched(tmp_path: Path) -> None:
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    task = queue.create(
+        "Blocked benchmark integration",
+        module_id="genesis.coding",
+        priority=99,
+        payload={"task_type": "benchmark_runner_integration"},
+    )
+    queue.transition(task.task_id, "assigned", module_id="genesis.coding")
+    queue.transition(task.task_id, "blocked", module_id="genesis.coding")
+
+    work = _coding_work(queue)
+
+    assert task.task_id not in {row.task_id for row in work}
+
+
 def test_coding_work_includes_improvement_owned_measured_growth(tmp_path: Path) -> None:
     queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
     speculative = queue.create(
@@ -122,6 +138,29 @@ def test_active_measured_growth_defers_benchmark_runner_until_growth_checkpoints
     assert resumed is not None
     assert resumed.state == "assigned"
     assert second["resumed_benchmark_runner_id"] == runner.task_id
+
+
+def test_blocked_growth_does_not_starve_benchmark_runner(tmp_path: Path) -> None:
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    runner = queue.create(
+        "Integrate benchmark runner",
+        module_id="genesis.coding",
+        priority=93,
+        payload={"task_type": "benchmark_runner_integration"},
+    )
+    growth = queue.create(
+        "Improve measured SWE-Bench deficit",
+        module_id="genesis.improvement",
+        priority=95,
+        payload={"task_type": "capability_growth", "benchmark_id": "swe_bench_pro"},
+    )
+    queue.transition(growth.task_id, "assigned", module_id="genesis.improvement")
+    queue.transition(growth.task_id, "blocked", module_id="genesis.improvement")
+
+    result = _rebalance_work_priority(queue)
+
+    assert result["active_growth_task_ids"] == []
+    assert queue.get(runner.task_id).state == "new"
 
 
 def test_resume_one_prefers_highest_priority_provider_wait(monkeypatch, tmp_path: Path) -> None:
