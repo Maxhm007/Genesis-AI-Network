@@ -192,12 +192,17 @@ def evaluate_candidate(root: Path, base_ref: str, issue_text: str) -> dict:
 def _issue_text(repository: str, issue_number: int) -> str:
     command = [
         "gh", "issue", "view", str(issue_number), "--repo", repository,
-        "--json", "title,body", "--jq", "'TITLE: ' + .title + '\nBODY:\n' + (.body // '')",
+        "--json", "title,body",
     ]
     result = subprocess.run(command, text=True, capture_output=True, check=False)
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout or "issue lookup failed")[-1200:])
-    return result.stdout.strip()
+    value = json.loads(result.stdout or "{}")
+    if not isinstance(value, dict):
+        raise RuntimeError("issue lookup did not return an object")
+    title = str(value.get("title") or "").strip()
+    body = str(value.get("body") or "").strip()
+    return f"TITLE: {title}\nBODY:\n{body}"
 
 
 def main() -> None:
