@@ -191,10 +191,31 @@ class IssueSolver:
 
     @staticmethod
     def _extract_json(raw: str) -> dict:
+        """Extract the first complete JSON object from bounded model output.
+
+        Local reasoning providers may emit a short preamble even when instructed
+        to return JSON only. The provider stopping rule already tolerates text
+        before the first object, so the repair parser must use the same contract.
+        Trailing commentary is ignored only after a syntactically complete JSON
+        object has been decoded; proposal validation still enforces all repair
+        path, syntax, file-count, and size boundaries.
+        """
         text = raw.strip()
         if text.startswith("```"):
             text = re.sub(r"^```(?:json)?\s*", "", text)
             text = re.sub(r"\s*```$", "", text)
+
+        decoder = json.JSONDecoder()
+        for match in re.finditer(r"\{", text):
+            try:
+                candidate, _end = decoder.raw_decode(text[match.start() :])
+            except json.JSONDecodeError:
+                continue
+            if isinstance(candidate, dict):
+                return candidate
+
+        # Preserve JSONDecodeError semantics for callers and diagnostics when no
+        # complete object can be recovered.
         return json.loads(text)
 
     def _http_provider_proposal(self, diagnosis: Diagnosis) -> dict | None:
