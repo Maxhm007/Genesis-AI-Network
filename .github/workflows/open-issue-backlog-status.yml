@@ -4,7 +4,6 @@ on:
   workflow_run:
     workflows: ["Genesis Proactive Development"]
     types: [completed]
-  workflow_dispatch:
 
 permissions:
   actions: read
@@ -17,7 +16,7 @@ concurrency:
 
 jobs:
   reconcile:
-    if: github.event_name == 'workflow_dispatch' || github.event.workflow_run.conclusion == 'success'
+    if: ${{ github.event.workflow_run.conclusion == 'success' }}
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -26,7 +25,6 @@ jobs:
           fetch-depth: 0
 
       - name: Download exact proactive-development evidence
-        if: github.event_name == 'workflow_run'
         uses: actions/download-artifact@v4
         with:
           name: genesis-autonomous-evidence-${{ github.event.workflow_run.id }}
@@ -44,11 +42,9 @@ jobs:
           import os
           from pathlib import Path
 
-          roots = [Path('evidence'), Path('runtime')]
           report = None
-          for root in roots:
-              if not root.exists():
-                  continue
+          root = Path('evidence')
+          if root.exists():
               for path in root.rglob('autonomous_engineering.json'):
                   try:
                       report = json.loads(path.read_text(encoding='utf-8'))
@@ -56,8 +52,6 @@ jobs:
                       continue
                   if isinstance(report, dict):
                       break
-              if isinstance(report, dict):
-                  break
 
           issue = ''
           candidate = ''
@@ -104,7 +98,7 @@ jobs:
 
       - name: Verify exact candidate is present on current main
         id: promoted
-        if: steps.source.outputs.issue_number != '' && steps.source.outputs.candidate_sha != ''
+        if: ${{ steps.source.outputs.issue_number != '' && steps.source.outputs.candidate_sha != '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -119,7 +113,7 @@ jobs:
           fi
 
       - name: Close bounded issue only after exact validated promotion
-        if: steps.promoted.outputs.verified == 'true' && steps.source.outputs.close_issue == 'true'
+        if: ${{ steps.promoted.outputs.verified == 'true' && steps.source.outputs.close_issue == 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -129,7 +123,7 @@ jobs:
           gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --reason completed --comment "Genesis independently validated and promoted exact candidate SHA \`$candidate\` for this bounded issue. Closing only after promotion evidence was verified on current main."
 
       - name: Record validated bounded progress for broader issue
-        if: steps.promoted.outputs.verified == 'true' && steps.source.outputs.close_issue != 'true'
+        if: ${{ steps.promoted.outputs.verified == 'true' && steps.source.outputs.close_issue != 'true' }}
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
