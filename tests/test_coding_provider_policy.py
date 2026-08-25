@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from genesis.coding import CodingModule
 from genesis.coding_provider_policy import (
     CODING_ROLE,
@@ -7,8 +9,24 @@ from genesis.coding_provider_policy import (
     TRANSPORT_CODING_ROLE,
     _transport_prompt,
 )
-from genesis.providers import _reasoning_token_budget
+from genesis.providers import GenesisHTTPProvider, ProviderRegistry, _reasoning_token_budget
 from scripts.local_reasoning_provider import role_token_budget
+
+
+class TwoEditHTTPProvider(GenesisHTTPProvider):
+    def __init__(self) -> None:
+        super().__init__("http://127.0.0.1:1", name="bounded-http-test")
+
+    def available(self) -> bool:
+        return True
+
+    def reason(self, prompt: str) -> str:
+        return (
+            '{"edits":['
+            '{"path":"genesis/example.py","old":"A = 1","new":"A = 2"},'
+            '{"path":"genesis/example.py","old":"B = 2","new":"B = 3"}'
+            ']}'
+        )
 
 
 def test_coding_transport_role_uses_configured_provider_budget() -> None:
@@ -33,6 +51,19 @@ def test_non_coding_prompt_is_not_rewritten() -> None:
     assert _transport_prompt(prompt) == prompt
 
 
-def test_policy_keeps_edit_scope_bounded_to_two() -> None:
+def test_http_repair_lane_allows_two_related_edits_without_widening_default(tmp_path: Path) -> None:
+    target = tmp_path / "genesis" / "example.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("A = 1\nB = 2\n", encoding="utf-8")
+    module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
+
+    proposal = module.propose(
+        "Update the paired bounded values.",
+        ["genesis/example.py"],
+        provider=TwoEditHTTPProvider(),
+    )
+
+    assert proposal.files["genesis/example.py"] == "A = 2\nB = 3\n"
     assert MAX_BOUNDED_EDITS == 2
-    assert CodingModule.MAX_EDITS == 2
+    assert CodingModule.MAX_EDITS == 1
+    assert "MAX_EDITS" not in module.__dict__
