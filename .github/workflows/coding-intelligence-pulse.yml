@@ -313,7 +313,7 @@ jobs:
           retention-days: 30
 
       - name: Return to normal Gene Pulse
-        if: env.CONTINUE_CHAIN == 'true'
+        if: env.CONTINUE_CHAIN == 'true' && steps.pulse.outputs.dispatch_next == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
