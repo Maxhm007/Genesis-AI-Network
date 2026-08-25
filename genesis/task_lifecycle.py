@@ -17,6 +17,7 @@ REVIEW_ARTIFACT_TASK_TYPES = {
 BOUNDED_BLOCKED_TASK_TYPES = {
     "operational_issue",
     "benchmark_runner_integration",
+    "github_issue_development",
 }
 
 
