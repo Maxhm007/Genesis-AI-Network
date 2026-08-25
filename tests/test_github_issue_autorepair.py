@@ -5,6 +5,7 @@ from scripts.github_issue_autorepair import (
     allowed_issue_repair_paths,
     build_issue_text,
     candidate_context_paths,
+    restricted_issue_targets,
 )
 
 
@@ -45,6 +46,16 @@ def test_control_plane_files_are_excluded_from_issue_context(tmp_path: Path):
 
     assert not (set(paths) & CONTROL_PLANE_FILES)
     assert "genesis/health.py" in paths
+
+
+def test_protected_and_workflow_targets_are_detected_explicitly():
+    restricted = restricted_issue_targets(
+        "Change `genesis/security.py`, `.github/workflows/secret-guard.yml`, and GENESIS_CONSTITUTION.md."
+    )
+
+    assert "genesis/security.py" in restricted
+    assert ".github/workflows/secret-guard.yml" in restricted
+    assert "GENESIS_CONSTITUTION.md" in restricted
 
 
 def test_issue_repair_scope_allows_only_context_and_conventional_tests():
