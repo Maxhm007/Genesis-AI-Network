@@ -20,7 +20,7 @@ _ORIGINAL_CODING_PROPOSE = CodingModule.propose
 
 ISSUE_EVIDENCE_MARKER = "ISSUE_EVIDENCE:"
 REQUEST_HEADING_RE = re.compile(
-    r"(?im)^(?:#{1,6}\s*)?(?:required(?:\s+system)?\s+improvement|requirements?|acceptance(?:\s+criteria)?|expected(?:\s+behavior)?|requested\s+change|remediation|fix)\s*:?\s*$"
+    r"(?im)^(?:#{1,6}\s*)?(?:required(?:\s+system)?\s+(?:improvement|fix|change)|requirements?|acceptance(?:\s+criteria)?|expected(?:\s+behavior)?|requested\s+change|remediation|fix)\s*:?\s*$"
 )
 EXPLICIT_GENESIS_PATH_RE = re.compile(r"(?:^|[\s`'\"(])((?:genesis)/[A-Za-z0-9_./-]+\.py)")
 GROUNDING_STOPWORDS = {
@@ -181,14 +181,29 @@ def _explicit_focus_paths(text: str) -> list[str]:
 
 
 def _safe_grounding_source(module: CodingModule, relative: str) -> str | None:
+    """Read an existing safe Genesis source for context ranking only.
+
+    Context discovery is intentionally separate from edit authorization. The edit
+    lane still runs SelfDevelopmentExecutor path validation after context is
+    selected; this helper only confines repository reads to existing non-protected
+    ``genesis/*.py`` files under the current root.
+    """
     normalized = str(relative).replace("\\", "/").lstrip("./")
-    if normalized in GROUNDING_EXCLUDED or normalized.endswith("/__init__.py"):
+    if (
+        not normalized.startswith("genesis/")
+        or normalized in GROUNDING_EXCLUDED
+        or normalized.endswith("/__init__.py")
+        or ".." in Path(normalized).parts
+    ):
         return None
+
+    root = module.root.resolve()
+    target = (root / normalized).resolve()
     try:
-        target = module._validate_path(normalized)
-    except Exception:
+        target.relative_to(root)
+    except ValueError:
         return None
-    if not target.is_file() or target.suffix != ".py" or not normalized.startswith("genesis/"):
+    if not target.is_file() or target.suffix != ".py":
         return None
     try:
         return target.read_text(encoding="utf-8", errors="ignore")[:MAX_GROUNDING_SOURCE_CHARS]
