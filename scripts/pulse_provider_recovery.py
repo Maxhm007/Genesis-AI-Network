@@ -14,7 +14,10 @@ PROVIDER_WAIT_REASONS = {
     "waiting_for_non_qwen_coding_provider",  # legacy durable state
     "waiting_for_eligible_coding_provider",
 }
-RUNNABLE_STATES = {"new", "assigned", "blocked"}
+# A blocked task is a durable checkpoint, not executable work. Treating it as
+# runnable causes the same unchanged task to be delegated on every Gene Pulse.
+# The component that clears the blocker must explicitly move it back to assigned.
+RUNNABLE_STATES = {"new", "assigned"}
 MEASURED_GROWTH_DEFER_REASON = "deferred_for_measured_capability_growth"
 
 
@@ -25,7 +28,7 @@ def _queue(root: Path = ROOT) -> PersistentTaskQueue:
 def _growth_is_executable(queue: PersistentTaskQueue, task: GenesisTask) -> bool:
     if task.payload.get("task_type") != "capability_growth":
         return False
-    if task.state in {"new", "assigned", "running", "blocked"}:
+    if task.state in {"new", "assigned", "running"}:
         return True
     if task.state == "failed":
         return queue.retryable(task)
