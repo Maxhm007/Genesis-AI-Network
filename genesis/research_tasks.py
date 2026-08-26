@@ -5,6 +5,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
+from .github_issue_task_router import issue_backed, route_unbacked_tasks
 from .modules.task_queue import PersistentTaskQueue
 from .providers import ProviderRegistry
 from .team import AITeam
@@ -20,9 +21,9 @@ SUPPORTED_TASK_TYPES = {
 class ImmortalityResearchWorker:
     """Advance one high-priority Genesis mission task to a preserved review artifact.
 
-    Completion means the requested review artifact was produced. It does not mean
-    that a scientific claim, benchmark value, or capability assertion was promoted.
-    Those still require their separate evidence/validation path.
+    GitHub Issues are authoritative. Research work may be discovered internally, but
+    it cannot run until it has an Issue. Completion means the requested review
+    artifact was produced; it does not promote scientific claims or benchmark values.
     """
 
     def __init__(self, root: Path, providers: ProviderRegistry | None = None) -> None:
@@ -54,12 +55,26 @@ class ImmortalityResearchWorker:
         )
 
     def run_one(self) -> dict:
+        issue_sync = route_unbacked_tasks(self.root)
         candidates = [
             task for task in self.queue.list(limit=200)
-            if task.state in {"new", "assigned"} and task.payload.get("task_type") in SUPPORTED_TASK_TYPES
+            if issue_backed(task)
+            and task.state in {"new", "assigned"}
+            and task.payload.get("task_type") in SUPPORTED_TASK_TYPES
         ]
         if not candidates:
-            return {"status": "idle", "reason": "no_supported_runnable_task"}
+            unbacked = [
+                task.task_id for task in self.queue.list(limit=200)
+                if not issue_backed(task)
+                and task.state in {"new", "assigned"}
+                and task.payload.get("task_type") in SUPPORTED_TASK_TYPES
+            ]
+            return {
+                "status": "waiting_for_github_issue" if unbacked else "idle",
+                "reason": "no_issue_backed_supported_runnable_task",
+                "unbacked_task_ids": unbacked,
+                "github_issue_sync": issue_sync,
+            }
         task = candidates[0]
         task_type = str(task.payload.get("task_type"))
         module_id = "genesis.research" if task_type == "immortality_research" else "genesis.capability"
@@ -72,6 +87,7 @@ class ImmortalityResearchWorker:
             "created_at": datetime.now(timezone.utc).isoformat(),
             "status": "candidate_review",
             "team_outputs": outputs,
+            "github_issue_number": int(task.payload.get("github_issue_number") or 0),
             "rule": "Candidate evidence only. Completion of this work item does not promote evidence, benchmark claims, knowledge, scores, or protected code.",
         }
         out_dir = self.root / "runtime" / "task_reviews"
@@ -85,5 +101,7 @@ class ImmortalityResearchWorker:
             "task_type": task_type,
             "priority": task.priority,
             "state": updated.state,
+            "github_issue_number": int(task.payload.get("github_issue_number") or 0),
             "team_members": [item.get("agent") for item in outputs],
+            "github_issue_sync": issue_sync,
         }
