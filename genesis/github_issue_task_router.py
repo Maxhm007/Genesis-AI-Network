@@ -57,6 +57,27 @@ def _github_request(method: str, path: str, payload: dict | None = None):
         return None
 
 
+def issue_authority_enabled(root: Path) -> bool:
+    """Return whether this path is the real Genesis repository runtime.
+
+    Unit tests frequently create temporary SQLite queues while GitHub Actions still
+    exposes repository credentials. Those fixtures must never create real Issues.
+    The actual Actions checkout is identified by GITHUB_WORKSPACE; local production
+    clones are identified by their .git directory. Tests can explicitly force this
+    policy with GENESIS_FORCE_GITHUB_TASK_AUTHORITY=1 or an injected requester.
+    """
+    root = Path(root).resolve()
+    if os.environ.get("GENESIS_FORCE_GITHUB_TASK_AUTHORITY", "").strip() == "1":
+        return True
+    workspace = os.environ.get("GITHUB_WORKSPACE", "").strip()
+    if workspace:
+        try:
+            return root == Path(workspace).resolve()
+        except OSError:
+            return False
+    return (root / ".git").exists()
+
+
 def issue_backed(task: GenesisTask) -> bool:
     return int(task.payload.get("github_issue_number") or 0) > 0
 
@@ -244,13 +265,16 @@ def route_unbacked_tasks(
     Existing specialist capability/self-improvement Issues are reused rather than
     duplicated. If GitHub is unavailable, the router fails closed: it does not mark
     a task executable, and downstream schedulers must reject unbacked work.
+
+    An injected requester explicitly opts a caller (normally a unit test) into the
+    real routing behavior without requiring the caller to be the production repo.
     """
     root = Path(root).resolve()
     runtime = root / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     report_path = runtime / "github_issue_task_router.json"
     queue = PersistentTaskQueue(runtime / "genesis_tasks.sqlite3")
-    requester = requester or _github_request
+    explicit_requester = requester is not None
 
     candidates = [
         task
@@ -259,16 +283,25 @@ def route_unbacked_tasks(
     ]
     result = {
         "status": "ok",
+        "enforced": bool(explicit_requester or issue_authority_enabled(root)),
         "policy": "GitHub Issues are the authoritative task source; SQLite is execution/cache state only.",
         "candidate_count": len(candidates),
         "bound": [],
         "adopted": [],
         "blocked": [],
     }
+
+    if not result["enforced"]:
+        result["status"] = "not_repository_runtime"
+        result["reason"] = "temporary/non-repository runtime; real GitHub Issue mutations are disabled"
+        report_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return result
+
     if not candidates:
         report_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return result
 
+    requester = requester or _github_request
     if not _ensure_label(requester):
         result["status"] = "blocked"
         result["reason"] = "GitHub Issue lane unavailable; unbacked tasks remain non-executable"
