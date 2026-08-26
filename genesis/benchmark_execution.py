@@ -15,7 +15,7 @@ from .terminal_bench_evidence import TerminalBench21EvidenceAdapter
 class BenchmarkExecutionPlanner:
     """Advance frontier benchmark tasks without fabricating capability evidence.
 
-    Real benchmark output may be staged only through a benchmark-specific evidence
+    pass
     adapter. If no real result is available, the planner creates bounded coding
     work for missing runner integration. Once that bounded lane is exhausted, an
     execution/readiness blocker is surfaced instead of endlessly generating code.
