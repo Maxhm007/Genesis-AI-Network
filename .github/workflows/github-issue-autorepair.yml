@@ -58,6 +58,7 @@ jobs:
           ensure_label genesis-validating 0969da 'Genesis candidate is under independent validation'
           ensure_label genesis-blocked d1242f 'Genesis safely blocked this issue pending narrower context or review'
           ensure_label genesis-solved 8250df 'Solved through validated Genesis autonomous repair'
+          ensure_label genesis-repair-in-progress d4c5f9 'Genesis is currently processing this autonomous issue'
 
   solve:
     if: github.event_name != 'push' && (github.event_name != 'issues' || github.event.label.name == 'genesis-autonomous')
@@ -89,7 +90,18 @@ jobs:
           elif [[ '${{ github.event_name }}' == 'workflow_dispatch' && -n '${{ inputs.issue_number }}' ]]; then
             n='${{ inputs.issue_number }}'
           else
-            n=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label genesis-autonomous --limit 1 --json number --jq '.[0].number // empty')
+            n=$(gh issue list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --label genesis-autonomous \
+              --limit 100 \
+              --json number,updatedAt,labels \
+              --jq '[.[]
+                | select(([.labels[].name] | index("genesis-repair-in-progress")) | not)
+                | select(([.labels[].name] | index("genesis-validating")) | not)
+                | select(([.labels[].name] | index("genesis-blocked")) | not)
+                | select(([.labels[].name] | index("genesis-solved")) | not)
+              ] | sort_by(.updatedAt, .number) | .[0].number // empty')
           fi
           if [[ -n "$n" && ! "$n" =~ ^[0-9]+$ ]]; then
             echo "Invalid issue number: $n" >&2
@@ -97,6 +109,13 @@ jobs:
           fi
           echo "issue_number=$n" >> "$GITHUB_OUTPUT"
           [[ -n "$n" ]] && echo "Genesis selected issue #$n" || echo 'No authorized Genesis issue is queued.'
+      - name: Claim selected issue
+        if: steps.issue.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
+        shell: bash
+        run: gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-repair-in-progress
       - name: Install repository dependencies
         if: steps.issue.outputs.issue_number != ''
         run: pip install -r requirements.txt
@@ -155,6 +174,13 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/github_issue_autorepair.py --issue-number '${{ steps.issue.outputs.issue_number }}' --repository "$GITHUB_REPOSITORY"
+      - name: Release selected issue claim
+        if: always() && steps.issue.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
+        shell: bash
+        run: gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress || true
       - name: Resolve generated candidate
         id: candidate
         if: always() && steps.issue.outputs.issue_number != ''
