@@ -1,0 +1,64 @@
+{
+  "schema_version": 1,
+  "release_version": "1.0.0",
+  "publisher": {
+    "node_id": "gene-0",
+    "repository": "Maxhm007/Genesis-AI-Network",
+    "ref": "main"
+  },
+  "compatibility": {
+    "network": "gden/0.2",
+    "allowed_nodes": [
+      "gene-node-2",
+      "gene-node-3"
+    ]
+  },
+  "protected_descendant_paths": [
+    "node.json",
+    "attestation.json",
+    "LEARNING_POLICY.json",
+    "README.md",
+    "scripts/node_self_heal.py",
+    "scripts/peer_heal.py",
+    "scripts/request_peer_healing.py",
+    ".github/"
+  ],
+  "exports": [
+    {
+      "id": "genesis-constitution",
+      "source": "GENESIS_CONSTITUTION.md",
+      "target": "inherited/gene0/policies/GENESIS_CONSTITUTION.md",
+      "kind": "policy"
+    },
+    {
+      "id": "knowledge-policy",
+      "source": "KNOWLEDGE_POLICY.md",
+      "target": "inherited/gene0/policies/KNOWLEDGE_POLICY.md",
+      "kind": "policy"
+    },
+    {
+      "id": "autonomy-spec",
+      "source": "AUTONOMY_SPEC.md",
+      "target": "inherited/gene0/policies/AUTONOMY_SPEC.md",
+      "kind": "policy"
+    },
+    {
+      "id": "distribution-protocol",
+      "source": "DISTRIBUTION_PROTOCOL.md",
+      "target": "inherited/gene0/policies/DISTRIBUTION_PROTOCOL.md",
+      "kind": "policy"
+    },
+    {
+      "id": "shared-capability-catalog",
+      "source": "gene_core/CAPABILITIES.json",
+      "target": "inherited/gene0/core/CAPABILITIES.json",
+      "kind": "json"
+    },
+    {
+      "id": "descendant-health-runtime",
+      "source": "gene_core/descendant_health.py",
+      "target": "inherited/gene0/core/descendant_health.py",
+      "kind": "python"
+    }
+  ]
+}
