@@ -42,6 +42,17 @@ jobs:
           mkdir -p handoff
           gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > /tmp/genesis-action-repair-status.zip
           unzip -q /tmp/genesis-action-repair-status.zip -d handoff
+          mapfile -t status_files < <(find handoff -type f -name 'action_repair_recovery_status.json' -print)
+          if (( ${#status_files[@]} != 1 )); then
+            echo "Expected exactly one recovery-status JSON in the artifact; found ${#status_files[@]}. Leave the issue open." >&2
+            echo 'skip_apply=true' >> "$GITHUB_ENV"
+            exit 0
+          fi
+          mkdir -p handoff/runtime
+          canonical='handoff/runtime/action_repair_recovery_status.json'
+          if [[ "${status_files[0]}" != "$canonical" ]]; then
+            cp "${status_files[0]}" "$canonical"
+          fi
       - name: Apply repair outcome and preserve retry state
         if: env.skip_apply != 'true'
         env:

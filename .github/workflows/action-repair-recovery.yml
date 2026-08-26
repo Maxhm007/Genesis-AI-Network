@@ -48,6 +48,16 @@ jobs:
           mkdir -p handoff
           gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > /tmp/genesis-action-repair-candidate.zip
           unzip -q /tmp/genesis-action-repair-candidate.zip -d handoff
+          mapfile -t candidate_files < <(find handoff -type f -name 'action_repair_candidate.json' -print)
+          if (( ${#candidate_files[@]} != 1 )); then
+            echo "Expected exactly one Action repair candidate JSON in the artifact; found ${#candidate_files[@]}." >&2
+            exit 1
+          fi
+          mkdir -p handoff/runtime
+          canonical='handoff/runtime/action_repair_candidate.json'
+          if [[ "${candidate_files[0]}" != "$canonical" ]]; then
+            cp "${candidate_files[0]}" "$canonical"
+          fi
       - name: Resolve exact privileged candidate
         id: resolve
         shell: bash
