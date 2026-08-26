@@ -5,7 +5,7 @@ from dataclasses import asdict
 from datetime import datetime, timezone
 from pathlib import Path
 
-from .github_issue_task_router import issue_backed, route_unbacked_tasks
+from .github_issue_task_router import issue_authority_enabled, issue_backed, route_unbacked_tasks
 from .modules.task_queue import PersistentTaskQueue
 from .providers import ProviderRegistry
 from .team import AITeam
@@ -21,9 +21,10 @@ SUPPORTED_TASK_TYPES = {
 class ImmortalityResearchWorker:
     """Advance one high-priority Genesis mission task to a preserved review artifact.
 
-    GitHub Issues are authoritative. Research work may be discovered internally, but
-    it cannot run until it has an Issue. Completion means the requested review
-    artifact was produced; it does not promote scientific claims or benchmark values.
+    GitHub Issues are authoritative in the real Genesis runtime. Research work may
+    be discovered internally, but it cannot run there until it has an Issue.
+    Completion means the requested review artifact was produced; it does not promote
+    scientific claims or benchmark values.
     """
 
     def __init__(self, root: Path, providers: ProviderRegistry | None = None) -> None:
@@ -55,27 +56,32 @@ class ImmortalityResearchWorker:
         )
 
     def run_one(self) -> dict:
+        authority = issue_authority_enabled(self.root)
         issue_sync = route_unbacked_tasks(self.root)
         candidates = [
             task for task in self.queue.list(limit=200)
-            if issue_backed(task)
+            if (not authority or issue_backed(task))
             and task.state in {"new", "assigned"}
             and task.payload.get("task_type") in SUPPORTED_TASK_TYPES
         ]
         if not candidates:
             unbacked = [
                 task.task_id for task in self.queue.list(limit=200)
-                if not issue_backed(task)
+                if authority
+                and not issue_backed(task)
                 and task.state in {"new", "assigned"}
                 and task.payload.get("task_type") in SUPPORTED_TASK_TYPES
             ]
             return {
                 "status": "waiting_for_github_issue" if unbacked else "idle",
-                "reason": "no_issue_backed_supported_runnable_task",
+                "reason": "no_issue_backed_supported_runnable_task" if authority else "no_supported_runnable_task",
                 "unbacked_task_ids": unbacked,
+                "github_issue_authority_enforced": authority,
                 "github_issue_sync": issue_sync,
             }
         task = candidates[0]
+        if authority and not issue_backed(task):
+            raise RuntimeError("GitHub Issue is required before autonomous research execution")
         task_type = str(task.payload.get("task_type"))
         module_id = "genesis.research" if task_type == "immortality_research" else "genesis.capability"
         if task.state == "new":
@@ -103,5 +109,6 @@ class ImmortalityResearchWorker:
             "state": updated.state,
             "github_issue_number": int(task.payload.get("github_issue_number") or 0),
             "team_members": [item.get("agent") for item in outputs],
+            "github_issue_authority_enforced": authority,
             "github_issue_sync": issue_sync,
         }
