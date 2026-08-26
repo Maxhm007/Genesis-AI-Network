@@ -109,6 +109,36 @@ def test_scheduled_retry_still_owns_problem_and_blocks_duplicate_intake(monkeypa
     assert report["issues"][0]["status"] == "linked_existing_problem"
 
 
+def test_same_github_issue_does_not_spawn_new_generation_during_retry_backoff(monkeypatch, tmp_path: Path):
+    module = _load_script()
+    issue = _issue(405, "Repair parser validation crash")
+    monkeypatch.setattr(module, "_github_open_issues", lambda: [issue])
+
+    first = module.ingest_open_issue_backlog(tmp_path)
+    first_id = first["issues"][0]["task_id"]
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    task = queue.get(first_id)
+    assert task is not None
+    queue.transition(task.task_id, "assigned", module_id=task.module_id)
+    queue.transition(task.task_id, "running", module_id=task.module_id)
+    failed = queue.record_failure(
+        task.task_id,
+        "bounded failure",
+        classification="test",
+        retry_after_seconds=3600,
+        module_id=task.module_id,
+    )
+    assert failed.state == "failed"
+    assert queue.retryable(failed) is False
+
+    second = module.ingest_open_issue_backlog(tmp_path)
+
+    assert second["created_count"] == 0
+    assert second["issues"][0]["task_id"] == first_id
+    assert second["issues"][0]["status"] == "existing_failed"
+    assert len(queue.list(limit=100)) == 1
+
+
 def test_unrelated_issue_still_creates_normal_github_backlog_task(monkeypatch, tmp_path: Path):
     module = _load_script()
     queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
