@@ -24,7 +24,6 @@ DIRECT_SELF_IMPROVEMENT_TYPES = {
     "planned_self_improvement",
 }
 
-
 GithubRequester = Callable[[str, str, dict | None], object | None]
 
 
@@ -77,9 +76,6 @@ def _is_source_self_improvement_task(task: GenesisTask) -> bool:
         return False
     if task_type in DIRECT_SELF_IMPROVEMENT_TYPES:
         return True
-    # Research-driven upgrades of an existing Genesis implementation are also
-    # self-improvement work. Capability-growth has its own stricter benchmark
-    # issue router and new-capability creation remains a separate lane.
     target = str(payload.get("target_path") or "").strip()
     return (
         source == "genesis.evolution_learning"
@@ -107,43 +103,40 @@ def _safe_target(root: Path, task: GenesisTask) -> str:
 def _issue_title(task: GenesisTask) -> str:
     task_type = str(task.payload.get("task_type") or "self_improvement").replace("_", " ")
     objective = " ".join(str(task.objective or "").split())
-    suffix = objective[:150] if objective else task.task_id
-    return f"{TITLE_PREFIX} {task_type} — {suffix}"[:240]
+    return f"{TITLE_PREFIX} {task_type} — {(objective or task.task_id)[:150]}"[:240]
 
 
 def _issue_body(task: GenesisTask, target: str) -> str:
     payload = dict(task.payload or {})
     task_type = str(payload.get("task_type") or "self_improvement")
-    development_source = str(payload.get("development_source") or payload.get("source") or "genesis")
-    target_line = f"- **Target:** `{target}`\n" if target else ""
+    detected_by = str(payload.get("development_source") or payload.get("source") or "genesis")
     context = [str(item) for item in list(payload.get("context_paths") or []) if str(item).strip()]
-    context_line = f"- **Context:** {', '.join(f'`{item}`' for item in context[:12])}\n" if context else ""
     acceptance = str(payload.get("acceptance") or payload.get("required_outcome") or "").strip()
     if not acceptance:
         acceptance = (
-            "Produce one bounded evidence-driven improvement. Existing tests, Security review, independent "
-            "validation, exact candidate promotion, provenance, owner-control, signing and secret boundaries remain mandatory."
+            "Produce one bounded evidence-driven improvement while preserving tests, Security, independent validation, "
+            "exact promotion, provenance, owner control, signing, and secret boundaries."
         )
+    target_line = f"- **Target:** `{target}`\n" if target else ""
+    context_line = f"- **Context:** {', '.join(f'`{item}`' for item in context[:12])}\n" if context else ""
     return (
         f"{_source_marker(task.task_id)}\n"
         "GitHub is the authoritative execution lane for this Genesis self-improvement task. "
-        "Genesis may detect and describe the improvement internally, but it must not execute the same work through a parallel direct lane.\n\n"
+        "Genesis may detect, inspect, score, research, and describe improvements internally, but implementation cannot use a parallel direct lane.\n\n"
         f"Genesis-Problem-Fingerprint: {_problem_fingerprint(task.task_id)}\n"
         f"- **Source task:** `{task.task_id}`\n"
         f"- **Task type:** `{task_type}`\n"
-        f"- **Detected by:** `{development_source}`\n"
+        f"- **Detected by:** `{detected_by}`\n"
         f"- **Owning module:** `{task.module_id or 'genesis.self_development'}`\n"
-        f"{target_line}"
-        f"{context_line}\n"
+        f"{target_line}{context_line}\n"
         "### Objective\n"
         f"{str(task.objective)[:8000]}\n\n"
         "### Acceptance\n"
         f"{acceptance[:6000]}\n\n"
         "### Safety and ownership\n"
-        "- The original internal source task is paused once this Issue is durable.\n"
+        "- The internal source task is non-executable while waiting for or represented by this Issue.\n"
         "- Exactly one issue-backed execution task may represent this source task.\n"
         "- Running/review candidates that started before cutover are not interrupted.\n"
-        "- Genesis may inspect, research, score and propose internally; implementation is issue-backed.\n"
         "- Tests, Security, independent validators and exact promotion remain mandatory for code changes.\n"
         "- Protected identity/workflow/signing/secret boundaries cannot be bypassed.\n"
     )
@@ -175,34 +168,17 @@ def _existing_issues(requester: GithubRequester) -> list[dict]:
     return [row for row in rows if isinstance(row, dict) and "pull_request" not in row]
 
 
-def _find_issue(existing: list[dict], task_id: str) -> dict | None:
-    marker = _source_marker(task_id)
-    for issue in existing:
-        if marker in str(issue.get("body") or ""):
-            return issue
-    return None
-
-
-def _ensure_issue(
-    requester: GithubRequester,
-    existing: list[dict],
-    task: GenesisTask,
-    target: str,
-) -> dict | None:
-    issue = _find_issue(existing, task.task_id)
+def _ensure_issue(requester: GithubRequester, existing: list[dict], task: GenesisTask, target: str) -> dict | None:
+    marker = _source_marker(task.task_id)
+    issue = next((row for row in existing if marker in str(row.get("body") or "")), None)
     title = _issue_title(task)
     body = _issue_body(task, target)
     if issue is None:
-        created = requester(
-            "POST",
-            "/issues",
-            {"title": title, "body": body, "labels": [SELF_IMPROVEMENT_LABEL]},
-        )
+        created = requester("POST", "/issues", {"title": title, "body": body, "labels": [SELF_IMPROVEMENT_LABEL]})
         if isinstance(created, dict) and int(created.get("number") or 0) > 0:
             existing.append(created)
             return created
         return None
-
     patch: dict[str, object] = {}
     if str(issue.get("title") or "") != title:
         patch["title"] = title
@@ -219,8 +195,7 @@ def _ensure_issue(
 
 def _execution_tasks(queue: PersistentTaskQueue, source_task_id: str) -> list[GenesisTask]:
     rows = [
-        task
-        for task in queue.list(limit=5000)
+        task for task in queue.list(limit=5000)
         if str(task.payload.get("source_self_improvement_task_id") or "") == source_task_id
         and int(task.payload.get("github_issue_number") or 0) > 0
         and str(task.payload.get("source") or "") == "github_self_improvement_issue"
@@ -229,12 +204,7 @@ def _execution_tasks(queue: PersistentTaskQueue, source_task_id: str) -> list[Ge
     return rows
 
 
-def _create_execution_task(
-    queue: PersistentTaskQueue,
-    source: GenesisTask,
-    issue: dict,
-    target: str,
-) -> tuple[GenesisTask, bool]:
+def _create_execution_task(queue: PersistentTaskQueue, source: GenesisTask, issue: dict, target: str) -> tuple[GenesisTask, bool]:
     issue_number = int(issue.get("number") or 0)
     payload = dict(source.payload or {})
     payload.update(
@@ -287,20 +257,15 @@ def create_planned_self_improvement_task(
     if not paths:
         return None, False
     digest = hashlib.sha256(
-        json.dumps(
-            {"title": title, "rationale": rationale, "files": files},
-            sort_keys=True,
-            separators=(",", ":"),
-        ).encode("utf-8")
+        json.dumps({"title": title, "rationale": rationale, "files": files}, sort_keys=True, separators=(",", ":")).encode("utf-8")
     ).hexdigest()[:20]
     target = paths[0] if len(paths) == 1 else ""
-    file_review = dict(proposal.get("file_self_review") or {})
     queue = PersistentTaskQueue(root / "runtime" / "genesis_tasks.sqlite3")
-    task, created = queue.create_unique(
+    return queue.create_unique(
         f"planned-self-improvement:{digest}",
         (
-            f"{title}. {rationale} "
-            "Re-evaluate and implement this bounded self-improvement from the current main branch through the GitHub Issue lane only."
+            f"{title}. {rationale} Re-evaluate and implement this bounded self-improvement from current main "
+            "through the GitHub Issue lane only."
         )[:10000],
         module_id="genesis.self_development",
         priority=92,
@@ -314,65 +279,68 @@ def create_planned_self_improvement_task(
             "target_path": target,
             "context_paths": paths,
             "planned_files": paths,
-            "file_self_review": file_review,
+            "file_self_review": dict(proposal.get("file_self_review") or {}),
             "acceptance": (
-                "Implement only the bounded improvement described by this Issue, against current main. "
+                "Implement only the bounded improvement described by the Issue against current main. "
                 "Do not blindly replay stale generated code. Full tests, Security and independent validation must pass."
             ),
             "requires_independent_validation": True,
         },
     )
-    return task, created
 
 
-def route_self_improvement(
-    root: Path,
-    *,
-    requester: GithubRequester | None = None,
-) -> dict:
+def _pause_waiting_for_issue(queue: PersistentTaskQueue, task: GenesisTask, reason: str) -> GenesisTask:
+    if task.state == "paused":
+        return task
+    return queue.pause(task.task_id, f"{ROUTER_PAUSE_PREFIX}pending: {reason}")
+
+
+def route_self_improvement(root: Path, *, requester: GithubRequester | None = None) -> dict:
     root = Path(root).resolve()
     runtime = root / "runtime"
     runtime.mkdir(parents=True, exist_ok=True)
     evidence_path = runtime / "self_improvement_issue_router.json"
     queue = PersistentTaskQueue(runtime / "genesis_tasks.sqlite3")
     requester = requester or _github_request
-
     sources = [task for task in queue.list(limit=5000) if _is_source_self_improvement_task(task)]
+
+    result = {
+        "status": "ok",
+        "source_tasks": len(sources),
+        "routed": [],
+        "already_routed": [],
+        "skipped_in_flight": [],
+        "blocked": [],
+    }
     if not sources:
-        result = {
-            "status": "ok",
-            "source_tasks": 0,
-            "routed": [],
-            "already_routed": [],
-            "skipped_in_flight": [],
-            "blocked": [],
-        }
         evidence_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return result
 
     if not _ensure_label(requester):
-        result = {
-            "status": "blocked",
-            "reason": "GitHub self-improvement label could not be verified or created; source tasks were left untouched",
-            "source_tasks": len(sources),
-            "routed": [],
-            "already_routed": [],
-            "skipped_in_flight": [],
-            "blocked": [task.task_id for task in sources],
-        }
+        result["status"] = "blocked"
+        result["reason"] = "GitHub self-improvement lane unavailable; direct execution is forbidden"
+        for source in sources:
+            if source.state in {"running", "review"}:
+                result["skipped_in_flight"].append(source.task_id)
+                continue
+            if source.state in TERMINAL_STATES:
+                continue
+            current = queue.get(source.task_id) or source
+            if current.state in ROUTABLE_STATES:
+                try:
+                    current = _pause_waiting_for_issue(queue, current, "waiting for GitHub self-improvement lane")
+                except Exception as exc:
+                    result["blocked"].append({"source_task_id": source.task_id, "reason": f"pause_failed:{type(exc).__name__}:{exc}"})
+                    continue
+            result["blocked"].append({"source_task_id": source.task_id, "reason": "github_lane_unavailable", "source_state": current.state})
         evidence_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return result
 
     existing = _existing_issues(requester)
-    routed: list[dict] = []
-    already_routed: list[dict] = []
-    skipped_in_flight: list[str] = []
-    blocked: list[dict] = []
-
     for source in sources:
         execution = _execution_tasks(queue, source.task_id)
         if execution:
-            already_routed.append(
+            result["already_routed"].append(
                 {
                     "source_task_id": source.task_id,
                     "execution_task_id": execution[-1].task_id,
@@ -381,65 +349,57 @@ def route_self_improvement(
                 }
             )
             continue
-
         if source.state in {"running", "review"}:
-            skipped_in_flight.append(source.task_id)
+            result["skipped_in_flight"].append(source.task_id)
             continue
         if source.state in TERMINAL_STATES:
             continue
         if source.state == "paused" and not _recoverable_paused(source):
-            blocked.append({"source_task_id": source.task_id, "reason": "source_task_paused_for_other_reason"})
+            result["blocked"].append({"source_task_id": source.task_id, "reason": "source_task_paused_for_other_reason"})
             continue
         if source.state not in ROUTABLE_STATES and not _recoverable_paused(source):
-            blocked.append({"source_task_id": source.task_id, "reason": f"unsupported_source_state:{source.state}"})
+            result["blocked"].append({"source_task_id": source.task_id, "reason": f"unsupported_source_state:{source.state}"})
             continue
 
         target = _safe_target(root, source)
         if target.startswith("!"):
-            blocked.append({"source_task_id": source.task_id, "reason": f"invalid_target:{target}"})
+            current = queue.get(source.task_id) or source
+            if current.state in ROUTABLE_STATES:
+                current = _pause_waiting_for_issue(queue, current, f"invalid self-improvement target {target}")
+            result["blocked"].append({"source_task_id": source.task_id, "reason": f"invalid_target:{target}", "source_state": current.state})
             continue
 
         issue = _ensure_issue(requester, existing, source, target)
         if issue is None:
-            blocked.append({"source_task_id": source.task_id, "reason": "github_issue_unavailable"})
+            current = queue.get(source.task_id) or source
+            if current.state in ROUTABLE_STATES:
+                current = _pause_waiting_for_issue(queue, current, "GitHub Issue creation unavailable")
+            result["blocked"].append({"source_task_id": source.task_id, "reason": "github_issue_unavailable", "source_state": current.state})
             continue
         issue_number = int(issue.get("number") or 0)
 
         current = queue.get(source.task_id)
         if current is None:
-            blocked.append({"source_task_id": source.task_id, "reason": "source_task_disappeared"})
+            result["blocked"].append({"source_task_id": source.task_id, "reason": "source_task_disappeared"})
             continue
         if current.state in {"running", "review"}:
-            skipped_in_flight.append(source.task_id)
+            result["skipped_in_flight"].append(source.task_id)
             continue
         if current.state != "paused":
             try:
                 current = queue.pause(
                     source.task_id,
-                    f"{ROUTER_PAUSE_PREFIX}{issue_number}: GitHub Issue is now the exclusive self-improvement execution lane",
+                    f"{ROUTER_PAUSE_PREFIX}{issue_number}: GitHub Issue is the exclusive self-improvement execution lane",
                 )
             except Exception as exc:
-                blocked.append(
-                    {
-                        "source_task_id": source.task_id,
-                        "github_issue_number": issue_number,
-                        "reason": f"pause_failed:{type(exc).__name__}:{exc}",
-                    }
-                )
+                result["blocked"].append({"source_task_id": source.task_id, "github_issue_number": issue_number, "reason": f"pause_failed:{type(exc).__name__}:{exc}"})
                 continue
 
         try:
             execution_task, created = _create_execution_task(queue, current, issue, target)
         except Exception as exc:
-            blocked.append(
-                {
-                    "source_task_id": source.task_id,
-                    "github_issue_number": issue_number,
-                    "reason": f"execution_task_create_failed:{type(exc).__name__}:{exc}",
-                }
-            )
+            result["blocked"].append({"source_task_id": source.task_id, "github_issue_number": issue_number, "reason": f"execution_task_create_failed:{type(exc).__name__}:{exc}"})
             continue
-
         row = {
             "source_task_id": source.task_id,
             "source_state": current.state,
@@ -448,15 +408,9 @@ def route_self_improvement(
             "execution_task_id": execution_task.task_id,
             "execution_state": execution_task.state,
         }
-        (routed if created else already_routed).append(row)
+        (result["routed"] if created else result["already_routed"]).append(row)
 
-    result = {
-        "status": "ok" if not blocked else "partial",
-        "source_tasks": len(sources),
-        "routed": routed,
-        "already_routed": already_routed,
-        "skipped_in_flight": skipped_in_flight,
-        "blocked": blocked,
-    }
+    if result["blocked"]:
+        result["status"] = "partial"
     evidence_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result
