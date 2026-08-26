@@ -23,6 +23,7 @@ on:
 permissions:
   contents: write
   actions: write
+  issues: write
 
 concurrency:
   group: gene-pulse-${{ inputs.gene || 'gene-node-1' }}
@@ -163,9 +164,13 @@ jobs:
           git config user.email "genesis-ai@users.noreply.github.com"
 
       - name: Execute one bounded coding-aware queue transition
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/gene_pulse.py --gene "$GENE_ID" --output runtime/pulse_result.json
 
       - name: Advance one bounded frontier benchmark task
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/benchmark_task_worker.py
 
       - name: Read pulse handoffs
