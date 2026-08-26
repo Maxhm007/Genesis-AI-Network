@@ -176,14 +176,26 @@ jobs:
         with:
           python-version: '3.12'
       - run: pip install -r requirements.txt
-      - uses: actions/download-artifact@v4
-        with:
-          name: action-repair-validator-a-${{ github.run_id }}
-          path: votes/a
-      - uses: actions/download-artifact@v4
-        with:
-          name: action-repair-validator-b-${{ github.run_id }}
-          path: votes/b
+      - name: Download exact validator votes through GitHub API
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for validator in a b; do
+            artifact_name="action-repair-validator-${validator}-${GITHUB_RUN_ID}"
+            artifact_id=''
+            for attempt in {1..5}; do
+              artifact_id=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}/artifacts" \
+                --jq ".artifacts[] | select(.name == \"${artifact_name}\") | .id" | head -n 1)
+              [[ -n "$artifact_id" ]] && break
+              sleep 2
+            done
+            [[ -n "$artifact_id" ]] || { echo "Missing validator artifact ${artifact_name}" >&2; exit 1; }
+            mkdir -p "votes/${validator}"
+            gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > "/tmp/validator-${validator}.zip"
+            unzip -q "/tmp/validator-${validator}.zip" -d "votes/${validator}"
+          done
       - name: Verify independent signed quorum
         run: python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
       - name: Promote exact validated Action candidate
@@ -199,6 +211,7 @@ jobs:
           test "$(git rev-parse origin/$BRANCH)" = "$CANDIDATE_SHA"
           main_sha=$(git rev-parse origin/main)
           git merge-base --is-ancestor "$main_sha" "$CANDIDATE_SHA"
+          git checkout --detach "$CANDIDATE_SHA"
           python scripts/action_repair_guard.py origin/main
           git push origin "$CANDIDATE_SHA:refs/heads/main"
           echo "promoted_sha=$CANDIDATE_SHA" >> "$GITHUB_OUTPUT"
