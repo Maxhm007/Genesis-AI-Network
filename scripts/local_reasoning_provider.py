@@ -203,8 +203,10 @@ def compact_edit_block_complete(text: str) -> bool:
 
 
 def bounded_coding_output_complete(text: str) -> bool:
-    """Recognize either legacy JSON or the compact edit protocol."""
-    return balanced_json_object_complete(text) or compact_edit_block_complete(text)
+    """Recognize compact protocol first so braces inside replacement code are harmless."""
+    if text.lstrip().startswith("PATH:"):
+        return compact_edit_block_complete(text)
+    return balanced_json_object_complete(text)
 
 
 def normalize_bounded_coding_output(text: str) -> str:
@@ -213,13 +215,15 @@ def normalize_bounded_coding_output(text: str) -> str:
     Leaving malformed output untouched is intentional: CodingModule will reject it.
     No path, range, replacement text, or missing delimiter is invented here.
     """
+    if text.lstrip().startswith("PATH:"):
+        try:
+            edit = parse_compact_edit(text)
+        except ValueError:
+            return text
+        return json.dumps(edit, separators=(",", ":"))
     if balanced_json_object_complete(text):
         return text
-    try:
-        edit = parse_compact_edit(text)
-    except ValueError:
-        return text
-    return json.dumps(edit, separators=(",", ":"))
+    return text
 
 
 def json_completion_reserve_tokens(
