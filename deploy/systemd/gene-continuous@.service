@@ -9,7 +9,9 @@ User=gene
 Group=gene
 WorkingDirectory=/opt/genesis
 Environment=PYTHONUNBUFFERED=1
-ExecStart=/opt/genesis/.venv/bin/python /opt/genesis/scripts/gene_continuous_work.py --gene %i --idle-pause 5
+Environment=GITHUB_REPOSITORY=Maxhm007/Genesis-AI-Network
+EnvironmentFile=-/etc/genesis/github.env
+ExecStart=/opt/genesis/.venv/bin/python -m scripts.gene_issue_continuous --gene %i --idle-pause 5 --authority-retry-pause 60
 Restart=always
 RestartSec=3
 StartLimitIntervalSec=0

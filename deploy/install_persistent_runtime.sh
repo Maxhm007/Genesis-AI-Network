@@ -4,9 +4,25 @@ set -euo pipefail
 REPO_URL="${GENE_REPO_URL:-https://github.com/Maxhm007/Genesis-AI-Network.git}"
 INSTALL_DIR="${GENE_INSTALL_DIR:-/opt/genesis}"
 GENES="${GENE_LOGICAL_IDS:-gene-node-1}"
+GITHUB_ENV_FILE="${GENE_GITHUB_ENV_FILE:-/etc/genesis/github.env}"
 
 if [[ "${EUID}" -ne 0 ]]; then
   echo "Run as root" >&2
+  exit 1
+fi
+
+if [[ ! -r "${GITHUB_ENV_FILE}" ]]; then
+  echo "Missing ${GITHUB_ENV_FILE}. Genesis requires a GitHub Issue write credential before persistent autonomous work can start." >&2
+  exit 1
+fi
+
+if ! grep -q '^GITHUB_TOKEN=.' "${GITHUB_ENV_FILE}"; then
+  echo "${GITHUB_ENV_FILE} does not contain GITHUB_TOKEN" >&2
+  exit 1
+fi
+
+if ! grep -q '^GITHUB_REPOSITORY=Maxhm007/Genesis-AI-Network$' "${GITHUB_ENV_FILE}"; then
+  echo "${GITHUB_ENV_FILE} must bind the runtime to Maxhm007/Genesis-AI-Network" >&2
   exit 1
 fi
 
@@ -37,7 +53,8 @@ install -m 0644 "${INSTALL_DIR}/deploy/systemd/gene-continuous@.service" /etc/sy
 systemctl daemon-reload
 
 for logical_id in ${GENES}; do
-  systemctl enable --now "gene-continuous@${logical_id}.service"
+  systemctl enable "gene-continuous@${logical_id}.service"
+  systemctl restart "gene-continuous@${logical_id}.service"
 done
 
 systemctl --no-pager --full status "gene-continuous@${GENES%% *}.service" || true

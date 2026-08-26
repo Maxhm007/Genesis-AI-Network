@@ -3,11 +3,12 @@ from __future__ import annotations
 import json
 import os
 import re
+import sqlite3
 import urllib.request
 from pathlib import Path
 
 from genesis.iterative_engineering import IterativeAutonomousEngineeringLoop
-from genesis.modules.task_queue import PersistentTaskQueue
+from genesis.modules.task_queue import PersistentTaskQueue, utc_now
 
 
 DEVLAB_MARKER = "<!-- genesis-devlab-task -->"
@@ -123,12 +124,13 @@ def _route_module(title: str, body: str) -> str:
 
 
 def classify_open_issue(issue: dict) -> dict:
-    """Classify one open issue without granting it execution authority.
+    """Classify one open issue without granting its text execution authority.
 
-    Issue text is task context only. Existing specialist lanes retain ownership of
-    Action failures, normal autorepair, and operational state. Persistent channels
-    stay open by design; external-secret/trust-domain blockers stay tracked rather
-    than being bypassed by code generated in the main repository.
+    Ordinary owner/user-created Issues are managed as development work without
+    requiring a special Genesis label. Existing specialist lanes retain ownership
+    of Action failures, normal autorepair, and operational state. Persistent
+    channels stay open by design; external trust-domain blockers remain visible
+    instead of being bypassed by generated code.
     """
     if issue.get("pull_request"):
         return {"kind": "pull_request", "managed": False}
@@ -192,7 +194,7 @@ def _task_is_active(queue: PersistentTaskQueue, task) -> bool:
 
 
 def _task_represents_open_problem(task) -> bool:
-    """Return whether a non-GitHub task remains the authoritative work item for a problem."""
+    """Return whether a non-GitHub task remains an active representation of a problem."""
     if task.state not in ACTIVE_TASK_STATES:
         return False
     if task.state == "failed" and task.attempt_count >= task.max_attempts:
@@ -252,12 +254,7 @@ def _module_compatible(issue_module: str, task_module: str | None) -> bool:
 
 
 def _find_existing_problem_task(queue: PersistentTaskQueue, issue: dict, classification: dict):
-    """Find an active Genesis-owned task already representing this GitHub problem.
-
-    Explicit fingerprints win. Without one, matching is intentionally conservative:
-    the routed owner must be compatible and at least 75% of a sufficiently-specific
-    GitHub title must already appear in the task's durable problem context.
-    """
+    """Find an active Genesis-owned task already representing this GitHub problem."""
     issue_module = str(classification.get("module_id") or "genesis.self_development")
     explicit = _explicit_problem_fingerprint(issue)
     issue_terms = _problem_terms(str(issue.get("title") or ""))
@@ -282,6 +279,29 @@ def _find_existing_problem_task(queue: PersistentTaskQueue, issue: dict, classif
         return None
     candidates.sort(key=lambda item: (-item[0], item[1].created_at, item[1].task_id))
     return candidates[0][1]
+
+
+def _adopt_issue_authority(queue: PersistentTaskQueue, task, issue: dict):
+    """Bind a matching existing Genesis task to the manually created GitHub Issue."""
+    number = int(issue.get("number") or 0)
+    if number <= 0:
+        return task
+    payload = dict(task.payload or {})
+    payload.update(
+        {
+            "github_issue_number": number,
+            "github_issue_url": str(issue.get("html_url") or ""),
+            "github_issue_authoritative": True,
+            "execution_lane": "github_issue",
+            "attribution": str(payload.get("attribution") or "owner_directed_backlog"),
+        }
+    )
+    with sqlite3.connect(queue.path) as db:
+        db.execute(
+            "UPDATE genesis_tasks SET payload_json = ?, updated_at = ? WHERE task_id = ?",
+            (json.dumps(payload, sort_keys=True), utc_now(), task.task_id),
+        )
+    return queue.get(task.task_id) or task
 
 
 def _next_generation(queue: PersistentTaskQueue, issue_number: int, task_type: str) -> tuple[object | None, int]:
@@ -355,7 +375,8 @@ def _queue_generic_issue(queue: PersistentTaskQueue, issue: dict, classification
 
     existing_problem = _find_existing_problem_task(queue, issue, classification)
     if existing_problem is not None:
-        return existing_problem.task_id, "linked_existing_problem"
+        adopted = _adopt_issue_authority(queue, existing_problem, issue)
+        return adopted.task_id, "linked_existing_problem"
 
     title = str(issue.get("title") or "").strip()
     body = str(issue.get("body") or "")
@@ -400,9 +421,9 @@ def ingest_open_issue_backlog(root: Path) -> dict:
         classification = classify_open_issue(issue)
         number = int(issue.get("number") or 0)
         row = {"issue": number, **classification}
-        kind = classification.get("kind")
         task_id = None
         status = "owned_by_specialist"
+        kind = classification.get("kind")
         if kind == "devlab":
             task_id, status = _queue_devlab_issue(root, queue, issue, classification)
         elif kind == "development":
@@ -428,10 +449,10 @@ def ingest_open_issue_backlog(root: Path) -> dict:
         "linked_existing_count": len(linked),
         "issues": rows,
         "policy": (
-            "The Genesis task queue is the source of truth. Every open GitHub issue must map to exactly one owning lane: "
-            "an already-active Genesis problem, specialist repair, persistent engineering, tracked external blocker, or intentional "
-            "persistent channel. GitHub intake links to matching internal work instead of creating a second task. Exhausted engineering "
-            "tasks receive a bounded new generation only when no active authoritative problem already owns the same work."
+            "GitHub Issues are the authoritative production task source. Every actionable open Issue must map to exactly one owning "
+            "Genesis lane. If a user-created Issue matches an active internal problem, that existing task adopts the Issue instead of "
+            "creating duplicate work. SQLite remains execution/cache state only. Exhausted engineering work may receive a bounded new "
+            "generation under the same Issue only when no active work already owns it."
         ),
     }
 

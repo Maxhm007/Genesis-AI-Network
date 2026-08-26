@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import asdict, dataclass
 from pathlib import Path
 
+from scripts.autonomous_engineering import ingest_open_issue_backlog
 from scripts.gene_continuous_work import run_step
+
+from .github_issue_task_router import issue_authority_enabled, route_unbacked_tasks
 
 
 DEFAULT_IDLE_DISCOVERY_BURST = 4
@@ -27,14 +30,7 @@ def workflow_chain_decision(
     idle_budget: int,
     default_idle_budget: int = DEFAULT_IDLE_DISCOVERY_BURST,
 ) -> tuple[bool, int, str]:
-    """Decide whether GitHub Actions should dispatch another Gene Pulse.
-
-    Executable work keeps chaining and resets the idle-discovery budget. A pulse
-    that checkpointed only because discovery was idle may receive a small bounded
-    burst of extra reassessment pulses. This gives Genesis enough consecutive
-    opportunities to discover/route work without creating an unbounded workflow
-    loop when there is genuinely nothing actionable.
-    """
+    """Decide whether GitHub Actions should dispatch another Gene Pulse."""
     if default_idle_budget < 1:
         raise ValueError("default idle discovery budget must be positive")
     if idle_budget < 0:
@@ -53,13 +49,13 @@ def workflow_chain_decision(
 
 
 class GenePulse:
-    """Execute one resumable unit of Gene work.
+    """Execute one resumable unit of authoritative GitHub Issue work.
 
-    Each pulse performs at most one bounded autonomy-pipeline transition. Queue
-    state survives the process; specialist workers do not need to remain alive.
-    Immediate chaining is used when the next stage has executable work. An outer
-    workflow may also grant a small bounded burst for repeated idle discovery;
-    validation waits and hard checkpoints still stop immediately.
+    In the real Genesis runtime, every Pulse first imports all actionable open
+    repository Issues, then binds every remaining internal task to an Issue before
+    any worker runs. If GitHub intake or task binding is unavailable, the Pulse
+    fails closed. A second sync after the bounded step immediately publishes any
+    newly discovered task before another Pulse can execute it.
     """
 
     def __init__(self, root: Path, logical_id: str = "gene-node-1") -> None:
@@ -70,6 +66,9 @@ class GenePulse:
     def _next_pulse_decision(action: str, payload: dict) -> tuple[bool, str]:
         if action in {"fatal_stop", "owner_stop"}:
             return False, action
+
+        if action in {"github_issue_sync_blocked", "github_issue_intake_blocked"}:
+            return False, "github_issue_authority_unavailable"
 
         pipeline_continue = {
             "pipeline_issue_discovered": "issue_waiting_for_triage",
@@ -118,13 +117,74 @@ class GenePulse:
 
         return False, "unrecognized_action_checkpointed"
 
+    def _authority_blocked(self, action: str, *, detail: dict) -> PulseResult:
+        payload = {
+            "decision": {
+                "mode": "github_issue_authority",
+                "task_id": None,
+                "reason": "GitHub Issue authority is unavailable; autonomous execution is forbidden",
+            },
+            "action": action,
+            **detail,
+            "policy": "No GitHub Issue = no Genesis task execution.",
+        }
+        return PulseResult(
+            logical_id=self.logical_id,
+            action=action,
+            mode="github_issue_authority",
+            task_id=None,
+            needs_next_pulse=False,
+            next_pulse_reason="github_issue_authority_unavailable",
+            payload=payload,
+        )
+
     def run(self) -> PulseResult:
+        authority = issue_authority_enabled(self.root)
+        backlog = {
+            "status": "not_repository_runtime",
+            "open_issue_count": 0,
+            "created_count": 0,
+        }
+        if authority:
+            try:
+                backlog = ingest_open_issue_backlog(self.root)
+            except Exception as exc:
+                return self._authority_blocked(
+                    "github_issue_intake_blocked",
+                    detail={
+                        "github_open_issue_backlog": {
+                            "status": "blocked",
+                            "error": f"{type(exc).__name__}: {exc}"[:2000],
+                        }
+                    },
+                )
+
+        issue_sync_before = route_unbacked_tasks(self.root)
+        if authority and issue_sync_before.get("blocked"):
+            return self._authority_blocked(
+                "github_issue_sync_blocked",
+                detail={
+                    "github_open_issue_backlog": backlog,
+                    "github_issue_sync_before": issue_sync_before,
+                },
+            )
+
         payload = run_step(self.logical_id)
+        issue_sync_after = route_unbacked_tasks(self.root)
+        payload["github_open_issue_backlog"] = backlog
+        payload["github_issue_sync_before"] = issue_sync_before
+        payload["github_issue_sync_after"] = issue_sync_after
+        payload["task_authority"] = "github_issues" if authority else "temporary_test_runtime"
+
         decision = dict(payload.get("decision", {}) or {})
         action = str(payload.get("action", "unknown"))
         mode = str(decision.get("mode", "unknown"))
         task_id = decision.get("task_id")
         needs_next, reason = self._next_pulse_decision(action, payload)
+
+        if authority and issue_sync_after.get("blocked"):
+            needs_next = False
+            reason = "github_issue_authority_unavailable"
 
         return PulseResult(
             logical_id=self.logical_id,
