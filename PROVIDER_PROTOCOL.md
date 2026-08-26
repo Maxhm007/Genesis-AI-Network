@@ -39,28 +39,22 @@ Multiple generic providers can also be configured through `GENESIS_PROVIDER_ENDP
 
 No provider receives constitutional authority merely by being connected. Outputs remain candidate knowledge and candidate engineering work until separately validated.
 
-## Built-in optional DeepSeek adapter
+## Local Qwen + DeepSeek coding runtime
 
-Genesis can add DeepSeek behind the same provider abstraction without replacing Qwen or changing the existing provider configuration. The adapter is disabled unless an operator supplies an API key at runtime:
-
-```text
-DEEPSEEK_API_KEY=<runtime-secret>
-```
-
-Optional settings:
+Genesis uses open-weight models locally in the bounded Coding Intelligence Pulse. Qwen remains the primary coding model and DeepSeek is the default escalation/retry model:
 
 ```text
-GENESIS_DEEPSEEK_MODEL=deepseek-v4-flash
-GENESIS_DEEPSEEK_BASE_URL=https://api.deepseek.com
-GENESIS_DEEPSEEK_TIMEOUT_SECONDS=90
-GENESIS_DEEPSEEK_MAX_TOKENS=512
-GENESIS_DEEPSEEK_THINKING=enabled
-GENESIS_DEEPSEEK_REASONING_EFFORT=high
+GENESIS_PULSE_FALLBACK_MODEL=Qwen/Qwen2.5-Coder-0.5B-Instruct
+GENESIS_PULSE_ESCALATION_MODEL=deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
 ```
 
-The default model is `deepseek-v4-flash`. The adapter uses DeepSeek's OpenAI-compatible `POST /chat/completions` API and declares reasoning, coding, research, planning and review capabilities. It does not store credentials in the repository.
+Both checkpoints are downloaded through the existing Hugging Face/Transformers cache and executed on the GitHub Actions runner. There is no DeepSeek API key, paid DeepSeek service, or DeepSeek HTTP dependency in this path.
 
-Routing remains Genesis-owned. General `IntelligenceRouter` selection continues to preserve its existing Qwen preference when Qwen is available, while DeepSeek is an eligible fallback. Autonomous coding continues to obey the repository's existing coding-provider policy, which may prefer an eligible non-Qwen coder based on the current validated repair policy. In every case, tests, Security, review, independent validation and promotion gates remain unchanged.
+`deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B` is an open-weight DeepSeek-R1 distilled checkpoint. The runtime keeps the model ID configurable so Genesis can evaluate and adopt a better local DeepSeek checkpoint later without changing its identity or safety boundaries.
+
+The adaptive local coding provider uses Qwen for the first bounded attempt and selects the configured escalation model when repository evidence indicates a revision/retry. If the escalation model fails to load or infer, the provider falls back to the primary Qwen model. Tests, Security, review, independent validation and promotion gates remain authoritative.
+
+The larger GitHub Issue Autorepair lane continues using its existing local Qwen runtime to avoid loading another multi-billion-parameter checkpoint into the same standard runner. Provider-bound work that needs the Qwen + DeepSeek pairing is delegated to the dedicated Coding Intelligence Pulse.
 
 ## Bootstrap provider
 
