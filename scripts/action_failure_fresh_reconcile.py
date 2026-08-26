@@ -3,6 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts.action_failure_watchdog import decode_metadata
 
@@ -38,7 +44,7 @@ def find_fresh_success(repository: str, metadata: dict) -> dict | None:
     failed_run_id = int(metadata.get("run_id") or 0)
     failed_sha = str(metadata.get("head_sha") or "")
     failed_job = str(metadata.get("failed_job") or "")
-    if not workflow_id or not failed_run_id or not failed_job or failed_job == "workflow":
+    if not workflow_id or not failed_run_id or not failed_job:
         return None
     payload = _run_json([
         "gh",
@@ -58,14 +64,17 @@ def find_fresh_success(repository: str, metadata: dict) -> dict | None:
     candidates.sort(key=lambda row: int(row.get("id") or 0), reverse=True)
     for run in candidates:
         run_id = int(run.get("id") or 0)
+        evidence = {
+            "run_id": run_id,
+            "head_sha": str(run.get("head_sha") or ""),
+            "failed_job": failed_job,
+        }
+        if failed_job == "workflow":
+            return evidence
         jobs_payload = _run_json(["gh", "api", f"repos/{repository}/actions/runs/{run_id}/jobs?per_page=100"])
         jobs = list(jobs_payload.get("jobs") or []) if isinstance(jobs_payload, dict) else []
         if _matching_job_passed(jobs, failed_job):
-            return {
-                "run_id": run_id,
-                "head_sha": str(run.get("head_sha") or ""),
-                "failed_job": failed_job,
-            }
+            return evidence
     return None
 
 
@@ -76,10 +85,16 @@ def _close_verified(repository: str, issue_number: int, evidence: dict) -> None:
     result = subprocess.run(edit, text=True, capture_output=True, check=False)
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout or "label update failed")[-1200:])
+    failed_job = str(evidence.get("failed_job") or "")
+    proof = (
+        "the whole workflow completed successfully"
+        if failed_job == "workflow"
+        else f"the previously failed job `{failed_job}` passed"
+    )
     comment = (
         "Genesis found fresh verification on a newer `main` revision: "
-        f"workflow run `{evidence['run_id']}` completed successfully and the previously failed job "
-        f"`{evidence['failed_job']}` passed on SHA `{evidence['head_sha']}`."
+        f"workflow run `{evidence['run_id']}` completed successfully and {proof} "
+        f"on SHA `{evidence['head_sha']}`."
     )
     result = subprocess.run(
         ["gh", "issue", "close", str(issue_number), "--repo", repository, "--reason", "completed", "--comment", comment],
