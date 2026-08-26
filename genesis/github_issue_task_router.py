@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from typing import Callable
 
+from .issue_backpressure import active_capacity_count, capacity_limited_task, configured_max_active
 from .issue_fingerprint import canonical_issue_fingerprint, canonical_task_fingerprint
 from .modules.task_queue import GenesisTask, PersistentTaskQueue, utc_now
 
@@ -269,12 +270,14 @@ def route_unbacked_tasks(
     *,
     requester: GithubRequester | None = None,
 ) -> dict:
-    """Bind every non-terminal autonomous task to a GitHub Issue before execution.
+    """Bind non-terminal autonomous tasks to GitHub Issues before execution.
 
     GitHub Issues are authoritative. The SQLite queue is execution/cache state only.
-    Existing specialist capability/self-improvement Issues are reused rather than
-    duplicated. If GitHub is unavailable, the router fails closed: it does not mark
-    a task executable, and downstream schedulers must reject unbacked work.
+    Existing matching Issues are always reused before admission capacity is tested.
+    Low-priority research/capability candidates are left unbacked and therefore
+    non-executable when the active autonomous backlog is full; they remain durable
+    in the same queue and are reconsidered on the next routing cycle. Repair,
+    security/action-failure and owner-prioritized work bypasses that admission cap.
 
     An injected requester explicitly opts a caller (normally a unit test) into the
     real routing behavior without requiring the caller to be the production repo.
@@ -291,13 +294,19 @@ def route_unbacked_tasks(
         for task in queue.list(limit=5000)
         if task.state not in TERMINAL_STATES and not issue_backed(task)
     ]
+    max_active = configured_max_active()
     result = {
         "status": "ok",
         "enforced": bool(explicit_requester or issue_authority_enabled(root)),
         "policy": "GitHub Issues are the authoritative task source; SQLite is execution/cache state only.",
         "candidate_count": len(candidates),
+        "backpressure": {
+            "max_active_autonomous_issues": max_active,
+            "active_capacity_issues": 0,
+        },
         "bound": [],
         "adopted": [],
+        "deferred": [],
         "blocked": [],
     }
 
@@ -320,6 +329,9 @@ def route_unbacked_tasks(
         return result
 
     existing = _all_issues(requester)
+    active_limited = active_capacity_count(existing)
+    result["backpressure"]["active_capacity_issues"] = active_limited
+
     for task in candidates:
         linked = _linked_issue_from_queue(queue, task.task_id)
         if linked is not None:
@@ -335,11 +347,50 @@ def route_unbacked_tasks(
             )
             continue
 
+        # Dedupe/reuse happens before capacity admission. Existing authoritative
+        # work must never receive a second issue merely because the backlog is full.
+        matched = _find_issue_for_task(existing, task)
+        if matched is not None:
+            was_open = str(matched.get("state") or "open") == "open"
+            issue = _ensure_issue(requester, existing, task)
+            if issue is None:
+                result["blocked"].append({"task_id": task.task_id, "reason": "github_issue_unavailable"})
+                continue
+            if capacity_limited_task(task) and not was_open and str(issue.get("state") or "open") == "open":
+                active_limited += 1
+            issue_number = int(issue.get("number") or 0)
+            issue_url = str(issue.get("html_url") or "")
+            updated = _bind_issue(queue, task, issue_number, issue_url)
+            result["adopted"].append(
+                {
+                    "task_id": updated.task_id,
+                    "github_issue_number": issue_number,
+                    "github_issue_url": issue_url,
+                    "reason": "reused_existing_canonical_issue",
+                }
+            )
+            continue
+
+        limited = capacity_limited_task(task)
+        if limited and active_limited >= max_active:
+            result["deferred"].append(
+                {
+                    "task_id": task.task_id,
+                    "task_type": _task_type(task),
+                    "priority": task.priority,
+                    "created_at": task.created_at,
+                    "reason": "active_autonomous_backlog_at_capacity",
+                }
+            )
+            continue
+
         issue = _ensure_issue(requester, existing, task)
         if issue is None:
             result["blocked"].append({"task_id": task.task_id, "reason": "github_issue_unavailable"})
             continue
 
+        if limited:
+            active_limited += 1
         issue_number = int(issue.get("number") or 0)
         issue_url = str(issue.get("html_url") or "")
         updated = _bind_issue(queue, task, issue_number, issue_url)
@@ -351,6 +402,7 @@ def route_unbacked_tasks(
             }
         )
 
+    result["backpressure"]["active_capacity_issues_after_routing"] = active_limited
     if result["blocked"]:
         result["status"] = "partial" if result["bound"] or result["adopted"] else "blocked"
     report_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
