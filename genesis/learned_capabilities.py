@@ -154,4 +154,27 @@ def learned_8b7a22c14b8a383e(self):
 
 pass
 
+def _learned_27322463c7e3(
+    requested: str | None,
+    available,
+    fallback: str | None = None,
+) -> str | None:
+    """Prefer an explicit supported runtime device, then a compatible fallback."""
+    choices = tuple(str(item).strip() for item in available if str(item).strip())
+    preferred = str(requested).strip() if requested is not None else ""
+    if preferred and preferred in choices:
+        return preferred
+    fallback_name = str(fallback).strip() if fallback is not None else ""
+    if fallback_name and fallback_name in choices:
+        return fallback_name
+    return choices[0] if choices else None
+
+register_capability(
+    'runtime_device_selection_27322463c7e3',
+    "Select an explicit supported runtime device while preserving a compatible fallback path. Verified lesson: Research-backed capability candidate from 'b10622': <details open> metal : null-check buffer alloc to fix OOM crash (#25371) * metal : null-check ggml_metal_buffer_init result to avoid OOM crash ggml_backend_metal_buffer_type_alloc_buffer used the result of ggml_metal_buffer_init without checking for NULL. ggml_metal_buffer_init returns NULL when the underlying Metal allocation fails (e.g. an out-of-memory condition), and the following ggml_metal_buffer_is_shared(res) call dereferences it, turning a recoverable allocation failure into a hard crash (EXC_BAD_ACCESS). This is easy to hit on memor",
+    '<details open> metal : null-check buffer alloc to fix OOM crash (#25371) * metal : null-check ggml_metal_buffer_init result to avoid OOM crash ggml_backend_metal_buffer_type_alloc_buffer used the result of ggml_metal_buffer_init without checking for NULL. ggml_metal_buffer_init returns NULL when the underlying Metal allocation fails (e.g. an out-of-memory condition), and the following ggml_metal_buffer_is_shared(res) call dereferences it, turning a recoverable allocation failure into a hard crash (EXC_BAD_ACCESS). This is easy to hit on memory-constrained devices such as iOS when a model/context exceeds the available Metal budget. Log the failure using the existing GGML_LOG_ERROR convention and return NULL so the allocator surfaces a diagnosable error up the stack instead of crashing. * cont : fix log --------- Co-authored-by: Georgi Gerganov <ggerganov@gmail.com> </details> **Website:** - <https://llama.app> **Attestations:** - <https://github.com/ggml-org/llama.cpp/attestations/42843565> **macOS/iOS:** - [macOS Apple Silicon (arm64)](https://github.com/ggml-org/llama.cpp/releases/download/b10622/llama-b10622-bin-macos-arm64.tar.gz) - macOS Apple Silicon (arm64, KleidiAI enabled)',
+    _learned_27322463c7e3,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
