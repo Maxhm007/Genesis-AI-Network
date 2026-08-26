@@ -16,7 +16,6 @@ concurrency:
 
 jobs:
   resolve:
-    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     outputs:
       has_candidate: ${{ steps.resolve.outputs.has_candidate }}
@@ -26,6 +25,8 @@ jobs:
       workflow_id: ${{ steps.resolve.outputs.workflow_id }}
       workflow_path: ${{ steps.resolve.outputs.workflow_path }}
       repair_cycles: ${{ steps.resolve.outputs.repair_cycles }}
+      candidate_status: ${{ steps.resolve.outputs.candidate_status }}
+      candidate_failure: ${{ steps.resolve.outputs.candidate_failure }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -42,32 +43,51 @@ jobs:
           artifact_id=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" \
             --jq ".artifacts[] | select(.name == \"${artifact_name}\") | .id" | head -n 1)
           if [[ -z "$artifact_id" ]]; then
-            echo "Required candidate handoff artifact ${artifact_name} was not published." >&2
-            exit 1
+            echo "No candidate handoff artifact was published by source run ${SOURCE_RUN_ID}; preserve the source failure without creating a secondary recovery failure."
+            echo 'missing_candidate_handoff=true' >> "$GITHUB_ENV"
+            exit 0
           fi
           mkdir -p handoff
           gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > /tmp/genesis-action-repair-candidate.zip
           unzip -q /tmp/genesis-action-repair-candidate.zip -d handoff
           mapfile -t candidate_files < <(find handoff -type f -name 'action_repair_candidate.json' -print)
           if (( ${#candidate_files[@]} != 1 )); then
-            echo "Expected exactly one Action repair candidate JSON in the artifact; found ${#candidate_files[@]}." >&2
-            exit 1
+            echo "Expected exactly one Action repair candidate JSON in the artifact; found ${#candidate_files[@]}. Preserve the issue open." >&2
+            echo 'missing_candidate_handoff=true' >> "$GITHUB_ENV"
+            exit 0
           fi
           mkdir -p handoff/runtime
           canonical='handoff/runtime/action_repair_candidate.json'
           if [[ "${candidate_files[0]}" != "$canonical" ]]; then
             cp "${candidate_files[0]}" "$canonical"
           fi
-      - name: Resolve exact privileged candidate
+      - name: Resolve exact privileged candidate or bounded failure evidence
         id: resolve
         shell: bash
+        env:
+          SOURCE_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
         run: |
+          set -euo pipefail
+          if [[ "${missing_candidate_handoff:-false}" == true ]]; then
+            echo 'has_candidate=false' >> "$GITHUB_OUTPUT"
+            echo 'issue_number=0' >> "$GITHUB_OUTPUT"
+            echo 'candidate_branch=' >> "$GITHUB_OUTPUT"
+            echo 'candidate_sha=' >> "$GITHUB_OUTPUT"
+            echo 'workflow_id=0' >> "$GITHUB_OUTPUT"
+            echo 'workflow_path=' >> "$GITHUB_OUTPUT"
+            echo 'repair_cycles=0' >> "$GITHUB_OUTPUT"
+            echo 'candidate_status=source_failed_without_handoff' >> "$GITHUB_OUTPUT"
+            echo "candidate_failure=source_conclusion=${SOURCE_CONCLUSION}" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           python - <<'PY' >> "$GITHUB_OUTPUT"
           import json
           import subprocess
           from pathlib import Path
+
           payload = json.loads(Path('handoff/runtime/action_repair_candidate.json').read_text(encoding='utf-8'))
-          ok = payload.get('status') == 'candidate_created'
+          status = str(payload.get('status') or 'unknown')
+          ok = status == 'candidate_created'
           branch = str(payload.get('candidate_branch') or '')
           sha = str(payload.get('candidate_sha') or '')
           if ok and (not branch.startswith('genesis/privileged-candidate-') or len(sha) != 40):
@@ -77,6 +97,12 @@ jobs:
               actual = subprocess.check_output(['git', 'rev-parse', f'origin/{branch}'], text=True).strip()
               if actual != sha:
                   raise SystemExit('candidate branch head changed after generation')
+          feedback = payload.get('feedback')
+          if isinstance(feedback, list):
+              failure = ' | '.join(str(item) for item in feedback[-3:])
+          else:
+              failure = str(payload.get('reason') or payload.get('error') or '')
+          failure = ' '.join(failure.split())[:900]
           print(f"has_candidate={'true' if ok else 'false'}")
           print(f"issue_number={int(payload.get('issue_number') or 0)}")
           print(f"candidate_branch={branch if ok else ''}")
@@ -84,6 +110,8 @@ jobs:
           print(f"workflow_id={int(payload.get('workflow_id') or 0)}")
           print(f"workflow_path={str(payload.get('workflow_path') or '')}")
           print(f"repair_cycles={int(payload.get('repair_cycles') or 0)}")
+          print(f"candidate_status={status}")
+          print(f"candidate_failure={failure}")
           PY
 
   validator_a:
@@ -238,6 +266,9 @@ jobs:
           WORKFLOW_ID: ${{ needs.resolve.outputs.workflow_id }}
           WORKFLOW_PATH: ${{ needs.resolve.outputs.workflow_path }}
           REPAIR_CYCLES: ${{ needs.resolve.outputs.repair_cycles }}
+          CANDIDATE_STATUS: ${{ needs.resolve.outputs.candidate_status }}
+          CANDIDATE_FAILURE: ${{ needs.resolve.outputs.candidate_failure }}
+          SOURCE_CONCLUSION: ${{ github.event.workflow_run.conclusion }}
           PROMOTED_SHA: ${{ needs.promote.outputs.promoted_sha }}
           PROMOTE_RESULT: ${{ needs.promote.result }}
           VALIDATOR_A: ${{ needs.validator_a.result }}
@@ -248,6 +279,20 @@ jobs:
           python - <<'PY'
           import json, os
           success = os.environ.get('PROMOTE_RESULT') == 'success' and bool(os.environ.get('PROMOTED_SHA'))
+          candidate_status = os.environ.get('CANDIDATE_STATUS') or 'unknown'
+          candidate_failure = os.environ.get('CANDIDATE_FAILURE') or ''
+          if success:
+              failure_excerpt = ''
+          elif candidate_status != 'candidate_created':
+              failure_excerpt = (
+                  f"candidate_status={candidate_status} source_conclusion={os.environ.get('SOURCE_CONCLUSION')} "
+                  f"candidate_failure={candidate_failure or '[no bounded candidate failure detail]'}"
+              )
+          else:
+              failure_excerpt = (
+                  f"validator_a={os.environ.get('VALIDATOR_A')} validator_b={os.environ.get('VALIDATOR_B')} "
+                  f"secret_guard={os.environ.get('SECRET_GUARD')} promote={os.environ.get('PROMOTE_RESULT')}"
+              )
           payload = {
               'status': 'promoted' if success else 'validation_failed',
               'issue_number': int(os.environ.get('ISSUE_NUMBER') or 0),
@@ -255,7 +300,7 @@ jobs:
               'workflow_path': os.environ.get('WORKFLOW_PATH') or '',
               'repair_cycles': int(os.environ.get('REPAIR_CYCLES') or 0),
               'promoted_sha': os.environ.get('PROMOTED_SHA') or '',
-              'failure_excerpt': f"validator_a={os.environ.get('VALIDATOR_A')} validator_b={os.environ.get('VALIDATOR_B')} secret_guard={os.environ.get('SECRET_GUARD')} promote={os.environ.get('PROMOTE_RESULT')}",
+              'failure_excerpt': failure_excerpt[:1600],
           }
           open('runtime/action_repair_recovery_status.json', 'w', encoding='utf-8').write(json.dumps(payload, indent=2, sort_keys=True) + '\n')
           PY
