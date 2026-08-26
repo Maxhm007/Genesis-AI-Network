@@ -23,7 +23,7 @@ env:
   GENESIS_PROVIDER_URL: http://127.0.0.1:8768
   GENESIS_PROVIDER_NAME: qwen3-1.7b-action-autorepair
   GENESIS_PROVIDER_TIMEOUT_SECONDS: '240'
-  GENESIS_PROVIDER_MAX_NEW_TOKENS: '1024'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '512'
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
 
@@ -86,7 +86,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen3-1.7B --host 127.0.0.1 --port 8768 --max-new-tokens 1024 > /tmp/genesis-action-repair.log 2>&1 &
+          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen3-1.7B --host 127.0.0.1 --port 8768 --max-new-tokens 512 > /tmp/genesis-action-repair.log 2>&1 &
           ready=false
           for i in {1..120}; do
             python - <<'PY' && ready=true && break || true
