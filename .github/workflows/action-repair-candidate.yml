@@ -41,7 +41,10 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Resolve one authorized Action issue
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Resolve one repairable authorized Action issue
         id: issue
         env:
           GH_TOKEN: ${{ github.token }}
@@ -51,14 +54,10 @@ jobs:
           set -euo pipefail
           n="$REQUESTED"
           if [[ -z "$n" ]]; then
-            n=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label genesis-action-autonomous --limit 1 --json number --jq '.[0].number // empty')
+            n=$(python scripts/action_repair_selector.py --repository "$GITHUB_REPOSITORY")
           fi
           [[ -z "$n" || "$n" =~ ^[0-9]+$ ]]
           echo "issue_number=$n" >> "$GITHUB_OUTPUT"
-      - uses: actions/setup-python@v5
-        if: steps.issue.outputs.issue_number != ''
-        with:
-          python-version: '3.12'
       - name: Install Genesis dependencies
         if: steps.issue.outputs.issue_number != ''
         run: pip install -r requirements.txt

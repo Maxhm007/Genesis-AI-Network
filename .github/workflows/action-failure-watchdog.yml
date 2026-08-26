@@ -9,6 +9,7 @@ on:
     paths:
       - '.github/workflows/action-failure-watchdog.yml'
       - 'scripts/action_failure_watchdog.py'
+      - 'scripts/action_failure_fresh_reconcile.py'
 
 permissions:
   actions: read
@@ -31,7 +32,7 @@ jobs:
           python-version: '3.12'
       - run: pip install -r requirements.txt
       - name: Verify watchdog boundaries
-        run: python -m pytest -q tests/test_action_failure_watchdog.py tests/test_action_repair_guard.py
+        run: python -m pytest -q tests/test_action_failure_watchdog.py tests/test_action_repair_guard.py tests/test_action_failure_fresh_reconcile.py tests/test_action_repair_selector.py
       - name: Ensure Action repair labels exist
         env:
           GH_TOKEN: ${{ github.token }}
@@ -49,6 +50,10 @@ jobs:
           ensure_label genesis-action-solved 8250df 'Action repair verified on a fresh run'
           ensure_label genesis-action-blocked b60205 'Action repair safely blocked or exhausted'
           ensure_label genesis-action-transient d4c5f9 'Action passed on one transient retry'
+      - name: Close stale failures proven fixed on newer main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/action_failure_fresh_reconcile.py --repository "$GITHUB_REPOSITORY"
       - name: Reconcile failures and open one new issue
         env:
           GH_TOKEN: ${{ github.token }}
