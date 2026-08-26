@@ -7,6 +7,9 @@ on:
     paths:
       - 'deploy/**'
       - 'scripts/gene_continuous_work.py'
+      - 'scripts/gene_issue_continuous.py'
+      - 'genesis/pulse.py'
+      - 'genesis/github_issue_task_router.py'
       - 'genesis/work_rule.py'
       - '.github/workflows/deploy-persistent-runtime.yml'
 
@@ -23,10 +26,12 @@ jobs:
           HOST: ${{ secrets.GENE_RUNTIME_HOST }}
           USER: ${{ secrets.GENE_RUNTIME_USER }}
           KEY: ${{ secrets.GENE_RUNTIME_SSH_KEY }}
+          GITHUB_ISSUE_TOKEN: ${{ secrets.GENE_RUNTIME_GITHUB_TOKEN }}
         run: |
           test -n "$HOST"
           test -n "$USER"
           test -n "$KEY"
+          test -n "$GITHUB_ISSUE_TOKEN"
 
       - name: Install SSH key
         env:
@@ -44,6 +49,15 @@ jobs:
           test -n "$HOST_KEY"
           printf '%s\n' "$HOST_KEY" > ~/.ssh/known_hosts
           chmod 600 ~/.ssh/known_hosts
+
+      - name: Provision GitHub Issue authority credential
+        env:
+          HOST: ${{ secrets.GENE_RUNTIME_HOST }}
+          USER: ${{ secrets.GENE_RUNTIME_USER }}
+          GITHUB_ISSUE_TOKEN: ${{ secrets.GENE_RUNTIME_GITHUB_TOKEN }}
+        run: |
+          printf 'GITHUB_TOKEN=%s\nGITHUB_REPOSITORY=Maxhm007/Genesis-AI-Network\n' "$GITHUB_ISSUE_TOKEN" \
+            | ssh "$USER@$HOST" 'sudo install -d -m 0750 -o root -g gene /etc/genesis && sudo tee /etc/genesis/github.env >/dev/null && sudo chown root:gene /etc/genesis/github.env && sudo chmod 0640 /etc/genesis/github.env'
 
       - name: Deploy Gene 0
         env:
