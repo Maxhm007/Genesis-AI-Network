@@ -1,0 +1,24 @@
+{
+  "schema_version": 1,
+  "core_name": "Gene 0 Shared Descendant Core",
+  "capabilities": [
+    {
+      "id": "verified-capability-inheritance",
+      "description": "Consume only Gene 0 exports declared by the capability manifest and verified by SHA-256 before activation."
+    },
+    {
+      "id": "policy-inheritance",
+      "description": "Keep canonical network policy snapshots locally without overwriting descendant identity or local learning policy."
+    },
+    {
+      "id": "descendant-health-validation",
+      "description": "Validate local critical JSON state and inherited core state before an inherited release is committed."
+    },
+    {
+      "id": "node-sovereignty",
+      "description": "Preserve descendant-specific node identity, model profile, attestations, learning policy and specialist repair logic."
+    }
+  ],
+  "activation_rule": "download -> verify hash -> stage -> validate -> commit",
+  "rollback_rule": "never install a lower semantic release version than the locally recorded Gene 0 release"
+}
