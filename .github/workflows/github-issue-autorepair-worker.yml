@@ -32,11 +32,6 @@ jobs:
     concurrency:
       group: genesis-github-issue-autorepair-issue-${{ inputs.issue_number }}
       cancel-in-progress: false
-    outputs:
-      issue_number: ${{ inputs.issue_number }}
-      has_candidate: ${{ steps.candidate.outputs.has_candidate }}
-      candidate_branch: ${{ steps.candidate.outputs.candidate_branch }}
-      candidate_sha: ${{ steps.candidate.outputs.candidate_sha }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -53,9 +48,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          issue_json=$(gh issue view "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --json state,labels)
+          issue_json=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels)
           eligible=$(jq -r '
             (.state == "OPEN") and
             (([.labels[].name] | index("genesis-autonomous")) != null) and
@@ -66,7 +59,7 @@ jobs:
           ' <<<"$issue_json")
           echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
           if [[ "$eligible" != "true" ]]; then
-            echo "Issue #$ISSUE_NUMBER is no longer eligible for this reserved repair slot."
+            echo "Issue #$ISSUE_NUMBER is no longer eligible for this reserved solve slot."
           fi
       - name: Install repository dependencies
         if: steps.eligibility.outputs.eligible == 'true'
@@ -121,40 +114,11 @@ jobs:
         run: |
           git config user.name "Genesis AI"
           git config user.email "genesis-ai@users.noreply.github.com"
-      - name: Let Genesis solve the selected GitHub issue
+      - name: Let Genesis solve the reserved GitHub issue
         if: steps.eligibility.outputs.eligible == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/github_issue_autorepair.py --issue-number '${{ inputs.issue_number }}' --repository "$GITHUB_REPOSITORY"
-      - name: Release selected issue claim
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ inputs.issue_number }}
-        shell: bash
-        run: gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress || true
-      - name: Resolve generated candidate
-        id: candidate
-        if: always()
-        shell: bash
-        run: |
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-          from pathlib import Path
-          path = Path('runtime/github_issue_autorepair.json')
-          if not path.is_file():
-              print('has_candidate=false')
-              print('candidate_branch=')
-              print('candidate_sha=')
-              raise SystemExit(0)
-          payload = json.loads(path.read_text(encoding='utf-8'))
-          branch = str(payload.get('candidate_branch') or '')
-          sha = str(payload.get('candidate_sha') or '')
-          valid = payload.get('status') == 'candidate_created' and branch.startswith('genesis/candidate-') and len(sha) == 40
-          print(f"has_candidate={'true' if valid else 'false'}")
-          print(f'candidate_branch={branch if valid else ""}')
-          print(f'candidate_sha={sha if valid else ""}')
-          PY
       - name: Preserve issue repair evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -166,224 +130,7 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-  open_pr:
-    needs: solve
-    if: needs.solve.outputs.has_candidate == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      pull-requests: write
-    outputs:
-      pr_number: ${{ steps.pr.outputs.pr_number }}
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-      - name: Open or link the exact issue-repair candidate PR
-        id: pr
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ needs.solve.outputs.candidate_branch }}
-          CANDIDATE_SHA: ${{ needs.solve.outputs.candidate_sha }}
-          ISSUE_NUMBER: ${{ needs.solve.outputs.issue_number }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          cat > "$RUNNER_TEMP/body.md" <<EOF
-          Genesis autonomous repair candidate for GitHub issue #${ISSUE_NUMBER}.
-
-          Fixes #${ISSUE_NUMBER}
-
-          Promotion is allowed only after two independent full-test validators, Security review, signed quorum verification, Secret Guard, protected-boundary verification, and exact candidate-SHA promotion.
-
-          Candidate SHA: \`${CANDIDATE_SHA}\`
-          EOF
-          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')
-          if [[ -n "$existing" ]]; then
-            gh pr edit "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
-            pr="$existing"
-          else
-            url=$(gh pr create --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --title "Genesis issue repair #${ISSUE_NUMBER}" --body-file "$RUNNER_TEMP/body.md")
-            pr=${url##*/}
-          fi
-          echo "pr_number=$pr" >> "$GITHUB_OUTPUT"
-
-  validator_a:
-    needs: solve
-    if: needs.solve.outputs.has_candidate == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.solve.outputs.candidate_sha }}
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install -r requirements.txt
-      - name: Independent full test suite A
-        run: python -m pytest -q
-      - name: Enforce issue-autorepair boundary A
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch origin main
-          if git diff --name-only origin/main...HEAD | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
-            echo 'Issue autorepair cannot change identity or workflow boundaries' >&2
-            exit 1
-          fi
-      - name: Security review A
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          from genesis.security import SecurityModule
-          report = SecurityModule(Path('.')).review_candidate('origin/main')
-          print(report.as_dict())
-          raise SystemExit(0 if report.status == 'pass' else 1)
-          PY
-      - name: Sign validator A approval
-        run: python genesis/ephemeral_validator.py --validator-id github-issue-validator-a --candidate ${{ needs.solve.outputs.candidate_sha }} --output validator-a.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: github-issue-validator-a-${{ inputs.issue_number }}-${{ github.run_id }}
-          path: validator-a.json
-
-  validator_b:
-    needs: solve
-    if: needs.solve.outputs.has_candidate == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.solve.outputs.candidate_sha }}
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install -r requirements.txt
-      - name: Independent full test suite B
-        run: python -m pytest -q
-      - name: Enforce issue-autorepair boundary B
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch origin main
-          if git diff --name-only origin/main...HEAD | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
-            echo 'Issue autorepair cannot change identity or workflow boundaries' >&2
-            exit 1
-          fi
-      - name: Security review B
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          from genesis.security import SecurityModule
-          report = SecurityModule(Path('.')).review_candidate('origin/main')
-          print(report.as_dict())
-          raise SystemExit(0 if report.status == 'pass' else 1)
-          PY
-      - name: Sign validator B approval
-        run: python genesis/ephemeral_validator.py --validator-id github-issue-validator-b --candidate ${{ needs.solve.outputs.candidate_sha }} --output validator-b.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: github-issue-validator-b-${{ inputs.issue_number }}-${{ github.run_id }}
-          path: validator-b.json
-
-  secret_guard:
-    needs: solve
-    if: needs.solve.outputs.has_candidate == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.solve.outputs.candidate_sha }}
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Scan candidate and reachable history for secrets
-        run: python scripts/secret_guard.py --history
-
-  promote:
-    needs: [solve, open_pr, validator_a, validator_b, secret_guard]
-    if: needs.solve.outputs.has_candidate == 'true'
-    runs-on: ubuntu-latest
-    permissions:
-      actions: read
-      contents: write
-      issues: write
-      pull-requests: write
-    concurrency:
-      group: genesis-github-issue-autorepair-promotion
-      cancel-in-progress: false
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install -r requirements.txt
-      - uses: actions/download-artifact@v4
-        with:
-          name: github-issue-validator-a-${{ inputs.issue_number }}-${{ github.run_id }}
-          path: votes/a
-      - uses: actions/download-artifact@v4
-        with:
-          name: github-issue-validator-b-${{ inputs.issue_number }}-${{ github.run_id }}
-          path: votes/b
-      - name: Verify independent signed quorum
-        run: python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
-      - name: Promote exact validated issue-repair SHA
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ needs.solve.outputs.candidate_branch }}
-          CANDIDATE_SHA: ${{ needs.solve.outputs.candidate_sha }}
-          ISSUE_NUMBER: ${{ needs.solve.outputs.issue_number }}
-          PR_NUMBER: ${{ needs.open_pr.outputs.pr_number }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$BRANCH" == genesis/candidate-* ]]
-          git fetch origin main "$BRANCH"
-          main_sha=$(git rev-parse origin/main)
-          test "$(git rev-parse origin/$BRANCH)" = "$CANDIDATE_SHA"
-          git merge-base --is-ancestor "$main_sha" "$CANDIDATE_SHA"
-          if git diff --name-only "$main_sha..$CANDIDATE_SHA" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
-            echo 'Protected Genesis boundary changed' >&2
-            exit 1
-          fi
-          git push origin "$CANDIDATE_SHA:refs/heads/main"
-          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-solved --remove-label genesis-validating --remove-label genesis-autonomous || true
-          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed --comment "Genesis independently validated and promoted exact candidate SHA \`$CANDIDATE_SHA\` to main."
-          if [[ -n "$PR_NUMBER" ]]; then
-            state=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state' || true)
-            if [[ "$state" == 'OPEN' ]]; then
-              gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment "Exact validated candidate SHA was promoted directly to main by the Genesis issue-autorepair quorum."
-            fi
-          fi
-
-  recover_queue:
-    needs: [solve, open_pr, validator_a, validator_b, secret_guard, promote]
-    if: always() && needs.solve.outputs.has_candidate == 'true' && needs.promote.result != 'success'
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-      issues: write
-    steps:
-      - name: Requeue issue after validation or promotion failure
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ needs.solve.outputs.issue_number }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --remove-label genesis-validating || true
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Genesis validation or exact-SHA promotion did not complete successfully. The issue has been returned to the autonomous repair queue for a later retry."
+      # The dispatcher reservation is intentionally not released here. It stays
+      # with this issue until the serialized integration workflow has either
+      # promoted, requeued, or safely declined the candidate. This prevents a
+      # later run from reclaiming the same issue while this batch is unfinished.
