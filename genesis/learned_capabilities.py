@@ -177,4 +177,21 @@ register_capability(
 )
 
 
+def _learned_55ac9a819dc7(total: int, parts: int) -> tuple[int, ...]:
+    """Split a non-negative tensor/work extent into balanced deterministic parts."""
+    total_i = int(total)
+    parts_i = int(parts)
+    if total_i < 0 or parts_i < 1 or parts_i > 256:
+        raise ValueError("tensor split inputs are out of bounds")
+    base, extra = divmod(total_i, parts_i)
+    return tuple(base + (1 if index < extra else 0) for index in range(parts_i))
+
+register_capability(
+    'balanced_tensor_split_55ac9a819dc7',
+    "Split a bounded tensor/work extent deterministically across multiple execution parts. Verified lesson: Research-backed capability candidate from 'v0.3.0': ## Overview llama.cpp 0.3.0 introduces the dots3-note multimodal model (with a new DSA-ISWA KV cache), MTP support for GLM-4.5-Air, and tensor-split (`-sm tensor`) plus multi-sequence rollback fixes for DeepSeek 4. ggml is bumped to v0.22.0 (meta-backend tensor split, per-op Metal kernels with parallel compilation, non-in-place `ggml_clamp`), while mtmd gains dots3-note vision/audio, WebP decoding and a Pillow-accurate resize. The server adds a `LLAMA_SERVER_SLOTS_N_DIFF` debug knob, and the web UI gets tabbed chat navigation. ### New models",
+    '## Overview llama.cpp 0.3.0 introduces the dots3-note multimodal model (with a new DSA-ISWA KV cache), MTP support for GLM-4.5-Air, and tensor-split (`-sm tensor`) plus multi-sequence rollback fixes for DeepSeek 4. ggml is bumped to v0.22.0 (meta-backend tensor split, per-op Metal kernels with parallel compilation, non-in-place `ggml_clamp`), while mtmd gains dots3-note vision/audio, WebP decoding and a Pillow-accurate resize. The server adds a `LLAMA_SERVER_SLOTS_N_DIFF` debug knob, and the web UI gets tabbed chat navigation. ### New models - Add dots3-note model with a new DSA-ISWA KV cache type ([#27060](https://github.com/ggml-org/llama.cpp/pull/27060)) ### Core changes - DeepSeek 4: add tensor-split mode via `-sm tensor` ([#26490](https://github.com/ggml-org/llama.cpp/pull/26490)) - DeepSeek 4: fix rollback with multiple sequences ([#26756](https://github.com/ggml-org/llama.cpp/pull/26756)) - Fix meta tensor split state propagation for tensor parallel ([#27574](https://github.com/ggml-org/llama.cpp/pull/27574)) - GLM-4.5-Air: add MTP (multi-token prediction) support ([#26534](https://github.com/ggml-org/llama.cpp/pull/26534)) - bailingmoe3: support DSpark ([#27508](https://git',
+    _learned_55ac9a819dc7,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
