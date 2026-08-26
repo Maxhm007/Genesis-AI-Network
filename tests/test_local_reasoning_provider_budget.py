@@ -12,12 +12,12 @@ def test_internal_code_reviewer_has_compact_generation_budget() -> None:
 
 
 def test_bounded_coding_engineer_has_compact_initial_generation_budget() -> None:
-    prompt = "ROLE: bounded_coding_engineer\nReturn one compact edit as JSON.\n"
+    prompt = "ROLE: bounded_coding_engineer\nReturn one compact edit.\n"
     assert role_token_budget(prompt) == 128
 
 
 def test_bounded_coding_engineer_has_hard_total_generation_budget() -> None:
-    prompt = "ROLE: bounded_coding_engineer\nReturn one compact edit as JSON.\n"
+    prompt = "ROLE: bounded_coding_engineer\nReturn one compact edit.\n"
     assert role_completion_budget(prompt) == 160
 
 
@@ -28,8 +28,11 @@ def test_bounded_coding_prompt_unwraps_initial_schema_example() -> None:
         "OBJECTIVE: keep this evidence unchanged\n"
     )
     simplified = simplify_bounded_coding_prompt(prompt)
-    assert "JSON only as ONE flat edit object" in simplified
-    assert '"path":"genesis/example.py"' in simplified
+    assert "do not use JSON" in simplified
+    assert "PATH: genesis/example.py" in simplified
+    assert "START: 5" in simplified
+    assert "END: 5" in simplified
+    assert "NEW:\nreplacement text\nEND_NEW" in simplified
     assert '"edits"' not in simplified
     assert "OBJECTIVE: keep this evidence unchanged" in simplified
 
@@ -43,8 +46,12 @@ def test_bounded_coding_prompt_unwraps_retry_schema_but_preserves_previous_outpu
     )
     simplified = simplify_bounded_coding_prompt(prompt)
     assert f"PREVIOUS: {previous}" in simplified
-    assert "Return ONLY ONE flat edit object like:" in simplified
-    assert 'like: {"path":"genesis/example.py","start_line":7,"end_line":7,"new":"replacement text"}' in simplified
+    assert "do not use JSON" in simplified
+    assert "PATH: genesis/example.py" in simplified
+    assert "START: 7" in simplified
+    assert "END: 7" in simplified
+    assert "NEW:\nreplacement text\nEND_NEW" in simplified
+    assert ". Verify it." in simplified
 
 
 def test_prompt_simplification_does_not_change_other_roles() -> None:
@@ -56,7 +63,7 @@ def test_prompt_simplification_does_not_change_other_roles() -> None:
 
 
 def test_incomplete_coding_json_gets_only_small_completion_reserve() -> None:
-    prompt = "ROLE: bounded_coding_engineer\nReturn one compact edit as JSON.\n"
+    prompt = "ROLE: bounded_coding_engineer\nReturn one compact edit.\n"
     assert json_completion_reserve_tokens(
         '{"path":"genesis/coding.py","new":"unfinished',
         generated_tokens=128,
