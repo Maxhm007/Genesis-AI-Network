@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from collections import defaultdict
-from datetime import datetime
 from typing import Callable, Iterable
 
 from .issue_fingerprint import canonical_issue_fingerprint
@@ -9,7 +8,9 @@ from .issue_fingerprint import canonical_issue_fingerprint
 
 GithubRequester = Callable[[str, str, dict | None], object]
 GENESIS_TASK_MARKER = "<!-- genesis-task-id:"
+GENESIS_TASK_LABEL = "genesis-task"
 DUPLICATE_LABEL = "duplicate"
+AUTOMATION_AUTHORS = frozenset({"github-actions[bot]"})
 
 
 def _issue_number(issue: dict) -> int:
@@ -26,10 +27,33 @@ def _created_sort_key(issue: dict) -> tuple[str, int]:
     return (created or "9999-12-31T23:59:59Z", _issue_number(issue))
 
 
+def _label_names(issue: dict) -> set[str]:
+    names: set[str] = set()
+    for row in issue.get("labels") or []:
+        if isinstance(row, dict):
+            name = str(row.get("name") or "").strip()
+        else:
+            name = str(row or "").strip()
+        if name:
+            names.add(name)
+    return names
+
+
+def _author_login(issue: dict) -> str:
+    user = issue.get("user")
+    if isinstance(user, dict):
+        return str(user.get("login") or "").strip()
+    return ""
+
+
 def _is_authoritative_open_task(issue: dict) -> bool:
     if not isinstance(issue, dict) or "pull_request" in issue:
         return False
-    if str(issue.get("state") or "open").lower() != "open":
+    if str(issue.get("state") or "").lower() != "open":
+        return False
+    if _author_login(issue) not in AUTOMATION_AUTHORS:
+        return False
+    if GENESIS_TASK_LABEL not in _label_names(issue):
         return False
     body = str(issue.get("body") or "")
     if GENESIS_TASK_MARKER not in body:
@@ -40,9 +64,10 @@ def _is_authoritative_open_task(issue: dict) -> bool:
 def build_reconciliation_plan(issues: Iterable[dict]) -> dict:
     """Return an exact-fingerprint duplicate plan without mutating GitHub.
 
-    Only open issues carrying the authoritative Genesis task marker are eligible.
-    Manual issues, reports, controls, escalations, action-failure channels and
-    unparseable legacy records therefore stay outside the plan by construction.
+    Eligibility is deliberately narrow: the issue must be open, bot-authored,
+    labeled ``genesis-task``, carry the authoritative Genesis task marker, and
+    yield a canonical objective fingerprint. Manual issues, reports, controls,
+    escalations, action-failure channels and unparseable records are excluded.
     """
 
     groups: dict[str, list[dict]] = defaultdict(list)
@@ -105,11 +130,10 @@ def _ensure_duplicate_label(requester: GithubRequester) -> None:
 
 
 def apply_reconciliation_plan(plan: dict, *, requester: GithubRequester, apply: bool = False) -> dict:
-    """Apply a previously reviewed plan only when ``apply=True`` is explicit.
+    """Apply a reviewed plan only when ``apply=True`` is explicit.
 
-    GitHub Issues does not expose a ``duplicate`` state_reason through the REST
-    Issues API. We therefore use the standard duplicate label plus an explicit
-    canonical-primary comment and close with ``not_planned``.
+    The dry-run path is mutation-free. Apply mode leaves an auditable comment,
+    applies the duplicate label, and uses GitHub's duplicate state reason.
     """
 
     groups = list(plan.get("groups") or [])
@@ -146,7 +170,7 @@ def apply_reconciliation_plan(plan: dict, *, requester: GithubRequester, apply: 
             requester(
                 "PATCH",
                 f"/issues/{number}",
-                {"state": "closed", "state_reason": "not_planned"},
+                {"state": "closed", "state_reason": "duplicate"},
             )
             closed.append(number)
 
