@@ -11,11 +11,12 @@ MAX_ALLOWED_NEW_TOKENS = 768
 MAX_PROVIDER_PROMPT_CHARS = 14_000
 ROLE_MAX_NEW_TOKENS = {
     "genesis_internal_code_reviewer": 128,
-    "bounded_coding_engineer": 128,
+    "bounded_coding_engineer": 80,
 }
 ROLE_MAX_COMPLETION_TOKENS = {
-    "bounded_coding_engineer": 160,
+    "bounded_coding_engineer": 112,
 }
+SINGLE_LINE_EDIT_PREFIX = "EDIT|"
 COMPACT_EDIT_END_MARKER = "END_NEW"
 
 
@@ -45,8 +46,8 @@ def _single_edit_from_example(text: str) -> tuple[dict, int, int] | None:
     return None
 
 
-def _compact_single_edit_example(text: str) -> str:
-    """Replace one JSON edit example with a quote-free bounded line protocol."""
+def _single_line_edit_example(text: str) -> str:
+    """Replace one JSON edit example with a quote-free single-line protocol."""
     found = _single_edit_from_example(text)
     if found is None:
         return text
@@ -62,44 +63,37 @@ def _compact_single_edit_example(text: str) -> str:
         or not isinstance(end_line, int)
         or isinstance(end_line, bool)
         or not isinstance(new, str)
+        or "\n" in new
+        or "\r" in new
     ):
         return text
-    block = (
-        f"PATH: {path}\n"
-        f"START: {start_line}\n"
-        f"END: {end_line}\n"
-        "NEW:\n"
-        f"{new}\n"
-        f"{COMPACT_EDIT_END_MARKER}"
-    )
-    tail = text[end:]
-    if tail and not tail.startswith("\n"):
-        tail = "\n" + tail.lstrip()
+    example = f"{SINGLE_LINE_EDIT_PREFIX}{path}|{start_line}|{end_line}|{new}"
     prefix = text[:start].rstrip()
-    return prefix + "\n" + block + tail
+    tail = text[end:]
+    return prefix + " " + example + tail
 
 
 def simplify_bounded_coding_prompt(prompt: str) -> str:
-    """Use a strict line protocol so the small coding model need not escape code as JSON.
+    """Use a one-line edit protocol so small coding models terminate quickly.
 
     CodingModule still receives JSON after this provider strictly translates a complete
-    line-protocol edit. The downstream path/range/AST/security checks are unchanged, and
-    legacy JSON output remains accepted unchanged.
+    one-line edit. Quotes and braces in replacement code need no JSON escaping. Legacy
+    JSON and the older multiline compact protocol remain accepted for compatibility.
     """
     if _prompt_role(prompt) != "bounded_coding_engineer":
         return prompt
     rows: list[str] = []
     for line in prompt.splitlines():
         if line.startswith("OUTPUT: JSON only in this shape:"):
-            line = _compact_single_edit_example(line).replace(
+            line = _single_line_edit_example(line).replace(
                 "OUTPUT: JSON only in this shape:",
-                "OUTPUT: Return ONLY this exact one-edit block; do not use JSON:",
+                "OUTPUT: Return ONLY one EDIT line and then a newline; do not use JSON:",
                 1,
             )
         elif "Return ONLY the same JSON shape as:" in line:
-            line = _compact_single_edit_example(line).replace(
+            line = _single_line_edit_example(line).replace(
                 "Return ONLY the same JSON shape as:",
-                "Return ONLY this exact one-edit block; do not use JSON:",
+                "Return ONLY one EDIT line and then a newline; do not use JSON:",
                 1,
             )
         rows.append(line)
@@ -161,8 +155,48 @@ def balanced_json_object_complete(text: str) -> bool:
     return False
 
 
+def parse_single_line_edit(text: str) -> dict:
+    """Parse one EDIT line without guessing any missing field."""
+    rows = text.lstrip().splitlines()
+    line = rows[0] if rows else ""
+    if not line.startswith(SINGLE_LINE_EDIT_PREFIX):
+        raise ValueError("single-line edit must start with EDIT|")
+    parts = line.split("|", 4)
+    if len(parts) != 5:
+        raise ValueError("single-line edit is incomplete")
+    _, path, start_text, end_text, new = parts
+    path = path.strip()
+    start_text = start_text.strip()
+    end_text = end_text.strip()
+    if not path or not start_text.isdecimal() or not end_text.isdecimal():
+        raise ValueError("single-line edit path/range is invalid")
+    start_line = int(start_text)
+    end_line = int(end_text)
+    if start_line < 1 or end_line < start_line:
+        raise ValueError("single-line edit range is invalid")
+    return {
+        "path": path,
+        "start_line": start_line,
+        "end_line": end_line,
+        "new": new,
+    }
+
+
+def single_line_edit_complete(text: str) -> bool:
+    """Return True after one syntactically complete EDIT line is newline-terminated."""
+    stripped = text.lstrip()
+    if not stripped.startswith(SINGLE_LINE_EDIT_PREFIX) or "\n" not in stripped:
+        return False
+    first_line = stripped.split("\n", 1)[0]
+    try:
+        parse_single_line_edit(first_line)
+    except ValueError:
+        return False
+    return True
+
+
 def parse_compact_edit(text: str) -> dict:
-    """Parse one exact line-protocol edit without guessing or repairing missing fields."""
+    """Parse the older multiline compact protocol for compatibility."""
     rows = text.strip().splitlines()
     if len(rows) < 5:
         raise ValueError("compact edit is incomplete")
@@ -194,7 +228,7 @@ def parse_compact_edit(text: str) -> dict:
 
 
 def compact_edit_block_complete(text: str) -> bool:
-    """Return True only when one strict compact edit block is complete."""
+    """Return True only when one strict multiline compact edit block is complete."""
     try:
         parse_compact_edit(text)
     except ValueError:
@@ -203,21 +237,33 @@ def compact_edit_block_complete(text: str) -> bool:
 
 
 def bounded_coding_output_complete(text: str) -> bool:
-    """Recognize compact protocol first so braces inside replacement code are harmless."""
-    if text.lstrip().startswith("PATH:"):
+    """Recognize the fastest strict protocol first, then compatibility formats."""
+    stripped = text.lstrip()
+    if stripped.startswith(SINGLE_LINE_EDIT_PREFIX):
+        return single_line_edit_complete(text)
+    if stripped.startswith("PATH:"):
         return compact_edit_block_complete(text)
     return balanced_json_object_complete(text)
 
 
-def normalize_bounded_coding_output(text: str) -> str:
-    """Translate a complete compact edit to JSON; leave malformed output untouched.
+def normalize_bounded_coding_output(text: str, *, allow_unterminated_single_line: bool = False) -> str:
+    """Translate only complete, unambiguous compact output to the existing JSON contract.
 
-    Leaving malformed output untouched is intentional: CodingModule will reject it.
+    Malformed or token-truncated output is returned untouched so CodingModule rejects it.
     No path, range, replacement text, or missing delimiter is invented here.
     """
-    if text.lstrip().startswith("PATH:"):
+    stripped = text.lstrip()
+    if stripped.startswith(SINGLE_LINE_EDIT_PREFIX):
+        if "\n" not in stripped and not allow_unterminated_single_line:
+            return text
         try:
-            edit = parse_compact_edit(text)
+            edit = parse_single_line_edit(stripped)
+        except ValueError:
+            return text
+        return json.dumps(edit, separators=(",", ":"))
+    if stripped.startswith("PATH:"):
+        try:
+            edit = parse_compact_edit(stripped)
         except ValueError:
             return text
         return json.dumps(edit, separators=(",", ":"))
@@ -233,18 +279,19 @@ def json_completion_reserve_tokens(
     requested_budget: int,
     configured_budget: int,
 ) -> int:
-    """Return a bounded reserve when a recognized coding output was cut off.
-
-    The legacy function name is retained for compatibility. The reserve now also
-    understands the compact edit protocol used by bounded coding roles.
-    """
+    """Return a bounded reserve when recognized coding output was cut off."""
     requested = max(0, int(requested_budget))
     configured = max(0, int(configured_budget))
     if configured <= requested or generated_tokens < requested:
         return 0
     if bounded_coding_output_complete(text):
         return 0
-    if "{" not in text and "PATH:" not in text:
+    stripped = text.lstrip()
+    if (
+        "{" not in text
+        and "PATH:" not in text
+        and not stripped.startswith(SINGLE_LINE_EDIT_PREFIX)
+    ):
         return 0
     return configured - requested
 
@@ -331,15 +378,17 @@ class LocalReasoningModel:
                 **inputs,
             )
             generated = output[0][prompt_tokens:]
-            decoded = self.tokenizer.decode(generated, skip_special_tokens=True).strip()
+            decoded_raw = self.tokenizer.decode(generated, skip_special_tokens=True)
+            decoded = decoded_raw.strip()
+            generated_tokens = int(generated.shape[-1])
+            eos_token_id = self.tokenizer.eos_token_id
+            ended_with_eos = bool(generated.shape[-1]) and eos_token_id is not None and int(generated[-1]) == int(eos_token_id)
             reserve = json_completion_reserve_tokens(
-                decoded,
-                generated_tokens=int(generated.shape[-1]),
+                decoded_raw,
+                generated_tokens=generated_tokens,
                 requested_budget=budget,
                 configured_budget=configured_completion_budget,
             )
-            eos_token_id = self.tokenizer.eos_token_id
-            ended_with_eos = bool(generated.shape[-1]) and eos_token_id is not None and int(generated[-1]) == int(eos_token_id)
             if reserve and not ended_with_eos:
                 output = self._generate(
                     output,
@@ -347,9 +396,17 @@ class LocalReasoningModel:
                     prompt_tokens=prompt_tokens,
                 )
                 generated = output[0][prompt_tokens:]
-                decoded = self.tokenizer.decode(generated, skip_special_tokens=True).strip()
+                decoded_raw = self.tokenizer.decode(generated, skip_special_tokens=True)
+                decoded = decoded_raw.strip()
+                generated_tokens = int(generated.shape[-1])
+                ended_with_eos = bool(generated.shape[-1]) and eos_token_id is not None and int(generated[-1]) == int(eos_token_id)
         if role == "bounded_coding_engineer":
-            return normalize_bounded_coding_output(decoded)
+            completed_before_limit = generated_tokens < configured_completion_budget
+            allow_unterminated = ended_with_eos or completed_before_limit
+            return normalize_bounded_coding_output(
+                decoded_raw,
+                allow_unterminated_single_line=allow_unterminated,
+            )
         return decoded
 
 
