@@ -70,16 +70,17 @@ def test_malformed_compact_edit_is_not_repaired_or_invented():
     assert module.bounded_coding_output_complete(raw) is False
 
 
-def test_compact_edit_can_use_bounded_completion_reserve_when_truncated():
+def test_compact_edit_braces_do_not_trigger_early_completion_and_can_use_reserve():
     module = _load_provider_module()
     partial = (
         "PATH: genesis/example.py\n"
         "START: 5\n"
         "END: 5\n"
         "NEW:\n"
-        "VALUE = 8"
+        'VALUE = {"quoted": "code"}'
     )
 
+    assert module.bounded_coding_output_complete(partial) is False
     assert module.json_completion_reserve_tokens(
         partial,
         generated_tokens=128,
