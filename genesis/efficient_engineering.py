@@ -44,6 +44,32 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
             and str(task.payload.get("task_type") or "") == "github_issue_development"
         )
 
+    @classmethod
+    def _is_managed_github_issue_task(cls, task) -> bool:
+        """Return whether this task represents actionable work for an open GitHub issue."""
+        return int(task.payload.get("github_issue_number") or 0) > 0 and (
+            cls._is_devlab_task(task) or cls._is_github_backlog_task(task)
+        )
+
+    @staticmethod
+    def _github_issue_fairness_key(task) -> tuple:
+        """Order issue work so older untouched issues run once, then retries rotate fairly.
+
+        A newly-created first generation represents an issue that Genesis has not yet
+        worked through this managed queue. Those tasks are ordered by GitHub issue
+        number, which is monotonic within a repository and therefore gives older open
+        issues their first turn before newer ones. Once an issue has been attempted,
+        its durable task ``updated_at`` becomes the rotation clock: the least-recently
+        touched issue runs next. New retry generations therefore return at the back of
+        the rotation instead of immediately monopolizing subsequent cycles.
+        """
+        issue_number = int(task.payload.get("github_issue_number") or 0)
+        generation = int(task.payload.get("work_generation") or 1)
+        untouched_first_generation = generation == 1 and task.attempt_count == 0 and task.state == "new"
+        if untouched_first_generation:
+            return (0, issue_number, task.created_at, task.task_id)
+        return (1, task.updated_at, issue_number, generation, task.task_id)
+
     def _eligible_task(self, task, attempted: set[str]) -> bool:
         if task.task_id in attempted or task.module_id not in ENGINEERING_MODULES:
             return False
@@ -59,35 +85,23 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
                 if self._eligible_task(task, attempted):
                     candidates.append(task)
 
-        # Golden path: an explicit bounded DevLab task must not be starved by
-        # recurring score/capability work. Priority remains deterministic inside
-        # this class, while generic work still uses the efficiency governor.
-        devlab_candidates = [task for task in candidates if self._is_devlab_task(task)]
-        if devlab_candidates:
-            task = sorted(devlab_candidates, key=lambda item: (-item.priority, item.created_at, item.task_id))[0]
+        # Solve-first fair backlog policy: every actionable open GitHub issue shares
+        # one managed rotation, including explicit DevLab challenges. This preserves
+        # their priority over recurring background work without allowing one failing
+        # DevLab issue to consume every future cycle. Older untouched issues receive
+        # a first turn; after that, least-recently-worked issue state drives rotation.
+        issue_candidates = [task for task in candidates if self._is_managed_github_issue_task(task)]
+        if issue_candidates:
+            task = sorted(issue_candidates, key=self._github_issue_fairness_key)[0]
             self._selection_trace.append({
                 "selected": task.task_id,
                 "score": None,
-                "reason": "golden_path_devlab_priority",
-                "eligible": len(devlab_candidates),
+                "reason": "github_issue_fair_rotation",
+                "eligible": len(issue_candidates),
                 "considered": len(candidates),
-            })
-            return task
-
-        # Solve-first backlog policy: a concrete open GitHub issue is user-visible
-        # unresolved work. Do not let recurring model-scout/score/capability tasks
-        # outrank it merely because the efficiency governor has more historical
-        # telemetry for the background task. The issue task remains bounded and
-        # still passes all normal coding, Security, validator and promotion gates.
-        backlog_candidates = [task for task in candidates if self._is_github_backlog_task(task)]
-        if backlog_candidates:
-            task = sorted(backlog_candidates, key=lambda item: (-item.priority, item.created_at, item.task_id))[0]
-            self._selection_trace.append({
-                "selected": task.task_id,
-                "score": None,
-                "reason": "github_issue_backlog_priority",
-                "eligible": len(backlog_candidates),
-                "considered": len(candidates),
+                "issue_number": int(task.payload.get("github_issue_number") or 0),
+                "work_generation": int(task.payload.get("work_generation") or 1),
+                "devlab": self._is_devlab_task(task),
             })
             return task
 
@@ -260,7 +274,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
             "selected_task": asdict(task),
             "selection": {
                 "score": decision.score,
-                "reason": "golden_path_devlab_priority" if self._is_devlab_task(task) else decision.reason,
+                "reason": "github_issue_fair_rotation" if self._is_managed_github_issue_task(task) else decision.reason,
             },
             "coding_status": attempt.get("coding_status"),
             "candidate": attempt.get("candidate"),
@@ -283,8 +297,11 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
             "golden_path": {
                 "enabled": True,
                 "path": "task -> DevLab -> candidate -> Security -> Validator A/B -> promotion -> verify -> learn",
-                "devlab_tasks_have_priority": True,
+                "devlab_tasks_have_priority": False,
+                "devlab_tasks_share_fair_issue_rotation": True,
                 "github_issue_backlog_has_priority_over_background_work": True,
+                "older_untouched_issues_get_first_turn": True,
+                "issue_retries_rotate_by_least_recent_work": True,
                 "failed_methods_persist_across_cycles": True,
             },
             "self_evaluation_memory": {
@@ -293,7 +310,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
                 "max_items": self.SELF_EVALUATION_ITEMS,
                 "principle": "Use validated self-development history as advisory memory; never as self-awarded capability evidence.",
             },
-            "principle": "Prefer completed validated outcomes over workflow activity; concrete open issues must not be starved by recurring background work.",
+            "principle": "Prefer completed validated outcomes over workflow activity; concrete open issues must not be starved by recurring background work or by repeated retries of another issue.",
         }
         runtime = self.root / "runtime"
         (runtime / "autonomous_engineering.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
