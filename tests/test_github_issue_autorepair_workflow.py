@@ -16,9 +16,10 @@ def test_dispatcher_uses_bounded_three_worker_admission() -> None:
     assert "github-issue-autorepair-worker.yml" in text
 
 
-def test_dispatcher_refill_is_bounded_to_one_additional_round() -> None:
+def test_dispatcher_refill_is_bounded_and_has_five_minute_fallback() -> None:
     text = DISPATCHER.read_text(encoding="utf-8")
 
+    assert "cron: '*/5 * * * *'" in text
     assert "refill_round" in text
     assert "needs.plan.outputs.refill_round == '0'" in text
     assert "-f refill_round=1" in text
@@ -26,9 +27,12 @@ def test_dispatcher_refill_is_bounded_to_one_additional_round() -> None:
     assert "active < GENESIS_ISSUE_REPAIR_MAX_PARALLEL" in text
 
 
-def test_dispatcher_always_cleans_up_failed_worker_claims() -> None:
+def test_dispatcher_rolls_back_partial_claims_and_cleans_failed_workers() -> None:
     text = DISPATCHER.read_text(encoding="utf-8")
 
+    assert "rollback_uncommitted_claims" in text
+    assert "trap rollback_uncommitted_claims EXIT" in text
+    assert "claims_committed='true'" in text
     assert "cleanup_claims:" in text
     assert "if: always() && needs.plan.outputs.has_work == 'true'" in text
     assert "Release any batch claims left behind by failed workers" in text
