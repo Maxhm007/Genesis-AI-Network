@@ -49,3 +49,35 @@ def test_find_fresh_success_requires_newer_main_sha_and_same_job(monkeypatch):
         },
     )
     assert evidence == {"run_id": 120, "head_sha": "b" * 40, "failed_job": "repair"}
+
+
+def test_workflow_level_failure_requires_newer_successful_main_run(monkeypatch):
+    responses = [
+        {
+            "workflow_runs": [
+                {
+                    "id": 130,
+                    "status": "completed",
+                    "conclusion": "success",
+                    "head_branch": "main",
+                    "head_sha": "c" * 40,
+                }
+            ]
+        }
+    ]
+
+    def fake_run_json(_args):
+        return responses.pop(0)
+
+    monkeypatch.setattr(reconcile, "_run_json", fake_run_json)
+    evidence = reconcile.find_fresh_success(
+        "owner/repo",
+        {
+            "workflow_id": 8,
+            "run_id": 100,
+            "head_sha": "a" * 40,
+            "failed_job": "workflow",
+        },
+    )
+    assert evidence == {"run_id": 130, "head_sha": "c" * 40, "failed_job": "workflow"}
+    assert responses == []
