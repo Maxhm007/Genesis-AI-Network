@@ -7,6 +7,9 @@ on:
         description: Optional Genesis Action issue number
         required: false
         default: ''
+  workflow_run:
+    workflows: ["Genesis Action Failure Retry"]
+    types: [completed]
   schedule:
     - cron: '6,16,26,36,46,56 * * * *'
 
@@ -30,6 +33,7 @@ concurrency:
 
 jobs:
   repair:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     timeout-minutes: 45
     steps:
@@ -37,12 +41,6 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install -r requirements.txt
-      - name: Verify stable baseline
-        run: python -m pytest -q
       - name: Resolve one authorized Action issue
         id: issue
         env:
@@ -57,6 +55,16 @@ jobs:
           fi
           [[ -z "$n" || "$n" =~ ^[0-9]+$ ]]
           echo "issue_number=$n" >> "$GITHUB_OUTPUT"
+      - uses: actions/setup-python@v5
+        if: steps.issue.outputs.issue_number != ''
+        with:
+          python-version: '3.12'
+      - name: Install Genesis dependencies
+        if: steps.issue.outputs.issue_number != ''
+        run: pip install -r requirements.txt
+      - name: Verify stable baseline
+        if: steps.issue.outputs.issue_number != ''
+        run: python -m pytest -q
       - name: Restore open-model caches
         if: steps.issue.outputs.issue_number != ''
         uses: actions/cache@v4
