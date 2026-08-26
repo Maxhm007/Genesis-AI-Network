@@ -8,6 +8,7 @@ import urllib.error
 import urllib.request
 from typing import Callable
 
+from .issue_fingerprint import canonical_issue_fingerprint, canonical_task_fingerprint
 from .modules.task_queue import GenesisTask, PersistentTaskQueue, utc_now
 
 
@@ -96,7 +97,9 @@ def _legacy_markers(task_id: str) -> tuple[str, str]:
 
 def _problem_fingerprint(task: GenesisTask) -> str:
     existing = str(task.payload.get("problem_fingerprint") or "").strip()
-    return existing or f"genesis-task:{task.task_id}"
+    if existing and not existing.startswith("genesis-task:"):
+        return existing
+    return canonical_task_fingerprint(task)
 
 
 def _task_type(task: GenesisTask) -> str:
@@ -177,9 +180,15 @@ def _all_issues(requester: GithubRequester, *, max_pages: int = 10) -> list[dict
 
 def _find_issue_for_task(existing: list[dict], task: GenesisTask) -> dict | None:
     markers = (_source_marker(task.task_id), *_legacy_markers(task.task_id))
+    fingerprint = _problem_fingerprint(task)
+    fingerprint_line = f"Genesis-Problem-Fingerprint: {fingerprint}"
     for issue in existing:
         body = str(issue.get("body") or "")
         if any(marker in body for marker in markers):
+            return issue
+        if fingerprint_line in body:
+            return issue
+        if canonical_issue_fingerprint(body) == fingerprint:
             return issue
     return None
 
