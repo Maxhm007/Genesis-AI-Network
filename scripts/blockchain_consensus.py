@@ -21,7 +21,7 @@ PEERS = {
 }
 
 
-def fetch_json(url: str) -> dict:
+from cryptography.exceptions import InvalidSignature
     with urllib.request.urlopen(url, timeout=20) as response:
         return json.loads(response.read().decode("utf-8"))
 
