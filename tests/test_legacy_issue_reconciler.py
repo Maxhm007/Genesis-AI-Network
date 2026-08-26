@@ -9,6 +9,8 @@ def _task_issue(number: int, *, task_type: str, source: str, target: str = "", o
         "number": number,
         "state": "open",
         "created_at": f"2026-08-26T{number % 24:02d}:00:00Z",
+        "user": {"login": "github-actions[bot]"},
+        "labels": [{"name": "genesis-task"}],
         "body": (
             f"<!-- genesis-task-id:task-{number} -->\n"
             f"Genesis-Problem-Fingerprint: genesis-task:task-{number}\n"
@@ -86,14 +88,18 @@ def test_manual_and_non_authoritative_issues_are_never_planned() -> None:
         target="genesis/learned_capabilities.py",
         objective="Autonomously add one bounded executable Genesis capability named learned_1111111111111111. Use the learned idea: validate JSON before persistence.",
     )
-    manual = {
-        "number": 401,
-        "state": "open",
-        "body": authoritative["body"].replace("<!-- genesis-task-id:task-400 -->\n", ""),
-    }
+    human_forged = dict(authoritative)
+    human_forged["number"] = 401
+    human_forged["user"] = {"login": "Maxhm007"}
+    missing_marker = dict(authoritative)
+    missing_marker["number"] = 402
+    missing_marker["body"] = authoritative["body"].replace("<!-- genesis-task-id:task-400 -->\n", "")
+    missing_label = dict(authoritative)
+    missing_label["number"] = 403
+    missing_label["labels"] = []
     report = {"number": 4, "state": "open", "body": "<!-- genesis-hourly-report:v2 -->"}
 
-    plan = build_reconciliation_plan([authoritative, manual, report])
+    plan = build_reconciliation_plan([authoritative, human_forged, missing_marker, missing_label, report])
 
     assert plan["eligible_issue_count"] == 1
     assert plan["duplicate_group_count"] == 0
