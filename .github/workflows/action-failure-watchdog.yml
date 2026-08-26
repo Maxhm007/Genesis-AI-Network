@@ -16,6 +16,9 @@ permissions:
   contents: read
   issues: write
 
+env:
+  PYTHONPATH: ${{ github.workspace }}
+
 concurrency:
   group: genesis-action-failure-watchdog
   cancel-in-progress: false
