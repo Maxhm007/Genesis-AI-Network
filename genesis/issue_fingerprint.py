@@ -14,6 +14,7 @@ _BENCHMARK_RETRY_RE = re.compile(r"\s+This is integration generation \d+\..*$", 
 
 
 def _normalized_objective(task_type: str, objective: str) -> str:
+    task_type = str(task_type or "autonomous_task").strip().lower()
     text = str(objective or "")[:10000]
     if task_type == "benchmark_runner_integration":
         text = _BENCHMARK_RETRY_RE.sub("", text)
@@ -25,11 +26,12 @@ def _normalized_objective(task_type: str, objective: str) -> str:
 
 
 def canonical_problem_fingerprint(*, task_type: str, source: str, target: str, objective: str) -> str:
+    normalized_task_type = str(task_type or "autonomous_task").strip().lower()
     material = {
-        "task_type": str(task_type or "autonomous_task").strip().lower(),
+        "task_type": normalized_task_type,
         "source": str(source or "genesis").strip().lower(),
         "target": str(target or "").replace("\\", "/").strip().lower(),
-        "objective": _normalized_objective(str(task_type or "autonomous_task").strip(), objective),
+        "objective": _normalized_objective(normalized_task_type, objective),
     }
     digest = hashlib.sha256(json.dumps(material, sort_keys=True, separators=(",", ":")).encode("utf-8")).hexdigest()
     return f"genesis-objective:{digest[:32]}"
