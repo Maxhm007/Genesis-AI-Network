@@ -10,7 +10,7 @@ def test_autonomy_heartbeat_restarts_idle_pipeline_without_duplicate_work() -> N
     root = Path(__file__).resolve().parents[1]
     workflow = (root / ".github" / "workflows" / "autonomy-heartbeat.yml").read_text(encoding="utf-8")
 
-    assert 'cron: "7 * * * *"' in workflow
+    assert 'cron: "*/15 * * * *"' in workflow
     assert "workflow_dispatch:" in workflow
     assert '".github/workflows/autonomy-heartbeat.yml"' in workflow
     assert "group: genesis-autonomy-heartbeat" in workflow
