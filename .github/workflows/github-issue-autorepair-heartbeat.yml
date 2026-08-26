@@ -1,0 +1,68 @@
+name: Genesis GitHub Issue Autorepair Heartbeat
+
+on:
+  workflow_run:
+    workflows: ["Gene Pulse"]
+    types: [completed]
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/github-issue-autorepair-heartbeat.yml'
+      - '.github/workflows/github-issue-autorepair.yml'
+
+permissions: {}
+
+env:
+  GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '3'
+
+concurrency:
+  group: genesis-github-issue-autorepair-heartbeat
+  cancel-in-progress: false
+
+jobs:
+  wake_dispatcher:
+    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'success'
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+      contents: read
+      issues: read
+    steps:
+      - name: Wake the bounded autorepair dispatcher when capacity exists
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --limit 500 \
+            --json number,labels \
+            > "$RUNNER_TEMP/open-issues.json"
+
+          active=$(jq '[.[]
+            | select(
+                (([.labels[].name] | index("genesis-repair-in-progress")) != null) or
+                (([.labels[].name] | index("genesis-validating")) != null)
+              )
+          ] | length' "$RUNNER_TEMP/open-issues.json")
+
+          eligible=$(jq '[.[]
+            | select(([.labels[].name] | index("genesis-autonomous")) != null)
+            | select(([.labels[].name] | index("genesis-repair-in-progress")) == null)
+            | select(([.labels[].name] | index("genesis-validating")) == null)
+            | select(([.labels[].name] | index("genesis-blocked")) == null)
+            | select(([.labels[].name] | index("genesis-solved")) == null)
+          ] | length' "$RUNNER_TEMP/open-issues.json")
+
+          if (( active < GENESIS_ISSUE_REPAIR_MAX_PARALLEL && eligible > 0 )); then
+            echo "Autorepair heartbeat waking dispatcher: active=$active eligible=$eligible"
+            gh workflow run github-issue-autorepair.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref main
+          else
+            echo "Autorepair heartbeat idle: active=$active eligible=$eligible"
+          fi
