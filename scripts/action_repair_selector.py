@@ -10,7 +10,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from scripts.action_failure_watchdog import decode_metadata
+from scripts.action_failure_watchdog import decode_metadata, failure_root_fingerprint
 
 PROTECTED_ACTION_CONTROL_PATHS = {
     ".github/workflows/candidate-pr-gate.yml",
@@ -53,8 +53,17 @@ def classify_failure(body: str) -> str:
 
 
 def choose_repairable_issue(issues: list[dict]) -> int | None:
-    candidates: list[tuple[int, int, int]] = []
-    for issue in issues:
+    """Choose one root failure fairly.
+
+    Every untouched root gets a turn before a retry generation can run again.
+    Within the same repair generation, the lower GitHub issue number wins so
+    older unresolved failures cannot be jumped by newer syntax/dependency noise.
+    Validator A/B duplicates are treated as one root even before the watchdog's
+    persistent deduplication pass closes duplicate issue records.
+    """
+    candidates: list[tuple[int, int, int, int]] = []
+    seen_roots: set[str] = set()
+    for issue in sorted(issues, key=lambda row: int(row.get("number") or 0)):
         body = str(issue.get("body") or "")
         metadata = decode_metadata(body)
         if not metadata:
@@ -66,13 +75,16 @@ def choose_repairable_issue(issues: list[dict]) -> int | None:
             continue
         if workflow_path in PROTECTED_ACTION_CONTROL_PATHS:
             continue
+        root = str(metadata.get("root_fingerprint") or failure_root_fingerprint(metadata))
+        if root in seen_roots:
+            continue
+        seen_roots.add(root)
         failure_class = classify_failure(body)
-        priority = FAILURE_CLASS_PRIORITY[failure_class]
-        candidates.append((priority, cycles, number))
+        candidates.append((cycles, number, FAILURE_CLASS_PRIORITY[failure_class], number))
     if not candidates:
         return None
     candidates.sort()
-    return candidates[0][2]
+    return candidates[0][3]
 
 
 def list_authorized_issues(repository: str) -> list[dict]:
