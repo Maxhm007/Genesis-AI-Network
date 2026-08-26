@@ -157,7 +157,7 @@ def test_running_self_improvement_is_grandfathered_not_migrated_mid_candidate(tm
     assert github.issues == []
 
 
-def test_github_failure_leaves_internal_source_unassigned(tmp_path: Path) -> None:
+def test_github_failure_pauses_source_and_forbids_direct_fallback(tmp_path: Path) -> None:
     queue, source = _source_task(tmp_path)
 
     def unavailable(method: str, path: str, payload: dict | None = None):
@@ -166,7 +166,10 @@ def test_github_failure_leaves_internal_source_unassigned(tmp_path: Path) -> Non
     report = route_self_improvement(tmp_path, requester=unavailable)
 
     assert report["status"] == "blocked"
-    assert queue.get(source.task_id).state == "new"
+    current = queue.get(source.task_id)
+    assert current is not None
+    assert current.state == "paused"
+    assert str(current.state_reason).startswith(ROUTER_PAUSE_PREFIX)
     executions = [
         task for task in queue.list(limit=100)
         if task.payload.get("source_self_improvement_task_id") == source.task_id
