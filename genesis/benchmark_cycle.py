@@ -5,7 +5,7 @@ from pathlib import Path
 from typing import Any
 
 from .benchmark_execution import BenchmarkExecutionPlanner
-from .github_issue_task_router import issue_backed, route_unbacked_tasks
+from .github_issue_task_router import issue_authority_enabled, issue_backed, route_unbacked_tasks
 from .modules.task_queue import GenesisTask, PersistentTaskQueue
 
 
@@ -71,10 +71,12 @@ def _paused_task_ready(
 def candidate_tasks(
     queue: PersistentTaskQueue,
     planner: BenchmarkExecutionPlanner | None = None,
+    *,
+    require_issue: bool = False,
 ):
     candidates = []
     for task in queue.list(limit=200):
-        if not issue_backed(task):
+        if require_issue and not issue_backed(task):
             continue
         if task.module_id != "genesis.evaluation":
             continue
@@ -93,31 +95,34 @@ def candidate_tasks(
 
 
 def advance_one_benchmark(root: Path) -> dict[str, Any]:
-    """Advance at most one Issue-backed durable frontier benchmark task.
+    """Advance at most one Issue-backed durable frontier benchmark task in production.
 
-    GitHub Issues are authoritative; SQLite is execution/cache state only. Benchmark
-    work is therefore routed to an Issue before it may run. The planner may queue
-    validated runner-integration work, stage real evidence, or surface an external
-    execution blocker. It never invents benchmark scores or changes validation or
-    promotion authority.
+    GitHub Issues are authoritative in the real Genesis runtime; SQLite is
+    execution/cache state only. Benchmark work is therefore routed to an Issue
+    before it may run. Temporary unit-test roots retain isolated behavior without
+    mutating the real repository. The planner never invents scores or changes
+    validation/promotion authority.
     """
     root = Path(root).resolve()
     queue = PersistentTaskQueue(root / "runtime" / "genesis_tasks.sqlite3")
+    authority = issue_authority_enabled(root)
     issue_sync = route_unbacked_tasks(root)
     planner = BenchmarkExecutionPlanner(root)
-    candidates = candidate_tasks(queue, planner)
+    candidates = candidate_tasks(queue, planner, require_issue=authority)
     if not candidates:
         unbacked = [
             task.task_id for task in queue.list(limit=200)
-            if not issue_backed(task)
+            if authority
+            and not issue_backed(task)
             and task.module_id == "genesis.evaluation"
             and task.payload.get("task_type") == "frontier_benchmark_measurement"
             and task.state in {"new", "assigned", "blocked", "failed", "paused"}
         ]
         return {
             "status": "waiting_for_github_issue" if unbacked else "idle",
-            "reason": "no_issue_backed_executable_benchmark_evaluation_task",
+            "reason": "no_issue_backed_executable_benchmark_evaluation_task" if authority else "no executable benchmark evaluation task",
             "unbacked_task_ids": unbacked,
+            "github_issue_authority_enforced": authority,
             "github_issue_sync": issue_sync,
         }
 
@@ -126,10 +131,15 @@ def advance_one_benchmark(root: Path) -> dict[str, Any]:
         task = queue.resume(task.task_id, module_id="genesis.evaluation")
     elif task.state in {"new", "blocked", "failed"}:
         if task.state == "failed" and not queue.retryable(task):
-            return {"status": "not_retryable", "task": asdict(task), "github_issue_sync": issue_sync}
+            return {
+                "status": "not_retryable",
+                "task": asdict(task),
+                "github_issue_authority_enforced": authority,
+                "github_issue_sync": issue_sync,
+            }
         task = queue.transition(task.task_id, "assigned", module_id="genesis.evaluation")
 
-    if not issue_backed(task):
+    if authority and not issue_backed(task):
         raise RuntimeError("GitHub Issue is required before benchmark execution")
 
     task = queue.transition(task.task_id, "running", module_id="genesis.evaluation")
@@ -141,7 +151,8 @@ def advance_one_benchmark(root: Path) -> dict[str, Any]:
             task.task_id,
             f"Waiting for benchmark runner task {result['task_id']} generation {result.get('work_generation', 1)} to produce real comparable evidence",
         )
-        route_unbacked_tasks(root)
+        if authority:
+            route_unbacked_tasks(root)
     elif result["status"] == "runner_integration_exhausted":
         queue.pause(
             task.task_id,
@@ -167,5 +178,6 @@ def advance_one_benchmark(root: Path) -> dict[str, Any]:
         "task_id": task.task_id,
         "github_issue_number": int(task.payload.get("github_issue_number") or 0),
         "result": result,
+        "github_issue_authority_enforced": authority,
         "github_issue_sync": issue_sync,
     }
