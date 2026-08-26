@@ -26,6 +26,15 @@ def test_dispatcher_refill_is_bounded_to_one_additional_round() -> None:
     assert "active < GENESIS_ISSUE_REPAIR_MAX_PARALLEL" in text
 
 
+def test_dispatcher_always_cleans_up_failed_worker_claims() -> None:
+    text = DISPATCHER.read_text(encoding="utf-8")
+
+    assert "cleanup_claims:" in text
+    assert "if: always() && needs.plan.outputs.has_work == 'true'" in text
+    assert "Release any batch claims left behind by failed workers" in text
+    assert "--remove-label genesis-repair-in-progress" in text
+
+
 def test_worker_preserves_claim_release_and_exact_issue_isolation() -> None:
     text = WORKER.read_text(encoding="utf-8")
 
