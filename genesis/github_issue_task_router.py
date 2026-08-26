@@ -12,6 +12,7 @@ from .modules.task_queue import GenesisTask, PersistentTaskQueue, utc_now
 
 
 GENESIS_TASK_LABEL = "genesis-task"
+AUTONOMOUS_REPAIR_LABEL = "genesis-autonomous"
 TITLE_PREFIX = "[Genesis Task]"
 SOURCE_MARKER_PREFIX = "<!-- genesis-task-id:"
 CAPABILITY_SOURCE_PREFIX = "<!-- genesis-capability-source:"
@@ -230,7 +231,7 @@ def _ensure_issue(
         created = requester(
             "POST",
             "/issues",
-            {"title": title, "body": body, "labels": [GENESIS_TASK_LABEL]},
+            {"title": title, "body": body, "labels": [GENESIS_TASK_LABEL, AUTONOMOUS_REPAIR_LABEL]},
         )
         if isinstance(created, dict) and int(created.get("number") or 0) > 0:
             existing.append(created)
