@@ -6,41 +6,35 @@ on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: Optional GitHub issue number; blank uses the next queued issue
+        description: Optional authorized GitHub issue number; blank fills available worker slots
         required: false
         default: ''
+      refill_round:
+        description: Internal bounded refill generation
+        required: false
+        default: '0'
   schedule:
-    - cron: '11 * * * *'
+    - cron: '*/5 * * * *'
   push:
     branches: [main]
     paths:
       - '.github/workflows/github-issue-autorepair.yml'
+      - '.github/workflows/github-issue-autorepair-worker.yml'
+      - '.github/workflows/github-issue-autorepair-integration.yml'
 
-permissions:
-  actions: read
-  contents: write
-  issues: write
-  pull-requests: write
+permissions: {}
 
 env:
   PYTHONPATH: ${{ github.workspace }}
-  DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
-  GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
-  GENESIS_PROVIDER_URL: http://127.0.0.1:8766
-  GENESIS_PROVIDER_NAME: qwen3-1.7b-github-issue-autorepair
-  GENESIS_PROVIDER_TIMEOUT_SECONDS: '240'
-  GENESIS_PROVIDER_MAX_NEW_TOKENS: '1024'
-  HF_HOME: ~/.cache/huggingface
-  PIP_CACHE_DIR: ~/.cache/pip
-
-concurrency:
-  group: genesis-github-issue-autorepair
-  cancel-in-progress: false
+  GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '3'
 
 jobs:
   bootstrap_labels:
     if: github.event_name == 'push'
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
     steps:
       - name: Ensure Genesis issue-queue labels exist
         env:
@@ -60,358 +54,188 @@ jobs:
           ensure_label genesis-solved 8250df 'Solved through validated Genesis autonomous repair'
           ensure_label genesis-repair-in-progress d4c5f9 'Genesis is currently processing this autonomous issue'
 
-  solve:
+  plan:
     if: github.event_name != 'push' && (github.event_name != 'issues' || github.event.label.name == 'genesis-autonomous')
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: genesis-github-issue-autorepair-admission
+      cancel-in-progress: false
     outputs:
-      issue_number: ${{ steps.issue.outputs.issue_number }}
-      has_candidate: ${{ steps.candidate.outputs.has_candidate }}
-      candidate_branch: ${{ steps.candidate.outputs.candidate_branch }}
-      candidate_sha: ${{ steps.candidate.outputs.candidate_sha }}
+      issue_numbers: ${{ steps.plan.outputs.issue_numbers }}
+      has_work: ${{ steps.plan.outputs.has_work }}
+      refill_round: ${{ steps.plan.outputs.refill_round }}
+      allow_refill: ${{ steps.plan.outputs.allow_refill }}
     steps:
       - uses: actions/checkout@v4
         with:
           ref: main
-          fetch-depth: 0
+          fetch-depth: 1
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Resolve one authorized open issue
-        id: issue
+      - name: Build and claim bounded repair batch
+        id: plan
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          n=''
-          if [[ '${{ github.event_name }}' == 'issues' ]]; then
-            n='${{ github.event.issue.number }}'
-          elif [[ '${{ github.event_name }}' == 'workflow_dispatch' && -n '${{ inputs.issue_number }}' ]]; then
-            n='${{ inputs.issue_number }}'
-          else
-            n=$(gh issue list \
+
+          round='0'
+          explicit=''
+          allow_refill='true'
+          if [[ '${{ github.event_name }}' == 'workflow_dispatch' ]]; then
+            round='${{ inputs.refill_round }}'
+            explicit='${{ inputs.issue_number }}'
+          fi
+          [[ "$round" =~ ^[0-9]+$ ]] || round='0'
+          if (( round > 1 )); then
+            round='1'
+          fi
+          if [[ -n "$explicit" ]]; then
+            [[ "$explicit" =~ ^[0-9]+$ ]] || {
+              echo "Invalid issue number: $explicit" >&2
+              exit 1
+            }
+            allow_refill='false'
+          fi
+
+          gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --limit 500 \
+            --json number,state,updatedAt,labels \
+            > "$RUNNER_TEMP/open-issues.json"
+
+          selector=(python scripts/select_issue_repair_batch.py
+            --issues-json "$RUNNER_TEMP/open-issues.json"
+            --max-parallel "$GENESIS_ISSUE_REPAIR_MAX_PARALLEL")
+          if [[ -n "$explicit" ]]; then
+            selector+=(--explicit-issue-number "$explicit")
+          fi
+          plan_json="$("${selector[@]}")"
+          selected="$(jq -c '.selected_issue_numbers' <<<"$plan_json")"
+
+          claimed='[]'
+          claims_committed='false'
+          rollback_uncommitted_claims() {
+            if [[ "$claims_committed" == 'true' ]]; then
+              return
+            fi
+            while IFS= read -r claimed_n; do
+              [[ -n "$claimed_n" ]] || continue
+              gh issue edit "$claimed_n" \
+                --repo "$GITHUB_REPOSITORY" \
+                --remove-label genesis-repair-in-progress || true
+            done < <(jq -r '.[]' <<<"$claimed")
+          }
+          trap rollback_uncommitted_claims EXIT
+
+          while IFS= read -r n; do
+            [[ -n "$n" ]] || continue
+            gh issue edit "$n" \
               --repo "$GITHUB_REPOSITORY" \
-              --state open \
-              --label genesis-autonomous \
-              --limit 100 \
-              --json number,updatedAt,labels \
-              --jq '[.[]
-                | select(([.labels[].name] | index("genesis-repair-in-progress")) | not)
-                | select(([.labels[].name] | index("genesis-validating")) | not)
-                | select(([.labels[].name] | index("genesis-blocked")) | not)
-                | select(([.labels[].name] | index("genesis-solved")) | not)
-              ] | sort_by(.updatedAt, .number) | .[0].number // empty')
-          fi
-          if [[ -n "$n" && ! "$n" =~ ^[0-9]+$ ]]; then
-            echo "Invalid issue number: $n" >&2
-            exit 1
-          fi
-          echo "issue_number=$n" >> "$GITHUB_OUTPUT"
-          [[ -n "$n" ]] && echo "Genesis selected issue #$n" || echo 'No authorized Genesis issue is queued.'
-      - name: Claim selected issue
-        if: steps.issue.outputs.issue_number != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
-        shell: bash
-        run: gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-repair-in-progress
-      - name: Install repository dependencies
-        if: steps.issue.outputs.issue_number != ''
-        run: pip install -r requirements.txt
-      - name: Verify stable baseline
-        if: steps.issue.outputs.issue_number != ''
-        run: python -m pytest -q
-      - name: Restore open-model caches
-        if: steps.issue.outputs.issue_number != ''
-        uses: actions/cache@v4
-        with:
-          path: |
-            ~/.cache/huggingface
-            ~/.cache/pip
-          key: genesis-qwen3-1.7b-${{ runner.os }}-py312-v1
-          restore-keys: |
-            genesis-qwen3-1.7b-${{ runner.os }}-py312-
-      - name: Install free local repair intelligence
-        if: steps.issue.outputs.issue_number != ''
-        run: |
-          python -m pip install --upgrade pip
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install 'transformers>=4.51,<5' safetensors
-      - name: Start Genesis issue-repair provider
-        if: steps.issue.outputs.issue_number != ''
-        shell: bash
-        run: |
-          set -euo pipefail
-          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen3-1.7B --host 127.0.0.1 --port 8766 --max-new-tokens 1024 > /tmp/genesis-github-issue-autorepair.log 2>&1 &
-          ready=false
-          for i in {1..120}; do
-            if python - <<'PY'
-          import urllib.request
-          try:
-              with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=2) as response:
-                  raise SystemExit(0 if response.status == 200 else 1)
-          except Exception:
-              raise SystemExit(1)
-          PY
-            then
-              ready=true
-              break
-            fi
-            sleep 2
-          done
-          if [[ "$ready" != true ]]; then
-            cat /tmp/genesis-github-issue-autorepair.log || true
-            exit 1
-          fi
-      - name: Configure Genesis Git identity
-        if: steps.issue.outputs.issue_number != ''
-        run: |
-          git config user.name "Genesis AI"
-          git config user.email "genesis-ai@users.noreply.github.com"
-      - name: Let Genesis solve the selected GitHub issue
-        if: steps.issue.outputs.issue_number != ''
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/github_issue_autorepair.py --issue-number '${{ steps.issue.outputs.issue_number }}' --repository "$GITHUB_REPOSITORY"
-      - name: Release selected issue claim
-        if: always() && steps.issue.outputs.issue_number != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ steps.issue.outputs.issue_number }}
-        shell: bash
-        run: gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress || true
-      - name: Resolve generated candidate
-        id: candidate
-        if: always() && steps.issue.outputs.issue_number != ''
-        shell: bash
-        run: |
-          python - <<'PY' >> "$GITHUB_OUTPUT"
-          import json
-          from pathlib import Path
-          path = Path('runtime/github_issue_autorepair.json')
-          if not path.is_file():
-              print('has_candidate=false')
-              print('candidate_branch=')
-              print('candidate_sha=')
-              raise SystemExit(0)
-          payload = json.loads(path.read_text(encoding='utf-8'))
-          branch = str(payload.get('candidate_branch') or '')
-          sha = str(payload.get('candidate_sha') or '')
-          valid = payload.get('status') == 'candidate_created' and branch.startswith('genesis/candidate-') and len(sha) == 40
-          print(f"has_candidate={'true' if valid else 'false'}")
-          print(f'candidate_branch={branch if valid else ""}')
-          print(f'candidate_sha={sha if valid else ""}')
-          PY
-      - name: Preserve issue repair evidence
-        if: always() && steps.issue.outputs.issue_number != ''
-        uses: actions/upload-artifact@v4
-        with:
-          name: genesis-github-issue-autorepair-${{ github.run_id }}
-          path: |
-            runtime/github_issue_autorepair.json
-            /tmp/genesis-github-issue-autorepair.log
-          if-no-files-found: ignore
-          retention-days: 30
+              --add-label genesis-repair-in-progress
+            claimed="$(jq -c --argjson n "$n" '. + [$n]' <<<"$claimed")"
+          done < <(jq -r '.[]' <<<"$selected")
 
-  open_pr:
-    needs: solve
-    if: needs.solve.outputs.has_candidate == 'true'
+          has_work='false'
+          if [[ "$(jq 'length' <<<"$claimed")" -gt 0 ]]; then
+            has_work='true'
+          fi
+
+          echo "issue_numbers=$claimed" >> "$GITHUB_OUTPUT"
+          echo "has_work=$has_work" >> "$GITHUB_OUTPUT"
+          echo "refill_round=$round" >> "$GITHUB_OUTPUT"
+          echo "allow_refill=$allow_refill" >> "$GITHUB_OUTPUT"
+          echo "Genesis repair admission: $plan_json; claimed=$claimed"
+          claims_committed='true'
+
+  solve_workers:
+    needs: plan
+    if: needs.plan.outputs.has_work == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 3
+      matrix:
+        issue_number: ${{ fromJSON(needs.plan.outputs.issue_numbers) }}
+    uses: ./.github/workflows/github-issue-autorepair-worker.yml
+    with:
+      issue_number: ${{ matrix.issue_number }}
+    secrets: inherit
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+
+  integrate_workers:
+    needs: [plan, solve_workers]
+    if: always() && needs.plan.outputs.has_work == 'true'
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        issue_number: ${{ fromJSON(needs.plan.outputs.issue_numbers) }}
+    uses: ./.github/workflows/github-issue-autorepair-integration.yml
+    with:
+      issue_number: ${{ matrix.issue_number }}
+    permissions:
+      actions: read
+      contents: write
+      issues: write
+      pull-requests: write
+
+  refill:
+    needs: [plan, solve_workers, integrate_workers]
+    if: >-
+      always() &&
+      needs.plan.outputs.has_work == 'true' &&
+      needs.plan.outputs.allow_refill == 'true' &&
+      needs.plan.outputs.refill_round == '0' &&
+      needs.integrate_workers.result != 'cancelled'
     runs-on: ubuntu-latest
-    outputs:
-      pr_number: ${{ steps.pr.outputs.pr_number }}
+    permissions:
+      actions: write
+      contents: read
+      issues: read
     steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-      - name: Open or link the exact issue-repair candidate PR
-        id: pr
+      - name: Refill one additional bounded batch if capacity remains
         env:
           GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ needs.solve.outputs.candidate_branch }}
-          CANDIDATE_SHA: ${{ needs.solve.outputs.candidate_sha }}
-          ISSUE_NUMBER: ${{ needs.solve.outputs.issue_number }}
         shell: bash
         run: |
           set -euo pipefail
-          cat > "$RUNNER_TEMP/body.md" <<EOF
-          Genesis autonomous repair candidate for GitHub issue #${ISSUE_NUMBER}.
 
-          Fixes #${ISSUE_NUMBER}
+          gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --limit 500 \
+            --json number,labels \
+            > "$RUNNER_TEMP/open-issues.json"
 
-          Promotion is allowed only after two independent full-test validators, Security review, signed quorum verification, Secret Guard, protected-boundary verification, and exact candidate-SHA promotion.
+          active=$(jq '[.[]
+            | select(
+                (([.labels[].name] | index("genesis-repair-in-progress")) != null) or
+                (([.labels[].name] | index("genesis-validating")) != null)
+              )
+          ] | length' "$RUNNER_TEMP/open-issues.json")
+          eligible=$(jq '[.[]
+            | select(([.labels[].name] | index("genesis-autonomous")) != null)
+            | select(([.labels[].name] | index("genesis-repair-in-progress")) == null)
+            | select(([.labels[].name] | index("genesis-validating")) == null)
+            | select(([.labels[].name] | index("genesis-blocked")) == null)
+            | select(([.labels[].name] | index("genesis-solved")) == null)
+          ] | length' "$RUNNER_TEMP/open-issues.json")
 
-          Candidate SHA: \`${CANDIDATE_SHA}\`
-          EOF
-          existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')
-          if [[ -n "$existing" ]]; then
-            gh pr edit "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
-            pr="$existing"
+          if (( active < GENESIS_ISSUE_REPAIR_MAX_PARALLEL && eligible > 0 )); then
+            echo "Capacity is available; dispatching one bounded refill round."
+            gh workflow run github-issue-autorepair.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref main \
+              -f refill_round=1
           else
-            url=$(gh pr create --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --title "Genesis issue repair #${ISSUE_NUMBER}" --body-file "$RUNNER_TEMP/body.md")
-            pr=${url##*/}
+            echo "No safe refill required: active=$active eligible=$eligible"
           fi
-          echo "pr_number=$pr" >> "$GITHUB_OUTPUT"
-
-  validator_a:
-    needs: solve
-    if: needs.solve.outputs.has_candidate == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.solve.outputs.candidate_sha }}
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install -r requirements.txt
-      - name: Independent full test suite A
-        run: python -m pytest -q
-      - name: Enforce issue-autorepair boundary A
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch origin main
-          if git diff --name-only origin/main...HEAD | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
-            echo 'Issue autorepair cannot change identity or workflow boundaries' >&2
-            exit 1
-          fi
-      - name: Security review A
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          from genesis.security import SecurityModule
-          report = SecurityModule(Path('.')).review_candidate('origin/main')
-          print(report.as_dict())
-          raise SystemExit(0 if report.status == 'pass' else 1)
-          PY
-      - name: Sign validator A approval
-        run: python genesis/ephemeral_validator.py --validator-id github-issue-validator-a --candidate ${{ needs.solve.outputs.candidate_sha }} --output validator-a.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: github-issue-validator-a-${{ github.run_id }}
-          path: validator-a.json
-
-  validator_b:
-    needs: solve
-    if: needs.solve.outputs.has_candidate == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.solve.outputs.candidate_sha }}
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install -r requirements.txt
-      - name: Independent full test suite B
-        run: python -m pytest -q
-      - name: Enforce issue-autorepair boundary B
-        shell: bash
-        run: |
-          set -euo pipefail
-          git fetch origin main
-          if git diff --name-only origin/main...HEAD | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
-            echo 'Issue autorepair cannot change identity or workflow boundaries' >&2
-            exit 1
-          fi
-      - name: Security review B
-        run: |
-          python - <<'PY'
-          from pathlib import Path
-          from genesis.security import SecurityModule
-          report = SecurityModule(Path('.')).review_candidate('origin/main')
-          print(report.as_dict())
-          raise SystemExit(0 if report.status == 'pass' else 1)
-          PY
-      - name: Sign validator B approval
-        run: python genesis/ephemeral_validator.py --validator-id github-issue-validator-b --candidate ${{ needs.solve.outputs.candidate_sha }} --output validator-b.json
-      - uses: actions/upload-artifact@v4
-        with:
-          name: github-issue-validator-b-${{ github.run_id }}
-          path: validator-b.json
-
-  secret_guard:
-    needs: solve
-    if: needs.solve.outputs.has_candidate == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: ${{ needs.solve.outputs.candidate_sha }}
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - name: Scan candidate and reachable history for secrets
-        run: python scripts/secret_guard.py --history
-
-  promote:
-    needs: [solve, open_pr, validator_a, validator_b, secret_guard]
-    if: needs.solve.outputs.has_candidate == 'true'
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-      - uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-      - run: pip install -r requirements.txt
-      - uses: actions/download-artifact@v4
-        with:
-          name: github-issue-validator-a-${{ github.run_id }}
-          path: votes/a
-      - uses: actions/download-artifact@v4
-        with:
-          name: github-issue-validator-b-${{ github.run_id }}
-          path: votes/b
-      - name: Verify independent signed quorum
-        run: python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
-      - name: Promote exact validated issue-repair SHA
-        env:
-          GH_TOKEN: ${{ github.token }}
-          BRANCH: ${{ needs.solve.outputs.candidate_branch }}
-          CANDIDATE_SHA: ${{ needs.solve.outputs.candidate_sha }}
-          ISSUE_NUMBER: ${{ needs.solve.outputs.issue_number }}
-          PR_NUMBER: ${{ needs.open_pr.outputs.pr_number }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          [[ "$BRANCH" == genesis/candidate-* ]]
-          git fetch origin main "$BRANCH"
-          main_sha=$(git rev-parse origin/main)
-          test "$(git rev-parse origin/$BRANCH)" = "$CANDIDATE_SHA"
-          git merge-base --is-ancestor "$main_sha" "$CANDIDATE_SHA"
-          if git diff --name-only "$main_sha..$CANDIDATE_SHA" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json|\.github/)'; then
-            echo 'Protected Genesis boundary changed' >&2
-            exit 1
-          fi
-          git push origin "$CANDIDATE_SHA:refs/heads/main"
-          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-solved --remove-label genesis-validating --remove-label genesis-autonomous || true
-          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed --comment "Genesis independently validated and promoted exact candidate SHA \`$CANDIDATE_SHA\` to main."
-          if [[ -n "$PR_NUMBER" ]]; then
-            state=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state' || true)
-            if [[ "$state" == 'OPEN' ]]; then
-              gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment "Exact validated candidate SHA was promoted directly to main by the Genesis issue-autorepair quorum."
-            fi
-          fi
-
-  recover_queue:
-    needs: [solve, open_pr, validator_a, validator_b, secret_guard, promote]
-    if: always() && needs.solve.outputs.has_candidate == 'true' && needs.promote.result != 'success'
-    runs-on: ubuntu-latest
-    steps:
-      - name: Requeue issue after validation or promotion failure
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ needs.solve.outputs.issue_number }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --remove-label genesis-validating || true
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Genesis validation or exact-SHA promotion did not complete successfully. The issue has been returned to the autonomous repair queue for a later retry."
