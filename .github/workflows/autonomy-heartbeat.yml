@@ -2,7 +2,7 @@ name: Genesis Autonomy Heartbeat
 
 on:
   schedule:
-    - cron: "7 * * * *"
+    - cron: "*/15 * * * *"
   workflow_dispatch:
   push:
     branches: [main]
@@ -151,6 +151,8 @@ jobs:
             else
               echo "No fresh or stale in-progress autonomous repair worker remained; Gene Pulse was dispatched."
             fi
+            echo
+            echo "GitHub Actions is the production continuous runtime; this heartbeat recovers the bounded Pulse chain every 15 minutes when idle."
             echo
             echo "Fresh runs: ${FRESH_COUNT:-0}"
             echo "Stale runs detected: ${STALE_COUNT:-0}"
