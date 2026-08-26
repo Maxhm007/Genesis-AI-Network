@@ -18,6 +18,60 @@ ROLE_MAX_COMPLETION_TOKENS = {
 }
 
 
+def _prompt_role(prompt: str) -> str | None:
+    for line in prompt.splitlines()[:8]:
+        if line.startswith("ROLE:"):
+            return line.split(":", 1)[1].strip()
+    return None
+
+
+def _flat_single_edit_example(text: str) -> str:
+    """Unwrap one valid nested edit schema example without repairing model output."""
+    marker = '{"edits":['
+    start = text.find(marker)
+    if start < 0:
+        return text
+    try:
+        value, end = json.JSONDecoder().raw_decode(text, start)
+    except json.JSONDecodeError:
+        return text
+    if not isinstance(value, dict) or set(value) != {"edits"}:
+        return text
+    edits = value.get("edits")
+    if not isinstance(edits, list) or len(edits) != 1 or not isinstance(edits[0], dict):
+        return text
+    flat = json.dumps(edits[0], separators=(",", ":"))
+    return text[:start] + flat + text[end:]
+
+
+def simplify_bounded_coding_prompt(prompt: str) -> str:
+    """Show the small coding model a flat one-edit grammar already accepted downstream.
+
+    CodingModule intentionally accepts a complete top-level single edit and normalizes it
+    through the same path/range/AST/security checks as the legacy nested ``edits`` shape.
+    Only schema-example lines are rewritten here; objective, repository context, validation
+    feedback, and previous model output are preserved verbatim.
+    """
+    if _prompt_role(prompt) != "bounded_coding_engineer":
+        return prompt
+    rows: list[str] = []
+    for line in prompt.splitlines():
+        if line.startswith("OUTPUT: JSON only in this shape:"):
+            line = _flat_single_edit_example(line).replace(
+                "OUTPUT: JSON only in this shape:",
+                "OUTPUT: JSON only as ONE flat edit object:",
+                1,
+            )
+        elif "Return ONLY the same JSON shape as:" in line:
+            line = _flat_single_edit_example(line).replace(
+                "Return ONLY the same JSON shape as:",
+                "Return ONLY ONE flat edit object like:",
+                1,
+            )
+        rows.append(line)
+    return "\n".join(rows)
+
+
 def compact_prompt(prompt: str) -> str:
     """Keep bounded instructions/objective and recent repository context."""
     if len(prompt) <= MAX_PROVIDER_PROMPT_CHARS:
@@ -29,20 +83,14 @@ def compact_prompt(prompt: str) -> str:
 
 def role_token_budget(prompt: str) -> int | None:
     """Return a narrow initial output cap for roles that only need compact JSON decisions."""
-    for line in prompt.splitlines()[:8]:
-        if line.startswith("ROLE:"):
-            role = line.split(":", 1)[1].strip()
-            return ROLE_MAX_NEW_TOKENS.get(role)
-    return None
+    role = _prompt_role(prompt)
+    return ROLE_MAX_NEW_TOKENS.get(role) if role else None
 
 
 def role_completion_budget(prompt: str) -> int | None:
     """Return the maximum total generation budget for latency-sensitive roles."""
-    for line in prompt.splitlines()[:8]:
-        if line.startswith("ROLE:"):
-            role = line.split(":", 1)[1].strip()
-            return ROLE_MAX_COMPLETION_TOKENS.get(role)
-    return None
+    role = _prompt_role(prompt)
+    return ROLE_MAX_COMPLETION_TOKENS.get(role) if role else None
 
 
 def balanced_json_object_complete(text: str) -> bool:
@@ -152,6 +200,7 @@ class LocalReasoningModel:
         )
         initial_role_budget = role_token_budget(prompt)
         completion_role_budget = role_completion_budget(prompt)
+        prompt = simplify_bounded_coding_prompt(prompt)
         prompt = compact_prompt(prompt)
         messages = [
             {"role": "system", "content": system},
