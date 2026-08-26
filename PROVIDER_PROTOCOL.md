@@ -35,7 +35,32 @@ GENESIS_PROVIDER_URL=http://127.0.0.1:9000
 GENESIS_PROVIDER_NAME=my-independent-provider
 ```
 
+Multiple generic providers can also be configured through `GENESIS_PROVIDER_ENDPOINTS`.
+
 No provider receives constitutional authority merely by being connected. Outputs remain candidate knowledge and candidate engineering work until separately validated.
+
+## Built-in optional DeepSeek adapter
+
+Genesis can add DeepSeek behind the same provider abstraction without replacing Qwen or changing the existing provider configuration. The adapter is disabled unless an operator supplies an API key at runtime:
+
+```text
+DEEPSEEK_API_KEY=<runtime-secret>
+```
+
+Optional settings:
+
+```text
+GENESIS_DEEPSEEK_MODEL=deepseek-v4-flash
+GENESIS_DEEPSEEK_BASE_URL=https://api.deepseek.com
+GENESIS_DEEPSEEK_TIMEOUT_SECONDS=90
+GENESIS_DEEPSEEK_MAX_TOKENS=512
+GENESIS_DEEPSEEK_THINKING=enabled
+GENESIS_DEEPSEEK_REASONING_EFFORT=high
+```
+
+The default model is `deepseek-v4-flash`. The adapter uses DeepSeek's OpenAI-compatible `POST /chat/completions` API and declares reasoning, coding, research, planning and review capabilities. It does not store credentials in the repository.
+
+Routing remains Genesis-owned. General `IntelligenceRouter` selection continues to preserve its existing Qwen preference when Qwen is available, while DeepSeek is an eligible fallback. Autonomous coding continues to obey the repository's existing coding-provider policy, which may prefer an eligible non-Qwen coder based on the current validated repair policy. In every case, tests, Security, review, independent validation and promotion gates remain unchanged.
 
 ## Bootstrap provider
 
