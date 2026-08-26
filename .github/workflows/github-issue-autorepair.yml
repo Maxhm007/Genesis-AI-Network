@@ -14,7 +14,7 @@ on:
         required: false
         default: '0'
   schedule:
-    - cron: '11 * * * *'
+    - cron: '*/5 * * * *'
   push:
     branches: [main]
     paths:
@@ -119,6 +119,20 @@ jobs:
           selected="$(jq -c '.selected_issue_numbers' <<<"$plan_json")"
 
           claimed='[]'
+          claims_committed='false'
+          rollback_uncommitted_claims() {
+            if [[ "$claims_committed" == 'true' ]]; then
+              return
+            fi
+            while IFS= read -r claimed_n; do
+              [[ -n "$claimed_n" ]] || continue
+              gh issue edit "$claimed_n" \
+                --repo "$GITHUB_REPOSITORY" \
+                --remove-label genesis-repair-in-progress || true
+            done < <(jq -r '.[]' <<<"$claimed")
+          }
+          trap rollback_uncommitted_claims EXIT
+
           while IFS= read -r n; do
             [[ -n "$n" ]] || continue
             gh issue edit "$n" \
@@ -137,6 +151,7 @@ jobs:
           echo "refill_round=$round" >> "$GITHUB_OUTPUT"
           echo "allow_refill=$allow_refill" >> "$GITHUB_OUTPUT"
           echo "Genesis repair admission: $plan_json; claimed=$claimed"
+          claims_committed='true'
 
   workers:
     needs: plan
