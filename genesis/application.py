@@ -61,10 +61,16 @@ class ApplicationModule:
                     "provide Chat, Memory, Coding, Security, Research, Network and Updates surfaces, and keep the UI lightweight. "
                     "Do not modify CI workflows, signing policy, Constitution, Genesis Block, or validation rules."
                 )
-            return (
-                "Improve the Genesis Windows desktop application with the smallest useful, tested, accessible change. "
-                "Prioritize runtime health, real module/status data, update UX, and resource efficiency. Do not modify CI workflows."
-            )
+            if not present:
+                return (
+                    "Build the Genesis AI Windows desktop application under desktop/. Use the existing Genesis Core API, "
+                    "provide Chat, Memory, Coding, Security, Research, Network and Updates surfaces, and keep the UI lightweight. "
+                    "Do not modify CI workflows, signing policy, Constitution, Genesis Block, or validation rules."
+                )
+            else:
+                return (
+                    "Improve the Genesis Windows desktop application with the smallest useful, tested, accessible change. Prioritize runtime health, real module/status data, update UX, and resource efficiency. Do not modify CI workflows."
+                )
         if target.target_id == "android-mobile":
             if not present:
                 return (
