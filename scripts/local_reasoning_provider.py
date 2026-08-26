@@ -401,8 +401,7 @@ class LocalReasoningModel:
                 generated_tokens = int(generated.shape[-1])
                 ended_with_eos = bool(generated.shape[-1]) and eos_token_id is not None and int(generated[-1]) == int(eos_token_id)
         if role == "bounded_coding_engineer":
-            completed_before_limit = generated_tokens < configured_completion_budget
-            allow_unterminated = ended_with_eos or completed_before_limit
+            allow_unterminated = ended_with_eos or single_line_edit_complete(decoded_raw)
             return normalize_bounded_coding_output(
                 decoded_raw,
                 allow_unterminated_single_line=allow_unterminated,
