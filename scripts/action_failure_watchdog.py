@@ -16,6 +16,12 @@ MARKER_NAME = "genesis-action-failure"
 FAILURE_CONCLUSIONS = {"failure", "timed_out", "startup_failure", "action_required"}
 MAX_LOG_CHARS = 2400
 MAX_REPAIR_CYCLES = 3
+ACTION_QUEUE_LABELS = (
+    "genesis-action-verifying",
+    "genesis-action-autonomous",
+    "genesis-action-retry",
+    "genesis-action-blocked",
+)
 
 Runner = Callable[..., subprocess.CompletedProcess[str]]
 
@@ -81,15 +87,30 @@ def sanitize_log_excerpt(text: str) -> str:
     return "\n".join(lines)[-MAX_LOG_CHARS:]
 
 
+def _normalize_failure_identity(value: object) -> str:
+    text = str(value or "").strip().casefold()
+    # Matrix validators and their A/B security steps are independent evidence
+    # for the same underlying workflow defect, not separate repair roots.
+    text = re.sub(r"\bsecurity\s+review(?:\s+candidate)?\s+[ab]\b", "security review", text)
+    text = re.sub(r"\bvalidator[_\s/-]*[ab]\b", "validator", text)
+    text = re.sub(r"\bcandidate[_\s/-]*[ab]\b", "candidate", text)
+    text = re.sub(r"\s+", " ", text)
+    return text.strip()
+
+
 def failure_fingerprint(metadata: dict) -> str:
     material = {
         "workflow_id": int(metadata.get("workflow_id") or 0),
         "workflow_path": str(metadata.get("workflow_path") or ""),
-        "failed_job": str(metadata.get("failed_job") or ""),
-        "failed_step": str(metadata.get("failed_step") or ""),
+        "failed_job": _normalize_failure_identity(metadata.get("failed_job")),
+        "failed_step": _normalize_failure_identity(metadata.get("failed_step")),
     }
     payload = json.dumps(material, sort_keys=True, separators=(",", ":"))
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
+
+
+def failure_root_fingerprint(metadata: dict) -> str:
+    return failure_fingerprint(metadata)
 
 
 def actionable_run(run: dict, *, current_run_id: int | None = None) -> bool:
@@ -230,10 +251,96 @@ def _close_issue(repository: str, issue_number: int, *, comment: str, runner: Ru
         raise RuntimeError((result.stderr or result.stdout or "issue close failed")[-1200:])
 
 
+def _close_duplicate_issue(repository: str, issue_number: int, *, canonical_issue: int, runner: Runner) -> None:
+    _edit_issue_labels(
+        repository,
+        issue_number,
+        add=["genesis-action-duplicate"],
+        remove=list(ACTION_QUEUE_LABELS),
+        runner=runner,
+    )
+    result = runner(
+        [
+            "gh",
+            "issue",
+            "close",
+            str(issue_number),
+            "--repo",
+            repository,
+            "--reason",
+            "not planned",
+            "--comment",
+            f"Genesis consolidated this validator/matrix duplicate into root Action failure #{canonical_issue}. Repair, validation, verification, and closure continue on the canonical issue.",
+        ],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    if result.returncode != 0:
+        raise RuntimeError((result.stderr or result.stdout or "duplicate issue close failed")[-1200:])
+
+
 def _update_issue_body(repository: str, issue_number: int, body: str, runner: Runner) -> None:
     result = runner(["gh", "issue", "edit", str(issue_number), "--repo", repository, "--body", body], text=True, capture_output=True, check=False)
     if result.returncode != 0:
         raise RuntimeError((result.stderr or result.stdout or "issue body update failed")[-1200:])
+
+
+def _lifecycle_label(issues: list[dict]) -> str | None:
+    for label in ACTION_QUEUE_LABELS:
+        if any(label in _issue_labels(issue) for issue in issues):
+            return label
+    return None
+
+
+def deduplicate_open_issues(repository: str, *, runner: Runner = _default_runner) -> list[dict]:
+    issues = _list_action_issues(repository, state="open", runner=runner)
+    groups: dict[str, list[dict]] = {}
+    for issue in issues:
+        metadata = decode_metadata(str(issue.get("body") or ""))
+        if not metadata:
+            continue
+        root = failure_root_fingerprint(metadata)
+        groups.setdefault(root, []).append(issue)
+
+    actions: list[dict] = []
+    for root, group in groups.items():
+        if len(group) < 2:
+            continue
+        group.sort(key=lambda issue: int(issue.get("number") or 0))
+        canonical = group[0]
+        canonical_number = int(canonical.get("number") or 0)
+        lifecycle = _lifecycle_label(group)
+        source_candidates = [issue for issue in group if lifecycle and lifecycle in _issue_labels(issue)] or group
+        source = max(
+            source_candidates,
+            key=lambda issue: int((decode_metadata(str(issue.get("body") or "")) or {}).get("run_id") or 0),
+        )
+        merged = dict(decode_metadata(str(source.get("body") or "")) or {})
+        merged["fingerprint"] = root
+        merged["repair_cycles"] = max(
+            int((decode_metadata(str(issue.get("body") or "")) or {}).get("repair_cycles") or 0)
+            for issue in group
+        )
+        merged_body = replace_metadata(str(source.get("body") or canonical.get("body") or ""), merged)
+        _update_issue_body(repository, canonical_number, merged_body, runner)
+        if lifecycle:
+            _edit_issue_labels(
+                repository,
+                canonical_number,
+                add=[lifecycle],
+                remove=[label for label in ACTION_QUEUE_LABELS if label != lifecycle],
+                runner=runner,
+            )
+        duplicates: list[int] = []
+        for duplicate in group[1:]:
+            number = int(duplicate.get("number") or 0)
+            if not number:
+                continue
+            _close_duplicate_issue(repository, number, canonical_issue=canonical_number, runner=runner)
+            duplicates.append(number)
+        actions.append({"issue": canonical_number, "action": "root_grouped", "duplicates": duplicates})
+    return actions
 
 
 def _latest_verification_run(repository: str, metadata: dict, *, runner: Runner) -> dict | None:
@@ -250,7 +357,7 @@ def _latest_verification_run(repository: str, metadata: dict, *, runner: Runner)
 
 def reconcile_open_issues(repository: str, *, runner: Runner = _default_runner) -> list[dict]:
     actions: list[dict] = []
-    for issue in _list_action_issues(repository, state="open", runner=runner):
+    for issue in sorted(_list_action_issues(repository, state="open", runner=runner), key=lambda row: int(row.get("number") or 0)):
         metadata = decode_metadata(str(issue.get("body") or ""))
         if not metadata:
             continue
@@ -274,6 +381,7 @@ def reconcile_open_issues(repository: str, *, runner: Runner = _default_runner) 
                     "head_sha": str(verification.get("head_sha") or ""),
                     "phase": "failed",
                 })
+                metadata["fingerprint"] = failure_root_fingerprint(metadata)
                 body = replace_metadata(str(issue.get("body") or ""), metadata)
                 _update_issue_body(repository, number, body, runner)
                 if int(metadata.get("repair_cycles") or 0) >= MAX_REPAIR_CYCLES:
@@ -298,6 +406,7 @@ def reconcile_open_issues(repository: str, *, runner: Runner = _default_runner) 
             actions.append({"issue": number, "action": "closed_transient"})
         elif attempt >= 2 and conclusion in FAILURE_CONCLUSIONS and "genesis-action-autonomous" not in labels:
             metadata["run_attempt"] = attempt
+            metadata["fingerprint"] = failure_root_fingerprint(metadata)
             _update_issue_body(repository, number, replace_metadata(str(issue.get("body") or ""), metadata), runner)
             _edit_issue_labels(repository, number, add=["genesis-action-autonomous"], remove=["genesis-action-retry"], runner=runner)
             actions.append({"issue": number, "action": "authorized_repair"})
@@ -305,17 +414,23 @@ def reconcile_open_issues(repository: str, *, runner: Runner = _default_runner) 
 
 
 def open_new_failure(repository: str, *, runner: Runner = _default_runner) -> dict:
-    all_issues = _list_action_issues(repository, state="all", runner=runner)
-    known = {str((decode_metadata(str(issue.get("body") or "")) or {}).get("fingerprint") or "") for issue in all_issues}
+    open_issues = _list_action_issues(repository, state="open", runner=runner)
+    known_roots = {
+        failure_root_fingerprint(metadata)
+        for issue in open_issues
+        if (metadata := decode_metadata(str(issue.get("body") or "")))
+    }
     payload = _run_json(runner, ["gh", "api", f"repos/{repository}/actions/runs?branch=main&per_page=100"])
     runs = list(payload.get("workflow_runs") or []) if isinstance(payload, dict) else []
     current_run_id = int(os.environ.get("GITHUB_RUN_ID", "0") or 0) or None
-    for run in sorted(runs, key=lambda row: int(row.get("id") or 0), reverse=True):
+    for run in sorted(runs, key=lambda row: int(row.get("id") or 0)):
         if not actionable_run(run, current_run_id=current_run_id):
             continue
         metadata = inspect_failure(repository, run, runner=runner)
-        if metadata["fingerprint"] in known:
+        root = failure_root_fingerprint(metadata)
+        if root in known_roots:
             continue
+        metadata["fingerprint"] = root
         created = runner(
             [
                 "gh",
@@ -343,11 +458,17 @@ def open_new_failure(repository: str, *, runner: Runner = _default_runner) -> di
 
 
 def retry_once(repository: str, *, runner: Runner = _default_runner) -> dict:
-    issues = _run_json(runner, ["gh", "issue", "list", "--repo", repository, "--state", "open", "--label", "genesis-action-retry", "--limit", "20", "--json", "number,body"])
-    for issue in list(issues) if isinstance(issues, list) else []:
+    issues = _run_json(runner, ["gh", "issue", "list", "--repo", repository, "--state", "open", "--label", "genesis-action-retry", "--limit", "100", "--json", "number,body"])
+    rows = sorted(list(issues) if isinstance(issues, list) else [], key=lambda row: int(row.get("number") or 0))
+    seen_roots: set[str] = set()
+    for issue in rows:
         metadata = decode_metadata(str(issue.get("body") or ""))
         if not metadata:
             continue
+        root = failure_root_fingerprint(metadata)
+        if root in seen_roots:
+            continue
+        seen_roots.add(root)
         run_id = int(metadata.get("run_id") or 0)
         if not run_id:
             continue
@@ -381,6 +502,7 @@ def apply_recovery_status(repository: str, status_path: Path, *, runner: Runner 
             "workflow_id": int(payload.get("workflow_id") or metadata.get("workflow_id") or 0),
             "workflow_path": str(payload.get("workflow_path") or metadata.get("workflow_path") or ""),
         })
+        metadata["fingerprint"] = failure_root_fingerprint(metadata)
         _update_issue_body(repository, issue_number, replace_metadata(str(issue.get("body") or ""), metadata), runner)
         _edit_issue_labels(repository, issue_number, add=["genesis-action-verifying"], remove=["genesis-action-autonomous", "genesis-action-retry", "genesis-action-blocked"], runner=runner)
         runner(["gh", "issue", "comment", str(issue_number), "--repo", repository, "--body", f"Genesis promoted validated Action-repair SHA `{metadata['promoted_sha']}`. The issue remains open until a fresh run of the repaired workflow passes."], text=True, capture_output=True, check=False)
@@ -389,6 +511,7 @@ def apply_recovery_status(repository: str, status_path: Path, *, runner: Runner 
     cycles += 1
     metadata["repair_cycles"] = cycles
     metadata["phase"] = "failed"
+    metadata["fingerprint"] = failure_root_fingerprint(metadata)
     _update_issue_body(repository, issue_number, replace_metadata(str(issue.get("body") or ""), metadata), runner)
     if cycles >= MAX_REPAIR_CYCLES:
         _edit_issue_labels(repository, issue_number, add=["genesis-action-blocked"], remove=["genesis-action-autonomous", "genesis-action-retry", "genesis-action-verifying"], runner=runner)
@@ -402,9 +525,10 @@ def apply_recovery_status(repository: str, status_path: Path, *, runner: Runner 
 
 
 def run(repository: str, *, runner: Runner = _default_runner) -> dict:
+    deduplicated = deduplicate_open_issues(repository, runner=runner)
     reconciled = reconcile_open_issues(repository, runner=runner)
     opened = open_new_failure(repository, runner=runner)
-    result = {"status": "complete", "reconciled": reconciled, "discovery": opened}
+    result = {"status": "complete", "deduplicated": deduplicated, "reconciled": reconciled, "discovery": opened}
     EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
     EVIDENCE_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result
