@@ -39,9 +39,8 @@ jobs:
       IDLE_DISCOVERY_BUDGET: ${{ inputs.chain_budget || '4' }}
       RUNTIME_PARENT_RUN_ID: ${{ inputs.runtime_parent_run_id || '' }}
       PYTHONPATH: ${{ github.workspace }}
-      DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
       GENESIS_PULSE_FALLBACK_MODEL: ${{ vars.GENESIS_PULSE_FALLBACK_MODEL || 'Qwen/Qwen2.5-Coder-0.5B-Instruct' }}
-      GENESIS_PULSE_ESCALATION_MODEL: ${{ vars.GENESIS_PULSE_ESCALATION_MODEL || 'Qwen/Qwen2.5-Coder-1.5B-Instruct' }}
+      GENESIS_PULSE_ESCALATION_MODEL: ${{ vars.GENESIS_PULSE_ESCALATION_MODEL || 'deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B' }}
       GENESIS_PROVIDER_TIMEOUT_SECONDS: ${{ vars.GENESIS_PULSE_PROVIDER_TIMEOUT_SECONDS || '300' }}
     steps:
       - uses: actions/checkout@v4
