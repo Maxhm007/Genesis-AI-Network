@@ -31,12 +31,23 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - uses: actions/download-artifact@v4
-        with:
-          name: genesis-action-repair-candidate-${{ github.event.workflow_run.id }}
-          path: handoff
-          github-token: ${{ github.token }}
-          run-id: ${{ github.event.workflow_run.id }}
+      - name: Download exact candidate handoff from source run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_name="genesis-action-repair-candidate-${SOURCE_RUN_ID}"
+          artifact_id=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" \
+            --jq ".artifacts[] | select(.name == \"${artifact_name}\") | .id" | head -n 1)
+          if [[ -z "$artifact_id" ]]; then
+            echo "Required candidate handoff artifact ${artifact_name} was not published." >&2
+            exit 1
+          fi
+          mkdir -p handoff
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > /tmp/genesis-action-repair-candidate.zip
+          unzip -q /tmp/genesis-action-repair-candidate.zip -d handoff
       - name: Resolve exact privileged candidate
         id: resolve
         shell: bash
