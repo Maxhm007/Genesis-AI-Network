@@ -7,17 +7,18 @@ from dataclasses import asdict, replace
 from .autonomous_engineering import ENGINEERING_MODULES, AutonomousEngineeringLoop
 from .development_efficiency import DevelopmentEfficiencyGovernor
 from .devlab.module import GenesisDevLab
+from .github_issue_task_router import issue_authority_enabled, issue_backed, route_unbacked_tasks
 from .self_evaluation import GenesisSelfEvaluation
 from .velocity import AdaptiveVelocityController
 
 
 class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
-    """Autonomous engineering with one preferred software-development path.
+    """Autonomous engineering with one preferred Issue-backed development path.
 
-    Explicit DevLab and managed GitHub issue tasks are selected before generic
-    engineering work and retain failure/retry evidence across cycles. All successful
-    candidates still leave DevLab/Coding and pass through the existing Security and
-    independent-validator path.
+    In the real Genesis runtime, every engineering task must be backed by a GitHub
+    Issue before selection or execution. All Issue-backed tasks share one fair
+    rotation, while SQLite remains resumable execution/cache state. Successful
+    candidates still pass through Security and independent-validator promotion.
     """
 
     MAX_SAFE_BURST = 5
@@ -46,23 +47,12 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
 
     @classmethod
     def _is_managed_github_issue_task(cls, task) -> bool:
-        """Return whether this task represents actionable work for an open GitHub issue."""
-        return int(task.payload.get("github_issue_number") or 0) > 0 and (
-            cls._is_devlab_task(task) or cls._is_github_backlog_task(task)
-        )
+        """Return whether this task has authoritative GitHub Issue backing."""
+        return issue_backed(task)
 
     @staticmethod
     def _github_issue_fairness_key(task) -> tuple:
-        """Order issue work so older untouched issues run once, then retries rotate fairly.
-
-        A newly-created first generation represents an issue that Genesis has not yet
-        worked through this managed queue. Those tasks are ordered by GitHub issue
-        number, which is monotonic within a repository and therefore gives older open
-        issues their first turn before newer ones. Once an issue has been attempted,
-        its durable task ``updated_at`` becomes the rotation clock: the least-recently
-        touched issue runs next. New retry generations therefore return at the back of
-        the rotation instead of immediately monopolizing subsequent cycles.
-        """
+        """Order Issue work so older untouched issues run once, then retries rotate fairly."""
         issue_number = int(task.payload.get("github_issue_number") or 0)
         generation = int(task.payload.get("work_generation") or 1)
         untouched_first_generation = generation == 1 and task.attempt_count == 0 and task.state == "new"
@@ -72,6 +62,8 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
 
     def _eligible_task(self, task, attempted: set[str]) -> bool:
         if task.task_id in attempted or task.module_id not in ENGINEERING_MODULES:
+            return False
+        if issue_authority_enabled(self.root) and not issue_backed(task):
             return False
         if task.state == "failed" and not self.queue.retryable(task):
             return False
@@ -85,11 +77,9 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
                 if self._eligible_task(task, attempted):
                     candidates.append(task)
 
-        # Solve-first fair backlog policy: every actionable open GitHub issue shares
-        # one managed rotation, including explicit DevLab challenges. This preserves
-        # their priority over recurring background work without allowing one failing
-        # DevLab issue to consume every future cycle. Older untouched issues receive
-        # a first turn; after that, least-recently-worked issue state drives rotation.
+        # All Issue-backed autonomous engineering shares one solve-first fair
+        # rotation. This includes owner-created Issues, Genesis-created repairs,
+        # capability work, self-improvement, and explicit DevLab challenges.
         issue_candidates = [task for task in candidates if self._is_managed_github_issue_task(task)]
         if issue_candidates:
             task = sorted(issue_candidates, key=self._github_issue_fairness_key)[0]
@@ -143,6 +133,8 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
 
     def _attempt_devlab_task(self, task, runtime) -> dict:
         """Execute one persistent DevLab method and preserve failure evidence."""
+        if issue_authority_enabled(self.root) and not issue_backed(task):
+            raise RuntimeError("GitHub Issue is required before DevLab execution")
         started = time.perf_counter()
         owner_module = task.module_id or "genesis.coding"
         target_path = str(task.payload.get("target_path") or "").replace("\\", "/").lstrip("./")
@@ -150,7 +142,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
             "task": asdict(task),
             "owner_module": owner_module,
             "executor_module": "genesis.devlab",
-            "development_path": "task -> DevLab -> candidate -> Security -> validators -> promotion",
+            "development_path": "GitHub Issue -> task state -> DevLab -> candidate -> Security -> validators -> promotion",
             "ai_team_context_used": False,
             "context_paths": [target_path] if target_path else [],
             "candidate_revisions": task.attempt_count,
@@ -183,6 +175,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
                     "designer": "genesis.devlab",
                     "executor": "genesis.devlab",
                     "source_task_id": task.task_id,
+                    "github_issue_number": int(task.payload.get("github_issue_number") or 0),
                     "attribution": str(task.payload.get("attribution") or "genesis_autonomous"),
                 },
             )
@@ -236,6 +229,8 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
             return attempt
 
     def _attempt_task(self, task, runtime) -> dict:
+        if issue_authority_enabled(self.root) and not issue_backed(task):
+            raise RuntimeError("GitHub Issue is required before autonomous engineering execution")
         if self._is_devlab_task(task):
             return self._attempt_devlab_task(task, runtime)
 
@@ -258,9 +253,12 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
 
     def run_selected(self, task_id: str) -> dict:
         """Run exactly one pre-selected task in an isolated parallel worker checkout."""
+        issue_sync = route_unbacked_tasks(self.root)
         task = self.queue.get(task_id)
         if task is None:
             raise KeyError(task_id)
+        if issue_authority_enabled(self.root) and not issue_backed(task):
+            raise RuntimeError("GitHub Issue is required before isolated autonomous execution")
         if task.module_id not in ENGINEERING_MODULES:
             raise RuntimeError(f"task is not owned by an engineering module: {task.module_id}")
         decision = self.governor.score(task)
@@ -282,6 +280,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
             "attempt": attempt,
             "velocity_policy": self.velocity_policy,
             "parallel_worker": True,
+            "github_issue_sync": issue_sync,
         }
         (runtime / f"parallel_result_{task_id}.json").write_text(
             json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8"
@@ -289,16 +288,26 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
         return result
 
     def run_once(self) -> dict:
+        issue_sync_before = route_unbacked_tasks(self.root)
         result = super().run_once()
+        issue_sync_after = route_unbacked_tasks(self.root)
+        result["github_issue_authority"] = {
+            "enforced": issue_authority_enabled(self.root),
+            "source_of_truth": "github_issues",
+            "sqlite_role": "execution_cache_state",
+            "sync_before": issue_sync_before,
+            "sync_after": issue_sync_after,
+        }
         result["development_efficiency"] = {
             "task_attempt_budget": self.MAX_TASK_ATTEMPTS_PER_CYCLE,
             "velocity_policy": self.velocity_policy,
             "selection_trace": list(self._selection_trace),
             "golden_path": {
                 "enabled": True,
-                "path": "task -> DevLab -> candidate -> Security -> Validator A/B -> promotion -> verify -> learn",
+                "path": "GitHub Issue -> task state -> DevLab/Coding -> candidate -> Security -> Validator A/B -> promotion -> verify -> learn",
+                "all_production_engineering_requires_github_issue": True,
                 "devlab_tasks_have_priority": False,
-                "devlab_tasks_share_fair_issue_rotation": True,
+                "all_issue_tasks_share_fair_rotation": True,
                 "github_issue_backlog_has_priority_over_background_work": True,
                 "older_untouched_issues_get_first_turn": True,
                 "issue_retries_rotate_by_least_recent_work": True,
@@ -310,7 +319,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
                 "max_items": self.SELF_EVALUATION_ITEMS,
                 "principle": "Use validated self-development history as advisory memory; never as self-awarded capability evidence.",
             },
-            "principle": "Prefer completed validated outcomes over workflow activity; concrete open issues must not be starved by recurring background work or by repeated retries of another issue.",
+            "principle": "GitHub Issues are authoritative; prefer completed validated outcomes over workflow activity, and do not starve older open Issues.",
         }
         runtime = self.root / "runtime"
         (runtime / "autonomous_engineering.json").write_text(json.dumps(result, indent=2, sort_keys=True) + "\n")
