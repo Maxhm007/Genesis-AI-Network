@@ -264,7 +264,8 @@ jobs:
       - name: Independent full test suite A
         run: python -m pytest -q
       - name: Security review candidate A
-        run: python - <<'PY'
+        run: |
+          python - <<'PY'
           from pathlib import Path
           from genesis.security import SecurityModule
           report = SecurityModule(Path('.')).review_candidate('${{ needs.develop.outputs.candidate_sha }}^')
@@ -294,7 +295,8 @@ jobs:
       - name: Independent full test suite B
         run: python -m pytest -q
       - name: Security review candidate B
-        run: python - <<'PY'
+        run: |
+          python - <<'PY'
           from pathlib import Path
           from genesis.security import SecurityModule
           report = SecurityModule(Path('.')).review_candidate('${{ needs.develop.outputs.candidate_sha }}^')

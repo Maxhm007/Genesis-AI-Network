@@ -16,6 +16,7 @@ concurrency:
 
 jobs:
   apply:
+    if: github.event.workflow_run.conclusion == 'success'
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -24,13 +25,26 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - uses: actions/download-artifact@v4
-        with:
-          name: genesis-action-repair-status-${{ github.event.workflow_run.id }}
-          path: handoff
-          github-token: ${{ github.token }}
-          run-id: ${{ github.event.workflow_run.id }}
+      - name: Download exact recovery status from source run
+        env:
+          GH_TOKEN: ${{ github.token }}
+          SOURCE_RUN_ID: ${{ github.event.workflow_run.id }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          artifact_name="genesis-action-repair-status-${SOURCE_RUN_ID}"
+          artifact_id=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/runs/${SOURCE_RUN_ID}/artifacts" \
+            --jq ".artifacts[] | select(.name == \"${artifact_name}\") | .id" | head -n 1)
+          if [[ -z "$artifact_id" ]]; then
+            echo "No recovery-status artifact was published; leave the source issue open without creating a secondary failure."
+            echo 'skip_apply=true' >> "$GITHUB_ENV"
+            exit 0
+          fi
+          mkdir -p handoff
+          gh api "/repos/${GITHUB_REPOSITORY}/actions/artifacts/${artifact_id}/zip" > /tmp/genesis-action-repair-status.zip
+          unzip -q /tmp/genesis-action-repair-status.zip -d handoff
       - name: Keep issue open until fresh Action verification passes
+        if: env.skip_apply != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/action_failure_watchdog.py --repository "$GITHUB_REPOSITORY" --apply-recovery-status handoff/runtime/action_repair_recovery_status.json
