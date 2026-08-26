@@ -105,7 +105,7 @@ class GenesisAutomationModule:
                 "last_seen_at": now,
             })
             if action == "escalate_chatgpt" and not prior.get("escalated_at"):
-                prior["escalated_at"] = now
+                prior['escalated_at'] = now
             issue_state[key] = prior
             decisions.append(AutomationDecision(key, str(issue.get("title", key)), action, attempts, task_id, task_state, reason))
 
