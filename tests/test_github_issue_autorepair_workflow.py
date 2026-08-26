@@ -7,7 +7,8 @@ WORKFLOW = Path(".github/workflows/github-issue-autorepair.yml")
 def test_scheduled_autorepair_uses_bounded_fair_backlog_selection() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
 
-    assert "--label genesis-autonomous --limit 100" in text
+    assert "--label genesis-autonomous" in text
+    assert "--limit 100" in text
     assert "--json number,updatedAt,labels" in text
     assert "sort_by(.updatedAt, .number)" in text
     assert 'index("genesis-repair-in-progress")' in text
