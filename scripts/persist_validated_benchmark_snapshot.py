@@ -4,7 +4,7 @@ import argparse
 import json
 from pathlib import Path
 
-from genesis.benchmark_state import persist_validated_benchmark_snapshot
+import genesis
 
 
 def main() -> None:
