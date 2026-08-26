@@ -238,7 +238,11 @@ jobs:
           candidate='${{ needs.prepare.outputs.candidate_sha }}'
           main_sha=$(git rev-parse origin/main)
           test "$(git rev-parse origin/${{ needs.prepare.outputs.candidate_branch }})" = "$candidate"
-          git merge-base --is-ancestor "$main_sha" "$candidate"
+          if ! git merge-base --is-ancestor "$main_sha" "$candidate"; then
+            echo 'Main advanced after validation; retire only this stale staged branch and safely restage on the next run.'
+            git push origin --delete '${{ needs.prepare.outputs.candidate_branch }}' || true
+            exit 0
+          fi
           changed=$(git diff --name-only "$main_sha..$candidate")
           if printf '%s\n' "$changed" | grep -Eq '^(GENESIS_CONSTITUTION.md|GENESIS_BLOCK.json)$'; then
             echo 'Protected Genesis identity file changed' >&2
