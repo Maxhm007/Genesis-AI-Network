@@ -11,7 +11,10 @@ MAX_ALLOWED_NEW_TOKENS = 768
 MAX_PROVIDER_PROMPT_CHARS = 14_000
 ROLE_MAX_NEW_TOKENS = {
     "genesis_internal_code_reviewer": 128,
-    "bounded_coding_engineer": 256,
+    "bounded_coding_engineer": 128,
+}
+ROLE_MAX_COMPLETION_TOKENS = {
+    "bounded_coding_engineer": 160,
 }
 
 
@@ -25,11 +28,20 @@ def compact_prompt(prompt: str) -> str:
 
 
 def role_token_budget(prompt: str) -> int | None:
-    """Return a narrow output cap for roles that only need compact JSON decisions."""
+    """Return a narrow initial output cap for roles that only need compact JSON decisions."""
     for line in prompt.splitlines()[:8]:
         if line.startswith("ROLE:"):
             role = line.split(":", 1)[1].strip()
             return ROLE_MAX_NEW_TOKENS.get(role)
+    return None
+
+
+def role_completion_budget(prompt: str) -> int | None:
+    """Return the maximum total generation budget for latency-sensitive roles."""
+    for line in prompt.splitlines()[:8]:
+        if line.startswith("ROLE:"):
+            role = line.split(":", 1)[1].strip()
+            return ROLE_MAX_COMPLETION_TOKENS.get(role)
     return None
 
 
@@ -138,6 +150,8 @@ class LocalReasoningModel:
             "You do not define Genesis identity. Give concise, testable, evidence-aware answers. "
             "Do not claim certainty where evidence is missing."
         )
+        initial_role_budget = role_token_budget(prompt)
+        completion_role_budget = role_completion_budget(prompt)
         prompt = compact_prompt(prompt)
         messages = [
             {"role": "system", "content": system},
@@ -156,6 +170,11 @@ class LocalReasoningModel:
         input_ids = inputs.pop("input_ids")
         prompt_tokens = input_ids.shape[-1]
         budget = self.max_new_tokens if max_new_tokens is None else max(64, min(int(max_new_tokens), MAX_ALLOWED_NEW_TOKENS))
+        if initial_role_budget is not None:
+            budget = min(budget, initial_role_budget)
+        configured_completion_budget = self.max_new_tokens
+        if completion_role_budget is not None:
+            configured_completion_budget = min(configured_completion_budget, completion_role_budget)
         with self.torch.no_grad():
             output = self._generate(
                 input_ids,
@@ -169,7 +188,7 @@ class LocalReasoningModel:
                 decoded,
                 generated_tokens=int(generated.shape[-1]),
                 requested_budget=budget,
-                configured_budget=self.max_new_tokens,
+                configured_budget=configured_completion_budget,
             )
             eos_token_id = self.tokenizer.eos_token_id
             ended_with_eos = bool(generated.shape[-1]) and eos_token_id is not None and int(generated[-1]) == int(eos_token_id)
