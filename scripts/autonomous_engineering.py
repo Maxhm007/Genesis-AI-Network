@@ -183,10 +183,10 @@ def _existing_issue_tasks(queue: PersistentTaskQueue, issue_number: int, task_ty
 
 
 def _task_is_active(queue: PersistentTaskQueue, task) -> bool:
-    """Return whether an existing issue task still has a usable execution path."""
+    """Return whether an issue task still owns work, including retry backoff time."""
     if task.state not in ACTIVE_TASK_STATES:
         return False
-    if task.state == "failed" and not queue.retryable(task):
+    if task.state == "failed" and task.attempt_count >= task.max_attempts:
         return False
     return True
 
