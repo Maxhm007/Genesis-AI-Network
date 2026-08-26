@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from genesis.github_issue_task_router import (
+    AUTONOMOUS_REPAIR_LABEL,
     GENESIS_TASK_LABEL,
     issue_authority_enabled,
     route_unbacked_tasks,
@@ -69,7 +70,14 @@ def test_unbacked_task_creates_issue_and_binds_same_task(tmp_path: Path) -> None
     assert updated.payload["execution_lane"] == "github_issue"
     assert updated.payload["github_issue_authoritative"] is True
     assert len(queue.list(limit=20)) == 1
-    assert any(method == "POST" and path == "/issues" for method, path, _ in github.calls)
+    issue_creates = [
+        payload
+        for method, path, payload in github.calls
+        if method == "POST" and path == "/issues"
+    ]
+    assert len(issue_creates) == 1
+    assert issue_creates[0] is not None
+    assert issue_creates[0]["labels"] == [GENESIS_TASK_LABEL, AUTONOMOUS_REPAIR_LABEL]
 
 
 def test_specialist_execution_issue_is_reused_for_source_task(tmp_path: Path) -> None:
