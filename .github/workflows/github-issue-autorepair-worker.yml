@@ -14,7 +14,7 @@ env:
   PYTHONPATH: ${{ github.workspace }}
   GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_URL: http://127.0.0.1:8766
-  GENESIS_PROVIDER_NAME: qwen3-1.7b-github-issue-autorepair
+  GENESIS_PROVIDER_NAME: qwen2.5-coder-0.5b-github-issue-autorepair
   GENESIS_PROVIDER_TIMEOUT_SECONDS: '240'
   GENESIS_PROVIDER_MAX_NEW_TOKENS: '1024'
   HF_HOME: ~/.cache/huggingface
@@ -73,9 +73,9 @@ jobs:
           path: |
             ~/.cache/huggingface
             ~/.cache/pip
-          key: genesis-qwen3-1.7b-${{ runner.os }}-py312-v1
+          key: genesis-qwen2.5-coder-0.5b-${{ runner.os }}-py312-v1
           restore-keys: |
-            genesis-qwen3-1.7b-${{ runner.os }}-py312-
+            genesis-qwen2.5-coder-0.5b-${{ runner.os }}-py312-
       - name: Install free local repair intelligence
         if: steps.eligibility.outputs.eligible == 'true'
         run: |
@@ -87,7 +87,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen3-1.7B --host 127.0.0.1 --port 8766 --max-new-tokens 1024 > /tmp/genesis-github-issue-autorepair.log 2>&1 &
+          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen2.5-Coder-0.5B-Instruct --host 127.0.0.1 --port 8766 --max-new-tokens 1024 > /tmp/genesis-github-issue-autorepair.log 2>&1 &
           ready=false
           for i in {1..120}; do
             if python - <<'PY'

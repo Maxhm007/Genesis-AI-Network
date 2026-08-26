@@ -51,6 +51,18 @@ def test_solver_keeps_reservation_until_serialized_integration() -> None:
     assert "intentionally not released here" in text
 
 
+def test_solver_uses_cpu_fast_qwen_coder_specialist() -> None:
+    text = SOLVER.read_text(encoding="utf-8")
+
+    assert "GENESIS_PROVIDER_NAME: qwen2.5-coder-0.5b-github-issue-autorepair" in text
+    assert "Qwen/Qwen2.5-Coder-0.5B-Instruct" in text
+    assert "genesis-qwen2.5-coder-0.5b-${{ runner.os }}-py312-v1" in text
+    assert "GENESIS_PROVIDER_TIMEOUT_SECONDS: '240'" in text
+    assert "Qwen/Qwen3-1.7B" not in text
+    assert "qwen3-1.7b-github-issue-autorepair" not in text
+    assert "genesis-qwen3-1.7b-${{ runner.os }}" not in text
+
+
 def test_integration_rebases_onto_latest_main_before_all_validation() -> None:
     text = INTEGRATION.read_text(encoding="utf-8")
 
