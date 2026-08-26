@@ -55,7 +55,7 @@ class ModuleManager:
     """Plan structural evolution without bypassing Genesis validation.
 
     The manager may propose adding, modifying, splitting, merging, replacing,
-    retiring, or reactivating modules. Proposals are candidate state only.
+        # Add comprehensive error handling mechanisms and ensure that all operations are performed safely and reliably.
     Activation remains a separate validated promotion action.
     """
 
