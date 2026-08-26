@@ -3,6 +3,7 @@ from scripts.action_failure_watchdog import (
     decode_metadata,
     encode_metadata,
     failure_fingerprint,
+    failure_root_fingerprint,
     replace_metadata,
     sanitize_log_excerpt,
     select_actionable_run,
@@ -47,6 +48,44 @@ def test_failure_fingerprint_is_stable_for_same_workflow_step():
     first = {"workflow_id": 8, "workflow_path": ".github/workflows/a.yml", "failed_job": "build", "failed_step": "test"}
     second = {**first, "run_id": 999, "head_sha": "a" * 40}
     assert failure_fingerprint(first) == failure_fingerprint(second)
+
+
+def test_failure_root_groups_validator_a_and_b_security_reviews():
+    first = {
+        "workflow_id": 8,
+        "workflow_path": ".github/workflows/a.yml",
+        "failed_job": "execute / validator_a",
+        "failed_step": "Security review A",
+    }
+    second = {
+        "workflow_id": 8,
+        "workflow_path": ".github/workflows/a.yml",
+        "failed_job": "execute / validator_b",
+        "failed_step": "Security review B",
+    }
+    assert failure_root_fingerprint(first) == failure_root_fingerprint(second)
+
+
+def test_failure_root_groups_candidate_a_and_b_security_reviews():
+    first = {
+        "workflow_id": 9,
+        "workflow_path": ".github/workflows/proactive-development.yml",
+        "failed_job": "validator_a",
+        "failed_step": "Security review candidate A",
+    }
+    second = {
+        "workflow_id": 9,
+        "workflow_path": ".github/workflows/proactive-development.yml",
+        "failed_job": "validator_b",
+        "failed_step": "Security review candidate B",
+    }
+    assert failure_root_fingerprint(first) == failure_root_fingerprint(second)
+
+
+def test_failure_root_does_not_merge_different_workflows():
+    first = {"workflow_id": 8, "workflow_path": ".github/workflows/a.yml", "failed_job": "validator_a", "failed_step": "Security review A"}
+    second = {"workflow_id": 9, "workflow_path": ".github/workflows/b.yml", "failed_job": "validator_b", "failed_step": "Security review B"}
+    assert failure_root_fingerprint(first) != failure_root_fingerprint(second)
 
 
 def test_sanitize_log_excerpt_redacts_token_like_values():
