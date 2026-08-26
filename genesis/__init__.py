@@ -118,3 +118,11 @@ from .review_materiality import install_review_materiality_gate as _install_revi
 
 _install_review_materiality_gate()
 del _install_review_materiality_gate
+
+# Add DeepSeek behind the existing provider abstraction only when an operator
+# supplies DEEPSEEK_API_KEY. Qwen and every current provider keep their existing
+# routing/policy behavior when DeepSeek is not configured.
+from .deepseek_integration import install_deepseek_provider as _install_deepseek_provider
+
+_install_deepseek_provider()
+del _install_deepseek_provider
