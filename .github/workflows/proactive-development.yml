@@ -187,6 +187,8 @@ jobs:
       - name: Proactively scout and recommend replacement intelligence models
         run: python scripts/model_scout_worker.py
       - name: Route next persistent TODO task to its owning module
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/task_router.py
       - name: Dispatch AI Team only when routed task needs cross-module specialists
         run: python scripts/ai_team_dispatch.py
