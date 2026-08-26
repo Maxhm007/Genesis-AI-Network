@@ -1,0 +1,6 @@
+Persistent Genesis runtime activation trigger.
+
+Issue: #437
+Purpose: trigger the existing Deploy Gene Persistent Runtime workflow after the owner configured GENE_RUNTIME_ENABLED=true and added GENE_RUNTIME_GITHUB_TOKEN.
+
+This file contains no credential or runtime logic.
