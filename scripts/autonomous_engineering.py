@@ -14,6 +14,8 @@ DEVLAB_MARKER = "<!-- genesis-devlab-task -->"
 OPS_MARKER = "<!-- genesis-ops:"
 TARGET_RE = re.compile(r"^DevLab-Target:\s*(.+?)\s*$", re.I | re.M)
 MODULE_RE = re.compile(r"^DevLab-Module:\s*(genesis\.[\w.]+)\s*$", re.I | re.M)
+PROBLEM_FINGERPRINT_RE = re.compile(r"^Genesis-Problem-Fingerprint:\s*([A-Za-z0-9._:/-]+)\s*$", re.I | re.M)
+PROBLEM_TOKEN_RE = re.compile(r"[a-z0-9][a-z0-9._-]{2,}")
 
 PERSISTENT_MARKERS = (
     "<!-- genesis-hourly-report:",
@@ -37,9 +39,17 @@ EXTERNAL_BLOCKER_PHRASES = (
     "generated inside that peer's own trust domain",
     "remaining work is **not ordinary coding**",
 )
+PROBLEM_STOPWORDS = {
+    "and", "the", "for", "from", "with", "into", "that", "this", "then", "than", "when", "while",
+    "genesis", "issue", "open", "github", "complete", "resolution", "advance", "develop", "development",
+    "build", "make", "ensure", "support", "using", "use", "work", "working", "problem", "task", "tasks",
+    "new", "existing", "system", "module", "modules", "feature", "features", "process", "processing",
+}
 MAX_GENERIC_GENERATIONS = 8
 MAX_DEVLAB_GENERATIONS = 8
 ACTIVE_TASK_STATES = {"new", "assigned", "running", "paused", "blocked", "review", "failed"}
+MIN_PROBLEM_TERMS = 3
+MIN_PROBLEM_COVERAGE = 0.75
 
 
 def _github_open_issues() -> list[dict]:
@@ -181,6 +191,99 @@ def _task_is_active(queue: PersistentTaskQueue, task) -> bool:
     return True
 
 
+def _task_represents_open_problem(task) -> bool:
+    """Return whether a non-GitHub task remains the authoritative work item for a problem."""
+    if task.state not in ACTIVE_TASK_STATES:
+        return False
+    if task.state == "failed" and task.attempt_count >= task.max_attempts:
+        return False
+    task_type = str(task.payload.get("task_type") or "")
+    source = str(task.payload.get("source") or "")
+    if task_type in {"github_issue_development", "devlab_issue"}:
+        return False
+    if source in {"github_open_issue_backlog", "owner_marked_github_issue"}:
+        return False
+    return True
+
+
+def _problem_terms(text: str) -> set[str]:
+    """Extract conservative, deterministic terms used only to suppress duplicate intake."""
+    terms = set()
+    for token in PROBLEM_TOKEN_RE.findall(str(text or "").lower()):
+        normalized = token.strip("._-")
+        if len(normalized) < 3 or normalized in PROBLEM_STOPWORDS or normalized.isdigit():
+            continue
+        terms.add(normalized)
+    return terms
+
+
+def _task_problem_text(task) -> str:
+    payload = task.payload
+    pieces = [task.objective]
+    for key in ("problem_title", "issue_title", "issue_key", "dedupe_key"):
+        value = payload.get(key)
+        if value:
+            pieces.append(str(value))
+    finding = payload.get("finding")
+    if isinstance(finding, dict):
+        pieces.extend(str(finding.get(key) or "") for key in ("title", "finding_id", "evidence"))
+    return "\n".join(piece for piece in pieces if piece)
+
+
+def _explicit_problem_fingerprint(issue: dict) -> str:
+    match = PROBLEM_FINGERPRINT_RE.search(str(issue.get("body") or ""))
+    return match.group(1).strip().lower() if match else ""
+
+
+def _task_fingerprints(task) -> set[str]:
+    values = set()
+    for key in ("problem_fingerprint", "issue_key", "dedupe_key"):
+        value = str(task.payload.get(key) or "").strip().lower()
+        if value:
+            values.add(value)
+    return values
+
+
+def _module_compatible(issue_module: str, task_module: str | None) -> bool:
+    task_module = str(task_module or "")
+    if issue_module == task_module:
+        return True
+    return "genesis.self_development" in {issue_module, task_module}
+
+
+def _find_existing_problem_task(queue: PersistentTaskQueue, issue: dict, classification: dict):
+    """Find an active Genesis-owned task already representing this GitHub problem.
+
+    Explicit fingerprints win. Without one, matching is intentionally conservative:
+    the routed owner must be compatible and at least 75% of a sufficiently-specific
+    GitHub title must already appear in the task's durable problem context.
+    """
+    issue_module = str(classification.get("module_id") or "genesis.self_development")
+    explicit = _explicit_problem_fingerprint(issue)
+    issue_terms = _problem_terms(str(issue.get("title") or ""))
+    candidates: list[tuple[float, object]] = []
+
+    for task in queue.list(limit=5000):
+        if not _task_represents_open_problem(task):
+            continue
+        if explicit and explicit in _task_fingerprints(task):
+            return task
+        if len(issue_terms) < MIN_PROBLEM_TERMS or not _module_compatible(issue_module, task.module_id):
+            continue
+        task_terms = _problem_terms(_task_problem_text(task))
+        overlap = issue_terms & task_terms
+        if len(overlap) < MIN_PROBLEM_TERMS:
+            continue
+        coverage = len(overlap) / len(issue_terms)
+        if coverage >= MIN_PROBLEM_COVERAGE:
+            candidates.append((coverage, task))
+
+    if not candidates:
+        return None
+    candidates.sort(key=lambda item: (-item[0], item[1].created_at, item[1].task_id))
+    return candidates[0][1]
+
+
 def _next_generation(queue: PersistentTaskQueue, issue_number: int, task_type: str) -> tuple[object | None, int]:
     existing = _existing_issue_tasks(queue, issue_number, task_type)
     if not existing:
@@ -250,6 +353,10 @@ def _queue_generic_issue(queue: PersistentTaskQueue, issue: dict, classification
     if generation > MAX_GENERIC_GENERATIONS:
         return None, "generation_budget_exhausted"
 
+    existing_problem = _find_existing_problem_task(queue, issue, classification)
+    if existing_problem is not None:
+        return existing_problem.task_id, "linked_existing_problem"
+
     title = str(issue.get("title") or "").strip()
     body = str(issue.get("body") or "")
     module_id = str(classification.get("module_id") or "genesis.self_development")
@@ -284,10 +391,11 @@ def _queue_generic_issue(queue: PersistentTaskQueue, issue: dict, classification
 
 
 def ingest_open_issue_backlog(root: Path) -> dict:
-    """Ensure every actionable open issue has a bounded owning Genesis lane."""
+    """Ensure every actionable open issue has one bounded owning Genesis lane."""
     queue = PersistentTaskQueue(root / "runtime" / "genesis_tasks.sqlite3")
     rows: list[dict] = []
     created: list[str] = []
+    linked: list[str] = []
     for issue in _github_open_issues():
         classification = classify_open_issue(issue)
         number = int(issue.get("number") or 0)
@@ -305,19 +413,25 @@ def ingest_open_issue_backlog(root: Path) -> dict:
             status = "ignored"
         row["task_id"] = task_id
         row["status"] = status
+        row["deduplicated"] = status == "linked_existing_problem"
         if status == "created" and task_id:
             created.append(task_id)
+        elif status == "linked_existing_problem" and task_id:
+            linked.append(task_id)
         rows.append(row)
     return {
         "status": "ok",
         "open_issue_count": len(rows),
         "created_tasks": created,
         "created_count": len(created),
+        "linked_existing_tasks": linked,
+        "linked_existing_count": len(linked),
         "issues": rows,
         "policy": (
-            "Every open issue must have an owning lane: specialist repair, persistent engineering, "
-            "tracked external blocker, or intentional persistent channel. Exhausted engineering tasks "
-            "receive a bounded new generation while the originating issue remains open."
+            "The Genesis task queue is the source of truth. Every open GitHub issue must map to exactly one owning lane: "
+            "an already-active Genesis problem, specialist repair, persistent engineering, tracked external blocker, or intentional "
+            "persistent channel. GitHub intake links to matching internal work instead of creating a second task. Exhausted engineering "
+            "tasks receive a bounded new generation only when no active authoritative problem already owns the same work."
         ),
     }
 
