@@ -2,32 +2,48 @@ from pathlib import Path
 
 
 ROOT = Path(__file__).resolve().parents[1]
+WORKFLOWS = ROOT / ".github" / "workflows"
 
 
-def test_systemd_service_runs_issue_authoritative_gene_and_restarts():
-    text = (ROOT / "deploy" / "systemd" / "gene-continuous@.service").read_text(encoding="utf-8")
-    assert "-m scripts.gene_issue_continuous --gene %i" in text
-    assert "EnvironmentFile=-/etc/genesis/github.env" in text
-    assert "GITHUB_REPOSITORY=Maxhm007/Genesis-AI-Network" in text
-    assert "Restart=always" in text
-    assert "WantedBy=multi-user.target" in text
+def test_external_persistent_deploy_workflow_is_retired():
+    assert not (WORKFLOWS / "deploy-persistent-runtime.yml").exists()
 
 
-def test_installer_requires_issue_credential_and_restarts_gene_service():
-    text = (ROOT / "deploy" / "install_persistent_runtime.sh").read_text(encoding="utf-8")
-    assert "GITHUB_TOKEN" in text
-    assert "/etc/genesis/github.env" in text
-    assert "systemctl enable" in text
-    assert "systemctl restart" in text
-    assert "cron" not in text.lower()
-    assert "gene-node-1" in text
+def test_no_active_workflow_requires_external_runtime_host_or_ssh_secrets():
+    text = "\n".join(
+        path.read_text(encoding="utf-8")
+        for path in sorted(WORKFLOWS.glob("*.yml"))
+    )
+    for forbidden in (
+        "GENE_RUNTIME_HOST",
+        "GENE_RUNTIME_USER",
+        "GENE_RUNTIME_SSH_KEY",
+        "GENE_RUNTIME_HOST_KEY",
+    ):
+        assert forbidden not in text
 
 
-def test_deploy_workflow_requires_runtime_issue_token_and_pinned_host_key():
-    text = (ROOT / ".github" / "workflows" / "deploy-persistent-runtime.yml").read_text(encoding="utf-8")
-    assert "GENE_RUNTIME_ENABLED" in text
-    assert "GENE_RUNTIME_HOST_KEY" in text
-    assert "GENE_RUNTIME_GITHUB_TOKEN" in text
-    assert "Provision GitHub Issue authority credential" in text
-    assert "ssh-keyscan" not in text
-    assert "systemctl is-active" in text
+def test_gene_pulse_is_issue_authoritative_and_persists_actions_state():
+    text = (WORKFLOWS / "gene-pulse.yml").read_text(encoding="utf-8")
+    assert "issues: write" in text
+    assert "GITHUB_TOKEN: ${{ github.token }}" in text
+    assert "actions/cache/restore@v4" in text
+    assert "actions/cache/save@v4" in text
+    assert "runtime/genesis_tasks.sqlite3" in text
+    assert "gh workflow run gene-pulse.yml" in text
+
+
+def test_coding_pulse_keeps_issue_authority_when_provider_is_needed():
+    text = (WORKFLOWS / "coding-intelligence-pulse.yml").read_text(encoding="utf-8")
+    assert "issues: write" in text
+    assert "GITHUB_TOKEN: ${{ github.token }}" in text
+    assert "python scripts/gene_pulse.py" in text
+    assert "python scripts/benchmark_task_worker.py" in text
+
+
+def test_actions_heartbeat_recovers_continuous_runtime_every_fifteen_minutes():
+    text = (WORKFLOWS / "autonomy-heartbeat.yml").read_text(encoding="utf-8")
+    assert 'cron: "*/15 * * * *"' in text
+    assert "gh workflow run gene-pulse.yml" in text
+    assert "cancel-in-progress: false" in text
+    assert "GitHub Actions is the production continuous runtime" in text
