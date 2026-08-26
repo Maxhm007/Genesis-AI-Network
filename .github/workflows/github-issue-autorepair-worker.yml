@@ -12,7 +12,6 @@ permissions: {}
 
 env:
   PYTHONPATH: ${{ github.workspace }}
-  DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
   GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_NAME: qwen3-1.7b-github-issue-autorepair
