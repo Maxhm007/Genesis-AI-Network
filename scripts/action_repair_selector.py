@@ -3,6 +3,12 @@ from __future__ import annotations
 import argparse
 import json
 import subprocess
+import sys
+from pathlib import Path
+
+ROOT = Path(__file__).resolve().parents[1]
+if str(ROOT) not in sys.path:
+    sys.path.insert(0, str(ROOT))
 
 from scripts.action_failure_watchdog import decode_metadata
 
@@ -18,12 +24,39 @@ PROTECTED_ACTION_CONTROL_PATHS = {
     ".github/workflows/action-repair-status.yml",
 }
 MAX_REPAIR_CYCLES = 3
+FAILURE_CLASS_PRIORITY = {
+    "syntax": 0,
+    "dependency": 1,
+    "artifact": 2,
+    "test": 3,
+    "code": 4,
+    "infrastructure": 5,
+    "unknown": 6,
+}
+
+
+def classify_failure(body: str) -> str:
+    text = str(body or "").lower()
+    if any(token in text for token in ("syntax error", "here-document", "yaml parse", "mapping values are not allowed")):
+        return "syntax"
+    if any(token in text for token in ("modulenotfounderror", "no module named", "could not find a version that satisfies", "distribution not found")):
+        return "dependency"
+    if "filenotfounderror" in text or ("artifact" in text and any(token in text for token in ("not found", "missing", "could not find"))):
+        return "artifact"
+    if any(token in text for token in ("assertionerror", "failed tests", "pytest", "test session")):
+        return "test"
+    if any(token in text for token in ("name or service not known", "connection reset", "service unavailable", "timed out", "timeout")):
+        return "infrastructure"
+    if any(token in text for token in ("traceback", "exception", "error:")):
+        return "code"
+    return "unknown"
 
 
 def choose_repairable_issue(issues: list[dict]) -> int | None:
-    candidates: list[tuple[int, int]] = []
+    candidates: list[tuple[int, int, int]] = []
     for issue in issues:
-        metadata = decode_metadata(str(issue.get("body") or ""))
+        body = str(issue.get("body") or "")
+        metadata = decode_metadata(body)
         if not metadata:
             continue
         workflow_path = str(metadata.get("workflow_path") or "").replace("\\", "/")
@@ -33,11 +66,13 @@ def choose_repairable_issue(issues: list[dict]) -> int | None:
             continue
         if workflow_path in PROTECTED_ACTION_CONTROL_PATHS:
             continue
-        candidates.append((cycles, number))
+        failure_class = classify_failure(body)
+        priority = FAILURE_CLASS_PRIORITY[failure_class]
+        candidates.append((priority, cycles, number))
     if not candidates:
         return None
-    candidates.sort(key=lambda item: (item[0], item[1]))
-    return candidates[0][1]
+    candidates.sort()
+    return candidates[0][2]
 
 
 def list_authorized_issues(repository: str) -> list[dict]:
