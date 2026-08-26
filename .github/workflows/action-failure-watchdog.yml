@@ -53,11 +53,12 @@ jobs:
           ensure_label genesis-action-solved 8250df 'Action repair verified on a fresh run'
           ensure_label genesis-action-blocked b60205 'Action repair safely blocked or exhausted'
           ensure_label genesis-action-transient d4c5f9 'Action passed on one transient retry'
+          ensure_label genesis-action-duplicate cfd3d7 'Duplicate validator or matrix failure grouped into a canonical Action issue'
       - name: Close stale failures proven fixed on newer main
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/action_failure_fresh_reconcile.py --repository "$GITHUB_REPOSITORY"
-      - name: Reconcile failures and open one new issue
+      - name: Reconcile group failures and open one new root issue
         env:
           GH_TOKEN: ${{ github.token }}
         run: python scripts/action_failure_watchdog.py --repository "$GITHUB_REPOSITORY"
