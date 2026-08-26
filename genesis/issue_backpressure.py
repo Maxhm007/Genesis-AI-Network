@@ -13,6 +13,7 @@ _CAPACITY_LIMITED_TASK_TYPES = frozenset(
     {
         "new_capability",
         "capability_growth",
+        "self_improvement",
         "self_upgrade",
         "model_evaluation",
         "frontier_benchmark_measurement",
