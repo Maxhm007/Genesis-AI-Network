@@ -156,14 +156,37 @@ jobs:
       issues: write
       pull-requests: write
 
-  refill:
+  cleanup_claims:
     needs: [plan, workers]
+    if: always() && needs.plan.outputs.has_work == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    steps:
+      - name: Release any batch claims left behind by failed workers
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBERS: ${{ needs.plan.outputs.issue_numbers }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          while IFS= read -r n; do
+            [[ -n "$n" ]] || continue
+            gh issue edit "$n" \
+              --repo "$GITHUB_REPOSITORY" \
+              --remove-label genesis-repair-in-progress || true
+          done < <(jq -r '.[]' <<<"$ISSUE_NUMBERS")
+
+  refill:
+    needs: [plan, workers, cleanup_claims]
     if: >-
       always() &&
       needs.plan.outputs.has_work == 'true' &&
       needs.plan.outputs.allow_refill == 'true' &&
       needs.plan.outputs.refill_round == '0' &&
-      needs.workers.result != 'cancelled'
+      needs.workers.result != 'cancelled' &&
+      needs.cleanup_claims.result != 'cancelled'
     runs-on: ubuntu-latest
     permissions:
       actions: write
