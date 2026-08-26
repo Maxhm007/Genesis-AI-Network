@@ -33,6 +33,7 @@ on:
 permissions:
   contents: write
   actions: write
+  issues: write
 
 concurrency:
   group: gene-pulse-${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
@@ -90,10 +91,14 @@ jobs:
 
       - name: Execute one bounded queue transition
         if: steps.provider_gate.outputs.needs_local_provider != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/gene_pulse.py --gene "$GENE_ID" --output runtime/pulse_result.json
 
       - name: Advance one bounded frontier benchmark task
         if: steps.provider_gate.outputs.needs_local_provider != 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/benchmark_task_worker.py
 
       - name: Record delegated provider pulse
