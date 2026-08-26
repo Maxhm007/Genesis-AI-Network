@@ -4,7 +4,7 @@ from dataclasses import asdict, dataclass
 import json
 from pathlib import Path
 
-from .github_issue_task_router import issue_backed, route_unbacked_tasks
+from .github_issue_task_router import issue_authority_enabled, issue_backed, route_unbacked_tasks
 from .job_failure import JobFailureIntelligence
 from .modules.task_queue import GenesisTask, PersistentTaskQueue
 from .problem_solver import AutonomousProblemSolver
@@ -51,10 +51,12 @@ class RouteDecision:
 class TaskRouterModule:
     """Maintain up to three durable Genesis work slots without cancelling active work.
 
-    GitHub Issues are the authoritative task source. SQLite keeps execution state,
-    but an unbacked row is never eligible for dispatch. Every assignment cycle first
-    attempts to bind unbacked autonomous work to an Issue; GitHub failure therefore
-    fails closed instead of silently restoring the legacy local-queue authority.
+    GitHub Issues are the authoritative production task source. SQLite keeps
+    execution state, but an unbacked production row is never eligible for dispatch.
+    Every assignment cycle first attempts to bind unbacked autonomous work to an
+    Issue; GitHub failure therefore fails closed instead of silently restoring the
+    legacy local-queue authority. Temporary unit-test roots keep legacy in-memory
+    behavior so CI never mutates the real repository by accident.
     """
 
     def __init__(self, root: Path) -> None:
@@ -114,21 +116,23 @@ class TaskRouterModule:
             "active": len(active),
             "active_limit": ACTIVE_TASK_LIMIT,
             "active_task_ids": [task.task_id for task in active],
+            "github_issue_authority_enforced": issue_authority_enabled(self.root),
             "github_issue_unbacked_task_ids": unbacked,
             "tasks": [asdict(task) for task in tasks],
             "rule": (
-                "GitHub Issues are authoritative. Every autonomous task must be Issue-backed before dispatch. "
-                "SQLite is execution/cache state only. Keep at most three persistent active tasks. Running work is "
-                "never auto-cancelled. Paused/held work remains durable and resumable. Cancellation requires an "
-                "explicit recorded reason. Failed jobs are diagnosed before retry; repeated non-transient failures "
-                "must change strategy; external-authority blockers pause for minimal owner action; exhausted jobs "
-                "are quarantined."
+                "GitHub Issues are authoritative in the real Genesis runtime. Every autonomous task must be "
+                "Issue-backed before dispatch. SQLite is execution/cache state only. Keep at most three persistent "
+                "active tasks. Running work is never auto-cancelled. Paused/held work remains durable and resumable. "
+                "Cancellation requires an explicit recorded reason. Failed jobs are diagnosed before retry; repeated "
+                "non-transient failures must change strategy; external-authority blockers pause for minimal owner "
+                "action; exhausted jobs are quarantined."
             ),
         }
         self.todo_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return payload
 
     def assign_next(self) -> dict:
+        authority = issue_authority_enabled(self.root)
         issue_sync = route_unbacked_tasks(self.root)
         self.write_todo()
         active = self.active()
@@ -139,6 +143,7 @@ class TaskRouterModule:
                 "active": len(active),
                 "active_limit": ACTIVE_TASK_LIMIT,
                 "active_task_ids": [task.task_id for task in active],
+                "github_issue_authority_enforced": authority,
                 "github_issue_sync": issue_sync,
             }
             self.last_route_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -147,16 +152,18 @@ class TaskRouterModule:
         pending = self.pending()
         candidates = [
             task for task in pending
-            if issue_backed(task) and (task.state == "new" or self.queue.retryable(task))
+            if (not authority or issue_backed(task))
+            and (task.state == "new" or self.queue.retryable(task))
         ]
         if not candidates:
-            unbacked = [task.task_id for task in pending if not issue_backed(task)]
+            unbacked = [task.task_id for task in pending if authority and not issue_backed(task)]
             result = {
                 "status": "waiting_for_github_issue" if unbacked else "idle",
                 "decision": None,
                 "active": len(active),
                 "active_limit": ACTIVE_TASK_LIMIT,
                 "unbacked_task_ids": unbacked,
+                "github_issue_authority_enforced": authority,
                 "github_issue_sync": issue_sync,
             }
             self.last_route_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -184,6 +191,7 @@ class TaskRouterModule:
                     "active_limit": ACTIVE_TASK_LIMIT,
                     "problem_solver": problem_step,
                     "recovery_plan": recovery.as_dict() if recovery else None,
+                    "github_issue_authority_enforced": authority,
                     "github_issue_sync": issue_sync,
                 }
                 self.last_route_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -200,7 +208,7 @@ class TaskRouterModule:
                 ),
             )
 
-        if not issue_backed(task):
+        if authority and not issue_backed(task):
             raise RuntimeError("GitHub Issue is required before task assignment")
 
         assigned = self.queue.transition(task.task_id, "assigned", module_id=decision.module_id)
@@ -213,6 +221,7 @@ class TaskRouterModule:
             "ai_team_module": "genesis.ai_team" if decision.use_ai_team else None,
             "recovery_plan": recovery.as_dict() if recovery else None,
             "problem_solver": problem_step,
+            "github_issue_authority_enforced": authority,
             "github_issue_sync": issue_sync,
         }
         self.last_route_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
