@@ -161,7 +161,7 @@ def test_concrete_github_backlog_work_outranks_background_engineering(tmp_path: 
     assert selected is not None
     assert selected.task_id == issue_task.task_id
     assert selected.task_id != background.task_id
-    assert loop._selection_trace[-1]["reason"] == "github_issue_backlog_priority"
+    assert loop._selection_trace[-1]["reason"] == "github_issue_fair_rotation"
 
 
 def test_proactive_workflow_uses_stronger_bounded_issue_coding_runtime():
