@@ -96,6 +96,18 @@ def test_integration_preserves_independent_validation_security_and_exact_sha_pro
     assert 'git push origin "$CANDIDATE_SHA:refs/heads/main"' in text
 
 
+def test_integration_tolerates_only_repository_policy_pr_creation_denial() -> None:
+    text = INTEGRATION.read_text(encoding="utf-8")
+
+    assert "Open or update exact candidate PR when repository policy permits" in text
+    assert "GitHub Actions is not permitted to create or approve pull requests" in text
+    assert "continuing with the same independently validated exact-SHA promotion path" in text
+    assert 'cat "$RUNNER_TEMP/pr-create.err" >&2' in text
+    assert "exit 1" in text
+    assert "needs: [prepare, open_pr, validator_a, validator_b, secret_guard]" in text
+    assert "PR_NUMBER: ${{ needs.open_pr.outputs.pr_number }}" in text
+
+
 def test_claim_is_released_only_after_integration_pipeline_finishes() -> None:
     text = INTEGRATION.read_text(encoding="utf-8")
 
