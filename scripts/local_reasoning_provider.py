@@ -11,11 +11,13 @@ MAX_ALLOWED_NEW_TOKENS = 768
 MAX_PROVIDER_PROMPT_CHARS = 14_000
 ROLE_MAX_NEW_TOKENS = {
     "genesis_internal_code_reviewer": 128,
-    "bounded_coding_engineer": 80,
+    "bounded_coding_engineer": 128,
 }
 ROLE_MAX_COMPLETION_TOKENS = {
-    "bounded_coding_engineer": 112,
+    "bounded_coding_engineer": 192,
 }
+MULTILINE_EDIT_PREFIX = "EDIT_BLOCK|"
+MULTILINE_EDIT_END_MARKER = "END_EDIT"
 SINGLE_LINE_EDIT_PREFIX = "EDIT|"
 COMPACT_EDIT_END_MARKER = "END_NEW"
 
@@ -47,7 +49,7 @@ def _single_edit_from_example(text: str) -> tuple[dict, int, int] | None:
 
 
 def _single_line_edit_example(text: str) -> str:
-    """Replace one JSON edit example with a quote-free single-line protocol."""
+    """Replace one JSON edit example with the legacy quote-free single-line protocol."""
     found = _single_edit_from_example(text)
     if found is None:
         return text
@@ -73,27 +75,61 @@ def _single_line_edit_example(text: str) -> str:
     return prefix + " " + example + tail
 
 
-def simplify_bounded_coding_prompt(prompt: str) -> str:
-    """Use a one-line edit protocol so small coding models terminate quickly.
+def _multiline_edit_example(text: str) -> str:
+    """Replace one JSON edit example with a bounded multiline edit envelope."""
+    found = _single_edit_from_example(text)
+    if found is None:
+        return text
+    edit, start, end = found
+    path = edit.get("path")
+    start_line = edit.get("start_line")
+    end_line = edit.get("end_line")
+    new = edit.get("new")
+    if (
+        not isinstance(path, str)
+        or not isinstance(start_line, int)
+        or isinstance(start_line, bool)
+        or not isinstance(end_line, int)
+        or isinstance(end_line, bool)
+        or not isinstance(new, str)
+    ):
+        return text
+    block = (
+        f"{MULTILINE_EDIT_PREFIX}{path}|{start_line}|{end_line}\n"
+        f"{new}\n"
+        f"{MULTILINE_EDIT_END_MARKER}"
+    )
+    prefix = text[:start].rstrip()
+    tail = text[end:].lstrip()
+    if tail:
+        return prefix + " " + block + "\n" + tail
+    return prefix + " " + block
 
-    CodingModule still receives JSON after this provider strictly translates a complete
-    one-line edit. Quotes and braces in replacement code need no JSON escaping. Legacy
-    JSON and the older multiline compact protocol remain accepted for compatibility.
+
+def simplify_bounded_coding_prompt(prompt: str) -> str:
+    """Use an explicitly terminated multiline edit protocol for bounded coding.
+
+    The earlier one-line protocol stopped at the first newline, which made a natural
+    multiline Python replacement look complete while parentheses or suites were still
+    open. The preferred EDIT_BLOCK envelope can carry several lines and terminates only
+    at END_EDIT. CodingModule still receives JSON after strict translation. The older
+    one-line EDIT format, PATH/START/END/NEW format, and legacy JSON remain accepted for
+    compatibility, but are no longer the preferred generation contract.
     """
     if _prompt_role(prompt) != "bounded_coding_engineer":
         return prompt
     rows: list[str] = []
     for line in prompt.splitlines():
         if line.startswith("OUTPUT: JSON only in this shape:"):
-            line = _single_line_edit_example(line).replace(
+            line = _multiline_edit_example(line).replace(
                 "OUTPUT: JSON only in this shape:",
-                "OUTPUT: Return ONLY one EDIT line and then a newline; do not use JSON:",
+                "OUTPUT: Return ONLY one bounded EDIT_BLOCK; END_EDIT must be on its own final line; do not use JSON:",
                 1,
             )
         elif "Return ONLY the same JSON shape as:" in line:
-            line = _single_line_edit_example(line).replace(
+            line = _multiline_edit_example(line).replace(
                 "Return ONLY the same JSON shape as:",
-                "Return ONLY one EDIT line and then a newline; do not use JSON:",
+                "Return ONLY one bounded EDIT_BLOCK; END_EDIT must be on its own final line; do not use JSON:",
                 1,
             )
         rows.append(line)
@@ -155,8 +191,48 @@ def balanced_json_object_complete(text: str) -> bool:
     return False
 
 
+def parse_multiline_edit(text: str) -> dict:
+    """Parse one explicitly terminated EDIT_BLOCK without inventing missing fields."""
+    rows = text.strip().splitlines()
+    if len(rows) < 2 or not rows[0].startswith(MULTILINE_EDIT_PREFIX):
+        raise ValueError("multiline edit must start with EDIT_BLOCK|")
+    if rows[-1] != MULTILINE_EDIT_END_MARKER:
+        raise ValueError("multiline edit is missing END_EDIT")
+    if MULTILINE_EDIT_END_MARKER in rows[1:-1]:
+        raise ValueError("multiline edit contains an ambiguous END_EDIT marker")
+    parts = rows[0].split("|", 3)
+    if len(parts) != 4:
+        raise ValueError("multiline edit header is incomplete")
+    _, path, start_text, end_text = parts
+    path = path.strip()
+    start_text = start_text.strip()
+    end_text = end_text.strip()
+    if not path or not start_text.isdecimal() or not end_text.isdecimal():
+        raise ValueError("multiline edit path/range is invalid")
+    start_line = int(start_text)
+    end_line = int(end_text)
+    if start_line < 1 or end_line < start_line:
+        raise ValueError("multiline edit range is invalid")
+    new = "\n".join(rows[1:-1])
+    return {
+        "path": path,
+        "start_line": start_line,
+        "end_line": end_line,
+        "new": new,
+    }
+
+
+def multiline_edit_block_complete(text: str) -> bool:
+    """Return True only after one strict EDIT_BLOCK reaches its explicit terminator."""
+    try:
+        parse_multiline_edit(text)
+    except ValueError:
+        return False
+    return True
+
+
 def parse_single_line_edit(text: str) -> dict:
-    """Parse one EDIT line without guessing any missing field."""
+    """Parse one legacy EDIT line without guessing any missing field."""
     rows = text.lstrip().splitlines()
     line = rows[0] if rows else ""
     if not line.startswith(SINGLE_LINE_EDIT_PREFIX):
@@ -183,7 +259,7 @@ def parse_single_line_edit(text: str) -> dict:
 
 
 def single_line_edit_complete(text: str) -> bool:
-    """Return True after one syntactically complete EDIT line is newline-terminated."""
+    """Return True after one syntactically complete legacy EDIT line is newline-terminated."""
     stripped = text.lstrip()
     if not stripped.startswith(SINGLE_LINE_EDIT_PREFIX) or "\n" not in stripped:
         return False
@@ -228,7 +304,7 @@ def parse_compact_edit(text: str) -> dict:
 
 
 def compact_edit_block_complete(text: str) -> bool:
-    """Return True only when one strict multiline compact edit block is complete."""
+    """Return True only when one strict older multiline compact edit block is complete."""
     try:
         parse_compact_edit(text)
     except ValueError:
@@ -237,8 +313,10 @@ def compact_edit_block_complete(text: str) -> bool:
 
 
 def bounded_coding_output_complete(text: str) -> bool:
-    """Recognize the fastest strict protocol first, then compatibility formats."""
+    """Recognize preferred bounded output first, then compatibility formats."""
     stripped = text.lstrip()
+    if stripped.startswith(MULTILINE_EDIT_PREFIX):
+        return multiline_edit_block_complete(text)
     if stripped.startswith(SINGLE_LINE_EDIT_PREFIX):
         return single_line_edit_complete(text)
     if stripped.startswith("PATH:"):
@@ -253,6 +331,12 @@ def normalize_bounded_coding_output(text: str, *, allow_unterminated_single_line
     No path, range, replacement text, or missing delimiter is invented here.
     """
     stripped = text.lstrip()
+    if stripped.startswith(MULTILINE_EDIT_PREFIX):
+        try:
+            edit = parse_multiline_edit(stripped)
+        except ValueError:
+            return text
+        return json.dumps(edit, separators=(",", ":"))
     if stripped.startswith(SINGLE_LINE_EDIT_PREFIX):
         if "\n" not in stripped and not allow_unterminated_single_line:
             return text
@@ -290,6 +374,7 @@ def json_completion_reserve_tokens(
     if (
         "{" not in text
         and "PATH:" not in text
+        and not stripped.startswith(MULTILINE_EDIT_PREFIX)
         and not stripped.startswith(SINGLE_LINE_EDIT_PREFIX)
     ):
         return 0
