@@ -805,4 +805,21 @@ register_capability(
 )
 
 
+def _learned_401bd4923c5b(total: int, parts: int) -> tuple[int, ...]:
+    """Split a non-negative tensor/work extent into balanced deterministic parts."""
+    total_i = int(total)
+    parts_i = int(parts)
+    if total_i < 0 or parts_i < 1 or parts_i > 256:
+        raise ValueError("tensor split inputs are out of bounds")
+    base, extra = divmod(total_i, parts_i)
+    return tuple(base + (1 if index < extra else 0) for index in range(parts_i))
+
+register_capability(
+    'balanced_tensor_split_401bd4923c5b',
+    "Split a bounded tensor/work extent deterministically across multiple execution parts. Verified lesson: Research-backed capability candidate from 'b10660': <details open> model: add Qwen3.8-Flash-Next (qwen4exp) (#27742) * gguf: add qwen4exp (Qwen3.8-Flash-Next) arch and converter Adds the GGUF-side plumbing for HF model_type qwen4_exp: - MODEL_ARCH.QWEN4EXP plus tensors for the low-rank hyper-connection variant (hc_*_norm/down/up/inject) and the PLE n-gram hash embeddings. The DeepSeek-V4 hc_*_fn/base/scale tensors are a different parameterisation, so these are separate entries rather than reuse. - Reuses the existing indexer, per_layer_token_embd, SSM and compress_ratios keys unchanged. - conv",
+    '<details open> model: add Qwen3.8-Flash-Next (qwen4exp) (#27742) * gguf: add qwen4exp (Qwen3.8-Flash-Next) arch and converter Adds the GGUF-side plumbing for HF model_type qwen4_exp: - MODEL_ARCH.QWEN4EXP plus tensors for the low-rank hyper-connection variant (hc_*_norm/down/up/inject) and the PLE n-gram hash embeddings. The DeepSeek-V4 hc_*_fn/base/scale tensors are a different parameterisation, so these are separate entries rather than reuse. - Reuses the existing indexer, per_layer_token_embd, SSM and compress_ratios keys unchanged. - conversion/qwen4exp.py inherits the Qwen3.5 linear-attention V-head reorder and interleaved mrope, concatenates the 128 PLE embedding shards, and splits index_qk_proj into separate indexer q/k tensors. The PLE hash multipliers reach ~2.4e13. prepare_tensors() casts every non-float dtype to float32 before modify_tensors() runs, and GGUF array writes infer INT32 from Python ints, so both paths are bypassed: the constants are read from the pre-cast lazy tensors and written as explicit UINT64 arrays. Additive only; no existing arch changes behaviour. * llama: load qwen4exp (Qwen3.8-Flash-Next) hparams and tensors Adds LLM_ARCH_QWEN4EXP with its hparams',
+    _learned_401bd4923c5b,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
