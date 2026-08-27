@@ -47,16 +47,24 @@ def test_solver_keeps_reservation_until_serialized_integration() -> None:
     assert "intentionally not released here" in text
 
 
-def test_solver_uses_cpu_fast_qwen_coder_specialist() -> None:
+def test_solver_uses_bounded_qwen_first_deepseek_retry_escalation() -> None:
     text = SOLVER.read_text(encoding="utf-8")
 
-    assert "GENESIS_PROVIDER_NAME: qwen2.5-coder-0.5b-github-issue-autorepair" in text
+    assert "GENESIS_PROVIDER_NAME: genesis-adaptive-github-issue-autorepair" in text
+    assert "GENESIS_REPAIR_FALLBACK_MODEL:" in text
     assert "Qwen/Qwen2.5-Coder-0.5B-Instruct" in text
-    assert "genesis-qwen2.5-coder-0.5b-${{ runner.os }}-py312-v1" in text
-    assert "GENESIS_PROVIDER_TIMEOUT_SECONDS: '240'" in text
+    assert "GENESIS_REPAIR_ESCALATION_MODEL:" in text
+    assert "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" in text
+    assert "GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS: '192'" in text
+    assert "GENESIS_PROVIDER_TIMEOUT_SECONDS: '300'" in text
+    assert "scripts/pulse_coding_provider.py" in text
+    assert '--model "$GENESIS_REPAIR_FALLBACK_MODEL"' in text
+    assert '--escalation-model "$GENESIS_REPAIR_ESCALATION_MODEL"' in text
+    assert '--escalation-max-new-tokens "$GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS"' in text
+    assert "snapshot_download(model_id)" in text
+    assert "genesis-github-issue-autorepair-${{ runner.os }}-${{ steps.model_cache_key.outputs.model_key }}-v1" in text
+    assert "scripts/local_reasoning_provider.py --model" not in text
     assert "Qwen/Qwen3-1.7B" not in text
-    assert "qwen3-1.7b-github-issue-autorepair" not in text
-    assert "genesis-qwen3-1.7b-${{ runner.os }}" not in text
 
 
 def test_integration_rebases_onto_latest_main_before_all_validation() -> None:
