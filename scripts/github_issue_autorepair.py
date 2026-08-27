@@ -12,6 +12,7 @@ import urllib.request
 from pathlib import Path
 
 from genesis.coding import CodingModule, CodingProposal
+from genesis.github_issue_capability_builder import GitHubIssueLearnedCapabilityProvider
 from genesis.issue_solver import Diagnosis, RepairAttempt
 from genesis.providers import GenesisHTTPProvider, IntelligenceProvider
 from genesis.selfdev import SelfDevelopmentExecutor
@@ -256,7 +257,11 @@ def propose_issue_repair(
     provider: IntelligenceProvider | None = None,
     repair_memory: list[dict] | None = None,
 ) -> CodingProposal:
-    if provider is None:
+    coding = CodingModule(root)
+    deterministic = GitHubIssueLearnedCapabilityProvider.for_issue(root, issue, coding)
+    if deterministic is not None:
+        provider = deterministic
+    elif provider is None:
         provider_url = os.environ.get("GENESIS_REPAIR_PROVIDER_URL", "").strip()
         if not provider_url:
             raise RuntimeError("no Genesis issue-repair provider configured")
@@ -265,7 +270,7 @@ def propose_issue_repair(
             name=os.environ.get("GENESIS_PROVIDER_NAME", "genesis-github-issue-repair"),
             timeout=_provider_timeout_seconds(),
         )
-    return CodingModule(root).propose(
+    return coding.propose(
         issue_coding_objective(issue, repair_memory),
         context_paths,
         provider=provider,
@@ -366,15 +371,6 @@ def solve_reported_issue(
         return RepairAttempt(diagnosis, None, None, "blocked_no_safe_context")
 
     memory = repair_memory if repair_memory is not None else []
-    if provider is None:
-        provider_url = os.environ.get("GENESIS_REPAIR_PROVIDER_URL", "").strip()
-        if not provider_url:
-            return RepairAttempt(diagnosis, None, None, "retry_pending_capability")
-        provider = GenesisHTTPProvider(
-            provider_url,
-            name=os.environ.get("GENESIS_PROVIDER_NAME", "genesis-github-issue-repair"),
-            timeout=_provider_timeout_seconds(),
-        )
     executor = executor or SelfDevelopmentExecutor(root)
 
     last_proposal: dict | None = None
@@ -403,7 +399,7 @@ def solve_reported_issue(
 
         proposal = {
             "title": f"Genesis issue repair #{issue.get('number')}",
-            "rationale": "Bounded compact coding repair generated from maintainer-authorized GitHub issue evidence with validation-feedback self-correction.",
+            "rationale": "Bounded issue repair generated from maintainer-authorized GitHub issue evidence with validation-feedback self-correction.",
             "files": dict(coding_proposal.files),
         }
         allowed = allowed_issue_repair_paths(context_paths)
