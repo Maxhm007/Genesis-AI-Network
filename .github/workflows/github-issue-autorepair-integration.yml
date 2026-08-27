@@ -10,6 +10,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: genesis-github-issue-autorepair-integration-transaction
+  cancel-in-progress: false
+
 jobs:
   prepare:
     runs-on: ubuntu-latest
