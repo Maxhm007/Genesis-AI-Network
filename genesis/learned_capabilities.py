@@ -194,4 +194,27 @@ register_capability(
 )
 
 
+def _learned_1a50cc8a79a1(
+    requested: str | None,
+    available,
+    fallback: str | None = None,
+) -> str | None:
+    """Prefer an explicit supported runtime device, then a compatible fallback."""
+    choices = tuple(str(item).strip() for item in available if str(item).strip())
+    preferred = str(requested).strip() if requested is not None else ""
+    if preferred and preferred in choices:
+        return preferred
+    fallback_name = str(fallback).strip() if fallback is not None else ""
+    if fallback_name and fallback_name in choices:
+        return fallback_name
+    return choices[0] if choices else None
+
+register_capability(
+    'runtime_device_selection_1a50cc8a79a1',
+    "Select an explicit supported runtime device while preserving a compatible fallback path. Verified lesson: Research-backed capability candidate from 'b10643': <details open> hexagon: support for multi-NPU devices (IQ9, IQ10) and fully asynchronous backend (#26501) * hexagon: use non-host bufs by default and make the backend fully async * hex-hb: remove optional hostbuf support and fix async copy * hex-unary: relax supported unary check * hex-bufs: use same get_alignment for host bufs * snapdragon: bump android_platform to 34 * hex-rows: super hacky get/set rows for q8_0 * hex-get-rows: fix q8_0 * hex-get-rows: supprot for f16 and cleanup for q8_0 * hex-get-rows: generic macros and specialized threa",
+    '<details open> hexagon: support for multi-NPU devices (IQ9, IQ10) and fully asynchronous backend (#26501) * hexagon: use non-host bufs by default and make the backend fully async * hex-hb: remove optional hostbuf support and fix async copy * hex-unary: relax supported unary check * hex-bufs: use same get_alignment for host bufs * snapdragon: bump android_platform to 34 * hex-rows: super hacky get/set rows for q8_0 * hex-get-rows: fix q8_0 * hex-get-rows: supprot for f16 and cleanup for q8_0 * hex-get-rows: generic macros and specialized thread funcs * hex-get-rows: add DMA pipeline, vtcm_layout and kernel params * hex-set-rows: fix q8_0 support, add dma and tracing * hex-tests: override nmse threshold for HTP of Q8_0 quants * hex-fa: add support for Q8_0 with inplace dequantizers * hex-get-rows: simplify type dispatch * hex-rows: simplify GET/SET_ROWS DMA pipeline * hex-async: add events, set/get-tensor-async and rest of the async api support * hex-repack: use slice instead of expert in repack functions * hex-cpy: update event/async-cpy logging * hex-set-rows: optimize smaller tensors * hex-geglu: fix perf regression with larger tensors * hex-get-rows: add missing header * hex-set-',
+    _learned_1a50cc8a79a1,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
