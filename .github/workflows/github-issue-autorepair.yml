@@ -2,7 +2,7 @@ name: Genesis GitHub Issue Autorepair
 
 on:
   issues:
-    types: [labeled]
+    types: [opened, reopened, labeled]
   workflow_dispatch:
     inputs:
       issue_number:
@@ -55,6 +55,7 @@ jobs:
     if: >-
       github.event_name != 'push' &&
       (github.event_name != 'issues' ||
+       github.event.action != 'labeled' ||
        github.event.label.name == 'genesis-autonomous' ||
        github.event.label.name == 'genesis-task')
     runs-on: ubuntu-latest
@@ -129,8 +130,6 @@ jobs:
 
           while IFS= read -r n; do
             [[ -n "$n" ]] || continue
-            # Admission is the authoritative mutation boundary. Canonical
-            # genesis-task/title records are promoted here, never by heartbeat.
             gh issue edit "$n" \
               --repo "$GITHUB_REPOSITORY" \
               --add-label genesis-autonomous \
@@ -184,16 +183,13 @@ jobs:
 
   refill:
     needs: [plan, solve_workers, integrate_workers]
-    if: >-
-      always() &&
-      needs.plan.outputs.has_work == 'true' &&
-      needs.integrate_workers.result != 'cancelled'
+    if: always() && needs.plan.outputs.has_work == 'true'
     runs-on: ubuntu-latest
     permissions:
       actions: write
       contents: read
     steps:
-      - name: Wake read-only heartbeat to refill independent repair lanes
+      - name: Immediately wake read-only heartbeat to refill repair capacity
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
