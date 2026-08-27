@@ -64,7 +64,7 @@ def _model_check_timeout_response(prompt: str) -> str | None:
     """Return the role-specific advisory result when a model check times out.
 
     Only explicit checking roles are eligible. Generation, planning, research,
-    coding and other model calls still raise on timeout because there is no valid
+    return _bounded_coding_engineer_full_budget()
     work product to continue with. Adding a future checker requires registering
     its exact response schema here rather than silently treating every timeout as
     success.
