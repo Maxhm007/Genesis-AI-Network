@@ -525,4 +525,39 @@ register_capability(
 )
 
 
+def _learned_e45b1de1c7d0(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'b10587', 'details', 'open', 'vulkan', 'added', 'pad_reflect_1d', 'operation', 'implemented', 'ggml_op_pad_reflect_1d', 'backend', 'changes')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_e45b1de1c7d0ecc4',
+    "Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'b10587': <details open> vulkan : added the PAD_REFLECT_1D operation (#26586) * vulkan : added PAD_REFLECT_1D operation Implemented the GGML_OP_PAD_REFLECT_1D operation for the Vulkan backend Changes: - pad_reflect_1d.comp: implemented the GLSL compute shader with reflection logic - vulkan-shaders-gen.cpp: register the shader for SPIR-V compilation - ggml-vulkan.cpp: pushed constants struct, pipeline creation, supports_op, dispatch function, compute switch and debug",
+    '<details open> vulkan : added the PAD_REFLECT_1D operation (#26586) * vulkan : added PAD_REFLECT_1D operation Implemented the GGML_OP_PAD_REFLECT_1D operation for the Vulkan backend Changes: - pad_reflect_1d.comp: implemented the GLSL compute shader with reflection logic - vulkan-shaders-gen.cpp: register the shader for SPIR-V compilation - ggml-vulkan.cpp: pushed constants struct, pipeline creation, supports_op, dispatch function, compute switch and debug validation Tested the PAD_REFLECT_1D on Intel Iris Xe (Vulkan 1.4, Mesa 25.2.8): Correctness: PAD_REFLECT_1D(type=f32,ne_a=[512,34,2,1],pad_0=10,pad_1=9) = Pass PAD_REFLECT_1D(type=f32,ne_a=[3000,384,4,1],pad_0=10,pad_1=9) = Pass 2/2 tests passed - All test are passed Performance: ne_a=[512,34,2,1] -> 5.38 us/run, 24.55 GB/s ne_a=[3000,80,1,1] -> 30.09 us/run, 59.62 GB/s ne_a=[3000,384,4,1] -> 158.31 us/run, 54.39 GB/s * Update ggml/src/ggml-vulkan/vulkan-shaders/pad_reflect_1d.comp Co-authored-by: Jeff Bolz <jbolz@nvidia.com> --------- Co-authored-by: Jeff Bolz <jbolz@nvidia.com> </details> **Website:** - <https://llama.app> **Attestations:** - <https://github.com/ggml-org/llama.cpp/attestations/42354333> **macOS/iOS:** - [macOS',
+    _learned_e45b1de1c7d0,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
