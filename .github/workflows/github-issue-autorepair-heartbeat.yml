@@ -27,15 +27,54 @@ jobs:
     permissions:
       actions: write
       contents: read
-      issues: read
+      issues: write
     steps:
-      - name: Wake up to five independent autorepair pulses
+      - name: Admit waiting Genesis tasks and wake up to five independent autorepair pulses
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
 
+          gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --limit 500 \
+            --json number,title,labels \
+            > "$RUNNER_TEMP/open-issues.json"
+
+          # GitHub Issues are the authoritative Genesis task queue. Older task
+          # records may have genesis-task without genesis-autonomous, and owner
+          # created [Genesis Task] records may initially have no labels. Admit
+          # those records automatically while leaving reports, operational
+          # channels and privileged Action-repair issues on their own lanes.
+          while IFS= read -r n; do
+            [[ -n "$n" ]] || continue
+            echo "Admitting waiting Genesis task #$n to autonomous repair."
+            gh issue edit "$n" \
+              --repo "$GITHUB_REPOSITORY" \
+              --add-label genesis-task \
+              --add-label genesis-autonomous
+          done < <(jq -r '
+            .[]
+            | ([.labels[].name] // []) as $labels
+            | select(
+                ($labels | index("genesis-task")) != null or
+                (.title | startswith("[Genesis Task]")) or
+                (.title | startswith("[Genesis Repair]")) or
+                (.title | startswith("[Genesis Self Improvement]")) or
+                (.title | startswith("Genesis challenge:")) or
+                (.title | startswith("Genesis Control:"))
+              )
+            | select(($labels | index("genesis-autonomous")) == null)
+            | select(($labels | index("genesis-repair-in-progress")) == null)
+            | select(($labels | index("genesis-validating")) == null)
+            | select(($labels | index("genesis-blocked")) == null)
+            | select(($labels | index("genesis-solved")) == null)
+            | .number
+          ' "$RUNNER_TEMP/open-issues.json")
+
+          # Refresh after intake so capacity decisions see the newly admitted backlog.
           gh issue list \
             --repo "$GITHUB_REPOSITORY" \
             --state open \
