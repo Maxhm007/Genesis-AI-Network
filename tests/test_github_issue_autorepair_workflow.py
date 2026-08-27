@@ -6,30 +6,26 @@ SOLVER = Path(".github/workflows/github-issue-autorepair-worker.yml")
 INTEGRATION = Path(".github/workflows/github-issue-autorepair-integration.yml")
 
 
-def test_dispatcher_admits_three_parallel_solvers_but_one_integration_pipeline() -> None:
+def test_dispatcher_runs_one_issue_per_independent_repair_lane() -> None:
     text = DISPATCHER.read_text(encoding="utf-8")
 
-    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '3'" in text
-    assert "group: genesis-github-issue-autorepair-admission" in text
+    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '5'" in text
+    assert "issue_number:" in text
+    assert "group: genesis-github-issue-autorepair-admission-${{ inputs.issue_number || github.event.issue.number || github.run_id }}" in text
     assert "solve_workers:" in text
-    assert "max-parallel: 3" in text
+    assert text.count("max-parallel: 1") >= 2
     assert "github-issue-autorepair-worker.yml" in text
     assert "integrate_workers:" in text
-    assert "max-parallel: 1" in text
     assert "github-issue-autorepair-integration.yml" in text
 
 
-def test_dispatcher_refill_is_bounded_and_has_five_minute_fallback() -> None:
+def test_dispatcher_refill_wakes_read_only_heartbeat() -> None:
     text = DISPATCHER.read_text(encoding="utf-8")
 
-    assert "cron: '*/5 * * * *'" in text
-    assert "refill_round" in text
-    assert "needs.plan.outputs.refill_round == '0'" in text
-    assert "-f refill_round=1" in text
+    assert "refill:" in text
     assert "actions: write" in text
-    assert "active < GENESIS_ISSUE_REPAIR_MAX_PARALLEL" in text
-    assert 'index("genesis-repair-in-progress")' in text
-    assert 'index("genesis-validating")' in text
+    assert "gh workflow run github-issue-autorepair-heartbeat.yml" in text
+    assert "--ref main" in text
 
 
 def test_dispatcher_rolls_back_partial_claims() -> None:
