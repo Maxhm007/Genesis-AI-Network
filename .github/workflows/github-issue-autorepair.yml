@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
     inputs:
       issue_number:
-        description: Optional authorized GitHub issue number; blank fills available worker slots
+        description: Optional authorized GitHub issue number; blank claims one available repair lane
         required: false
         default: ''
       refill_round:
@@ -26,7 +26,7 @@ permissions: {}
 
 env:
   PYTHONPATH: ${{ github.workspace }}
-  GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '3'
+  GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '5'
 
 jobs:
   bootstrap_labels:
@@ -76,7 +76,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Build and claim bounded repair batch
+      - name: Build and claim one repair lane
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
@@ -117,7 +117,7 @@ jobs:
             selector+=(--explicit-issue-number "$explicit")
           fi
           plan_json="$("${selector[@]}")"
-          selected="$(jq -c '.selected_issue_numbers' <<<"$plan_json")"
+          selected="$(jq -c '.selected_issue_numbers[:1]' <<<"$plan_json")"
 
           claimed='[]'
           claims_committed='false'
@@ -151,7 +151,7 @@ jobs:
           echo "has_work=$has_work" >> "$GITHUB_OUTPUT"
           echo "refill_round=$round" >> "$GITHUB_OUTPUT"
           echo "allow_refill=$allow_refill" >> "$GITHUB_OUTPUT"
-          echo "Genesis repair admission: $plan_json; claimed=$claimed"
+          echo "Genesis repair admission: $plan_json; single_lane_selection=$selected; claimed=$claimed"
           claims_committed='true'
 
   solve_workers:
@@ -159,7 +159,7 @@ jobs:
     if: needs.plan.outputs.has_work == 'true'
     strategy:
       fail-fast: false
-      max-parallel: 3
+      max-parallel: 1
       matrix:
         issue_number: ${{ fromJSON(needs.plan.outputs.issue_numbers) }}
     uses: ./.github/workflows/github-issue-autorepair-worker.yml
@@ -202,7 +202,7 @@ jobs:
       contents: read
       issues: read
     steps:
-      - name: Refill one additional bounded batch if capacity remains
+      - name: Refill one repair lane if capacity remains
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -231,7 +231,7 @@ jobs:
           ] | length' "$RUNNER_TEMP/open-issues.json")
 
           if (( active < GENESIS_ISSUE_REPAIR_MAX_PARALLEL && eligible > 0 )); then
-            echo "Capacity is available; dispatching one bounded refill round."
+            echo "Capacity is available; dispatching one bounded refill pulse."
             gh workflow run github-issue-autorepair.yml \
               --repo "$GITHUB_REPOSITORY" \
               --ref main \
