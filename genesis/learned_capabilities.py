@@ -252,4 +252,39 @@ register_capability(
 )
 
 
+def _learned_0a9a20044317(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'b10582', 'details', 'open', 'restore', 'rocm', 'ubuntu', 'revert', 'disable', 'ubuntu-rocm', 'reverts', 'commit')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_0a9a20044317ace1',
+    'Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from \'b10582\': <details open> ci : Restore ROCm job for Ubuntu (#27399) * Revert "ci : disable ubuntu-rocm (#26969)" This reverts commit 9558fa44c92746a58dd07ad1bf0c889715b938a6. * ci: set ccache compiler_check=content for ROCm build The ROCm toolchain is pip-installed fresh on every run, so the clang binary\'s mtime changes each time. With ccache\'s default compiler_check=mtime that invalidates the whole cache and warm builds only reached ~70% hits. Hash the compiler conte',
+    '<details open> ci : Restore ROCm job for Ubuntu (#27399) * Revert "ci : disable ubuntu-rocm (#26969)" This reverts commit 9558fa44c92746a58dd07ad1bf0c889715b938a6. * ci: set ccache compiler_check=content for ROCm build The ROCm toolchain is pip-installed fresh on every run, so the clang binary\'s mtime changes each time. With ccache\'s default compiler_check=mtime that invalidates the whole cache and warm builds only reached ~70% hits. Hash the compiler contents instead so the cache survives toolchain reinstalls. * Update ccache size to 1GB We\'re waivering with so many architectures built, we need a bigger ccache limit. * merge fix --------- Co-authored-by: Jim Wu <ywu@xilinx.com> Co-authored-by: Sigbjørn Skjæret <sigbjorn.skjaeret@huggingface.co> </details> **Website:** - <https://llama.app> **Attestations:** - <https://github.com/ggml-org/llama.cpp/attestations/42320717> **macOS/iOS:** - [macOS Apple Silicon (arm64)](https://github.com/ggml-org/llama.cpp/releases/download/b10582/llama-b10582-bin-macos-arm64.tar.gz) - macOS Apple Silicon (arm64, KleidiAI enabled) [DISABLED](https://github.com/ggml-org/llama.cpp/pull/23780) - [macOS Intel (x64)](https://github.com/ggml-org/llama.cpp/',
+    _learned_0a9a20044317,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
