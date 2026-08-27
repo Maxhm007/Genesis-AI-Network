@@ -875,4 +875,39 @@ register_capability(
 )
 
 
+def _learned_84ff2bdb67b0(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'b10584', 'details', 'open', 'also', 'take', 'into', 'account', 'n_streams', 'server', 'make', 'draft')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_84ff2bdb67b01248',
+    "Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'b10584': <details open> fit: also take into account n_streams (#27496) * fit: also take into account n_streams * server: make the draft context follow the target context With a non-unified KV cache the target context now holds n_ctx_train tokens per sequence, while the draft context was still created with n_ctx = 0 and fell back to n_ctx_train / n_streams per sequence.",
+    '<details open> fit: also take into account n_streams (#27496) * fit: also take into account n_streams * server: make the draft context follow the target context With a non-unified KV cache the target context now holds n_ctx_train tokens per sequence, while the draft context was still created with n_ctx = 0 and fell back to n_ctx_train / n_streams per sequence.',
+    _learned_84ff2bdb67b0,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
