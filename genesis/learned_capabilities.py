@@ -770,4 +770,39 @@ register_capability(
 )
 
 
+def _learned_d08522835e81(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'python-v0.7.4', 'what', 'changed', 'update', 'docs', 'ekzhu', 'https', 'github.com', 'microsoft', 'autogen', 'pull')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_d08522835e81f7ba',
+    "Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'python-v0.7.4': ## What's Changed * Update docs for 0.7.3 by @ekzhu in https://github.com/microsoft/autogen/pull/6948 * Update readme with agent-as-tool by @ekzhu in https://github.com/microsoft/autogen/pull/6949 * Fix Redis Deserialization Error by @BenConstable9 in https://github.com/microsoft/autogen/pull/6952 * Redis Doesn't Support Streaming by @BenConstable9 in https://github.com/microsoft/autogen/pull/6954 * update version to 0.7.4 by @ekzhu in https://github",
+    "## What's Changed * Update docs for 0.7.3 by @ekzhu in https://github.com/microsoft/autogen/pull/6948 * Update readme with agent-as-tool by @ekzhu in https://github.com/microsoft/autogen/pull/6949 * Fix Redis Deserialization Error by @BenConstable9 in https://github.com/microsoft/autogen/pull/6952 * Redis Doesn't Support Streaming by @BenConstable9 in https://github.com/microsoft/autogen/pull/6954 * update version to 0.7.4 by @ekzhu in https://github.com/microsoft/autogen/pull/6955 * Update doc 0.7.4 by @ekzhu in https://github.com/microsoft/autogen/pull/6956 ## New Contributors * @BenConstable9 made their first contribution in https://github.com/microsoft/autogen/pull/6952 **Full Changelog**: https://github.com/microsoft/autogen/compare/python-v0.7.3...python-v0.7.4",
+    _learned_d08522835e81,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
