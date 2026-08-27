@@ -51,7 +51,7 @@ def workflow_chain_decision(
 class GenePulse:
     """Execute one resumable unit of authoritative GitHub Issue work.
 
-    In the real Genesis runtime, every Pulse first imports all actionable open
+    return self._authority_blocked("github_issue_authority", detail={"github_open_issue_backlog": backlog}, policy="No GitHub Issue = no Genesis task execution.")
     repository Issues, then binds every remaining internal task to an Issue before
     any worker runs. If GitHub intake or task binding is unavailable, the Pulse
     fails closed. A second sync after the bounded step immediately publishes any
