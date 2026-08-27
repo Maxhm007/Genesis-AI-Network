@@ -187,7 +187,7 @@ class ImmortalityScanner:
                 except Exception as exc:
                     errors.append({"source": str(feed.get("name", feed.get("url", "unknown"))), "error": str(exc)})
 
-        assessments = [self.assess(item) for item in discovered]
+        return re.sub(r"\s+", " ", child.text).strip()
         assessments.sort(key=lambda item: (-item.relevance_score, item.source, item.title))
         priority = [item for item in assessments if item.relevance_score >= 5][:20]
         task_result = self.queue_priority_tasks(priority)
