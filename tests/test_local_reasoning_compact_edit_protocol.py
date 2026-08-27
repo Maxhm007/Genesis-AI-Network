@@ -14,7 +14,7 @@ def _load_provider_module():
     return module
 
 
-def test_bounded_coding_prompt_uses_single_line_one_edit_protocol():
+def test_bounded_coding_prompt_prefers_explicitly_terminated_multiline_protocol():
     module = _load_provider_module()
     prompt = (
         "ROLE: bounded_coding_engineer\n"
@@ -26,12 +26,88 @@ def test_bounded_coding_prompt_uses_single_line_one_edit_protocol():
     simplified = module.simplify_bounded_coding_prompt(prompt)
 
     assert "do not use JSON" in simplified
-    assert "EDIT|genesis/example.py|5|5|replacement text" in simplified
-    assert "then a newline" in simplified
+    assert "EDIT_BLOCK|genesis/example.py|5|5" in simplified
+    assert "replacement text\nEND_EDIT" in simplified
+    assert "END_EDIT must be on its own final line" in simplified
     assert '{"edits":[' not in simplified
 
 
-def test_single_line_edit_normalizes_quotes_braces_and_pipes_without_json_escaping():
+def test_multiline_edit_normalizes_complete_python_with_quotes_braces_and_pipes():
+    module = _load_provider_module()
+    raw = (
+        "EDIT_BLOCK|genesis/example.py|5|7\n"
+        "value = (\n"
+        '    {"quoted": "code|safe"}\n'
+        ")\n"
+        "END_EDIT"
+    )
+
+    normalized = module.normalize_bounded_coding_output(raw)
+    payload = json.loads(normalized)
+
+    assert payload == {
+        "path": "genesis/example.py",
+        "start_line": 5,
+        "end_line": 7,
+        "new": 'value = (\n    {"quoted": "code|safe"}\n)',
+    }
+    assert module.bounded_coding_output_complete(raw) is True
+
+
+def test_multiline_edit_does_not_complete_at_internal_newline():
+    module = _load_provider_module()
+    raw = (
+        "EDIT_BLOCK|genesis/example.py|5|7\n"
+        "value = (\n"
+        '    {"quoted": "code|safe"}\n'
+    )
+
+    assert module.bounded_coding_output_complete(raw) is False
+    assert module.normalize_bounded_coding_output(raw) == raw
+
+
+def test_multiline_edit_missing_terminator_fails_closed_even_if_python_looks_complete():
+    module = _load_provider_module()
+    raw = (
+        "EDIT_BLOCK|genesis/example.py|5|7\n"
+        "value = (\n"
+        "    8\n"
+        ")"
+    )
+
+    assert module.bounded_coding_output_complete(raw) is False
+    assert module.normalize_bounded_coding_output(raw) == raw
+
+
+def test_multiline_edit_rejects_malformed_range_without_repairing_it():
+    module = _load_provider_module()
+    raw = (
+        "EDIT_BLOCK|genesis/example.py|five|7\n"
+        "value = 8\n"
+        "END_EDIT"
+    )
+
+    assert module.bounded_coding_output_complete(raw) is False
+    assert module.normalize_bounded_coding_output(raw) == raw
+
+
+def test_retry_prompt_schema_is_converted_without_losing_following_guidance():
+    module = _load_provider_module()
+    prompt = (
+        "ROLE: bounded_coding_engineer\n"
+        'PREVIOUS: {"path":"genesis/previous.py","new":"diagnostic"}\n'
+        'Return ONLY the same JSON shape as: {"edits":[{"path":"genesis/example.py","start_line":7,"end_line":8,"new":"replacement text"}]}. Verify the range before using it.\n'
+    )
+
+    simplified = module.simplify_bounded_coding_prompt(prompt)
+
+    assert 'PREVIOUS: {"path":"genesis/previous.py","new":"diagnostic"}' in simplified
+    assert "EDIT_BLOCK|genesis/example.py|7|8" in simplified
+    assert "replacement text\nEND_EDIT" in simplified
+    assert ". Verify the range before using it." in simplified
+
+
+def test_single_line_edit_remains_accepted_for_compatibility():
     module = _load_provider_module()
     raw = 'EDIT|genesis/example.py|5|5|VALUE = {"quoted": "code|safe"}\n'
 
@@ -69,14 +145,6 @@ def test_single_line_edit_can_be_accepted_without_newline_only_after_safe_early_
         "end_line": 5,
         "new": "VALUE = 8",
     }
-
-
-def test_malformed_single_line_edit_is_not_repaired_or_invented():
-    module = _load_provider_module()
-    raw = "EDIT|genesis/example.py|five|5|VALUE = 8\n"
-
-    assert module.normalize_bounded_coding_output(raw) == raw
-    assert module.bounded_coding_output_complete(raw) is False
 
 
 def test_older_multiline_compact_protocol_remains_accepted():
