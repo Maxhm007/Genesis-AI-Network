@@ -6,7 +6,7 @@ from pathlib import Path
 from genesis.coding import CodingModule
 from genesis.github_issue_capability_builder import GitHubIssueLearnedCapabilityProvider
 from genesis.selfdev import SelfDevResult
-from scripts.github_issue_autorepair import solve_reported_issue
+from scripts.github_issue_autorepair import propose_issue_repair, solve_reported_issue
 
 
 def _write_target(root: Path) -> None:
@@ -52,6 +52,34 @@ def _issue(*, author: str = "github-actions[bot]", lesson: str | None = None) ->
     }
 
 
+def _issue_468() -> dict:
+    return {
+        "number": 468,
+        "title": (
+            "[Genesis Task] new capability — Autonomously add one bounded executable Genesis capability "
+            "named learned_07030016a4b0afea."
+        ),
+        "user": {"login": "github-actions[bot]"},
+        "body": (
+            "<!-- genesis-task-id:task-3cfede18859dd833 -->\n"
+            "- **Task type:** `new_capability`\n"
+            "- **Source:** `genesis.evolution_learning`\n"
+            "- **Owning module:** `genesis.coding`\n"
+            "- **Target:** `genesis/learned_capabilities.py`\n\n"
+            "### Objective\n"
+            "Autonomously add one bounded executable Genesis capability named learned_07030016a4b0afea. "
+            "Use the learned idea: Add one new bounded Genesis capability implementing this verified transferable lesson: "
+            "GLM-5.3-Flash uses a hybrid architecture combining sparse and linear attention to reduce long-context serving costs. "
+            "Acceptance: preserve safeguards. "
+            "External learning evidence: GLM-5.3-Flash introduces hybrid sparse and linear attention while preserving precise "
+            "long-context capabilities and improving serving efficiency. "
+            "Incubator evidence: # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT "
+            "Target exactly genesis/learned_capabilities.py.\n\n"
+            "### Acceptance\nFull tests and independent validation must pass.\n"
+        ),
+    }
+
+
 def test_machine_generated_build_once_issue_uses_deterministic_template(tmp_path: Path) -> None:
     _write_target(tmp_path)
     provider = GitHubIssueLearnedCapabilityProvider.for_issue(
@@ -88,7 +116,47 @@ def test_user_authored_issue_cannot_select_machine_deterministic_route(tmp_path:
     assert provider is None
 
 
-def test_unsupported_machine_lesson_falls_back_instead_of_inventing_template(tmp_path: Path) -> None:
+def test_user_authored_issue_still_uses_bounded_model_route(tmp_path: Path) -> None:
+    _write_target(tmp_path)
+
+    class RecordingProvider:
+        name = "bounded-model-route"
+
+        def __init__(self) -> None:
+            self.calls = 0
+
+        def available(self) -> bool:
+            return True
+
+        def reason(self, prompt: str) -> str:
+            self.calls += 1
+            return json.dumps(
+                {
+                    "edits": [
+                        {
+                            "path": "genesis/learned_capabilities.py",
+                            "start_line": 6,
+                            "end_line": 6,
+                            "new": "MODEL_ROUTE = True\n# GENESIS_LEARNED_CAPABILITY_INSERTION_POINT",
+                        }
+                    ]
+                }
+            )
+
+    provider = RecordingProvider()
+    proposal = propose_issue_repair(
+        _issue(author="Maxhm007"),
+        ["genesis/learned_capabilities.py"],
+        tmp_path,
+        provider=provider,
+    )
+
+    assert provider.calls == 1
+    assert proposal.provider == "bounded-model-route"
+    assert "MODEL_ROUTE = True" in proposal.files["genesis/learned_capabilities.py"]
+
+
+def test_structured_unknown_lesson_uses_syntax_safe_generic_builder(tmp_path: Path) -> None:
     _write_target(tmp_path)
 
     provider = GitHubIssueLearnedCapabilityProvider.for_issue(
@@ -97,10 +165,65 @@ def test_unsupported_machine_lesson_falls_back_instead_of_inventing_template(tmp
         CodingModule(tmp_path),
     )
 
-    assert provider is None
+    assert provider is not None
+    proposal = json.loads(provider.reason("ignored"))
+    rendered = proposal["files"]["genesis/learned_capabilities.py"]
+    assert "learned_85ee71b19ede1785" in rendered
+    compile(rendered, "genesis/learned_capabilities.py", "exec")
+
+    namespace: dict[str, object] = {}
+    exec(rendered, namespace)
+    handler = namespace["_learned_85ee71b19ede"]
+    assert handler(["unrelated unknown transform", "nothing useful"]) == ("unrelated unknown transform",)
 
 
-def test_github_issue_solver_prefers_deterministic_builder_before_qwen(tmp_path: Path) -> None:
+def test_468_shaped_issue_uses_generic_builder_without_qwen(tmp_path: Path) -> None:
+    _write_target(tmp_path)
+    (tmp_path / "runtime").mkdir()
+
+    class QwenMustNotRun:
+        name = "qwen2.5-coder-0.5b-github-issue-autorepair"
+
+        def available(self) -> bool:
+            return True
+
+        def reason(self, prompt: str) -> str:
+            raise AssertionError("Qwen must not emit free-form code for a structured new-capability issue")
+
+    class PassingExecutor:
+        def __init__(self) -> None:
+            self.proposal: dict | None = None
+
+        def execute(self, proposal: dict) -> SelfDevResult:
+            self.proposal = proposal
+            return SelfDevResult(
+                branch="genesis/candidate-live-capability",
+                candidate_id="live-capability",
+                tests_passed=True,
+                committed=True,
+                changed_files=("genesis/learned_capabilities.py",),
+                commit_sha="a" * 40,
+                message="candidate ready",
+            )
+
+    executor = PassingExecutor()
+    attempt = solve_reported_issue(
+        _issue_468(),
+        tmp_path,
+        provider=QwenMustNotRun(),
+        executor=executor,
+        repair_memory=[],
+    )
+
+    assert attempt.status == "candidate_repaired"
+    assert executor.proposal is not None
+    assert executor.proposal["provenance"]["provider"] == "genesis-deterministic-capability-builder"
+    rendered = executor.proposal["files"]["genesis/learned_capabilities.py"]
+    assert "learned_07030016a4b0afea" in rendered
+    compile(rendered, "genesis/learned_capabilities.py", "exec")
+
+
+def test_github_issue_solver_prefers_specialized_builder_before_qwen(tmp_path: Path) -> None:
     _write_target(tmp_path)
     (tmp_path / "runtime").mkdir()
 
