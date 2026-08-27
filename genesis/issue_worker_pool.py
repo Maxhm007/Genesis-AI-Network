@@ -9,7 +9,7 @@ IN_PROGRESS_LABEL = "genesis-repair-in-progress"
 VALIDATING_LABEL = "genesis-validating"
 BLOCKED_LABEL = "genesis-blocked"
 SOLVED_LABEL = "genesis-solved"
-DEFAULT_MAX_PARALLEL = 3
+DEFAULT_MAX_PARALLEL = 5
 
 
 @dataclass(frozen=True)
