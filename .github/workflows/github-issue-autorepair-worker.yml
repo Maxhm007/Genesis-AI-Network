@@ -14,9 +14,12 @@ env:
   PYTHONPATH: ${{ github.workspace }}
   GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_URL: http://127.0.0.1:8766
-  GENESIS_PROVIDER_NAME: qwen2.5-coder-0.5b-github-issue-autorepair
-  GENESIS_PROVIDER_TIMEOUT_SECONDS: '240'
-  GENESIS_PROVIDER_MAX_NEW_TOKENS: '1024'
+  GENESIS_PROVIDER_NAME: genesis-adaptive-github-issue-autorepair
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '300'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '384'
+  GENESIS_REPAIR_FALLBACK_MODEL: ${{ vars.GENESIS_REPAIR_FALLBACK_MODEL || 'Qwen/Qwen2.5-Coder-0.5B-Instruct' }}
+  GENESIS_REPAIR_ESCALATION_MODEL: ${{ vars.GENESIS_REPAIR_ESCALATION_MODEL || 'deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B' }}
+  GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS: '192'
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
 
@@ -66,6 +69,25 @@ jobs:
       - name: Verify stable baseline
         if: steps.eligibility.outputs.eligible == 'true'
         run: python -m pytest -q
+      - name: Compute configured repair model cache key
+        id: model_cache_key
+        if: steps.eligibility.outputs.eligible == 'true'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import hashlib
+          import os
+
+          models = "\0".join(
+              [
+                  os.environ.get("GENESIS_REPAIR_FALLBACK_MODEL", ""),
+                  os.environ.get("GENESIS_REPAIR_ESCALATION_MODEL", ""),
+              ]
+          )
+          digest = hashlib.sha256(models.encode("utf-8")).hexdigest()[:16]
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as handle:
+              handle.write(f"model_key={digest}\n")
+          PY
       - name: Restore open-model caches
         if: steps.eligibility.outputs.eligible == 'true'
         uses: actions/cache@v4
@@ -73,21 +95,46 @@ jobs:
           path: |
             ~/.cache/huggingface
             ~/.cache/pip
-          key: genesis-qwen2.5-coder-0.5b-${{ runner.os }}-py312-v1
+          key: genesis-github-issue-autorepair-${{ runner.os }}-${{ steps.model_cache_key.outputs.model_key }}-v1
           restore-keys: |
-            genesis-qwen2.5-coder-0.5b-${{ runner.os }}-py312-
+            genesis-github-issue-autorepair-${{ runner.os }}-
+            genesis-coding-intelligence-${{ runner.os }}-
       - name: Install free local repair intelligence
         if: steps.eligibility.outputs.eligible == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install 'transformers>=4.51,<5' safetensors
-      - name: Start Genesis issue-repair provider
+      - name: Prefetch configured repair models
+        if: steps.eligibility.outputs.eligible == 'true'
+        shell: bash
+        run: |
+          python - <<'PY'
+          import os
+          from huggingface_hub import snapshot_download
+
+          model_ids = []
+          for env_name in ("GENESIS_REPAIR_FALLBACK_MODEL", "GENESIS_REPAIR_ESCALATION_MODEL"):
+              model_id = os.environ.get(env_name, "").strip()
+              if model_id and model_id not in model_ids:
+                  model_ids.append(model_id)
+          for model_id in model_ids:
+              print(f"Prefetching configured issue-repair model: {model_id}", flush=True)
+              snapshot_download(model_id)
+          PY
+      - name: Start Genesis adaptive issue-repair provider
         if: steps.eligibility.outputs.eligible == 'true'
         shell: bash
         run: |
           set -euo pipefail
-          nohup python scripts/local_reasoning_provider.py --model Qwen/Qwen2.5-Coder-0.5B-Instruct --host 127.0.0.1 --port 8766 --max-new-tokens 1024 > /tmp/genesis-github-issue-autorepair.log 2>&1 &
+          nohup python scripts/pulse_coding_provider.py \
+            --model "$GENESIS_REPAIR_FALLBACK_MODEL" \
+            --escalation-model "$GENESIS_REPAIR_ESCALATION_MODEL" \
+            --host 127.0.0.1 \
+            --port 8766 \
+            --max-new-tokens "$GENESIS_PROVIDER_MAX_NEW_TOKENS" \
+            --escalation-max-new-tokens "$GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS" \
+            > /tmp/genesis-github-issue-autorepair.log 2>&1 &
           ready=false
           for i in {1..120}; do
             if python - <<'PY'
