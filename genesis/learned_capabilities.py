@@ -455,4 +455,39 @@ register_capability(
 )
 
 
+def _learned_15ea4d08866a(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'v5.15.0', 'model', 'additions', 'meta', 'muse', 'glimmer', 'released', 'today', 'multimodal', 'especially', 'designed')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_15ea4d08866af6f5',
+    "Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'Release: v5.15.0': # Release v5.15.0 ## New Model additions ### Meta Muse Glimmer Muse Glimmer, released today, is Meta’s new multimodal model, especially designed for agentic use cases. Distilled from Muse to 30B parameters, and released under the Apache 2.0 license, it can be deployed to local setups for privacy-aware applications such as coding, document analysis, personal assistants, Claw- or Hermes-like setups. Muse Glimmer is a dense 30B parameter model cons",
+    '# Release v5.15.0 ## New Model additions ### Meta Muse Glimmer Muse Glimmer, released today, is Meta’s new multimodal model, especially designed for agentic use cases. Distilled from Muse to 30B parameters, and released under the Apache 2.0 license, it can be deployed to local setups for privacy-aware applications such as coding, document analysis, personal assistants, Claw- or Hermes-like setups. Muse Glimmer is a dense 30B parameter model consisting of: - 2B ViT-style encoder for vision (Perception Encoder) - 28B parameter text decoder We\'re covering it in the following blogpost: http://hf.co/blog/muse-glimmer <img width="960" height="1787" alt="image" src="https://github.com/user-attachments/assets/3d8e548e-f84f-4269-8bd0-a12722d7ab01" /> --- ### GraniteMoeSWA & GraniteSWA <img width="1013" height="389" alt="image" src="https://github.com/user-attachments/assets/2c2b87f0-466a-413a-a4be-25ceae49c9a5" /> **Links:** [Documentation](https://huggingface.co/docs/transformers/main/en/model_doc/granitemoe_swa) * Add Granite-swa and Granitemoe-swa model support (#47179) by @daviswer in [#47179](https://github.com/huggingface/transformers/pull/47179) **Links:** [Documentation](https://hug',
+    _learned_15ea4d08866a,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
