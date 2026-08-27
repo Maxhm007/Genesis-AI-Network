@@ -840,4 +840,39 @@ register_capability(
 )
 
 
+def _learned_8ea81c76a275(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'python-v0.7.3', 'what', 'changed', 'update', 'website', 'ekzhu', 'https', 'github.com', 'microsoft', 'autogen', 'pull')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_8ea81c76a27576c2',
+    "Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'python-v0.7.3': ## What's Changed * Update website for 0.7.2 by @ekzhu in https://github.com/microsoft/autogen/pull/6902 * Typo in docs for 'NoOpTracerProvider' by @nicsuzor in https://github.com/microsoft/autogen/pull/6915 * Fix MCP example in readme by @ekzhu in https://github.com/microsoft/autogen/pull/6919 * Extend pydantic model capability for anyOf/oneOf item typing by @fiow123 in https://github.com/microsoft/autogen/pull/6925 * Update README.md with correct s",
+    "## What's Changed * Update website for 0.7.2 by @ekzhu in https://github.com/microsoft/autogen/pull/6902 * Typo in docs for 'NoOpTracerProvider' by @nicsuzor in https://github.com/microsoft/autogen/pull/6915 * Fix MCP example in readme by @ekzhu in https://github.com/microsoft/autogen/pull/6919 * Extend pydantic model capability for anyOf/oneOf item typing by @fiow123 in https://github.com/microsoft/autogen/pull/6925 * Update README.md with correct stable version by @Jp3132 in https://github.com/microsoft/autogen/pull/6942 * fix: Add proper serialization to RedisStore for complex objects by @tejas-dharani in https://github.com/microsoft/autogen/pull/6905 * Fix OpenAIAgent function tool schema by @alexey-pelykh in https://github.com/microsoft/autogen/pull/6936 * Add model info for gpt-5 by @ekzhu in https://github.com/microsoft/autogen/pull/6945 * Update OpenAIAgent to reflect gap in supporting custom function tool by @ekzhu in https://github.com/microsoft/autogen/pull/6943 * Ensure task runner tools are always strict by @ekzhu in https://github.com/microsoft/autogen/pull/6946 * Update version to 0.7.3 by @ekzhu in https://github.com/microsoft/autogen/pull/6947 ## New Contributors",
+    _learned_8ea81c76a275,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
