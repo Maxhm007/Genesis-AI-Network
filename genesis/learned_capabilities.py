@@ -217,4 +217,26 @@ register_capability(
 )
 
 
+def _learned_ff3dd341aebb(steps, limit: int = 32) -> tuple[str, ...]:
+    """Normalize a bounded ordered tool workflow for later verified execution."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("tool workflow limit is out of bounds")
+    normalized: list[str] = []
+    for step in steps:
+        value = str(step).strip()
+        if value and value not in normalized:
+            normalized.append(value)
+        if len(normalized) >= limit_i:
+            break
+    return tuple(normalized)
+
+register_capability(
+    'bounded_tool_workflow_ff3dd341aebb',
+    "Normalize a bounded ordered tool workflow while preserving explicit tool-step intent. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'MidTool: Mid-training Data Synthesis for Agentic Tool Use': Mid-training is increasingly recognized as a critical stage for shaping the capabilities of large language models. Recent work has shown that targeted mid-training can strengthen reasoning-intensive abilities such as math and science, and can also improve agentic capabilities in software-engineering settings. In this work, we study the parallel but less explored agentic capability: general tool use. We pres",
+    'Mid-training is increasingly recognized as a critical stage for shaping the capabilities of large language models. Recent work has shown that targeted mid-training can strengthen reasoning-intensive abilities such as math and science, and can also improve agentic capabilities in software-engineering settings. In this work, we study the parallel but less explored agentic capability: general tool use. We present MidTool, an open corpus construction pipeline for agentic tool-use mid-training that combines large-scale web, PDF, and code data with synthesized supervision from real-world tool APIs, MCP skills, and document-grounded workflows. MidTool is designed to teach models how to recognize tool affordances, ground arguments from context, compose tool call workflow, and recover from incomplete information. We mid-train Qwen3-4B-Base and Qwen3-8B-Base on MidTool-Mix, and then apply follow-up post-training with both supervised fine-tuning and reinforcement learning. Compared with baselines, MidTool-Mix consistently improves downstream performance under both SFT and RL on BFCL, tau2-Bench, and MCP Universe. These results suggest that general tool use, like other important LLM capabiliti Incubator evidence: # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT',
+    _learned_ff3dd341aebb,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
