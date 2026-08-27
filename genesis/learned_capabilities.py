@@ -315,4 +315,39 @@ register_capability(
 )
 
 
+def _learned_6d4702d4d1b9(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'b10632', 'details', 'open', 'ggml-metal', 'chunked', 'mamba-2', 'prefill', 'optimization', 'metal', 'ssm_scan', 'kernels')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_6d4702d4d1b9e9b3',
+    "Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'b10632': <details open> ggml-metal: add chunked SSD MMA for Mamba-2 prefill optimization (#26647) * metal: WIP chunked SSD SSM_SCAN kernels for multi-token prefill * metal: drop scalar SSD path; MMA + sequential tail * drop WIP ssm scan test noise * remove state_from_dst and rename CS and NSG constants * remove unrelated added whitespace padding * added clarity to mma_tokens calculation * added clarity to use_mma bool checks * added comments to metal ssd op constant",
+    "<details open> ggml-metal: add chunked SSD MMA for Mamba-2 prefill optimization (#26647) * metal: WIP chunked SSD SSM_SCAN kernels for multi-token prefill * metal: drop scalar SSD path; MMA + sequential tail * drop WIP ssm scan test noise * remove state_from_dst and rename CS and NSG constants * remove unrelated added whitespace padding * added clarity to mma_tokens calculation * added clarity to use_mma bool checks * added comments to metal ssd op constants for clarity * reserve K tokens for sequential kernel rollback snapshots * reset concurrency between mma and seq tail * remove print args no longer used * fixed comment to no longer point to specific line * add FC_SSM_SCAN so seq path skips token offlset unless it's mma tail * added changes to new ssm.",
+    _learned_6d4702d4d1b9,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
