@@ -5,11 +5,20 @@ from typing import Iterable
 
 
 AUTONOMOUS_LABEL = "genesis-autonomous"
+TASK_LABEL = "genesis-task"
 IN_PROGRESS_LABEL = "genesis-repair-in-progress"
 VALIDATING_LABEL = "genesis-validating"
 BLOCKED_LABEL = "genesis-blocked"
 SOLVED_LABEL = "genesis-solved"
 DEFAULT_MAX_PARALLEL = 5
+
+AUTHORIZED_TITLE_PREFIXES = (
+    "[Genesis Task]",
+    "[Genesis Repair]",
+    "[Genesis Self Improvement]",
+    "Genesis challenge:",
+    "Genesis Control:",
+)
 
 
 @dataclass(frozen=True)
@@ -55,11 +64,18 @@ def _is_active(row: dict) -> bool:
     return IN_PROGRESS_LABEL in labels or VALIDATING_LABEL in labels
 
 
+def _has_authority(row: dict, labels: set[str]) -> bool:
+    if AUTONOMOUS_LABEL in labels or TASK_LABEL in labels:
+        return True
+    title = str(row.get("title") or "").strip()
+    return any(title.startswith(prefix) for prefix in AUTHORIZED_TITLE_PREFIXES)
+
+
 def _is_eligible(row: dict) -> bool:
     if not _is_open(row) or not _number(row):
         return False
     labels = _labels(row)
-    if AUTONOMOUS_LABEL not in labels:
+    if not _has_authority(row, labels):
         return False
     if labels & {IN_PROGRESS_LABEL, VALIDATING_LABEL, BLOCKED_LABEL, SOLVED_LABEL}:
         return False
@@ -77,6 +93,10 @@ def select_issue_repair_batch(
     explicit_issue_number: int | None = None,
 ) -> IssueRepairBatch:
     """Select a bounded, fair issue-repair batch from a GitHub issue snapshot.
+
+    GitHub Issues are the authoritative task source. Existing autonomous issues,
+    canonical ``genesis-task`` issues, and explicit Genesis task-title records are
+    eligible without requiring a second queue-admission mutation.
 
     Active repairs include both the model/repair stage and independent validation.
     This means a candidate under ``genesis-validating`` still consumes a worker slot,
