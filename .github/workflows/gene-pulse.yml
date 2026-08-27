@@ -78,6 +78,16 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt
 
+      - name: Wake authoritative GitHub issue autorepair
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run github-issue-autorepair-heartbeat.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
+
       - name: Detect provider-bound coding work
         id: provider_gate
         shell: bash
