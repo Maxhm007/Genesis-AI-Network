@@ -14,7 +14,7 @@ on:
 permissions: {}
 
 env:
-  GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '3'
+  GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '5'
 
 concurrency:
   group: genesis-github-issue-autorepair-heartbeat
@@ -29,7 +29,7 @@ jobs:
       contents: read
       issues: read
     steps:
-      - name: Wake the bounded autorepair dispatcher when capacity exists
+      - name: Wake up to five independent autorepair pulses
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -58,11 +58,24 @@ jobs:
             | select(([.labels[].name] | index("genesis-solved")) == null)
           ] | length' "$RUNNER_TEMP/open-issues.json")
 
-          if (( active < GENESIS_ISSUE_REPAIR_MAX_PARALLEL && eligible > 0 )); then
-            echo "Autorepair heartbeat waking dispatcher: active=$active eligible=$eligible"
-            gh workflow run github-issue-autorepair.yml \
-              --repo "$GITHUB_REPOSITORY" \
-              --ref main
+          available=$((GENESIS_ISSUE_REPAIR_MAX_PARALLEL - active))
+          if (( available < 0 )); then
+            available=0
+          fi
+
+          launch_count="$available"
+          if (( eligible < launch_count )); then
+            launch_count="$eligible"
+          fi
+
+          if (( launch_count > 0 )); then
+            echo "Autorepair heartbeat launching $launch_count independent pulse(s): active=$active eligible=$eligible capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"
+            for lane in $(seq 1 "$launch_count"); do
+              echo "Dispatching repair pulse $lane/$launch_count"
+              gh workflow run github-issue-autorepair.yml \
+                --repo "$GITHUB_REPOSITORY" \
+                --ref main
+            done
           else
-            echo "Autorepair heartbeat idle: active=$active eligible=$eligible"
+            echo "Autorepair heartbeat idle: active=$active eligible=$eligible capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"
           fi
