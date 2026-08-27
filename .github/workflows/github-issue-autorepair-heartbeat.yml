@@ -5,11 +5,14 @@ on:
     workflows: ["Gene Pulse"]
     types: [completed]
   workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
   push:
     branches: [main]
     paths:
       - '.github/workflows/github-issue-autorepair-heartbeat.yml'
       - '.github/workflows/github-issue-autorepair.yml'
+      - 'genesis/issue_worker_pool.py'
 
 permissions: {}
 
@@ -27,9 +30,9 @@ jobs:
     permissions:
       actions: write
       contents: read
-      issues: write
+      issues: read
     steps:
-      - name: Admit waiting Genesis tasks and wake up to five independent autorepair pulses
+      - name: Select and wake up to five independent autorepair pulses
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -40,46 +43,7 @@ jobs:
             --repo "$GITHUB_REPOSITORY" \
             --state open \
             --limit 500 \
-            --json number,title,labels \
-            > "$RUNNER_TEMP/open-issues.json"
-
-          # GitHub Issues are the authoritative Genesis task queue. Older task
-          # records may have genesis-task without genesis-autonomous, and owner
-          # created [Genesis Task] records may initially have no labels. Admit
-          # those records automatically while leaving reports, operational
-          # channels and privileged Action-repair issues on their own lanes.
-          while IFS= read -r n; do
-            [[ -n "$n" ]] || continue
-            echo "Admitting waiting Genesis task #$n to autonomous repair."
-            gh issue edit "$n" \
-              --repo "$GITHUB_REPOSITORY" \
-              --add-label genesis-task \
-              --add-label genesis-autonomous
-          done < <(jq -r '
-            .[]
-            | ([.labels[].name] // []) as $labels
-            | select(
-                ($labels | index("genesis-task")) != null or
-                (.title | startswith("[Genesis Task]")) or
-                (.title | startswith("[Genesis Repair]")) or
-                (.title | startswith("[Genesis Self Improvement]")) or
-                (.title | startswith("Genesis challenge:")) or
-                (.title | startswith("Genesis Control:"))
-              )
-            | select(($labels | index("genesis-autonomous")) == null)
-            | select(($labels | index("genesis-repair-in-progress")) == null)
-            | select(($labels | index("genesis-validating")) == null)
-            | select(($labels | index("genesis-blocked")) == null)
-            | select(($labels | index("genesis-solved")) == null)
-            | .number
-          ' "$RUNNER_TEMP/open-issues.json")
-
-          # Refresh after intake so capacity decisions see the newly admitted backlog.
-          gh issue list \
-            --repo "$GITHUB_REPOSITORY" \
-            --state open \
-            --limit 500 \
-            --json number,labels \
+            --json number,title,updatedAt,labels \
             > "$RUNNER_TEMP/open-issues.json"
 
           active=$(jq '[.[]
@@ -89,13 +53,25 @@ jobs:
               )
           ] | length' "$RUNNER_TEMP/open-issues.json")
 
-          eligible=$(jq '[.[]
-            | select(([.labels[].name] | index("genesis-autonomous")) != null)
-            | select(([.labels[].name] | index("genesis-repair-in-progress")) == null)
-            | select(([.labels[].name] | index("genesis-validating")) == null)
-            | select(([.labels[].name] | index("genesis-blocked")) == null)
-            | select(([.labels[].name] | index("genesis-solved")) == null)
-          ] | length' "$RUNNER_TEMP/open-issues.json")
+          eligible_filter='[
+            .[]
+            | ([.labels[].name] // []) as $labels
+            | select(
+                ($labels | index("genesis-autonomous")) != null or
+                ($labels | index("genesis-task")) != null or
+                (.title | startswith("[Genesis Task]")) or
+                (.title | startswith("[Genesis Repair]")) or
+                (.title | startswith("[Genesis Self Improvement]")) or
+                (.title | startswith("Genesis challenge:")) or
+                (.title | startswith("Genesis Control:"))
+              )
+            | select(($labels | index("genesis-repair-in-progress")) == null)
+            | select(($labels | index("genesis-validating")) == null)
+            | select(($labels | index("genesis-blocked")) == null)
+            | select(($labels | index("genesis-solved")) == null)
+          ] | sort_by(.updatedAt, .number)'
+
+          eligible=$(jq "$eligible_filter | length" "$RUNNER_TEMP/open-issues.json")
 
           available=$((GENESIS_ISSUE_REPAIR_MAX_PARALLEL - active))
           if (( available < 0 )); then
@@ -108,12 +84,16 @@ jobs:
           fi
 
           if (( launch_count > 0 )); then
-            echo "Autorepair heartbeat launching $launch_count independent pulse(s): active=$active eligible=$eligible capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"
-            for lane in $(seq 1 "$launch_count"); do
-              echo "Dispatching repair pulse $lane/$launch_count"
+            echo "Autorepair heartbeat launching $launch_count explicit independent pulse(s): active=$active eligible=$eligible capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"
+            mapfile -t selected < <(jq -r --argjson limit "$launch_count" "$eligible_filter | .[:\$limit][] | .number" "$RUNNER_TEMP/open-issues.json")
+            lane=0
+            for issue_number in "${selected[@]}"; do
+              lane=$((lane + 1))
+              echo "Dispatching repair pulse $lane/$launch_count for issue #$issue_number"
               gh workflow run github-issue-autorepair.yml \
                 --repo "$GITHUB_REPOSITORY" \
-                --ref main
+                --ref main \
+                -f issue_number="$issue_number"
             done
           else
             echo "Autorepair heartbeat idle: active=$active eligible=$eligible capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"
