@@ -490,4 +490,39 @@ register_capability(
 )
 
 
+def _learned_872ec47e54e2(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'b10593', 'details', 'open', 'deepseekv4', 'rollback', 'with', 'multi-seq', 'model', 'loading', 'make', 'pending')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_872ec47e54e29dcd',
+    "Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'b10593': <details open> DeepseekV4: fix rollback with multi-seq (#26756) * DeepseekV4: fix rollback with multi-seq * fix model loading * make pending rollback single use * only clear cache for seq_id for full load * add assert for compress ratio * make graph topology static * pass true instead of flags in clear_compressed * cont : clean-up + TODOs --------- Co-authored-by: Georgi Gerganov <ggerganov@gmail.com> </details> **Website:** - <https://llama.app> **Attestat",
+    '<details open> DeepseekV4: fix rollback with multi-seq (#26756) * DeepseekV4: fix rollback with multi-seq * fix model loading * make pending rollback single use * only clear cache for seq_id for full load * add assert for compress ratio * make graph topology static * pass true instead of flags in clear_compressed * cont : clean-up + TODOs --------- Co-authored-by: Georgi Gerganov <ggerganov@gmail.com> </details> **Website:** - <https://llama.app> **Attestations:** - <https://github.com/ggml-org/llama.cpp/attestations/42415702> **macOS/iOS:** - [macOS Apple Silicon (arm64)](https://github.com/ggml-org/llama.cpp/releases/download/b10593/llama-b10593-bin-macos-arm64.tar.gz) - macOS Apple Silicon (arm64, KleidiAI enabled) [DISABLED](https://github.com/ggml-org/llama.cpp/pull/23780) - [macOS Intel (x64)](https://github.com/ggml-org/llama.cpp/releases/download/b10593/llama-b10593-bin-macos-x64.tar.gz) - [iOS XCFramework](https://github.com/ggml-org/llama.cpp/releases/download/b10593/llama-b10593-xcframework.zip) **Linux:** - [Ubuntu x64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/b10593/llama-b10593-bin-ubuntu-x64.tar.gz) - [Ubuntu arm64 (CPU)](https://github.com/ggml-',
+    _learned_872ec47e54e2,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
