@@ -126,7 +126,7 @@ jobs:
         with:
           ref: main
           fetch-depth: 0
-      - name: Open or update exact candidate PR
+      - name: Open or update exact candidate PR when repository policy permits
         id: pr
         env:
           GH_TOKEN: ${{ github.token }}
@@ -146,12 +146,20 @@ jobs:
           Candidate SHA: \`${CANDIDATE_SHA}\`
           EOF
           existing=$(gh pr list --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --state open --json number --jq '.[0].number // empty')
+          pr=''
           if [[ -n "$existing" ]]; then
             gh pr edit "$existing" --repo "$GITHUB_REPOSITORY" --body-file "$RUNNER_TEMP/body.md"
             pr="$existing"
           else
-            url=$(gh pr create --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --title "Genesis issue repair #${ISSUE_NUMBER}" --body-file "$RUNNER_TEMP/body.md")
-            pr=${url##*/}
+            if url=$(gh pr create --repo "$GITHUB_REPOSITORY" --head "$BRANCH" --base main --title "Genesis issue repair #${ISSUE_NUMBER}" --body-file "$RUNNER_TEMP/body.md" 2>"$RUNNER_TEMP/pr-create.err"); then
+              pr=${url##*/}
+            elif grep -Fq 'GitHub Actions is not permitted to create or approve pull requests' "$RUNNER_TEMP/pr-create.err"; then
+              cat "$RUNNER_TEMP/pr-create.err"
+              echo 'Repository policy disallows Actions-created PRs; continuing with the same independently validated exact-SHA promotion path.'
+            else
+              cat "$RUNNER_TEMP/pr-create.err" >&2
+              exit 1
+            fi
           fi
           echo "pr_number=$pr" >> "$GITHUB_OUTPUT"
 
