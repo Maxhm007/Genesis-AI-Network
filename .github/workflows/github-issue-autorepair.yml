@@ -9,18 +9,14 @@ on:
         description: Optional authorized GitHub issue number; blank claims one available repair lane
         required: false
         default: ''
-      refill_round:
-        description: Internal bounded refill generation
-        required: false
-        default: '0'
-  schedule:
-    - cron: '*/5 * * * *'
   push:
     branches: [main]
     paths:
       - '.github/workflows/github-issue-autorepair.yml'
       - '.github/workflows/github-issue-autorepair-worker.yml'
       - '.github/workflows/github-issue-autorepair-integration.yml'
+      - 'genesis/issue_worker_pool.py'
+      - 'scripts/select_issue_repair_batch.py'
 
 permissions: {}
 
@@ -48,6 +44,7 @@ jobs:
               gh label create "$name" --repo "$GITHUB_REPOSITORY" --color "$color" --description "$description"
             fi
           }
+          ensure_label genesis-task 0e8a16 'Authoritative GitHub Issue backing for Genesis autonomous tasks'
           ensure_label genesis-autonomous 1f883d 'Authorized for Genesis autonomous repair'
           ensure_label genesis-validating 0969da 'Genesis candidate is under independent validation'
           ensure_label genesis-blocked d1242f 'Genesis safely blocked this issue pending narrower context or review'
@@ -55,19 +52,21 @@ jobs:
           ensure_label genesis-repair-in-progress d4c5f9 'Genesis is currently processing this autonomous issue'
 
   plan:
-    if: github.event_name != 'push' && (github.event_name != 'issues' || github.event.label.name == 'genesis-autonomous')
+    if: >-
+      github.event_name != 'push' &&
+      (github.event_name != 'issues' ||
+       github.event.label.name == 'genesis-autonomous' ||
+       github.event.label.name == 'genesis-task')
     runs-on: ubuntu-latest
     permissions:
       contents: read
       issues: write
     concurrency:
-      group: genesis-github-issue-autorepair-admission
+      group: genesis-github-issue-autorepair-admission-${{ inputs.issue_number || github.event.issue.number || github.run_id }}
       cancel-in-progress: false
     outputs:
       issue_numbers: ${{ steps.plan.outputs.issue_numbers }}
       has_work: ${{ steps.plan.outputs.has_work }}
-      refill_round: ${{ steps.plan.outputs.refill_round }}
-      allow_refill: ${{ steps.plan.outputs.allow_refill }}
     steps:
       - uses: actions/checkout@v4
         with:
@@ -84,30 +83,24 @@ jobs:
         run: |
           set -euo pipefail
 
-          round='0'
           explicit=''
-          allow_refill='true'
           if [[ '${{ github.event_name }}' == 'workflow_dispatch' ]]; then
-            round='${{ inputs.refill_round }}'
             explicit='${{ inputs.issue_number }}'
-          fi
-          [[ "$round" =~ ^[0-9]+$ ]] || round='0'
-          if (( round > 1 )); then
-            round='1'
+          elif [[ '${{ github.event_name }}' == 'issues' ]]; then
+            explicit='${{ github.event.issue.number }}'
           fi
           if [[ -n "$explicit" ]]; then
             [[ "$explicit" =~ ^[0-9]+$ ]] || {
               echo "Invalid issue number: $explicit" >&2
               exit 1
             }
-            allow_refill='false'
           fi
 
           gh issue list \
             --repo "$GITHUB_REPOSITORY" \
             --state open \
             --limit 500 \
-            --json number,state,updatedAt,labels \
+            --json number,title,state,updatedAt,labels \
             > "$RUNNER_TEMP/open-issues.json"
 
           selector=(python scripts/select_issue_repair_batch.py
@@ -136,8 +129,11 @@ jobs:
 
           while IFS= read -r n; do
             [[ -n "$n" ]] || continue
+            # Admission is the authoritative mutation boundary. Canonical
+            # genesis-task/title records are promoted here, never by heartbeat.
             gh issue edit "$n" \
               --repo "$GITHUB_REPOSITORY" \
+              --add-label genesis-autonomous \
               --add-label genesis-repair-in-progress
             claimed="$(jq -c --argjson n "$n" '. + [$n]' <<<"$claimed")"
           done < <(jq -r '.[]' <<<"$selected")
@@ -149,8 +145,6 @@ jobs:
 
           echo "issue_numbers=$claimed" >> "$GITHUB_OUTPUT"
           echo "has_work=$has_work" >> "$GITHUB_OUTPUT"
-          echo "refill_round=$round" >> "$GITHUB_OUTPUT"
-          echo "allow_refill=$allow_refill" >> "$GITHUB_OUTPUT"
           echo "Genesis repair admission: $plan_json; single_lane_selection=$selected; claimed=$claimed"
           claims_committed='true'
 
@@ -193,49 +187,18 @@ jobs:
     if: >-
       always() &&
       needs.plan.outputs.has_work == 'true' &&
-      needs.plan.outputs.allow_refill == 'true' &&
-      needs.plan.outputs.refill_round == '0' &&
       needs.integrate_workers.result != 'cancelled'
     runs-on: ubuntu-latest
     permissions:
       actions: write
       contents: read
-      issues: read
     steps:
-      - name: Refill one repair lane if capacity remains
+      - name: Wake read-only heartbeat to refill independent repair lanes
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-
-          gh issue list \
+          gh workflow run github-issue-autorepair-heartbeat.yml \
             --repo "$GITHUB_REPOSITORY" \
-            --state open \
-            --limit 500 \
-            --json number,labels \
-            > "$RUNNER_TEMP/open-issues.json"
-
-          active=$(jq '[.[]
-            | select(
-                (([.labels[].name] | index("genesis-repair-in-progress")) != null) or
-                (([.labels[].name] | index("genesis-validating")) != null)
-              )
-          ] | length' "$RUNNER_TEMP/open-issues.json")
-          eligible=$(jq '[.[]
-            | select(([.labels[].name] | index("genesis-autonomous")) != null)
-            | select(([.labels[].name] | index("genesis-repair-in-progress")) == null)
-            | select(([.labels[].name] | index("genesis-validating")) == null)
-            | select(([.labels[].name] | index("genesis-blocked")) == null)
-            | select(([.labels[].name] | index("genesis-solved")) == null)
-          ] | length' "$RUNNER_TEMP/open-issues.json")
-
-          if (( active < GENESIS_ISSUE_REPAIR_MAX_PARALLEL && eligible > 0 )); then
-            echo "Capacity is available; dispatching one bounded refill pulse."
-            gh workflow run github-issue-autorepair.yml \
-              --repo "$GITHUB_REPOSITORY" \
-              --ref main \
-              -f refill_round=1
-          else
-            echo "No safe refill required: active=$active eligible=$eligible"
-          fi
+            --ref main
