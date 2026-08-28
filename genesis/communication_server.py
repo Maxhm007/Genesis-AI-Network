@@ -119,7 +119,15 @@ class GenesisCommunicationHandler(BaseHTTPRequestHandler):
             self._serve_html("index.html")
             return
         if self.path in {"/owner", "/owner/", "/owner.html"}:
-            if not self._is_loopback() and not type(self).auth_token:
+            try:
+                result = type(self).communicator.reply(
+                    str(payload.get("sender", "anonymous")),
+                    str(payload.get("message", "")),
+                )
+            except (ValueError, json.JSONDecodeError) as exc:
+                self._json(400, {"error": str(exc)})
+            except Exception as exc:
+                self._json(500, {"error": type(exc).__name__})
                 self._json(403, {"error": "owner_dashboard_requires_private_authenticated_access"})
                 return
             self._serve_html("owner.html")
