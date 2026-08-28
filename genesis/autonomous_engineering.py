@@ -146,29 +146,33 @@ class AutonomousEngineeringLoop:
 
     @staticmethod
     def _is_qwen_provider(provider) -> bool:
-        """Qwen remains available to non-coding specialists, never to code execution."""
+        """Return whether a provider is from the local Qwen family."""
         return "qwen" in str(getattr(provider, "name", "")).strip().lower()
 
     def _coding_provider(self):
-        """Return the best available non-Qwen, non-bootstrap coding provider.
+        """Return the best eligible coder, preferring non-Qwen but allowing Qwen fallback.
 
-        The small local Qwen runtime is useful for bounded discovery/review tasks,
-        but it must not be a blocking implementation dependency. Coding either
-        uses another eligible provider or checkpoints without consuming repair
-        budget.
+        A locally available Qwen model must not deadlock autonomous repair when it
+        is the only trained coding/reasoning provider. Non-Qwen providers remain
+        preferred when available. Every generated candidate still has to pass the
+        normal repository tests, Security inspection, and independent validators
+        before promotion, so model fallback never bypasses quality or safety gates.
         """
         candidates = []
         for provider in self.providers.available_providers():
             profile = IntelligenceRouter.profile(provider)
-            if profile.name == "genesis-bootstrap" or self._is_qwen_provider(provider):
+            if profile.name == "genesis-bootstrap":
                 continue
             if "coding" not in profile.capabilities and "reasoning" not in profile.capabilities:
                 continue
-            candidates.append((profile.resource_cost, -profile.reliability, profile.name, provider))
+            qwen_fallback = 1 if self._is_qwen_provider(provider) else 0
+            candidates.append(
+                (qwen_fallback, profile.resource_cost, -profile.reliability, profile.name, provider)
+            )
         if not candidates:
             return None
-        candidates.sort(key=lambda item: (item[0], item[1], item[2]))
-        return candidates[0][3]
+        candidates.sort(key=lambda item: (item[0], item[1], item[2], item[3]))
+        return candidates[0][4]
 
     @staticmethod
     def _recorded_team_context(runtime: Path, task_id: str, max_bytes: int) -> str:
@@ -280,7 +284,7 @@ class AutonomousEngineeringLoop:
             "coding_status": "started",
             "candidate": None,
             "candidate_security": None,
-            "provider_policy": "qwen_excluded_from_coding",
+            "provider_policy": "prefer_non_qwen_qwen_validated_fallback",
             "coding_strategy": None,
         }
         try:
@@ -292,9 +296,9 @@ class AutonomousEngineeringLoop:
             if provider is None:
                 provider = self._coding_provider()
             if provider is None:
-                self.queue.pause(task.task_id, "waiting_for_non_qwen_coding_provider")
+                self.queue.pause(task.task_id, "waiting_for_eligible_coding_provider")
                 attempt["coding_status"] = "waiting_for_coding_provider"
-                attempt["error"] = "no_non_qwen_coding_provider_available"
+                attempt["error"] = "no_eligible_coding_provider_available"
                 return attempt
 
             attempt["coding_strategy"] = (

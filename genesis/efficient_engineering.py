@@ -52,13 +52,24 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
 
     @staticmethod
     def _github_issue_fairness_key(task) -> tuple:
-        """Order Issue work so older untouched issues run once, then retries rotate fairly."""
+        """Keep an Issue's age across generations so newer Issues cannot starve it.
+
+        Priority-100 work is an emergency lane. All other Issue-backed engineering
+        is ordered by GitHub Issue number first, which is monotonic creation order
+        inside one repository. A retry generation therefore retains the age of its
+        Issue instead of becoming younger than every newly created first generation.
+        """
         issue_number = int(task.payload.get("github_issue_number") or 0)
         generation = int(task.payload.get("work_generation") or 1)
-        untouched_first_generation = generation == 1 and task.attempt_count == 0 and task.state == "new"
-        if untouched_first_generation:
-            return (0, issue_number, task.created_at, task.task_id)
-        return (1, task.updated_at, issue_number, generation, task.task_id)
+        emergency_lane = 0 if int(task.priority) >= 100 else 1
+        return (
+            emergency_lane,
+            issue_number,
+            task.updated_at,
+            generation,
+            task.attempt_count,
+            task.task_id,
+        )
 
     def _eligible_task(self, task, attempted: set[str]) -> bool:
         if task.task_id in attempted or task.module_id not in ENGINEERING_MODULES:
@@ -73,7 +84,7 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
         attempted = attempted or set()
         candidates = []
         for state in ("assigned", "new", "failed", "blocked"):
-            for task in self.queue.list(state=state, limit=100):
+            for task in self.queue.list(state=state, limit=5000):
                 if self._eligible_task(task, attempted):
                     candidates.append(task)
 
