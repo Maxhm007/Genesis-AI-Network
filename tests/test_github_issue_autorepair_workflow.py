@@ -6,14 +6,15 @@ SOLVER = Path(".github/workflows/github-issue-autorepair-worker.yml")
 INTEGRATION = Path(".github/workflows/github-issue-autorepair-integration.yml")
 
 
-def test_dispatcher_runs_one_issue_per_independent_repair_lane() -> None:
+def test_dispatcher_serializes_one_global_repair_lane() -> None:
     text = DISPATCHER.read_text(encoding="utf-8")
 
-    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '5'" in text
+    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '1'" in text
     assert "issue_number:" in text
-    assert "group: genesis-github-issue-autorepair-admission-${{ inputs.issue_number || github.event.issue.number || github.run_id }}" in text
+    assert "group: genesis-autonomous-single-lane" in text
+    assert "group: genesis-github-issue-autorepair-admission" in text
     assert "solve_workers:" in text
-    assert text.count("max-parallel: 1") >= 2
+    assert text.count("max-parallel: 1") >= 3
     assert "github-issue-autorepair-worker.yml" in text
     assert "integrate_workers:" in text
     assert "github-issue-autorepair-integration.yml" in text
@@ -47,15 +48,16 @@ def test_solver_keeps_reservation_until_serialized_integration() -> None:
     assert "intentionally not released here" in text
 
 
-def test_solver_uses_bounded_qwen_first_deepseek_retry_escalation() -> None:
+def test_solver_uses_bounded_qwen_coder_retry_escalation() -> None:
     text = SOLVER.read_text(encoding="utf-8")
 
     assert "GENESIS_PROVIDER_NAME: genesis-adaptive-github-issue-autorepair" in text
     assert "GENESIS_REPAIR_FALLBACK_MODEL:" in text
     assert "Qwen/Qwen2.5-Coder-0.5B-Instruct" in text
     assert "GENESIS_REPAIR_ESCALATION_MODEL:" in text
-    assert "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" in text
-    assert "GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS: '192'" in text
+    assert "Qwen/Qwen2.5-Coder-1.5B-Instruct" in text
+    assert "GENESIS_PROVIDER_MAX_NEW_TOKENS: '512'" in text
+    assert "GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS: '512'" in text
     assert "GENESIS_PROVIDER_TIMEOUT_SECONDS: '300'" in text
     assert "scripts/pulse_coding_provider.py" in text
     assert '--model "$GENESIS_REPAIR_FALLBACK_MODEL"' in text
@@ -64,7 +66,7 @@ def test_solver_uses_bounded_qwen_first_deepseek_retry_escalation() -> None:
     assert "snapshot_download(model_id)" in text
     assert "genesis-github-issue-autorepair-${{ runner.os }}-${{ steps.model_cache_key.outputs.model_key }}-v1" in text
     assert "scripts/local_reasoning_provider.py --model" not in text
-    assert "Qwen/Qwen3-1.7B" not in text
+    assert "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B" not in text
 
 
 def test_integration_rebases_onto_latest_main_before_all_validation() -> None:
