@@ -6,6 +6,7 @@ import re
 
 DEFAULT_MAX_ACTIVE_AUTONOMOUS_ISSUES = 20
 MAX_CONFIGURED_BACKLOG = 500
+BACKLOG_REDUCTION_MODE_ENV = "GENESIS_BACKLOG_REDUCTION_MODE"
 GENESIS_TASK_MARKER = "<!-- genesis-task-id:"
 GENESIS_TASK_LABEL = "genesis-task"
 
@@ -53,8 +54,21 @@ _TASK_TYPE_RE = re.compile(r"^- \*\*Task type:\*\* `([^`]+)`", re.MULTILINE)
 _SOURCE_RE = re.compile(r"^- \*\*Source:\*\* `([^`]+)`", re.MULTILINE)
 
 
+def _truthy(value: object) -> bool:
+    if isinstance(value, bool):
+        return value
+    if isinstance(value, int):
+        return value != 0
+    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
 def configured_max_active(env: dict[str, str] | None = None) -> int:
     values = os.environ if env is None else env
+    # Backlog-reduction mode intentionally admits zero *new* capacity-limited
+    # tasks. Repair/security/action/owner work still bypasses this cap through
+    # bypasses_backpressure(), so safety-critical work remains routable.
+    if _truthy(values.get(BACKLOG_REDUCTION_MODE_ENV)):
+        return 0
     raw = str(values.get("GENESIS_MAX_ACTIVE_AUTONOMOUS_ISSUES", "") or "").strip()
     if not raw:
         return DEFAULT_MAX_ACTIVE_AUTONOMOUS_ISSUES
@@ -65,14 +79,6 @@ def configured_max_active(env: dict[str, str] | None = None) -> int:
     if parsed < 1:
         return DEFAULT_MAX_ACTIVE_AUTONOMOUS_ISSUES
     return min(parsed, MAX_CONFIGURED_BACKLOG)
-
-
-def _truthy(value: object) -> bool:
-    if isinstance(value, bool):
-        return value
-    if isinstance(value, int):
-        return value != 0
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
 
 
 def bypasses_backpressure(task) -> bool:

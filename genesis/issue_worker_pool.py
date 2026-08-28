@@ -10,6 +10,7 @@ IN_PROGRESS_LABEL = "genesis-repair-in-progress"
 VALIDATING_LABEL = "genesis-validating"
 BLOCKED_LABEL = "genesis-blocked"
 SOLVED_LABEL = "genesis-solved"
+ACTION_FAILURE_LABEL = "genesis-action-failure"
 DEFAULT_MAX_PARALLEL = 5
 
 AUTHORIZED_TITLE_PREFIXES = (
@@ -18,6 +19,23 @@ AUTHORIZED_TITLE_PREFIXES = (
     "[Genesis Self Improvement]",
     "Genesis challenge:",
     "Genesis Control:",
+)
+
+_HIGH_PRIORITY_TASK_PREFIXES = (
+    "[genesis task] self repair",
+    "[genesis task] security repair",
+    "[genesis task] action repair",
+    "[genesis task] workflow repair",
+    "[genesis task] issue repair",
+)
+_LOW_PRIORITY_TASK_MARKERS = (
+    "capability",
+    "benchmark",
+    "application development",
+    "research",
+    "model evaluation",
+    "self improvement",
+    "self upgrade",
 )
 
 
@@ -82,8 +100,32 @@ def _is_eligible(row: dict) -> bool:
     return True
 
 
-def _sort_key(row: dict) -> tuple[str, int]:
-    return (str(row.get("updatedAt") or row.get("updated_at") or ""), _number(row))
+def _drain_priority(row: dict) -> int:
+    """Prefer backlog-closing repair work without starving older work in a class."""
+    title = str(row.get("title") or "").strip().lower()
+    labels = _labels(row)
+    if (
+        title.startswith("[genesis repair]")
+        or title.startswith("genesis control:")
+        or title.startswith(_HIGH_PRIORITY_TASK_PREFIXES)
+        or ACTION_FAILURE_LABEL in labels
+    ):
+        return 0
+    if title.startswith("genesis challenge:"):
+        return 1
+    if title.startswith("[genesis self improvement]"):
+        return 3
+    if title.startswith("[genesis task]") and any(marker in title for marker in _LOW_PRIORITY_TASK_MARKERS):
+        return 3
+    return 2
+
+
+def _sort_key(row: dict) -> tuple[int, str, int]:
+    return (
+        _drain_priority(row),
+        str(row.get("updatedAt") or row.get("updated_at") or ""),
+        _number(row),
+    )
 
 
 def select_issue_repair_batch(
@@ -92,7 +134,7 @@ def select_issue_repair_batch(
     max_parallel: int = DEFAULT_MAX_PARALLEL,
     explicit_issue_number: int | None = None,
 ) -> IssueRepairBatch:
-    """Select a bounded, fair issue-repair batch from a GitHub issue snapshot.
+    """Select a bounded, backlog-draining issue-repair batch.
 
     GitHub Issues are the authoritative task source. Existing autonomous issues,
     canonical ``genesis-task`` issues, and explicit Genesis task-title records are
@@ -102,9 +144,11 @@ def select_issue_repair_batch(
     This means a candidate under ``genesis-validating`` still consumes a worker slot,
     preventing validation-heavy work from causing unbounded admission.
 
-    Selection is deterministic: least-recently-updated eligible issues win, then
-    issue number. An explicit manual issue is admitted only if it is currently
-    eligible and capacity exists.
+    Selection is deterministic and drain-aware: repair/security/control work wins
+    before challenge/general work, while research/self-improvement/capability work
+    is drained last. Within each class, least-recently-updated wins, then issue
+    number, so fairness is preserved. An explicit manual issue is admitted only if
+    it is currently eligible and capacity exists.
     """
 
     rows = [row for row in issues if isinstance(row, dict) and _is_open(row)]
