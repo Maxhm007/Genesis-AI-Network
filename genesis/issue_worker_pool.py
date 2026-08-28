@@ -21,6 +21,15 @@ AUTHORIZED_TITLE_PREFIXES = (
     "Genesis Control:",
 )
 
+# These Issue-backed task families have dedicated non-code execution/review lanes.
+# The generic GitHub autorepair worker must not force them through a coding model.
+_NON_CODE_TASK_PREFIXES = (
+    "[genesis self improvement]",
+    "[genesis task] competitive ai improvement",
+    "[genesis task] competitive reference refresh",
+    "[genesis task] immortality research",
+)
+
 _HIGH_PRIORITY_TASK_PREFIXES = (
     "[genesis task] self repair",
     "[genesis task] security repair",
@@ -89,11 +98,19 @@ def _has_authority(row: dict, labels: set[str]) -> bool:
     return any(title.startswith(prefix) for prefix in AUTHORIZED_TITLE_PREFIXES)
 
 
+def _uses_generic_code_repair(row: dict) -> bool:
+    """Return False for Issue types that already have a specialist execution lane."""
+    title = str(row.get("title") or "").strip().lower()
+    return not title.startswith(_NON_CODE_TASK_PREFIXES)
+
+
 def _is_eligible(row: dict) -> bool:
     if not _is_open(row) or not _number(row):
         return False
     labels = _labels(row)
     if not _has_authority(row, labels):
+        return False
+    if not _uses_generic_code_repair(row):
         return False
     if labels & {IN_PROGRESS_LABEL, VALIDATING_LABEL, BLOCKED_LABEL, SOLVED_LABEL}:
         return False
@@ -146,9 +163,11 @@ def select_issue_repair_batch(
 
     Selection is deterministic and drain-aware: repair/security/control work wins
     before challenge/general work, while research/self-improvement/capability work
-    is drained last. Within each class, least-recently-updated wins, then issue
-    number, so fairness is preserved. An explicit manual issue is admitted only if
-    it is currently eligible and capacity exists.
+    is drained last. Dedicated non-code research/self-improvement task families are
+    excluded from this generic coding pool and remain executable through their
+    specialist Issue-backed workers. Within each class, least-recently-updated wins,
+    then issue number, so fairness is preserved. An explicit manual issue is admitted
+    only if it is currently eligible and capacity exists.
     """
 
     rows = [row for row in issues if isinstance(row, dict) and _is_open(row)]
