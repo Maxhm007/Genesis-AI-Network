@@ -90,6 +90,8 @@ jobs:
 
       - name: Detect provider-bound coding work
         id: provider_gate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         shell: bash
         run: python scripts/pulse_provider_recovery.py inspect --github-output "$GITHUB_OUTPUT"
 
