@@ -52,22 +52,23 @@ class EfficientAutonomousEngineeringLoop(AutonomousEngineeringLoop):
 
     @staticmethod
     def _github_issue_fairness_key(task) -> tuple:
-        """Keep an Issue's age across generations so newer Issues cannot starve it.
+        """Keep Issue age while rotating retries fairly through the single lane.
 
-        Priority-100 work is an emergency lane. All other Issue-backed engineering
-        is ordered by GitHub Issue number first, which is monotonic creation order
-        inside one repository. A retry generation therefore retains the age of its
-        Issue instead of becoming younger than every newly created first generation.
+        Priority-100 work is an emergency lane. Otherwise, tasks with fewer
+        attempts receive the next turn; GitHub Issue number breaks ties so older
+        Issues retain age priority across generations. This prevents one repeatedly
+        failing old Issue from monopolizing the single repair lane while still
+        draining older work before equally attempted newer work.
         """
         issue_number = int(task.payload.get("github_issue_number") or 0)
         generation = int(task.payload.get("work_generation") or 1)
         emergency_lane = 0 if int(task.priority) >= 100 else 1
         return (
             emergency_lane,
+            task.attempt_count,
             issue_number,
             task.updated_at,
             generation,
-            task.attempt_count,
             task.task_id,
         )
 
