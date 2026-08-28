@@ -98,7 +98,7 @@ env:
   GENESIS_SMTP_APP_PASSWORD: ${{ secrets.GENESIS_SMTP_APP_PASSWORD }}
 
 concurrency:
-  group: genesis-proactive-development
+  group: genesis-autonomous-single-lane
   cancel-in-progress: false
 
 jobs:
