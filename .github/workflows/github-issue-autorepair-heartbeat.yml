@@ -23,6 +23,7 @@ on:
 permissions: {}
 
 env:
+  # One authoritative autonomous repair/development lane at a time.
   GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '1'
   GENESIS_ISSUE_REPAIR_STALE_MINUTES: '60'
 
