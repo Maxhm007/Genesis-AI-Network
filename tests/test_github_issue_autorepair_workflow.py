@@ -6,12 +6,13 @@ SOLVER = Path(".github/workflows/github-issue-autorepair-worker.yml")
 INTEGRATION = Path(".github/workflows/github-issue-autorepair-integration.yml")
 
 
-def test_dispatcher_serializes_one_global_repair_lane() -> None:
+def test_dispatcher_serializes_one_authoritative_repair_lane_without_shared_control_group() -> None:
     text = DISPATCHER.read_text(encoding="utf-8")
 
     assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '1'" in text
     assert "issue_number:" in text
-    assert "group: genesis-autonomous-single-lane" in text
+    assert "group: genesis-autonomous-single-lane" not in text
+    assert "shared top-level group can discard pending repair runs" in text
     assert "group: genesis-github-issue-autorepair-admission" in text
     assert "solve_workers:" in text
     assert text.count("max-parallel: 1") >= 3
