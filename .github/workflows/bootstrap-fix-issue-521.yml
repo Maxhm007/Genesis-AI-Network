@@ -9,10 +9,6 @@ on:
 permissions:
   contents: write
 
-concurrency:
-  group: genesis-autonomous-single-lane
-  cancel-in-progress: false
-
 jobs:
   repair-baseline:
     runs-on: ubuntu-latest
