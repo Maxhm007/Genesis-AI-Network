@@ -2,16 +2,21 @@ name: Genesis Autonomy Heartbeat
 
 on:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
+  workflow_run:
+    workflows: ["Genesis GitHub Issue Autorepair"]
+    types: [completed]
   workflow_dispatch:
   push:
     branches: [main]
     paths:
       - ".github/workflows/autonomy-heartbeat.yml"
+      - "genesis/pulse.py"
 
 permissions:
   actions: write
   contents: read
+  issues: read
 
 concurrency:
   group: genesis-autonomy-heartbeat
@@ -23,7 +28,15 @@ jobs:
     env:
       GH_REPO: ${{ github.repository }}
     steps:
-      - name: Check for fresh autonomous repair activity
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Measure repository pressure and active autonomous work
         id: gate
         env:
           GH_TOKEN: ${{ github.token }}
@@ -67,13 +80,74 @@ jobs:
             done
           done
 
-          # Only work that can still be executing blocks a new Pulse. A stale
-          # queued run that GitHub refuses to cancel is observable but inert.
           if (( ${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 )); then
-            echo 'busy=true' >> "$GITHUB_OUTPUT"
+            busy=true
           else
-            echo 'busy=false' >> "$GITHUB_OUTPUT"
+            busy=false
           fi
+
+          gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --limit 500 \
+            --json number,title,labels \
+            > "$RUNNER_TEMP/open-issues.json"
+
+          backlog_count=$(jq '[
+            .[]
+            | ([.labels[].name] // []) as $labels
+            | select(
+                ($labels | index("genesis-autonomous")) != null or
+                ($labels | index("genesis-task")) != null or
+                (.title | startswith("[Genesis Task]")) or
+                (.title | startswith("[Genesis Repair]")) or
+                (.title | startswith("[Genesis Self Improvement]")) or
+                (.title | startswith("Genesis challenge:")) or
+                (.title | startswith("Genesis Control:"))
+              )
+            | select(($labels | index("genesis-blocked")) == null)
+            | select(($labels | index("genesis-solved")) == null)
+          ] | length' "$RUNNER_TEMP/open-issues.json")
+          action_failure_count=$(jq '[.[] | select(([.labels[].name] | index("genesis-action-failure")) != null)] | length' "$RUNNER_TEMP/open-issues.json")
+
+          completed=$(gh api "/repos/${GITHUB_REPOSITORY}/actions/workflows/gene-pulse.yml/runs?branch=main&status=completed&per_page=1")
+          last_completed=$(jq -r '.workflow_runs[0].updated_at // empty' <<<"$completed")
+          last_completed_age_seconds=''
+          if [[ -n "$last_completed" ]]; then
+            last_completed_epoch=$(date -u -d "$last_completed" +%s 2>/dev/null || echo "$now")
+            last_completed_age_seconds=$((now - last_completed_epoch))
+            if (( last_completed_age_seconds < 0 )); then
+              last_completed_age_seconds=0
+            fi
+          fi
+
+          BACKLOG_COUNT="$backlog_count" \
+          ACTION_FAILURE_COUNT="$action_failure_count" \
+          LAST_COMPLETED_AGE_SECONDS="$last_completed_age_seconds" \
+          python - <<'PY'
+          import os
+          from genesis.pulse import adaptive_recovery_interval, recovery_pulse_due
+
+          decision = adaptive_recovery_interval(
+              backlog_count=int(os.environ["BACKLOG_COUNT"]),
+              action_failure_count=int(os.environ["ACTION_FAILURE_COUNT"]),
+          )
+          age_text = os.environ.get("LAST_COMPLETED_AGE_SECONDS", "")
+          age = int(age_text) if age_text else None
+          due = os.environ.get("GITHUB_EVENT_NAME") == "workflow_dispatch" or recovery_pulse_due(
+              last_completed_age_seconds=age,
+              interval_minutes=decision.interval_minutes,
+          )
+          with open(os.environ["GITHUB_OUTPUT"], "a", encoding="utf-8") as output:
+              output.write(f"desired_interval_minutes={decision.interval_minutes}\n")
+              output.write(f"schedule_reason={decision.reason}\n")
+              output.write(f"pulse_due={'true' if due else 'false'}\n")
+          PY
+
+          echo "busy=$busy" >> "$GITHUB_OUTPUT"
+          echo "backlog_count=$backlog_count" >> "$GITHUB_OUTPUT"
+          echo "action_failure_count=$action_failure_count" >> "$GITHUB_OUTPUT"
+          echo "last_completed_age_seconds=${last_completed_age_seconds:-none}" >> "$GITHUB_OUTPUT"
           echo "fresh_count=${#fresh[@]}" >> "$GITHUB_OUTPUT"
           echo "stale_count=${#stale[@]}" >> "$GITHUB_OUTPUT"
           echo "stale_in_progress_count=${#stale_in_progress[@]}" >> "$GITHUB_OUTPUT"
@@ -94,77 +168,59 @@ jobs:
               echo 'none'
             fi
             echo 'EOF'
-            echo 'stale_in_progress_runs<<EOF'
-            if (( ${#stale_in_progress[@]} > 0 )); then
-              printf '%s\n' "${stale_in_progress[@]}"
-            else
-              echo 'none'
-            fi
-            echo 'EOF'
-            echo 'stale_cancelled_runs<<EOF'
-            if (( ${#stale_cancelled[@]} > 0 )); then
-              printf '%s\n' "${stale_cancelled[@]}"
-            else
-              echo 'none'
-            fi
-            echo 'EOF'
-            echo 'stale_cancel_failures<<EOF'
-            if (( ${#stale_cancel_failures[@]} > 0 )); then
-              printf '%s\n' "${stale_cancel_failures[@]}"
-            else
-              echo 'none'
-            fi
-            echo 'EOF'
           } >> "$GITHUB_OUTPUT"
 
-      - name: Dispatch Gene Pulse when autonomy is idle
-        if: steps.gate.outputs.busy == 'false'
+      - name: Dispatch Gene Pulse when adaptive scheduler says due
+        if: steps.gate.outputs.busy == 'false' && steps.gate.outputs.pulse_due == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
+          DESIRED_INTERVAL_MINUTES: ${{ steps.gate.outputs.desired_interval_minutes }}
         run: >-
           gh workflow run gene-pulse.yml
           --ref main
           -f gene=gene-node-1
           -f continue_chain=true
 
-      - name: Record heartbeat decision
+      - name: Record adaptive heartbeat decision
         if: always()
         env:
           BUSY: ${{ steps.gate.outputs.busy }}
+          PULSE_DUE: ${{ steps.gate.outputs.pulse_due }}
+          DESIRED_INTERVAL_MINUTES: ${{ steps.gate.outputs.desired_interval_minutes }}
+          SCHEDULE_REASON: ${{ steps.gate.outputs.schedule_reason }}
+          BACKLOG_COUNT: ${{ steps.gate.outputs.backlog_count }}
+          ACTION_FAILURE_COUNT: ${{ steps.gate.outputs.action_failure_count }}
+          LAST_COMPLETED_AGE_SECONDS: ${{ steps.gate.outputs.last_completed_age_seconds }}
           FRESH_COUNT: ${{ steps.gate.outputs.fresh_count }}
           STALE_COUNT: ${{ steps.gate.outputs.stale_count }}
           STALE_IN_PROGRESS_COUNT: ${{ steps.gate.outputs.stale_in_progress_count }}
           STALE_CANCELLED_COUNT: ${{ steps.gate.outputs.stale_cancelled_count }}
           STALE_CANCEL_FAILURE_COUNT: ${{ steps.gate.outputs.stale_cancel_failure_count }}
-          FRESH_RUNS: ${{ steps.gate.outputs.fresh_runs }}
-          STALE_RUNS: ${{ steps.gate.outputs.stale_runs }}
-          STALE_IN_PROGRESS_RUNS: ${{ steps.gate.outputs.stale_in_progress_runs }}
-          STALE_CANCELLED_RUNS: ${{ steps.gate.outputs.stale_cancelled_runs }}
-          STALE_CANCEL_FAILURES: ${{ steps.gate.outputs.stale_cancel_failures }}
         shell: bash
         run: |
           {
-            echo "## Genesis Autonomy Heartbeat"
+            echo "## Genesis Adaptive Autonomy Heartbeat"
+            echo
+            echo "Scheduler interval: ${DESIRED_INTERVAL_MINUTES:-unknown} minutes (${SCHEDULE_REASON:-unknown})"
+            echo "Eligible backlog: ${BACKLOG_COUNT:-0}"
+            echo "Open Action failures: ${ACTION_FAILURE_COUNT:-0}"
+            echo "Last completed Pulse age: ${LAST_COMPLETED_AGE_SECONDS:-unknown} seconds"
+            echo "Pulse due: ${PULSE_DUE:-false}"
+            echo "Autonomy busy: ${BUSY:-unknown}"
             echo
             if [[ "$BUSY" == "true" ]]; then
-              echo "Autonomous repair activity is still active; duplicate Gene Pulse was skipped."
+              echo "An autonomous chain is active; duplicate Gene Pulse was skipped."
+            elif [[ "$PULSE_DUE" == "true" ]]; then
+              echo "Adaptive recovery threshold was reached; Gene Pulse was dispatched."
             else
-              echo "No fresh or stale in-progress autonomous repair worker remained; Gene Pulse was dispatched."
+              echo "Recovery threshold has not been reached; no duplicate Pulse was launched."
             fi
             echo
-            echo "GitHub Actions is the production continuous runtime; this heartbeat recovers the bounded Pulse chain every 15 minutes when idle."
+            echo "The cron only checks every five minutes. Active Gene Pulse chains still continue immediately, and GitHub Issue autorepair has its own event-driven refill path."
             echo
             echo "Fresh runs: ${FRESH_COUNT:-0}"
             echo "Stale runs detected: ${STALE_COUNT:-0}"
             echo "Stale in-progress runs: ${STALE_IN_PROGRESS_COUNT:-0}"
             echo "Stale cancellation requests accepted: ${STALE_CANCELLED_COUNT:-0}"
             echo "Stale cancellation failures: ${STALE_CANCEL_FAILURE_COUNT:-0}"
-            echo
-            echo '```'
-            printf '%s\n' "${FRESH_RUNS:-none}"
-            printf '%s\n' "${STALE_RUNS:-none}"
-            printf '%s\n' "${STALE_IN_PROGRESS_RUNS:-none}"
-            printf '%s\n' "${STALE_CANCELLED_RUNS:-none}"
-            printf '%s\n' "${STALE_CANCEL_FAILURES:-none}"
-            echo '```'
           } >> "$GITHUB_STEP_SUMMARY"

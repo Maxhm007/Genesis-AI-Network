@@ -10,7 +10,8 @@ def test_autonomy_heartbeat_restarts_idle_pipeline_without_duplicate_work() -> N
     root = Path(__file__).resolve().parents[1]
     workflow = (root / ".github" / "workflows" / "autonomy-heartbeat.yml").read_text(encoding="utf-8")
 
-    assert 'cron: "*/15 * * * *"' in workflow
+    assert 'cron: "*/5 * * * *"' in workflow
+    assert 'workflows: ["Genesis GitHub Issue Autorepair"]' in workflow
     assert "workflow_dispatch:" in workflow
     assert '".github/workflows/autonomy-heartbeat.yml"' in workflow
     assert "group: genesis-autonomy-heartbeat" in workflow
@@ -29,7 +30,10 @@ def test_autonomy_heartbeat_restarts_idle_pipeline_without_duplicate_work() -> N
     assert "${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0" in workflow
     assert "${#fresh[@]} > 0 || ${#stale_in_progress[@]} > 0 || ${#stale_cancel_failures[@]} > 0" not in workflow
 
-    assert "if: steps.gate.outputs.busy == 'false'" in workflow
+    assert "adaptive_recovery_interval" in workflow
+    assert "recovery_pulse_due" in workflow
+    assert "desired_interval_minutes" in workflow
+    assert "steps.gate.outputs.busy == 'false' && steps.gate.outputs.pulse_due == 'true'" in workflow
     assert "gh workflow run gene-pulse.yml" in workflow
     assert "-f continue_chain=true" in workflow
     assert "duplicate Gene Pulse was skipped" in workflow

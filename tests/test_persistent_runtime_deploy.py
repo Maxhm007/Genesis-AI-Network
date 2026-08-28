@@ -41,9 +41,11 @@ def test_coding_pulse_keeps_issue_authority_when_provider_is_needed():
     assert "python scripts/benchmark_task_worker.py" in text
 
 
-def test_actions_heartbeat_recovers_continuous_runtime_every_fifteen_minutes():
+def test_actions_heartbeat_adapts_continuous_runtime_recovery_cadence():
     text = (WORKFLOWS / "autonomy-heartbeat.yml").read_text(encoding="utf-8")
-    assert 'cron: "*/15 * * * *"' in text
+    assert 'cron: "*/5 * * * *"' in text
+    assert "adaptive_recovery_interval" in text
+    assert "recovery_pulse_due" in text
     assert "gh workflow run gene-pulse.yml" in text
     assert "cancel-in-progress: false" in text
-    assert "GitHub Actions is the production continuous runtime" in text
+    assert "Active Gene Pulse chains still continue immediately" in text
