@@ -5,6 +5,8 @@ on:
     branches: [main]
     paths:
       - '.github/workflows/bootstrap-fix-issue-521.yml'
+      - 'scripts/bootstrap_fix_issue_521.py'
+      - 'tests/test_github_issue_autorepair_claim_release.py'
 
 permissions:
   contents: write
