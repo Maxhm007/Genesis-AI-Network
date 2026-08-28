@@ -25,6 +25,19 @@ def test_integration_transaction_is_serialized_from_rebase_through_promotion() -
     assert rebase_at < secret_guard_at < promote_at
 
 
+def test_integration_requires_issue_specific_semantic_regression_evidence() -> None:
+    text = INTEGRATION.read_text(encoding="utf-8")
+
+    guard = "python scripts/issue_acceptance_guard.py"
+    assert text.count(guard) >= 3
+    assert "Require semantic regression evidence A" in text
+    assert "Require semantic regression evidence B" in text
+    assert "Reconfirm semantic acceptance before promotion" in text
+    assert "--base-ref origin/main" in text
+    assert '--repository "$GITHUB_REPOSITORY"' in text
+    assert "--issue-number '${{ inputs.issue_number }}'" in text
+
+
 def test_single_solver_lane_is_preserved() -> None:
     text = DISPATCHER.read_text(encoding="utf-8")
 
