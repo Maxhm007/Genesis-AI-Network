@@ -23,6 +23,37 @@ class PulseResult:
     payload: dict
 
 
+@dataclass(frozen=True)
+class PulseScheduleDecision:
+    interval_minutes: int
+    reason: str
+
+
+def adaptive_recovery_interval(*, backlog_count: int, action_failure_count: int) -> PulseScheduleDecision:
+    """Choose the recovery heartbeat cadence from observable repository pressure."""
+    if backlog_count < 0:
+        raise ValueError("backlog count cannot be negative")
+    if action_failure_count < 0:
+        raise ValueError("action failure count cannot be negative")
+
+    if backlog_count >= 20 or action_failure_count >= 3:
+        return PulseScheduleDecision(5, "high_repository_pressure")
+    if backlog_count > 0 or action_failure_count > 0:
+        return PulseScheduleDecision(10, "active_repository_pressure")
+    return PulseScheduleDecision(30, "idle_repository")
+
+
+def recovery_pulse_due(*, last_completed_age_seconds: int | None, interval_minutes: int) -> bool:
+    """Return whether the recovery heartbeat should start a new Pulse chain."""
+    if interval_minutes <= 0:
+        raise ValueError("interval minutes must be positive")
+    if last_completed_age_seconds is None:
+        return True
+    if last_completed_age_seconds < 0:
+        raise ValueError("last completed age cannot be negative")
+    return last_completed_age_seconds >= interval_minutes * 60
+
+
 def workflow_chain_decision(
     *,
     needs_next_pulse: bool,
@@ -51,11 +82,11 @@ def workflow_chain_decision(
 class GenePulse:
     """Execute one resumable unit of authoritative GitHub Issue work.
 
-    return self._authority_blocked("github_issue_authority", detail={"github_open_issue_backlog": backlog}, policy="No GitHub Issue = no Genesis task execution.")
-    repository Issues, then binds every remaining internal task to an Issue before
-    any worker runs. If GitHub intake or task binding is unavailable, the Pulse
-    fails closed. A second sync after the bounded step immediately publishes any
-    newly discovered task before another Pulse can execute it.
+    repository Issues are authoritative. Every remaining internal task is bound
+    to an Issue before any worker runs. If GitHub intake or task binding is
+    unavailable, the Pulse fails closed. A second sync after the bounded step
+    immediately publishes any newly discovered task before another Pulse can
+    execute it.
     """
 
     def __init__(self, root: Path, logical_id: str = "gene-node-1") -> None:
