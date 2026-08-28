@@ -26,10 +26,10 @@ def test_heartbeat_cannot_claim_or_mutate_issues() -> None:
     assert "gh issue edit" not in text
 
 
-def test_heartbeat_preserves_five_lane_capacity_and_queue_filters() -> None:
+def test_heartbeat_preserves_single_lane_capacity_and_queue_filters() -> None:
     text = HEARTBEAT.read_text(encoding="utf-8")
 
-    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '5'" in text
+    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '1'" in text
     assert 'index("genesis-repair-in-progress")' in text
     assert 'index("genesis-validating")' in text
     assert 'index("genesis-autonomous")' in text
@@ -40,12 +40,12 @@ def test_heartbeat_preserves_five_lane_capacity_and_queue_filters() -> None:
     assert "if (( launch_count > 0 )); then" in text
 
 
-def test_heartbeat_dispatches_distinct_explicit_issues_to_authoritative_dispatcher() -> None:
+def test_heartbeat_dispatches_explicit_issue_to_authoritative_dispatcher_only() -> None:
     text = HEARTBEAT.read_text(encoding="utf-8")
 
     assert "mapfile -t selected" in text
     assert "gh workflow run github-issue-autorepair.yml" in text
     assert "--ref main" in text
     assert '-f issue_number="$issue_number"' in text
-    assert "github-issue-autorepair-worker.yml" not in text
-    assert "github-issue-autorepair-integration.yml" not in text
+    assert "gh workflow run github-issue-autorepair-worker.yml" not in text
+    assert "gh workflow run github-issue-autorepair-integration.yml" not in text
