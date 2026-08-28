@@ -37,7 +37,7 @@ def test_dispatcher_reclaims_only_old_unvalidated_claims() -> None:
     assert 'index("genesis-validating")) == null' in text
     assert '(.updatedAt // "") < $cutoff' in text
     assert 'stale_json=$(gh issue view "$stale_issue"' in text
-    assert 'if [[ "$stale_now" == '\''true'\'' ]]; then' in text
+    assert "if [[ \"$stale_now\" == 'true' ]]; then" in text
     assert "--remove-label genesis-repair-in-progress" in text
     assert "snapshot_issues\n\n          selector=(python scripts/select_issue_repair_batch.py" in text
     assert text.count("snapshot_issues") >= 3
