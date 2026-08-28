@@ -44,9 +44,9 @@ def test_autorepair_admission_is_event_driven_for_open_reopen_and_authorized_lab
     assert "github.event.label.name == 'genesis-task'" in text
 
 
-def test_autorepair_preserves_immediate_refill_and_five_lane_capacity() -> None:
+def test_autorepair_preserves_immediate_refill_and_single_lane_capacity() -> None:
     text = AUTOREPAIR.read_text(encoding="utf-8")
-    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '5'" in text
+    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '1'" in text
     assert "refill:" in text
     assert "gh workflow run github-issue-autorepair-heartbeat.yml" in text
     assert "github-issue-autorepair-integration.yml" in text
