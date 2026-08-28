@@ -12,7 +12,13 @@ on:
     paths:
       - '.github/workflows/github-issue-autorepair-heartbeat.yml'
       - '.github/workflows/github-issue-autorepair.yml'
+      - '.github/workflows/github-issue-autorepair-worker.yml'
+      - '.github/workflows/github-issue-autorepair-integration.yml'
       - 'genesis/issue_worker_pool.py'
+      - 'scripts/github_issue_autorepair.py'
+      - 'scripts/pulse_coding_provider.py'
+      - 'scripts/select_issue_repair_batch.py'
+      - 'tests/test_github_issue_autorepair_workflow.py'
 
 permissions: {}
 
