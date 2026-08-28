@@ -36,7 +36,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: gene-pulse-${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
+  group: genesis-autonomous-single-lane
   cancel-in-progress: false
 
 jobs:
