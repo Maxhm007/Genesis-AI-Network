@@ -25,9 +25,9 @@ def test_integration_transaction_is_serialized_from_rebase_through_promotion() -
     assert rebase_at < secret_guard_at < promote_at
 
 
-def test_parallel_solver_capacity_is_preserved() -> None:
+def test_single_solver_lane_is_preserved() -> None:
     text = DISPATCHER.read_text(encoding="utf-8")
 
-    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '5'" in text
+    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '1'" in text
     assert "solve_workers:" in text
     assert "integrate_workers:" in text
