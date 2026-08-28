@@ -5,6 +5,12 @@ import json
 from pathlib import Path
 
 from genesis.intelligence_router import IntelligenceRouter
+from genesis.issue_backpressure import (
+    backlog_reduction_active,
+    capacity_limited_task,
+    configured_backlog_reduction_high_water,
+    github_open_issue_count,
+)
 from genesis.modules.task_queue import GenesisTask, PersistentTaskQueue
 from genesis.providers import ProviderRegistry
 
@@ -42,13 +48,7 @@ def _active_measured_growth(queue: PersistentTaskQueue) -> list[GenesisTask]:
 
 
 def _rebalance_work_priority(queue: PersistentTaskQueue) -> dict:
-    """Prevent benchmark plumbing from starving measured capability improvement.
-
-    A validated below-reference benchmark creates capability_growth work. While that
-    work is executable (or merely waiting for the coding provider), benchmark runner
-    integration stays durable but paused. As soon as no executable measured growth
-    remains, one deferred runner is resumed so benchmark coverage continues.
-    """
+    """Prevent benchmark plumbing from starving measured capability improvement."""
     growth = _active_measured_growth(queue)
     deferred: list[str] = []
     resumed: str | None = None
@@ -85,14 +85,7 @@ def _rebalance_work_priority(queue: PersistentTaskQueue) -> dict:
 
 
 def _coding_owned_work(task: GenesisTask) -> bool:
-    """Return work that needs a coding-capable provider, regardless of queue owner.
-
-    Capability-growth tasks are owned by ``genesis.improvement`` after the
-    improvement/merge split, but their bounded implementation still runs through
-    the coding worker. Filtering only on ``module_id == genesis.coding`` makes a
-    measured benchmark deficit invisible to the delegated coding pulse and lets
-    speculative learning work take its slot.
-    """
+    """Return work that needs a coding-capable provider, regardless of queue owner."""
     return bool(
         task.module_id == "genesis.coding"
         or task.payload.get("task_type") == "capability_growth"
@@ -136,13 +129,46 @@ def _eligible_provider_names(root: Path = ROOT) -> list[str]:
     return names
 
 
+def _drain_context() -> dict:
+    open_issue_count = github_open_issue_count()
+    high_water = configured_backlog_reduction_high_water()
+    return {
+        "active": backlog_reduction_active(open_issue_count, high_water=high_water),
+        "open_issue_count": open_issue_count,
+        "high_water": high_water,
+    }
+
+
+def _apply_backlog_reduction(work: list[GenesisTask], drain: dict) -> tuple[list[GenesisTask], list[GenesisTask]]:
+    if not drain.get("active"):
+        return list(work), []
+    runnable = [task for task in work if not capacity_limited_task(task)]
+    suppressed = [task for task in work if capacity_limited_task(task)]
+    return runnable, suppressed
+
+
 def inspect(root: Path = ROOT) -> dict:
     queue = _queue(root)
-    priority = _rebalance_work_priority(queue)
-    work = _coding_work(queue)
+    drain = _drain_context()
+    if drain["active"]:
+        # Do not mutate benchmark/growth priority while the repository is in drain
+        # mode. Those tasks remain durable but cannot trigger model provisioning.
+        priority = {
+            "active_growth_task_ids": [],
+            "deferred_benchmark_runner_ids": [],
+            "resumed_benchmark_runner_id": None,
+            "status": "deferred_backlog_reduction",
+        }
+    else:
+        priority = _rebalance_work_priority(queue)
+    all_work = _coding_work(queue)
+    work, suppressed = _apply_backlog_reduction(all_work, drain)
     providers = _eligible_provider_names(root)
+    status = "provider_ready" if providers and work else ("provider_needed" if work else "idle")
+    if drain["active"] and not work and suppressed:
+        status = "idle_backlog_reduction"
     return {
-        "status": "provider_ready" if providers else ("provider_needed" if work else "idle"),
+        "status": status,
         "needs_local_provider": bool(work and not providers),
         "coding_work_count": len(work),
         "provider_names": providers,
@@ -150,27 +176,46 @@ def inspect(root: Path = ROOT) -> dict:
         "next_task_type": work[0].payload.get("task_type") if work else None,
         "next_task_priority": work[0].priority if work else None,
         "priority_rebalance": priority,
+        "backlog_reduction": {
+            **drain,
+            "suppressed_task_ids": [task.task_id for task in suppressed],
+            "suppressed_task_types": [str(task.payload.get("task_type") or "") for task in suppressed],
+        },
     }
 
 
 def resume_one(root: Path = ROOT) -> dict:
     providers = _eligible_provider_names(root)
+    drain = _drain_context()
     if not providers:
-        return {"status": "no_eligible_provider", "resumed": False}
+        return {"status": "no_eligible_provider", "resumed": False, "backlog_reduction": drain}
 
     queue = _queue(root)
-    priority = _rebalance_work_priority(queue)
-    candidates = [
+    if drain["active"]:
+        priority = {
+            "active_growth_task_ids": [],
+            "deferred_benchmark_runner_ids": [],
+            "resumed_benchmark_runner_id": None,
+            "status": "deferred_backlog_reduction",
+        }
+    else:
+        priority = _rebalance_work_priority(queue)
+    all_candidates = [
         task
         for task in _coding_work(queue)
         if task.state == "paused" and str(task.state_reason or "") in PROVIDER_WAIT_REASONS
     ]
+    candidates, suppressed = _apply_backlog_reduction(all_candidates, drain)
     if not candidates:
         return {
-            "status": "nothing_to_resume",
+            "status": "nothing_to_resume_backlog_reduction" if suppressed else "nothing_to_resume",
             "resumed": False,
             "provider_names": providers,
             "priority_rebalance": priority,
+            "backlog_reduction": {
+                **drain,
+                "suppressed_task_ids": [task.task_id for task in suppressed],
+            },
         }
 
     task = candidates[0]
@@ -185,6 +230,7 @@ def resume_one(root: Path = ROOT) -> dict:
         "previous_reason": task.state_reason,
         "state": resumed.state,
         "priority_rebalance": priority,
+        "backlog_reduction": drain,
     }
 
 
