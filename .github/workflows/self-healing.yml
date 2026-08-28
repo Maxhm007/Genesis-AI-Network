@@ -28,6 +28,10 @@ permissions:
   pull-requests: write
   issues: write
 
+concurrency:
+  group: genesis-autonomous-single-lane
+  cancel-in-progress: false
+
 jobs:
   self_heal:
     runs-on: ubuntu-latest
