@@ -33,7 +33,46 @@ def patch_issue_fairness() -> None:
     replace_once(path, old_key, new_key)
 
 
+def patch_single_lane_regression_tests() -> None:
+    path = ROOT / "tests" / "test_adaptive_pulse_scheduler.py"
+    replace_once(
+        path,
+        "def test_autorepair_preserves_immediate_refill_and_five_lane_capacity() -> None:\n",
+        "def test_autorepair_preserves_immediate_refill_and_single_lane_capacity() -> None:\n",
+    )
+    replace_once(path, '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'5\'" in text\n', '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'1\'" in text\n')
+
+    path = ROOT / "tests" / "test_github_issue_autorepair_heartbeat_workflow.py"
+    replace_once(
+        path,
+        "def test_heartbeat_preserves_five_lane_capacity_and_queue_filters() -> None:\n",
+        "def test_heartbeat_preserves_single_lane_capacity_and_queue_filters() -> None:\n",
+    )
+    replace_once(path, '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'5\'" in text\n', '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'1\'" in text\n')
+    replace_once(
+        path,
+        '    assert "github-issue-autorepair-worker.yml" not in text\n    assert "github-issue-autorepair-integration.yml" not in text\n',
+        '    assert "gh workflow run github-issue-autorepair-worker.yml" not in text\n    assert "gh workflow run github-issue-autorepair-integration.yml" not in text\n',
+    )
+
+    path = ROOT / "tests" / "test_github_issue_autorepair_integration_transaction.py"
+    replace_once(
+        path,
+        "def test_parallel_solver_capacity_is_preserved() -> None:\n",
+        "def test_single_solver_capacity_is_preserved() -> None:\n",
+    )
+    replace_once(path, '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'5\'" in text\n', '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'1\'" in text\n')
+
+    path = ROOT / "tests" / "test_github_issue_autorepair_claim_release.py"
+    replace_once(
+        path,
+        '    assert "Re-read immediately before mutation" in text\n',
+        '    assert \'stale_json=$(gh issue view "$stale_issue"\' in text\n    assert \'if [[ "$stale_now" == \'"\'"\'true\'"\'"\' ]]; then\' in text\n',
+    )
+
+
 if __name__ == "__main__":
     patch_grounding_gate()
     patch_issue_fairness()
+    patch_single_lane_regression_tests()
     print("Issue #521 bootstrap patches applied.")
