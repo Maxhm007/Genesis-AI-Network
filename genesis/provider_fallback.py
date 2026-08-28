@@ -240,7 +240,9 @@ def _attempt_task_with_provider_fallback(self: AutonomousEngineeringLoop, task, 
     # ordinary engineering task.
     had_override = "_coding_provider" in self.__dict__
     previous_override = self.__dict__.get("_coding_provider")
-    self._coding_provider = MethodType(_ORIGINAL_CODING_PROVIDER, self)
+    # Deliberately expose no coding provider here. The original attempt path then
+    # enters its existing wait/pause branch without invoking any model at all.
+    self._coding_provider = MethodType(lambda _self: None, self)
     try:
         result = _ORIGINAL_ATTEMPT_TASK(self, task, runtime)
         result["provider_policy"] = "ungrounded_capability_requires_grounded_evidence"
