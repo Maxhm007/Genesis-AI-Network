@@ -20,6 +20,10 @@ on:
 
 permissions: {}
 
+concurrency:
+  group: genesis-autonomous-single-lane
+  cancel-in-progress: false
+
 env:
   PYTHONPATH: ${{ github.workspace }}
   GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '1'
@@ -123,8 +127,6 @@ jobs:
           ' "$RUNNER_TEMP/open-issues.json")
 
           for stale_issue in "${stale_claims[@]}"; do
-            # Re-read immediately before mutation. If a candidate became
-            # validating after the snapshot, its reservation must survive.
             stale_json=$(gh issue view "$stale_issue" \
               --repo "$GITHUB_REPOSITORY" \
               --json state,updatedAt,labels)
@@ -143,7 +145,6 @@ jobs:
             fi
           done
 
-          # Selection must use current issue state after any stale-claim repair.
           snapshot_issues
 
           selector=(python scripts/select_issue_repair_batch.py
@@ -172,8 +173,6 @@ jobs:
 
           while IFS= read -r n; do
             [[ -n "$n" ]] || continue
-            # Admission is the authoritative mutation boundary. Canonical
-            # genesis-task/title records are promoted here, never by heartbeat.
             gh issue edit "$n" \
               --repo "$GITHUB_REPOSITORY" \
               --add-label genesis-autonomous \
