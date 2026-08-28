@@ -24,8 +24,16 @@ class ResourceModule:
 
     def snapshot(self, cpu_percent: float, memory_percent: float, disk_percent: float,
                  battery_percent: float | None = None, network_available: bool = True) -> ResourceSnapshot:
+        if not isinstance(network_available, bool):
+            raise TypeError("network_available must be a boolean")
         battery = None if battery_percent is None else self._pct(battery_percent)
-        return ResourceSnapshot(self._pct(cpu_percent), self._pct(memory_percent), self._pct(disk_percent), battery, bool(network_available))
+        return ResourceSnapshot(
+            self._pct(cpu_percent),
+            self._pct(memory_percent),
+            self._pct(disk_percent),
+            battery,
+            network_available,
+        )
 
     def capacity_score(self, snapshot: ResourceSnapshot) -> float:
         free_cpu = 100.0 - snapshot.cpu_percent
