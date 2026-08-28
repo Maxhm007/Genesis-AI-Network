@@ -64,6 +64,10 @@ jobs:
             | select((.updatedAt // "") < $cutoff)
           ] | length' "$RUNNER_TEMP/open-issues.json")
 
+          # Old unresolved Issue-backed work must retain its age even when comments,
+          # retries, or status updates touch updatedAt. GitHub Issue number is the
+          # repository-local monotonic creation order, so it is the stable fairness
+          # key. Persistent control/reporting channels are deliberately excluded.
           eligible_filter='[
             .[]
             | ([.labels[].name] // []) as $labels
@@ -73,14 +77,16 @@ jobs:
                 (.title | startswith("[Genesis Task]")) or
                 (.title | startswith("[Genesis Repair]")) or
                 (.title | startswith("[Genesis Self Improvement]")) or
-                (.title | startswith("Genesis challenge:")) or
-                (.title | startswith("Genesis Control:"))
+                (.title | startswith("Genesis challenge:"))
               )
             | select(($labels | index("genesis-repair-in-progress")) == null)
             | select(($labels | index("genesis-validating")) == null)
             | select(($labels | index("genesis-blocked")) == null)
             | select(($labels | index("genesis-solved")) == null)
-          ] | sort_by(.updatedAt, .number)'
+            | select(($labels | index("genesis-persistent")) == null)
+            | select(($labels | index("genesis-control")) == null)
+            | select((.title | startswith("Genesis Control:")) | not)
+          ] | sort_by(.number, .updatedAt)'
 
           eligible=$(jq "$eligible_filter | length" "$RUNNER_TEMP/open-issues.json")
           available=$((GENESIS_ISSUE_REPAIR_MAX_PARALLEL - active))
