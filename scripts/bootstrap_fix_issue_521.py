@@ -23,18 +23,6 @@ def patch_grounding_gate() -> None:
     replace_if_needed(path, old, new)
 
 
-def patch_issue_fairness() -> None:
-    path = ROOT / "genesis" / "efficient_engineering.py"
-    replace_if_needed(
-        path,
-        '''    MAX_SAFE_BURST = 5\n    MAX_SELF_EVALUATION_CONTEXT_BYTES = 6_000\n    SELF_EVALUATION_ITEMS = 5\n''',
-        '''    MAX_SAFE_BURST = 5\n    MAX_SELF_EVALUATION_CONTEXT_BYTES = 6_000\n    SELF_EVALUATION_ITEMS = 5\n    RETRY_ROTATION_ISSUE_WINDOW = 100\n''',
-    )
-    old = '''    @staticmethod\n    def _github_issue_fairness_key(task) -> tuple:\n        """Keep an Issue's age across generations so newer Issues cannot starve it.\n\n        Priority-100 work is an emergency lane. All other Issue-backed engineering\n        is ordered by GitHub Issue number first, which is monotonic creation order\n        inside one repository. A retry generation therefore retains the age of its\n        Issue instead of becoming younger than every newly created first generation.\n        """\n        issue_number = int(task.payload.get("github_issue_number") or 0)\n        generation = int(task.payload.get("work_generation") or 1)\n        emergency_lane = 0 if int(task.priority) >= 100 else 1\n        return (\n            emergency_lane,\n            issue_number,\n            task.updated_at,\n            generation,\n            task.attempt_count,\n            task.task_id,\n        )\n'''
-    new = '''    @classmethod\n    def _github_issue_fairness_key(cls, task) -> tuple:\n        """Drain old Issues while rotating failed retries behind nearby waiting work.\n\n        Priority-100 work is an emergency lane. For normal work, GitHub Issue number\n        preserves creation age across task generations. Each failed attempt adds one\n        bounded issue-number window before the retry can win again. That lets nearby\n        waiting Issues receive a turn after a failure without allowing a continuously\n        growing new backlog to starve a genuinely old Issue forever.\n        """\n        issue_number = int(task.payload.get("github_issue_number") or 0)\n        generation = int(task.payload.get("work_generation") or 1)\n        attempts = max(0, int(task.attempt_count or 0))\n        emergency_lane = 0 if int(task.priority) >= 100 else 1\n        effective_issue_age = issue_number + attempts * cls.RETRY_ROTATION_ISSUE_WINDOW\n        return (\n            emergency_lane,\n            effective_issue_age,\n            issue_number,\n            task.updated_at,\n            generation,\n            task.task_id,\n        )\n'''
-    replace_if_needed(path, old, new)
-
-
 def patch_single_lane_tests() -> None:
     path = ROOT / "tests" / "test_adaptive_pulse_scheduler.py"
     replace_if_needed(path, "def test_autorepair_preserves_immediate_refill_and_five_lane_capacity() -> None:\n", "def test_autorepair_preserves_immediate_refill_and_single_lane_capacity() -> None:\n")
@@ -56,6 +44,5 @@ def patch_single_lane_tests() -> None:
 
 if __name__ == "__main__":
     patch_grounding_gate()
-    patch_issue_fairness()
     patch_single_lane_tests()
     print("Issue #521 bootstrap patches applied.")
