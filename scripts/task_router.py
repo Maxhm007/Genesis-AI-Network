@@ -3,79 +3,26 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
-import urllib.error
-import urllib.request
 
 from genesis.capability_issue_router import route_capability_growth
 from genesis.core_processor import GenesisCoreProcessor
 from genesis.github_issue_task_router import route_unbacked_tasks
-from genesis.issue_backpressure import BACKLOG_REDUCTION_MODE_ENV
+from genesis.issue_backpressure import (
+    BACKLOG_REDUCTION_MODE_ENV,
+    backlog_reduction_active,
+    configured_backlog_reduction_high_water,
+    github_open_issue_count,
+)
 from genesis.self_improvement_deduper import dedupe_self_improvement
 from genesis.self_improvement_issue_router import route_self_improvement
-
-
-DEFAULT_BACKLOG_REDUCTION_HIGH_WATER = 40
-
-
-def _truthy(value: object) -> bool:
-    return str(value or "").strip().lower() in {"1", "true", "yes", "on"}
-
-
-def _configured_high_water() -> int:
-    raw = str(os.environ.get("GENESIS_BACKLOG_REDUCTION_HIGH_WATER", "") or "").strip()
-    if not raw:
-        return DEFAULT_BACKLOG_REDUCTION_HIGH_WATER
-    try:
-        value = int(raw)
-    except ValueError:
-        return DEFAULT_BACKLOG_REDUCTION_HIGH_WATER
-    return max(5, min(value, 500))
-
-
-def _github_open_issue_count(max_pages: int = 5) -> int | None:
-    token = os.environ.get("GITHUB_TOKEN", "").strip()
-    repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
-    if not token or not repo:
-        return None
-    count = 0
-    for page in range(1, max(1, int(max_pages)) + 1):
-        request = urllib.request.Request(
-            f"https://api.github.com/repos/{repo}/issues?state=open&per_page=100&page={page}",
-            headers={
-                "Authorization": f"Bearer {token}",
-                "Accept": "application/vnd.github+json",
-                "X-GitHub-Api-Version": "2022-11-28",
-                "User-Agent": "Genesis-AI-Network/backlog-reduction-router",
-            },
-        )
-        try:
-            with urllib.request.urlopen(request, timeout=30) as response:
-                rows = json.loads(response.read().decode("utf-8"))
-        except (OSError, ValueError, urllib.error.URLError):
-            return None
-        if not isinstance(rows, list):
-            return None
-        count += sum(1 for row in rows if isinstance(row, dict) and "pull_request" not in row)
-        if len(rows) < 100:
-            break
-    return count
-
-
-def _backlog_reduction_active(open_issue_count: int | None, *, high_water: int | None = None) -> bool:
-    if _truthy(os.environ.get(BACKLOG_REDUCTION_MODE_ENV)):
-        return True
-    if open_issue_count is None:
-        return False
-    threshold = _configured_high_water() if high_water is None else max(1, int(high_water))
-    return int(open_issue_count) >= threshold
 
 
 def route_tasks(root: Path, *, open_issue_count: int | None = None) -> dict:
     root = Path(root).resolve()
     if open_issue_count is None:
-        open_issue_count = _github_open_issue_count()
-    high_water = _configured_high_water()
-    backlog_reduction = _backlog_reduction_active(open_issue_count, high_water=high_water)
+        open_issue_count = github_open_issue_count()
+    high_water = configured_backlog_reduction_high_water()
+    backlog_reduction = backlog_reduction_active(open_issue_count, high_water=high_water)
     previous_mode = os.environ.get(BACKLOG_REDUCTION_MODE_ENV)
     if backlog_reduction:
         os.environ[BACKLOG_REDUCTION_MODE_ENV] = "1"
