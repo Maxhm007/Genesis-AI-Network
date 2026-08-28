@@ -23,6 +23,9 @@ permissions: {}
 env:
   PYTHONPATH: ${{ github.workspace }}
   GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '5'
+  # Solve workers time out after 45 minutes. Keep a conservative grace period
+  # before the mutation-authorized dispatcher may reclaim an unvalidated claim.
+  GENESIS_ISSUE_REPAIR_STALE_MINUTES: '60'
 
 jobs:
   bootstrap_labels:
@@ -76,7 +79,7 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Build and claim one repair lane
+      - name: Reconcile stale claims, then build and claim one repair lane
         id: plan
         env:
           GH_TOKEN: ${{ github.token }}
@@ -97,12 +100,51 @@ jobs:
             }
           fi
 
-          gh issue list \
-            --repo "$GITHUB_REPOSITORY" \
-            --state open \
-            --limit 500 \
-            --json number,title,state,updatedAt,labels \
-            > "$RUNNER_TEMP/open-issues.json"
+          snapshot_issues() {
+            gh issue list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --limit 500 \
+              --json number,title,state,updatedAt,labels \
+              > "$RUNNER_TEMP/open-issues.json"
+          }
+
+          snapshot_issues
+
+          cutoff=$(date -u -d "$GENESIS_ISSUE_REPAIR_STALE_MINUTES minutes ago" +%Y-%m-%dT%H:%M:%SZ)
+          mapfile -t stale_claims < <(jq -r --arg cutoff "$cutoff" '
+            .[]
+            | ([.labels[].name] // []) as $labels
+            | select(($labels | index("genesis-autonomous")) != null)
+            | select(($labels | index("genesis-repair-in-progress")) != null)
+            | select(($labels | index("genesis-validating")) == null)
+            | select((.updatedAt // "") < $cutoff)
+            | .number
+          ' "$RUNNER_TEMP/open-issues.json")
+
+          for stale_issue in "${stale_claims[@]}"; do
+            # Re-read immediately before mutation. If a candidate became
+            # validating after the snapshot, its reservation must survive.
+            stale_json=$(gh issue view "$stale_issue" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json state,updatedAt,labels)
+            stale_now=$(jq -r --arg cutoff "$cutoff" '
+              (.state == "OPEN") and
+              (([.labels[].name] | index("genesis-autonomous")) != null) and
+              (([.labels[].name] | index("genesis-repair-in-progress")) != null) and
+              (([.labels[].name] | index("genesis-validating")) == null) and
+              ((.updatedAt // "") < $cutoff)
+            ' <<<"$stale_json")
+            if [[ "$stale_now" == 'true' ]]; then
+              echo "Reclaiming stale unvalidated repair reservation for issue #$stale_issue (cutoff=$cutoff)."
+              gh issue edit "$stale_issue" \
+                --repo "$GITHUB_REPOSITORY" \
+                --remove-label genesis-repair-in-progress || true
+            fi
+          done
+
+          # Selection must use current issue state after any stale-claim repair.
+          snapshot_issues
 
           selector=(python scripts/select_issue_repair_batch.py
             --issues-json "$RUNNER_TEMP/open-issues.json"
@@ -166,6 +208,37 @@ jobs:
       contents: write
       issues: write
 
+  release_unvalidated_claim:
+    needs: [plan, solve_workers]
+    if: always() && needs.plan.outputs.has_work == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        issue_number: ${{ fromJSON(needs.plan.outputs.issue_numbers) }}
+    steps:
+      - name: Release reservation immediately when solve produced no validating candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ matrix.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_json=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels)
+          validating=$(jq -r '([.labels[].name] | index("genesis-validating")) != null' <<<"$issue_json")
+          if [[ "$validating" == 'true' ]]; then
+            echo "Issue #$ISSUE_NUMBER has a validating candidate; integration retains the reservation."
+            exit 0
+          fi
+          echo "Issue #$ISSUE_NUMBER has no validating candidate after solve; releasing its repair reservation."
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label genesis-repair-in-progress || true
+
   integrate_workers:
     needs: [plan, solve_workers]
     if: always() && needs.plan.outputs.has_work == 'true'
@@ -184,7 +257,7 @@ jobs:
       pull-requests: write
 
   refill:
-    needs: [plan, solve_workers, integrate_workers]
+    needs: [plan, solve_workers, release_unvalidated_claim, integrate_workers]
     if: always() && needs.plan.outputs.has_work == 'true'
     runs-on: ubuntu-latest
     permissions:

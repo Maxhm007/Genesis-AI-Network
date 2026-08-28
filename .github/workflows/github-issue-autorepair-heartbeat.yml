@@ -18,6 +18,7 @@ permissions: {}
 
 env:
   GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '5'
+  GENESIS_ISSUE_REPAIR_STALE_MINUTES: '60'
 
 concurrency:
   group: genesis-github-issue-autorepair-heartbeat
@@ -32,7 +33,7 @@ jobs:
       contents: read
       issues: read
     steps:
-      - name: Select and wake up to five independent autorepair pulses
+      - name: Detect capacity or stale claims and wake authoritative dispatcher
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -51,6 +52,16 @@ jobs:
                 (([.labels[].name] | index("genesis-repair-in-progress")) != null) or
                 (([.labels[].name] | index("genesis-validating")) != null)
               )
+          ] | length' "$RUNNER_TEMP/open-issues.json")
+
+          cutoff=$(date -u -d "$GENESIS_ISSUE_REPAIR_STALE_MINUTES minutes ago" +%Y-%m-%dT%H:%M:%SZ)
+          stale_count=$(jq --arg cutoff "$cutoff" '[
+            .[]
+            | ([.labels[].name] // []) as $labels
+            | select(($labels | index("genesis-autonomous")) != null)
+            | select(($labels | index("genesis-repair-in-progress")) != null)
+            | select(($labels | index("genesis-validating")) == null)
+            | select((.updatedAt // "") < $cutoff)
           ] | length' "$RUNNER_TEMP/open-issues.json")
 
           eligible_filter='[
@@ -72,7 +83,6 @@ jobs:
           ] | sort_by(.updatedAt, .number)'
 
           eligible=$(jq "$eligible_filter | length" "$RUNNER_TEMP/open-issues.json")
-
           available=$((GENESIS_ISSUE_REPAIR_MAX_PARALLEL - active))
           if (( available < 0 )); then
             available=0
@@ -84,7 +94,7 @@ jobs:
           fi
 
           if (( launch_count > 0 )); then
-            echo "Autorepair heartbeat launching $launch_count explicit independent pulse(s): active=$active eligible=$eligible capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"
+            echo "Autorepair heartbeat launching $launch_count explicit independent pulse(s): active=$active eligible=$eligible stale=$stale_count capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"
             mapfile -t selected < <(jq -r --argjson limit "$launch_count" "$eligible_filter | .[:\$limit][] | .number" "$RUNNER_TEMP/open-issues.json")
             lane=0
             for issue_number in "${selected[@]}"; do
@@ -95,6 +105,11 @@ jobs:
                 --ref main \
                 -f issue_number="$issue_number"
             done
+          elif (( stale_count > 0 )); then
+            echo "Capacity is saturated by at least one stale unvalidated claim; waking authoritative dispatcher for reconciliation."
+            gh workflow run github-issue-autorepair.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref main
           else
-            echo "Autorepair heartbeat idle: active=$active eligible=$eligible capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"
+            echo "Autorepair heartbeat idle: active=$active eligible=$eligible stale=$stale_count capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"
           fi
