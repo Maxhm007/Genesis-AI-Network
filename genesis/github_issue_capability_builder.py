@@ -163,8 +163,9 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
             ),
             "files": {cls.TARGET: updated},
         }
-        coding.validate_proposal(proposal, cls.name)
-        return cls(proposal)
+        provider = cls(proposal)
+        provider.prepare_trusted_full_file_replay(root, coding)
+        return provider
 
     @classmethod
     def for_issue(

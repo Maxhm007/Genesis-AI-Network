@@ -24,6 +24,7 @@ class DeterministicLearnedCapabilityProvider:
     MARKER = "# GENESIS_LEARNED_CAPABILITY_INSERTION_POINT"
     MAX_LESSON_BYTES = 600
     MAX_EVIDENCE_BYTES = 1_600
+    MAX_TRUSTED_INSERT_BYTES = 8_000
 
     def __init__(self, proposal: dict) -> None:
         self._proposal = proposal
@@ -50,6 +51,43 @@ class DeterministicLearnedCapabilityProvider:
         if len(candidate) >= 12:
             return candidate[:12]
         return hashlib.sha256(f"{lesson}|{evidence}".encode("utf-8")).hexdigest()[:12]
+
+    def prepare_trusted_full_file_replay(self, root: Path, coding: CodingModule) -> None:
+        """Validate one deterministic insertion before replay through CodingModule.
+
+        ``CodingModule.MAX_TOTAL_BYTES`` remains the model-proposal ceiling. A
+        learned-capability file can legitimately grow beyond that ceiling over
+        time, so this trusted deterministic provider validates the exact fixed
+        target and the bounded inserted delta, then raises only this CodingModule
+        instance's replay allowance to the already validated full-file size.
+        """
+        files = self._proposal.get("files")
+        if not isinstance(files, dict) or set(files) != {self.TARGET}:
+            raise ValueError("deterministic capability proposal must modify only the learned-capability target")
+        proposed = files.get(self.TARGET)
+        if not isinstance(proposed, str):
+            raise ValueError("deterministic capability proposal contents must be text")
+
+        coding.executor._validate_paths([self.TARGET])
+        target = (Path(root).resolve() / self.TARGET).resolve()
+        if not target.is_file():
+            raise ValueError("deterministic capability target does not exist")
+        current = target.read_text(encoding="utf-8")
+        if current.count(self.MARKER) != 1 or proposed.count(self.MARKER) != 1:
+            raise ValueError("learned capability insertion marker is missing or ambiguous")
+
+        current_prefix, current_suffix = current.split(self.MARKER, 1)
+        proposed_prefix, proposed_suffix = proposed.split(self.MARKER, 1)
+        if proposed_suffix != current_suffix or not proposed_prefix.startswith(current_prefix):
+            raise ValueError("deterministic capability proposal may only insert immediately before the marker")
+        inserted = proposed_prefix[len(current_prefix) :]
+        inserted_bytes = len(inserted.encode("utf-8"))
+        if not inserted.strip() or inserted_bytes > self.MAX_TRUSTED_INSERT_BYTES:
+            raise ValueError("deterministic capability insertion exceeds trusted bounded size")
+
+        compile(proposed, self.TARGET, "exec")
+        replay_bytes = len(proposed.encode("utf-8"))
+        coding.MAX_TOTAL_BYTES = max(CodingModule.MAX_TOTAL_BYTES, replay_bytes)
 
     @classmethod
     def _render_template(cls, token: str, combined: str) -> tuple[str, str, str] | None:
@@ -265,5 +303,6 @@ class DeterministicLearnedCapabilityProvider:
             "rationale": "Deterministic evidence-backed capability synthesis from a grounded Genesis learning task.",
             "files": {cls.TARGET: updated},
         }
-        coding.validate_proposal(proposal, cls.name)
-        return cls(proposal)
+        provider = cls(proposal)
+        provider.prepare_trusted_full_file_replay(root, coding)
+        return provider

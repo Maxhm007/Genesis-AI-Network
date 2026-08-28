@@ -69,9 +69,33 @@ jobs:
       - name: Verify stable baseline
         if: steps.eligibility.outputs.eligible == 'true'
         run: python -m pytest -q
+      - name: Detect trusted deterministic learned-capability route
+        id: deterministic
+        if: steps.eligibility.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_json=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json author,title,body)
+          deterministic=$(jq -r '
+            (.author.login == "github-actions[bot]") and
+            (.title | startswith("[Genesis Task] new capability")) and
+            (.body | contains("<!-- genesis-task-id:task-")) and
+            (.body | contains("- **Task type:** `new_capability`")) and
+            (.body | contains("- **Source:** `genesis.evolution_learning`")) and
+            (.body | contains("- **Target:** `genesis/learned_capabilities.py`")) and
+            (.body | ascii_downcase | contains("verified transferable lesson")) and
+            (.body | contains("External learning evidence:"))
+          ' <<<"$issue_json")
+          echo "eligible=$deterministic" >> "$GITHUB_OUTPUT"
+          if [[ "$deterministic" == "true" ]]; then
+            echo "Trusted deterministic capability envelope detected; local repair models are not required."
+          fi
       - name: Compute configured repair model cache key
         id: model_cache_key
-        if: steps.eligibility.outputs.eligible == 'true'
+        if: steps.eligibility.outputs.eligible == 'true' && steps.deterministic.outputs.eligible != 'true'
         shell: bash
         run: |
           python - <<'PY'
@@ -89,7 +113,7 @@ jobs:
               handle.write(f"model_key={digest}\n")
           PY
       - name: Restore open-model caches
-        if: steps.eligibility.outputs.eligible == 'true'
+        if: steps.eligibility.outputs.eligible == 'true' && steps.deterministic.outputs.eligible != 'true'
         uses: actions/cache@v4
         with:
           path: |
@@ -100,13 +124,13 @@ jobs:
             genesis-github-issue-autorepair-${{ runner.os }}-
             genesis-coding-intelligence-${{ runner.os }}-
       - name: Install free local repair intelligence
-        if: steps.eligibility.outputs.eligible == 'true'
+        if: steps.eligibility.outputs.eligible == 'true' && steps.deterministic.outputs.eligible != 'true'
         run: |
           python -m pip install --upgrade pip
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install 'transformers>=4.51,<5' safetensors
       - name: Prefetch configured repair models
-        if: steps.eligibility.outputs.eligible == 'true'
+        if: steps.eligibility.outputs.eligible == 'true' && steps.deterministic.outputs.eligible != 'true'
         shell: bash
         run: |
           python - <<'PY'
@@ -123,7 +147,7 @@ jobs:
               snapshot_download(model_id)
           PY
       - name: Start Genesis adaptive issue-repair provider
-        if: steps.eligibility.outputs.eligible == 'true'
+        if: steps.eligibility.outputs.eligible == 'true' && steps.deterministic.outputs.eligible != 'true'
         shell: bash
         run: |
           set -euo pipefail
