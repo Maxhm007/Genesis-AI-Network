@@ -24,7 +24,7 @@ def test_backlog_reduction_mode_sets_capacity_limited_admission_to_zero() -> Non
     assert configured_max_active({"GENESIS_MAX_ACTIVE_AUTONOMOUS_ISSUES": "0"}) == 20
 
 
-def test_task_router_defers_new_improvement_publishers_but_keeps_general_router(tmp_path: Path, monkeypatch) -> None:
+def test_task_router_defers_new_publishers_but_drains_existing_self_improvement(tmp_path: Path, monkeypatch) -> None:
     calls: list[str] = []
 
     def forbidden_capability(_root: Path) -> dict:
@@ -32,6 +32,11 @@ def test_task_router_defers_new_improvement_publishers_but_keeps_general_router(
 
     def forbidden_self_improvement(_root: Path) -> dict:
         raise AssertionError("self-improvement issue publisher must not run during backlog reduction")
+
+    def drain_existing(_root: Path) -> dict:
+        calls.append("drain")
+        assert os.environ.get(BACKLOG_REDUCTION_MODE_ENV) == "1"
+        return {"status": "drain_existing_only", "routed": [], "deferred": []}
 
     def dedupe(_root: Path) -> dict:
         calls.append("dedupe")
@@ -51,26 +56,31 @@ def test_task_router_defers_new_improvement_publishers_but_keeps_general_router(
     monkeypatch.delenv(BACKLOG_REDUCTION_MODE_ENV, raising=False)
     monkeypatch.setattr(task_router, "route_capability_growth", forbidden_capability)
     monkeypatch.setattr(task_router, "route_self_improvement", forbidden_self_improvement)
+    monkeypatch.setattr(task_router, "route_existing_self_improvement", drain_existing)
     monkeypatch.setattr(task_router, "dedupe_self_improvement", dedupe)
     monkeypatch.setattr(task_router, "route_unbacked_tasks", general_router)
     monkeypatch.setattr(task_router, "GenesisCoreProcessor", lambda _root: Processor())
 
     result = task_router.route_tasks(tmp_path, open_issue_count=84)
 
-    assert calls == ["dedupe", "general", "cycle"]
+    assert calls == ["drain", "dedupe", "general", "cycle"]
     assert result["backlog_reduction"]["active"] is True
     assert result["backlog_reduction"]["high_water"] == 40
     assert result["capability_issue_router"]["status"] == "deferred_backlog_reduction"
-    assert result["self_improvement_issue_router"]["status"] == "deferred_backlog_reduction"
+    assert result["self_improvement_issue_router"]["status"] == "drain_existing_only"
     assert BACKLOG_REDUCTION_MODE_ENV not in os.environ
 
 
 def test_task_router_runs_normal_publishers_below_high_water(tmp_path: Path, monkeypatch) -> None:
     calls: list[str] = []
 
+    def forbidden_drain(_root: Path) -> dict:
+        raise AssertionError("existing-only drain is for backlog reduction mode")
+
     monkeypatch.delenv(BACKLOG_REDUCTION_MODE_ENV, raising=False)
     monkeypatch.setattr(task_router, "route_capability_growth", lambda _root: calls.append("capability") or {"status": "ok"})
     monkeypatch.setattr(task_router, "route_self_improvement", lambda _root: calls.append("self") or {"status": "ok"})
+    monkeypatch.setattr(task_router, "route_existing_self_improvement", forbidden_drain)
     monkeypatch.setattr(task_router, "dedupe_self_improvement", lambda _root: calls.append("dedupe") or {"status": "ok"})
     monkeypatch.setattr(task_router, "route_unbacked_tasks", lambda _root: calls.append("general") or {"status": "ok"})
 
