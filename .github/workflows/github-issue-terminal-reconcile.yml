@@ -1,0 +1,65 @@
+name: Genesis GitHub Issue Terminal Reconcile
+
+on:
+  workflow_run:
+    workflows: ["Gene Pulse"]
+    types: [completed]
+  schedule:
+    - cron: "*/15 * * * *"
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - "genesis/github_issue_terminal_reconciler.py"
+      - "tests/test_github_issue_terminal_reconciler.py"
+      - ".github/workflows/github-issue-terminal-reconcile.yml"
+
+permissions:
+  contents: read
+  actions: read
+  issues: write
+
+concurrency:
+  group: genesis-github-issue-terminal-reconcile
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      GITHUB_TOKEN: ${{ github.token }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Restore the latest persistent Gene task queue
+        uses: actions/cache/restore@v4
+        with:
+          path: runtime
+          key: gene-runtime-gene-node-1-${{ github.event.workflow_run.id || github.run_id }}
+          restore-keys: |
+            gene-runtime-gene-node-1-
+
+      - name: Verify terminal issue reconciliation safety rules
+        run: |
+          python -m pip install --quiet pytest
+          python -m pytest -q tests/test_github_issue_terminal_reconciler.py
+
+      - name: Close GitHub Issues whose linked Genesis tasks are terminal
+        run: python -m genesis.github_issue_terminal_reconciler
+
+      - name: Upload reconciliation evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: github-issue-terminal-reconcile-${{ github.run_id }}
+          path: runtime/github_issue_terminal_reconcile.json
+          if-no-files-found: warn
+          retention-days: 30
