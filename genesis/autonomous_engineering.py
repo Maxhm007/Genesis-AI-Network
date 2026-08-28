@@ -292,9 +292,28 @@ class AutonomousEngineeringLoop:
                 self.queue.transition(task.task_id, "assigned", module_id=owner_module)
             context_paths = self._context_paths_for_task(task)
             attempt["context_paths"] = context_paths
+
+            finding = ((task.payload.get("discovery") or {}).get("finding") or {})
+            new_capability = bool(finding.get("new_capability"))
+            grounded_capability = finding.get("grounded") is True
+            if new_capability and not grounded_capability:
+                self.queue.pause(task.task_id, "waiting_for_grounded_capability_evidence")
+                attempt["coding_status"] = "waiting_for_coding_provider"
+                attempt["provider_policy"] = "ungrounded_capability_requires_grounded_evidence"
+                attempt["capability_scope"] = "append_only_learned_capability"
+                attempt["error"] = "grounded_evidence_required_before_capability_generation"
+                return attempt
+
             provider = DeterministicLearnedCapabilityProvider.for_task(self.root, task, self.coding)
             if provider is None:
                 provider = self._coding_provider()
+                if new_capability and grounded_capability:
+                    attempt["capability_scope"] = "append_only_learned_capability"
+                    attempt["provider_policy"] = (
+                        "grounded_agentic_capability_qwen_preferred"
+                        if provider is not None and self._is_qwen_provider(provider)
+                        else "grounded_agentic_capability_validated_provider"
+                    )
             if provider is None:
                 self.queue.pause(task.task_id, "waiting_for_eligible_coding_provider")
                 attempt["coding_status"] = "waiting_for_coding_provider"
@@ -304,6 +323,8 @@ class AutonomousEngineeringLoop:
             attempt["coding_strategy"] = (
                 "deterministic_learned_capability"
                 if provider.name == DeterministicLearnedCapabilityProvider.name
+                else "external_qwen_provider"
+                if self._is_qwen_provider(provider)
                 else "external_non_qwen_provider"
             )
             self.queue.transition(task.task_id, "running", module_id=owner_module)
