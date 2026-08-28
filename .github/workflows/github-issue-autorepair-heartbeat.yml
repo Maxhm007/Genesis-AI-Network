@@ -18,6 +18,9 @@ permissions: {}
 
 env:
   GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '5'
+  # Solve workers time out after 45 minutes. A 60-minute lease gives them a
+  # conservative grace period while still guaranteeing dead claims recover.
+  GENESIS_ISSUE_REPAIR_STALE_MINUTES: '60'
 
 concurrency:
   group: genesis-github-issue-autorepair-heartbeat
@@ -30,21 +33,60 @@ jobs:
     permissions:
       actions: write
       contents: read
-      issues: read
+      issues: write
     steps:
-      - name: Select and wake up to five independent autorepair pulses
+      - name: Reclaim stale unvalidated reservations and wake available lanes
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
 
-          gh issue list \
-            --repo "$GITHUB_REPOSITORY" \
-            --state open \
-            --limit 500 \
-            --json number,title,updatedAt,labels \
-            > "$RUNNER_TEMP/open-issues.json"
+          snapshot_issues() {
+            gh issue list \
+              --repo "$GITHUB_REPOSITORY" \
+              --state open \
+              --limit 500 \
+              --json number,title,updatedAt,labels \
+              > "$RUNNER_TEMP/open-issues.json"
+          }
+
+          snapshot_issues
+
+          cutoff=$(date -u -d "$GENESIS_ISSUE_REPAIR_STALE_MINUTES minutes ago" +%Y-%m-%dT%H:%M:%SZ)
+          mapfile -t stale_claims < <(jq -r --arg cutoff "$cutoff" '
+            .[]
+            | ([.labels[].name] // []) as $labels
+            | select(($labels | index("genesis-autonomous")) != null)
+            | select(($labels | index("genesis-repair-in-progress")) != null)
+            | select(($labels | index("genesis-validating")) == null)
+            | select((.updatedAt // "") < $cutoff)
+            | .number
+          ' "$RUNNER_TEMP/open-issues.json")
+
+          for issue_number in "${stale_claims[@]}"; do
+            # Re-read immediately before mutation so a newly validating candidate
+            # can never be reclaimed from a stale snapshot.
+            issue_json=$(gh issue view "$issue_number" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json state,updatedAt,labels)
+            stale_now=$(jq -r --arg cutoff "$cutoff" '
+              (.state == "OPEN") and
+              (([.labels[].name] | index("genesis-autonomous")) != null) and
+              (([.labels[].name] | index("genesis-repair-in-progress")) != null) and
+              (([.labels[].name] | index("genesis-validating")) == null) and
+              ((.updatedAt // "") < $cutoff)
+            ' <<<"$issue_json")
+            if [[ "$stale_now" == 'true' ]]; then
+              echo "Reclaiming stale unvalidated repair reservation for issue #$issue_number (cutoff=$cutoff)."
+              gh issue edit "$issue_number" \
+                --repo "$GITHUB_REPOSITORY" \
+                --remove-label genesis-repair-in-progress || true
+            fi
+          done
+
+          # Capacity must be computed from a fresh snapshot after reclamation.
+          snapshot_issues
 
           active=$(jq '[.[]
             | select(
