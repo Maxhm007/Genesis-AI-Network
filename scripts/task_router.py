@@ -13,6 +13,7 @@ from genesis.issue_backpressure import (
     configured_backlog_reduction_high_water,
     github_open_issue_count,
 )
+from genesis.self_improvement_backlog_drain import route_existing_self_improvement
 from genesis.self_improvement_deduper import dedupe_self_improvement
 from genesis.self_improvement_issue_router import route_self_improvement
 
@@ -29,14 +30,16 @@ def route_tasks(root: Path, *, open_issue_count: int | None = None) -> dict:
 
     try:
         if backlog_reduction:
-            deferred = {
+            capability_issues = {
                 "status": "deferred_backlog_reduction",
                 "reason": "existing GitHub Issue backlog is above the reduction high-water mark",
                 "open_issue_count": open_issue_count,
                 "high_water": high_water,
             }
-            capability_issues = dict(deferred)
-            self_improvement_issues = dict(deferred)
+            # Existing specialist Issues are backlog, not new admission. Adopt them
+            # into their bounded execution tasks while publication of new
+            # self-improvement Issues remains disabled.
+            self_improvement_issues = route_existing_self_improvement(root)
         else:
             capability_issues = route_capability_growth(root)
             self_improvement_issues = route_self_improvement(root)
