@@ -1,11 +1,12 @@
 from genesis.issue_worker_pool import select_issue_repair_batch
 
 
-def _issue(number: int, updated: str, *labels: str) -> dict:
+def _issue(number: int, updated: str, *labels: str, title: str = "") -> dict:
     return {
         "number": number,
         "state": "OPEN",
         "updatedAt": updated,
+        "title": title,
         "labels": [{"name": label} for label in labels],
     }
 
@@ -54,6 +55,51 @@ def test_blocked_solved_and_claimed_issues_are_not_selected() -> None:
     batch = select_issue_repair_batch(rows)
 
     assert batch.selected_issue_numbers == (23,)
+
+
+def test_non_code_issue_backed_tasks_stay_out_of_generic_autorepair() -> None:
+    rows = [
+        _issue(
+            40,
+            "2026-08-26T01:00:00Z",
+            "genesis-autonomous",
+            "genesis-self-improvement",
+            title="[Genesis Self Improvement] competitive ai improvement — frontier benchmarks",
+        ),
+        _issue(
+            41,
+            "2026-08-26T02:00:00Z",
+            "genesis-task",
+            "genesis-autonomous",
+            title="[Genesis Task] competitive ai improvement — Measure the weakest frontier dimension",
+        ),
+        _issue(
+            42,
+            "2026-08-26T03:00:00Z",
+            "genesis-task",
+            "genesis-autonomous",
+            title="[Genesis Task] competitive reference refresh — Refresh official frontier evidence",
+        ),
+        _issue(
+            43,
+            "2026-08-26T04:00:00Z",
+            "genesis-task",
+            "genesis-autonomous",
+            title="[Genesis Task] immortality research — Review new evidence",
+        ),
+        _issue(
+            44,
+            "2026-08-26T05:00:00Z",
+            "genesis-autonomous",
+            title="[Genesis Repair] concrete software defect",
+        ),
+    ]
+
+    batch = select_issue_repair_batch(rows)
+
+    assert batch.selected_issue_numbers == (44,)
+    assert select_issue_repair_batch(rows, explicit_issue_number=40).selected_issue_numbers == ()
+    assert select_issue_repair_batch(rows, explicit_issue_number=41).selected_issue_numbers == ()
 
 
 def test_explicit_manual_issue_does_not_bypass_authorization_or_capacity() -> None:
