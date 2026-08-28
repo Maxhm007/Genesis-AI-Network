@@ -20,9 +20,10 @@ on:
 
 permissions: {}
 
-concurrency:
-  group: genesis-autonomous-single-lane
-  cancel-in-progress: false
+# Do not put this dispatcher in the shared control-workflow concurrency group.
+# Admission is serialized below and the authoritative issue claim enforces the
+# single repair lane. A shared top-level group can discard pending repair runs
+# when newer control/pulse runs arrive, even with cancel-in-progress disabled.
 
 env:
   PYTHONPATH: ${{ github.workspace }}
