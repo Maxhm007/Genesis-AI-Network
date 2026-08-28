@@ -145,7 +145,7 @@ jobs:
 
           Fixes #${ISSUE_NUMBER}
 
-          Promotion is allowed only after two independent full-test validators, Security review, signed quorum verification, Secret Guard, protected-boundary verification, and exact candidate-SHA promotion.
+          Promotion is allowed only after issue-specific semantic regression evidence, two independent full-test validators, Security review, signed quorum verification, Secret Guard, protected-boundary verification, and exact candidate-SHA promotion.
 
           Candidate SHA: \`${CANDIDATE_SHA}\`
           EOF
@@ -202,6 +202,10 @@ jobs:
           print(report.as_dict())
           raise SystemExit(0 if report.status == 'pass' else 1)
           PY
+      - name: Require semantic regression evidence A
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/issue_acceptance_guard.py --base-ref origin/main --repository "$GITHUB_REPOSITORY" --issue-number '${{ inputs.issue_number }}'
       - name: Sign validator A approval
         run: python genesis/ephemeral_validator.py --validator-id github-issue-validator-a --candidate ${{ needs.prepare.outputs.candidate_sha }} --output validator-a.json
       - uses: actions/upload-artifact@v4
@@ -244,6 +248,10 @@ jobs:
           print(report.as_dict())
           raise SystemExit(0 if report.status == 'pass' else 1)
           PY
+      - name: Require semantic regression evidence B
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/issue_acceptance_guard.py --base-ref origin/main --repository "$GITHUB_REPOSITORY" --issue-number '${{ inputs.issue_number }}'
       - name: Sign validator B approval
         run: python genesis/ephemeral_validator.py --validator-id github-issue-validator-b --candidate ${{ needs.prepare.outputs.candidate_sha }} --output validator-b.json
       - uses: actions/upload-artifact@v4
@@ -299,6 +307,15 @@ jobs:
           path: votes/b
       - name: Verify independent signed quorum
         run: python scripts/verify_validator_votes.py votes/a/validator-a.json votes/b/validator-b.json
+      - name: Reconfirm semantic acceptance before promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main '${{ needs.prepare.outputs.candidate_branch }}'
+          git checkout --detach '${{ needs.prepare.outputs.candidate_sha }}'
+          python scripts/issue_acceptance_guard.py --base-ref origin/main --repository "$GITHUB_REPOSITORY" --issue-number '${{ inputs.issue_number }}'
       - name: Promote exact validated candidate SHA
         env:
           GH_TOKEN: ${{ github.token }}
@@ -320,11 +337,11 @@ jobs:
           fi
           git push origin "$CANDIDATE_SHA:refs/heads/main"
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-solved --remove-label genesis-validating --remove-label genesis-autonomous || true
-          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed --comment "Genesis independently validated and promoted exact candidate SHA \`$CANDIDATE_SHA\` to main."
+          gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --reason completed --comment "Genesis independently validated semantic issue acceptance and promoted exact candidate SHA \`$CANDIDATE_SHA\` to main."
           if [[ -n "$PR_NUMBER" ]]; then
             state=$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state' || true)
             if [[ "$state" == 'OPEN' ]]; then
-              gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment "Exact validated candidate SHA was promoted directly to main by the Genesis issue-autorepair quorum."
+              gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --comment "Exact semantically accepted candidate SHA was promoted directly to main by the Genesis issue-autorepair quorum."
             fi
           fi
 
@@ -344,7 +361,7 @@ jobs:
         run: |
           set -euo pipefail
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --remove-label genesis-validating || true
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body 'Genesis integration or exact-SHA validation did not complete successfully. The issue was returned to the autonomous queue; no stale candidate was force-promoted.'
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body 'Genesis integration, semantic acceptance, exact-SHA validation, or promotion did not complete successfully. The issue was returned to the autonomous queue; no stale or semantically unproven candidate was force-promoted.'
 
   release_claim:
     needs: [prepare, open_pr, validator_a, validator_b, secret_guard, promote, recover_queue]
