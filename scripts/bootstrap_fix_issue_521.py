@@ -53,18 +53,6 @@ def patch_single_lane_tests() -> None:
     replace_if_needed(path, "def test_parallel_solver_capacity_is_preserved() -> None:\n", "def test_single_solver_capacity_is_preserved() -> None:\n")
     replace_if_needed(path, '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'5\'" in text\n', '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'1\'" in text\n')
 
-    path = ROOT / "tests" / "test_github_issue_autorepair_claim_release.py"
-    replace_if_needed(
-        path,
-        '    assert "Re-read immediately before mutation" in text\n',
-        '    assert \'stale_json=$(gh issue view "$stale_issue"\' in text\n    assert \'if [[ "$stale_now" == \'"\'"\'true\'"\'"\' ]]; then\' in text\n',
-    )
-    replace_if_needed(
-        path,
-        '    assert "Selection must use current issue state after any stale-claim repair." in text\n',
-        '    assert "snapshot_issues\\n\\n          selector=(python scripts/select_issue_repair_batch.py" in text\n',
-    )
-
 
 if __name__ == "__main__":
     patch_grounding_gate()
