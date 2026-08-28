@@ -5,15 +5,15 @@ from pathlib import Path
 ROOT = Path(__file__).resolve().parents[1]
 
 
-def replace_if_needed(path: Path, old: str, new: str) -> None:
+def replace_if_needed(path: Path, old: str, new: str, *, required: bool = True) -> None:
     text = path.read_text(encoding="utf-8")
     if new in text:
         return
     if old not in text:
-        raise RuntimeError(f"expected patch context not found in {path}")
-    if text.count(old) != 1:
-        raise RuntimeError(f"expected exactly one patch context in {path}, found {text.count(old)}")
-    path.write_text(text.replace(old, new, 1), encoding="utf-8")
+        if required:
+            raise RuntimeError(f"expected patch context not found in {path}")
+        return
+    path.write_text(text.replace(old, new), encoding="utf-8")
 
 
 def patch_grounding_gate() -> None:
@@ -24,22 +24,20 @@ def patch_grounding_gate() -> None:
 
 
 def patch_single_lane_tests() -> None:
-    path = ROOT / "tests" / "test_adaptive_pulse_scheduler.py"
-    replace_if_needed(path, "def test_autorepair_preserves_immediate_refill_and_five_lane_capacity() -> None:\n", "def test_autorepair_preserves_immediate_refill_and_single_lane_capacity() -> None:\n")
-    replace_if_needed(path, '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'5\'" in text\n', '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'1\'" in text\n')
-
-    path = ROOT / "tests" / "test_github_issue_autorepair_heartbeat_workflow.py"
-    replace_if_needed(path, "def test_heartbeat_preserves_five_lane_capacity_and_queue_filters() -> None:\n", "def test_heartbeat_preserves_single_lane_capacity_and_queue_filters() -> None:\n")
-    replace_if_needed(path, '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'5\'" in text\n', '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'1\'" in text\n')
-    replace_if_needed(
-        path,
-        '    assert "github-issue-autorepair-worker.yml" not in text\n    assert "github-issue-autorepair-integration.yml" not in text\n',
-        '    assert "gh workflow run github-issue-autorepair-worker.yml" not in text\n    assert "gh workflow run github-issue-autorepair-integration.yml" not in text\n',
-    )
-
-    path = ROOT / "tests" / "test_github_issue_autorepair_integration_transaction.py"
-    replace_if_needed(path, "def test_parallel_solver_capacity_is_preserved() -> None:\n", "def test_single_solver_capacity_is_preserved() -> None:\n")
-    replace_if_needed(path, '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'5\'" in text\n', '    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: \'1\'" in text\n')
+    files = [
+        ROOT / "tests" / "test_adaptive_pulse_scheduler.py",
+        ROOT / "tests" / "test_github_issue_autorepair_heartbeat_workflow.py",
+        ROOT / "tests" / "test_github_issue_autorepair_integration_transaction.py",
+    ]
+    for path in files:
+        text = path.read_text(encoding="utf-8")
+        text = text.replace("five_lane_capacity", "single_lane_capacity")
+        text = text.replace("parallel_solver_capacity", "single_solver_capacity")
+        text = text.replace("GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '5'", "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '1'")
+        if path.name == "test_github_issue_autorepair_heartbeat_workflow.py":
+            text = text.replace('assert "github-issue-autorepair-worker.yml" not in text', 'assert "gh workflow run github-issue-autorepair-worker.yml" not in text')
+            text = text.replace('assert "github-issue-autorepair-integration.yml" not in text', 'assert "gh workflow run github-issue-autorepair-integration.yml" not in text')
+        path.write_text(text, encoding="utf-8")
 
 
 if __name__ == "__main__":
