@@ -1,0 +1,81 @@
+name: Bootstrap Repair 521
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/bootstrap-repair-521.yml'
+
+permissions:
+  contents: write
+  issues: write
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch baseline regressions
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          provider = Path('genesis/provider_fallback.py')
+          text = provider.read_text(encoding='utf-8')
+          old = '    self._coding_provider = MethodType(_ORIGINAL_CODING_PROVIDER, self)\n'
+          new = (
+              '    # Ungrounded new-capability work must never reach any model provider.\n'
+              '    # Force the original attempt path into its existing wait/pause branch.\n'
+              '    self._coding_provider = MethodType(lambda _self: None, self)\n'
+          )
+          if text.count(old) != 1:
+              raise SystemExit(f'provider fallback patch anchor count={text.count(old)}')
+          provider.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          scheduler = Path('genesis/efficient_engineering.py')
+          text = scheduler.read_text(encoding='utf-8')
+          old = '''        return (\n            emergency_lane,\n            issue_number,\n            task.updated_at,\n            generation,\n            task.attempt_count,\n            task.task_id,\n        )\n'''
+          new = '''        return (\n            emergency_lane,\n            task.attempt_count,\n            issue_number,\n            task.updated_at,\n            generation,\n            task.task_id,\n        )\n'''
+          if text.count(old) != 1:
+              raise SystemExit(f'scheduler fairness patch anchor count={text.count(old)}')
+          text = text.replace(old, new, 1)
+          old_doc = '''        Priority-100 work is an emergency lane. All other Issue-backed engineering\n        is ordered by GitHub Issue number first, which is monotonic creation order\n        inside one repository. A retry generation therefore retains the age of its\n        Issue instead of becoming younger than every newly created first generation.\n'''
+          new_doc = '''        Priority-100 work is an emergency lane. Otherwise, tasks with fewer\n        attempts receive the next turn; GitHub Issue number breaks ties so older\n        Issues retain age priority across generations. This prevents one repeatedly\n        failing old Issue from monopolizing the single repair lane while still\n        draining older work before equally attempted newer work.\n'''
+          if text.count(old_doc) != 1:
+              raise SystemExit(f'scheduler doc patch anchor count={text.count(old_doc)}')
+          scheduler.write_text(text.replace(old_doc, new_doc, 1), encoding='utf-8')
+          PY
+      - name: Run focused regression tests
+        run: |
+          python -m pytest -q \
+            tests/test_deterministic_capability_builder.py \
+            tests/test_issue_scheduler_fairness.py \
+            tests/test_old_issue_drain_regression.py
+      - name: Run full baseline suite
+        run: python -m pytest -q
+      - name: Commit validated bootstrap repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'genesis-bootstrap-repair'
+          git config user.email 'actions@users.noreply.github.com'
+          git add genesis/provider_fallback.py genesis/efficient_engineering.py
+          git diff --cached --quiet && { echo 'No changes to commit'; exit 0; }
+          git commit -m 'fix: restore autonomous issue repair baseline (#521)'
+          git push origin HEAD:main
+      - name: Close bootstrap issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh issue close 521 --repo "$GITHUB_REPOSITORY" --reason completed --comment 'Baseline repair validated by focused regressions and the full pytest suite. Autonomous issue repair can resume.'
