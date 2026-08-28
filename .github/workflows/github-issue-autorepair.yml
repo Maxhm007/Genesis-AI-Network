@@ -166,6 +166,37 @@ jobs:
       contents: write
       issues: write
 
+  release_unvalidated_claim:
+    needs: [plan, solve_workers]
+    if: always() && needs.plan.outputs.has_work == 'true'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    strategy:
+      fail-fast: false
+      max-parallel: 1
+      matrix:
+        issue_number: ${{ fromJSON(needs.plan.outputs.issue_numbers) }}
+    steps:
+      - name: Release reservation immediately when solve produced no validating candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ matrix.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_json=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels)
+          validating=$(jq -r '([.labels[].name] | index("genesis-validating")) != null' <<<"$issue_json")
+          if [[ "$validating" == 'true' ]]; then
+            echo "Issue #$ISSUE_NUMBER has a validating candidate; integration retains the reservation."
+            exit 0
+          fi
+          echo "Issue #$ISSUE_NUMBER has no validating candidate after solve; releasing its repair reservation."
+          gh issue edit "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --remove-label genesis-repair-in-progress || true
+
   integrate_workers:
     needs: [plan, solve_workers]
     if: always() && needs.plan.outputs.has_work == 'true'
@@ -184,7 +215,7 @@ jobs:
       pull-requests: write
 
   refill:
-    needs: [plan, solve_workers, integrate_workers]
+    needs: [plan, solve_workers, release_unvalidated_claim, integrate_workers]
     if: always() && needs.plan.outputs.has_work == 'true'
     runs-on: ubuntu-latest
     permissions:
