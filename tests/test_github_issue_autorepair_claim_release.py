@@ -27,25 +27,41 @@ def test_refill_waits_for_claim_cleanup_and_integration() -> None:
     assert "Immediately wake read-only heartbeat to refill repair capacity" in text
 
 
-def test_heartbeat_reclaims_only_old_unvalidated_claims() -> None:
-    text = HEARTBEAT.read_text(encoding="utf-8")
+def test_dispatcher_reclaims_only_old_unvalidated_claims() -> None:
+    text = AUTOREPAIR.read_text(encoding="utf-8")
 
     assert "GENESIS_ISSUE_REPAIR_STALE_MINUTES: '60'" in text
     assert "issues: write" in text
-    assert "Reclaim stale unvalidated reservations and wake available lanes" in text
+    assert "Reconcile stale claims, then build and claim one repair lane" in text
     assert 'index("genesis-repair-in-progress")' in text
     assert 'index("genesis-validating")) == null' in text
     assert '(.updatedAt // "") < $cutoff' in text
     assert "Re-read immediately before mutation" in text
     assert "--remove-label genesis-repair-in-progress" in text
+    assert "Selection must use current issue state after any stale-claim repair." in text
+    assert text.count("snapshot_issues") >= 3
 
 
-def test_heartbeat_reloads_issue_snapshot_after_reclamation() -> None:
+def test_heartbeat_detects_stale_claims_without_mutating_issues() -> None:
     text = HEARTBEAT.read_text(encoding="utf-8")
 
-    assert "snapshot_issues()" in text
-    assert text.count("snapshot_issues") >= 3  # declaration + before + after reclamation
-    assert "Capacity must be computed from a fresh snapshot after reclamation." in text
-    fresh_snapshot = text.index("# Capacity must be computed from a fresh snapshot after reclamation.")
-    active_count = text.index("active=$(jq")
-    assert fresh_snapshot < active_count
+    assert "GENESIS_ISSUE_REPAIR_STALE_MINUTES: '60'" in text
+    assert "issues: read" in text
+    assert "issues: write" not in text
+    assert "stale_count=$(jq" in text
+    assert 'index("genesis-validating")) == null' in text
+    assert '(.updatedAt // "") < $cutoff' in text
+    assert "--remove-label genesis-repair-in-progress" not in text
+    assert "gh issue edit" not in text
+
+
+def test_saturated_stale_queue_wakes_authoritative_dispatcher_for_reconciliation() -> None:
+    text = HEARTBEAT.read_text(encoding="utf-8")
+
+    assert "elif (( stale_count > 0 )); then" in text
+    assert "waking authoritative dispatcher for reconciliation" in text
+    recovery_at = text.index("elif (( stale_count > 0 )); then")
+    recovery_block = text[recovery_at:]
+    assert "gh workflow run github-issue-autorepair.yml" in recovery_block
+    assert "--ref main" in recovery_block
+    assert '-f issue_number="$issue_number"' not in recovery_block
