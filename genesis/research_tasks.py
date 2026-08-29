@@ -69,18 +69,126 @@ class ImmortalityResearchWorker:
             if isinstance(item, dict)
         )
 
+    def _review_path(self, task_id: str) -> Path:
+        return self.root / "runtime" / "task_reviews" / f"{task_id}.json"
+
+    @staticmethod
+    def _team_members_from_review(review_path: Path) -> list[str]:
+        try:
+            review = json.loads(review_path.read_text(encoding="utf-8"))
+        except (OSError, json.JSONDecodeError):
+            return []
+        outputs = review.get("team_outputs") if isinstance(review, dict) else []
+        if not isinstance(outputs, list):
+            return []
+        return [
+            str(item.get("agent") or "")
+            for item in outputs
+            if isinstance(item, dict) and str(item.get("agent") or "").strip()
+        ]
+
+    def _finish_review_reconciliation(self, task, *, issue_sync: dict) -> dict:
+        """Retry GitHub evidence/closure for an existing review without rerunning AI work."""
+        task_type = str(task.payload.get("task_type"))
+        module_id = "genesis.research" if task_type == "immortality_research" else "genesis.capability"
+        issue_number = int(task.payload.get("github_issue_number") or 0)
+        review_path = self._review_path(task.task_id)
+        team_members = self._team_members_from_review(review_path)
+        evidence_result = publish_specialist_completion_evidence(
+            self.root,
+            task,
+            review_path=review_path,
+            team_members=team_members,
+        )
+        if not evidence_result.get("reported"):
+            return {
+                "status": "github_issue_reconciliation_pending",
+                "reason": evidence_result.get("reason") or evidence_result.get("status"),
+                "task_id": task.task_id,
+                "task_type": task_type,
+                "priority": task.priority,
+                "state": task.state,
+                "github_issue_number": issue_number,
+                "review_artifact": str(review_path.relative_to(self.root)),
+                "team_members": team_members,
+                "github_issue_authority_enforced": True,
+                "github_issue_sync": issue_sync,
+                "github_completion_evidence": evidence_result,
+                "github_issue_reconciled": False,
+                "research_reexecuted": False,
+            }
+
+        updated = self.queue.transition(task.task_id, "complete", module_id=module_id)
+        terminal_reconciliation = reconcile_terminal_github_issues(self.root)
+        issue_reconciled = self._issue_closed(issue_number, terminal_reconciliation)
+        return {
+            "status": "review_completed" if issue_reconciled else "github_issue_close_pending",
+            "task_id": task.task_id,
+            "task_type": task_type,
+            "priority": task.priority,
+            "state": updated.state,
+            "github_issue_number": issue_number,
+            "review_artifact": str(review_path.relative_to(self.root)),
+            "team_members": team_members,
+            "github_issue_authority_enforced": True,
+            "github_issue_sync": issue_sync,
+            "github_completion_evidence": evidence_result,
+            "github_terminal_reconciliation": terminal_reconciliation,
+            "github_issue_reconciled": issue_reconciled,
+            "research_reexecuted": False,
+        }
+
     def run_one(self) -> dict:
         authority = issue_authority_enabled(self.root)
         issue_sync = route_unbacked_tasks(self.root)
+        tasks = self.queue.list(limit=200)
+
+        # If a previous cycle completed the internal task but GitHub closure failed,
+        # retry only the terminal reconciliation. Never rerun specialist research.
+        if authority:
+            completed_issue_tasks = [
+                task for task in tasks
+                if issue_backed(task)
+                and task.state == "complete"
+                and task.payload.get("task_type") in SUPPORTED_TASK_TYPES
+            ]
+            if completed_issue_tasks:
+                task = completed_issue_tasks[0]
+                issue_number = int(task.payload.get("github_issue_number") or 0)
+                terminal_reconciliation = reconcile_terminal_github_issues(self.root)
+                issue_reconciled = self._issue_closed(issue_number, terminal_reconciliation)
+                return {
+                    "status": "review_completed" if issue_reconciled else "github_issue_close_pending",
+                    "task_id": task.task_id,
+                    "task_type": str(task.payload.get("task_type")),
+                    "priority": task.priority,
+                    "state": task.state,
+                    "github_issue_number": issue_number,
+                    "github_issue_authority_enforced": True,
+                    "github_issue_sync": issue_sync,
+                    "github_terminal_reconciliation": terminal_reconciliation,
+                    "github_issue_reconciled": issue_reconciled,
+                    "research_reexecuted": False,
+                }
+
+            review_issue_tasks = [
+                task for task in tasks
+                if issue_backed(task)
+                and task.state == "review"
+                and task.payload.get("task_type") in SUPPORTED_TASK_TYPES
+            ]
+            if review_issue_tasks:
+                return self._finish_review_reconciliation(review_issue_tasks[0], issue_sync=issue_sync)
+
         candidates = [
-            task for task in self.queue.list(limit=200)
+            task for task in tasks
             if (not authority or issue_backed(task))
             and task.state in {"new", "assigned"}
             and task.payload.get("task_type") in SUPPORTED_TASK_TYPES
         ]
         if not candidates:
             unbacked = [
-                task.task_id for task in self.queue.list(limit=200)
+                task.task_id for task in tasks
                 if authority
                 and not issue_backed(task)
                 and task.state in {"new", "assigned"}
@@ -141,6 +249,7 @@ class ImmortalityResearchWorker:
                     "github_issue_sync": issue_sync,
                     "github_completion_evidence": evidence_result,
                     "github_issue_reconciled": False,
+                    "research_reexecuted": True,
                 }
 
         updated = self.queue.transition(task.task_id, "complete", module_id=module_id)
@@ -164,4 +273,5 @@ class ImmortalityResearchWorker:
             "github_completion_evidence": evidence_result,
             "github_terminal_reconciliation": terminal_reconciliation,
             "github_issue_reconciled": issue_reconciled,
+            "research_reexecuted": True,
         }
