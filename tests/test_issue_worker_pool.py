@@ -1,11 +1,18 @@
 from genesis.issue_worker_pool import select_issue_repair_batch
 
 
-def _issue(number: int, updated: str, *labels: str, title: str = "") -> dict:
+def _issue(
+    number: int,
+    created: str,
+    *labels: str,
+    title: str = "",
+    updated: str | None = None,
+) -> dict:
     return {
         "number": number,
         "state": "OPEN",
-        "updatedAt": updated,
+        "createdAt": created,
+        "updatedAt": updated or created,
         "title": title,
         "labels": [{"name": label} for label in labels],
     }
@@ -100,6 +107,77 @@ def test_non_code_issue_backed_tasks_stay_out_of_generic_autorepair() -> None:
     assert batch.selected_issue_numbers == (44,)
     assert select_issue_repair_batch(rows, explicit_issue_number=40).selected_issue_numbers == ()
     assert select_issue_repair_batch(rows, explicit_issue_number=41).selected_issue_numbers == ()
+
+
+def test_older_general_issue_beats_newer_repair_issue() -> None:
+    rows = [
+        _issue(
+            70,
+            "2026-08-20T01:00:00Z",
+            "genesis-autonomous",
+            title="[Genesis Task] ordinary older repairable work",
+        ),
+        _issue(
+            71,
+            "2026-08-21T01:00:00Z",
+            "genesis-autonomous",
+            title="[Genesis Repair] newer urgent-looking work",
+        ),
+    ]
+
+    batch = select_issue_repair_batch(rows, max_parallel=1)
+
+    assert batch.selected_issue_numbers == (70,)
+
+
+def test_updated_at_does_not_change_fifo_position() -> None:
+    rows = [
+        _issue(
+            80,
+            "2026-08-20T01:00:00Z",
+            "genesis-autonomous",
+            updated="2026-08-29T23:59:00Z",
+        ),
+        _issue(
+            81,
+            "2026-08-21T01:00:00Z",
+            "genesis-autonomous",
+            updated="2026-08-21T01:00:00Z",
+        ),
+    ]
+
+    batch = select_issue_repair_batch(rows, max_parallel=1)
+
+    assert batch.selected_issue_numbers == (80,)
+
+
+def test_explicit_newer_issue_cannot_bypass_oldest_eligible_issue() -> None:
+    rows = [
+        _issue(90, "2026-08-20T01:00:00Z", "genesis-autonomous"),
+        _issue(91, "2026-08-21T01:00:00Z", "genesis-autonomous"),
+    ]
+
+    assert select_issue_repair_batch(rows, explicit_issue_number=91).selected_issue_numbers == ()
+    assert select_issue_repair_batch(rows, explicit_issue_number=90).selected_issue_numbers == (90,)
+
+
+def test_missing_or_equal_created_at_uses_issue_number_deterministically() -> None:
+    rows = [
+        {
+            "number": 102,
+            "state": "OPEN",
+            "title": "",
+            "labels": [{"name": "genesis-autonomous"}],
+        },
+        {
+            "number": 101,
+            "state": "OPEN",
+            "title": "",
+            "labels": [{"name": "genesis-autonomous"}],
+        },
+    ]
+
+    assert select_issue_repair_batch(rows, max_parallel=1).selected_issue_numbers == (101,)
 
 
 def test_explicit_manual_issue_does_not_bypass_authorization_or_capacity() -> None:

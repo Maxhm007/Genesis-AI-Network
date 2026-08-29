@@ -10,7 +10,6 @@ IN_PROGRESS_LABEL = "genesis-repair-in-progress"
 VALIDATING_LABEL = "genesis-validating"
 BLOCKED_LABEL = "genesis-blocked"
 SOLVED_LABEL = "genesis-solved"
-ACTION_FAILURE_LABEL = "genesis-action-failure"
 PERSISTENT_LABEL = "genesis-persistent"
 CONTROL_LABEL = "genesis-control"
 DUPLICATE_LABEL = "duplicate"
@@ -30,23 +29,6 @@ _NON_CODE_TASK_PREFIXES = (
     "[genesis task] competitive ai improvement",
     "[genesis task] competitive reference refresh",
     "[genesis task] immortality research",
-)
-
-_HIGH_PRIORITY_TASK_PREFIXES = (
-    "[genesis task] self repair",
-    "[genesis task] security repair",
-    "[genesis task] action repair",
-    "[genesis task] workflow repair",
-    "[genesis task] issue repair",
-)
-_LOW_PRIORITY_TASK_MARKERS = (
-    "capability",
-    "benchmark",
-    "application development",
-    "research",
-    "model evaluation",
-    "self improvement",
-    "self upgrade",
 )
 
 
@@ -129,32 +111,12 @@ def _is_eligible(row: dict) -> bool:
     return True
 
 
-def _drain_priority(row: dict) -> int:
-    """Prefer backlog-closing repair work without starving older work in a class."""
-    title = str(row.get("title") or "").strip().lower()
-    labels = _labels(row)
-    if (
-        title.startswith("[genesis repair]")
-        or title.startswith("genesis control:")
-        or title.startswith(_HIGH_PRIORITY_TASK_PREFIXES)
-        or ACTION_FAILURE_LABEL in labels
-    ):
-        return 0
-    if title.startswith("genesis challenge:"):
-        return 1
-    if title.startswith("[genesis self improvement]"):
-        return 3
-    if title.startswith("[genesis task]") and any(marker in title for marker in _LOW_PRIORITY_TASK_MARKERS):
-        return 3
-    return 2
-
-
-def _sort_key(row: dict) -> tuple[int, str, int]:
-    return (
-        _drain_priority(row),
-        str(row.get("updatedAt") or row.get("updated_at") or ""),
-        _number(row),
-    )
+def _sort_key(row: dict) -> int:
+    """Order eligible Issues strictly oldest-first by GitHub Issue number."""
+    # GitHub assigns repository Issue/PR numbers monotonically. Among Issues,
+    # a lower Issue number was created earlier, so it is a stable FIFO key that
+    # cannot be changed by comments, labels, retries, or other updates.
+    return _number(row)
 
 
 def select_issue_repair_batch(
@@ -163,7 +125,7 @@ def select_issue_repair_batch(
     max_parallel: int = DEFAULT_MAX_PARALLEL,
     explicit_issue_number: int | None = None,
 ) -> IssueRepairBatch:
-    """Select a bounded, backlog-draining issue-repair batch.
+    """Select a bounded oldest-first GitHub Issue repair batch.
 
     GitHub Issues are the authoritative task source. Existing autonomous issues,
     canonical ``genesis-task`` issues, and explicit Genesis task-title records are
@@ -173,13 +135,14 @@ def select_issue_repair_batch(
     This means a candidate under ``genesis-validating`` still consumes a worker slot,
     preventing validation-heavy work from causing unbounded admission.
 
-    Selection is deterministic and drain-aware: repair/security/control work wins
-    before challenge/general work, while research/self-improvement/capability work
-    is drained last. Dedicated non-code research/self-improvement task families are
-    excluded from this generic coding pool and remain executable through their
-    specialist Issue-backed workers. Within each class, least-recently-updated wins,
-    then issue number, so fairness is preserved. An explicit manual issue is admitted
-    only if it is currently eligible and capacity exists.
+    Selection is deterministic FIFO across the generic code-repair lane: the lowest
+    eligible GitHub Issue number wins. ``updatedAt`` and title priority do not affect
+    queue position, so comments, retries, labels, or newer repair/security Issues
+    cannot jump ahead of older eligible work. Dedicated non-code research/self-
+    improvement task families remain in their specialist Issue-backed lanes.
+
+    An explicit dispatch is only admitted when it names the oldest currently
+    eligible Issue. This keeps manual/event-driven wakeups from bypassing FIFO.
     """
 
     rows = [row for row in issues if isinstance(row, dict) and _is_open(row)]
@@ -190,13 +153,13 @@ def select_issue_repair_batch(
     if slots == 0:
         return IssueRepairBatch((), tuple(active_numbers), 0)
 
+    eligible = sorted((row for row in rows if _is_eligible(row)), key=_sort_key)
+
     if explicit_issue_number is not None:
         explicit = int(explicit_issue_number)
-        for row in rows:
-            if _number(row) == explicit and _is_eligible(row):
-                return IssueRepairBatch((explicit,), tuple(active_numbers), slots)
+        if eligible and _number(eligible[0]) == explicit:
+            return IssueRepairBatch((explicit,), tuple(active_numbers), slots)
         return IssueRepairBatch((), tuple(active_numbers), slots)
 
-    eligible = sorted((row for row in rows if _is_eligible(row)), key=_sort_key)
     selected = tuple(_number(row) for row in eligible[:slots])
     return IssueRepairBatch(selected, tuple(active_numbers), slots)

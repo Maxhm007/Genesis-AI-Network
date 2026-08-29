@@ -97,7 +97,7 @@ def test_task_router_runs_normal_publishers_below_high_water(tmp_path: Path, mon
     assert result["backlog_reduction"]["active"] is False
 
 
-def test_worker_pool_drains_repairs_before_low_priority_improvements() -> None:
+def test_worker_pool_drains_oldest_eligible_issues_first() -> None:
     issues = [
         _issue(10, "[Genesis Self Improvement] planned self improvement — old", "2026-01-01T00:00:00Z"),
         _issue(11, "[Genesis Task] frontier benchmark measurement — old", "2026-01-02T00:00:00Z"),
@@ -108,4 +108,4 @@ def test_worker_pool_drains_repairs_before_low_priority_improvements() -> None:
 
     batch = select_issue_repair_batch(issues, max_parallel=3)
 
-    assert batch.selected_issue_numbers == (12, 13, 14)
+    assert batch.selected_issue_numbers == (11, 12, 13)
