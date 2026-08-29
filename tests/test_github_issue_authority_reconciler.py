@@ -28,7 +28,7 @@ def _task(queue: PersistentTaskQueue, key: str, issue: int, state: str):
         f"Issue #{issue} cached work",
         module_id="genesis.coding",
         payload={"github_issue_number": issue, "task_type": "github_issue_development"},
-        max_attempts=4,
+        max_attempts=1 if state == "quarantined" else 4,
     )
     if state == "new":
         return task
@@ -49,15 +49,8 @@ def _task(queue: PersistentTaskQueue, key: str, issue: int, state: str):
         queue.transition(task.task_id, "assigned")
         return queue.record_failure(task.task_id, "retry me", retry_after_seconds=0)
     if state == "quarantined":
-        terminal, _ = queue.create_unique(
-            key + ":quarantine",
-            f"Issue #{issue} quarantined cached work",
-            module_id="genesis.coding",
-            payload={"github_issue_number": issue, "task_type": "github_issue_development"},
-            max_attempts=1,
-        )
-        queue.transition(terminal.task_id, "assigned")
-        return queue.record_failure(terminal.task_id, "budget exhausted", retry_after_seconds=0)
+        queue.transition(task.task_id, "assigned")
+        return queue.record_failure(task.task_id, "budget exhausted", retry_after_seconds=0)
     if state == "complete":
         queue.transition(task.task_id, "assigned")
         queue.transition(task.task_id, "running")
