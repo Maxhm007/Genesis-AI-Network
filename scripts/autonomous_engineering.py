@@ -29,11 +29,13 @@ PERSISTENT_TITLE_PREFIXES = (
     "genesis control:",
 )
 ACTION_LABEL_PREFIX = "genesis-action-"
+SELF_IMPROVEMENT_LABEL = "genesis-self-improvement"
 SPECIALIZED_ISSUE_LABELS = {
     "genesis-autonomous",
     "genesis-validating",
     "genesis-solved",
     "genesis-blocked",
+    SELF_IMPROVEMENT_LABEL,
 }
 EXTERNAL_BLOCKER_PHRASES = (
     "external-authority / independent-secret provisioning blocker",
@@ -182,6 +184,21 @@ def _existing_issue_tasks(queue: PersistentTaskQueue, issue_number: int, task_ty
         rows.append(task)
     rows.sort(key=lambda task: (task.created_at, task.task_id))
     return rows
+
+
+def _retire_misrouted_self_improvement_tasks(queue: PersistentTaskQueue, issue_number: int) -> list[str]:
+    """Cancel stale generic work after a self-improvement Issue moves to its specialist lane."""
+    retired: list[str] = []
+    for task in _existing_issue_tasks(queue, issue_number, "github_issue_development"):
+        if task.state in {"running", "review", "complete", "cancelled"}:
+            continue
+        cancelled = queue.cancel(
+            task.task_id,
+            reason="issue_route_migrated_to_self_improvement_specialist",
+        )
+        if cancelled.state == "cancelled":
+            retired.append(cancelled.task_id)
+    return retired
 
 
 def _task_is_active(queue: PersistentTaskQueue, task) -> bool:
@@ -424,6 +441,9 @@ def ingest_open_issue_backlog(root: Path) -> dict:
         task_id = None
         status = "owned_by_specialist"
         kind = classification.get("kind")
+        retired_generic_tasks: list[str] = []
+        if kind == "issue_autorepair_specialist" and SELF_IMPROVEMENT_LABEL in _labels(issue):
+            retired_generic_tasks = _retire_misrouted_self_improvement_tasks(queue, number)
         if kind == "devlab":
             task_id, status = _queue_devlab_issue(root, queue, issue, classification)
         elif kind == "development":
@@ -435,6 +455,7 @@ def ingest_open_issue_backlog(root: Path) -> dict:
         row["task_id"] = task_id
         row["status"] = status
         row["deduplicated"] = status == "linked_existing_problem"
+        row["retired_generic_tasks"] = retired_generic_tasks
         if status == "created" and task_id:
             created.append(task_id)
         elif status == "linked_existing_problem" and task_id:
