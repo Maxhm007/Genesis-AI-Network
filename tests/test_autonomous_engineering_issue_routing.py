@@ -59,8 +59,8 @@ def test_specialist_intake_retires_stale_generic_task(monkeypatch, tmp_path: Pat
 def test_specialist_intake_never_cancels_running_generic_candidate(monkeypatch, tmp_path: Path):
     queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
     running = _create_generic_issue_task(queue, 340, "running")
-    queue.transition(running.task_id, to_state="assigned", reason="test assignment")
-    queue.transition(running.task_id, to_state="running", reason="test execution")
+    queue.transition(running.task_id, "assigned")
+    queue.transition(running.task_id, "running")
     monkeypatch.setattr(autonomous_engineering, "_github_open_issues", lambda: [_self_improvement_issue()])
 
     result = autonomous_engineering.ingest_open_issue_backlog(tmp_path)
