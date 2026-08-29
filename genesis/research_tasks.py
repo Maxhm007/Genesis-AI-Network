@@ -144,7 +144,8 @@ class ImmortalityResearchWorker:
         tasks = self.queue.list(limit=200)
 
         # If a previous cycle completed the internal task but GitHub closure failed,
-        # retry only the terminal reconciliation. Never rerun specialist research.
+        # retry only the terminal reconciliation. Closed tasks must not monopolize
+        # subsequent specialist cycles, so successfully reconciled tasks fall through.
         if authority:
             completed_issue_tasks = [
                 task for task in tasks
@@ -153,23 +154,30 @@ class ImmortalityResearchWorker:
                 and task.payload.get("task_type") in SUPPORTED_TASK_TYPES
             ]
             if completed_issue_tasks:
-                task = completed_issue_tasks[0]
-                issue_number = int(task.payload.get("github_issue_number") or 0)
                 terminal_reconciliation = reconcile_terminal_github_issues(self.root)
-                issue_reconciled = self._issue_closed(issue_number, terminal_reconciliation)
-                return {
-                    "status": "review_completed" if issue_reconciled else "github_issue_close_pending",
-                    "task_id": task.task_id,
-                    "task_type": str(task.payload.get("task_type")),
-                    "priority": task.priority,
-                    "state": task.state,
-                    "github_issue_number": issue_number,
-                    "github_issue_authority_enforced": True,
-                    "github_issue_sync": issue_sync,
-                    "github_terminal_reconciliation": terminal_reconciliation,
-                    "github_issue_reconciled": issue_reconciled,
-                    "research_reexecuted": False,
-                }
+                unresolved = [
+                    task for task in completed_issue_tasks
+                    if not self._issue_closed(
+                        int(task.payload.get("github_issue_number") or 0),
+                        terminal_reconciliation,
+                    )
+                ]
+                if unresolved:
+                    task = unresolved[0]
+                    issue_number = int(task.payload.get("github_issue_number") or 0)
+                    return {
+                        "status": "github_issue_close_pending",
+                        "task_id": task.task_id,
+                        "task_type": str(task.payload.get("task_type")),
+                        "priority": task.priority,
+                        "state": task.state,
+                        "github_issue_number": issue_number,
+                        "github_issue_authority_enforced": True,
+                        "github_issue_sync": issue_sync,
+                        "github_terminal_reconciliation": terminal_reconciliation,
+                        "github_issue_reconciled": False,
+                        "research_reexecuted": False,
+                    }
 
             review_issue_tasks = [
                 task for task in tasks
