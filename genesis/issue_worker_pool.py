@@ -111,18 +111,12 @@ def _is_eligible(row: dict) -> bool:
     return True
 
 
-def _created_at(row: dict) -> str:
-    return str(row.get("createdAt") or row.get("created_at") or "").strip()
-
-
-def _sort_key(row: dict) -> tuple[int, str, int]:
-    """Order eligible Issues strictly oldest-first, independent of later updates."""
-    created_at = _created_at(row)
-    if created_at:
-        return (0, created_at, _number(row))
-    # GitHub snapshots used by production include createdAt. Keep deterministic
-    # behavior for legacy/test rows that do not by falling back to Issue number.
-    return (1, "", _number(row))
+def _sort_key(row: dict) -> int:
+    """Order eligible Issues strictly oldest-first by GitHub Issue number."""
+    # GitHub assigns repository Issue/PR numbers monotonically. Among Issues,
+    # a lower Issue number was created earlier, so it is a stable FIFO key that
+    # cannot be changed by comments, labels, retries, or other updates.
+    return _number(row)
 
 
 def select_issue_repair_batch(
@@ -141,12 +135,11 @@ def select_issue_repair_batch(
     This means a candidate under ``genesis-validating`` still consumes a worker slot,
     preventing validation-heavy work from causing unbounded admission.
 
-    Selection is deterministic FIFO across the generic code-repair lane: the oldest
-    eligible Issue by creation time wins, then Issue number. ``updatedAt`` and title
-    priority do not affect queue position, so comments, retries, labels, or newer
-    repair/security Issues cannot jump ahead of older eligible work. Dedicated
-    non-code research/self-improvement task families remain in their specialist
-    Issue-backed lanes.
+    Selection is deterministic FIFO across the generic code-repair lane: the lowest
+    eligible GitHub Issue number wins. ``updatedAt`` and title priority do not affect
+    queue position, so comments, retries, labels, or newer repair/security Issues
+    cannot jump ahead of older eligible work. Dedicated non-code research/self-
+    improvement task families remain in their specialist Issue-backed lanes.
 
     An explicit dispatch is only admitted when it names the oldest currently
     eligible Issue. This keeps manual/event-driven wakeups from bypassing FIFO.
