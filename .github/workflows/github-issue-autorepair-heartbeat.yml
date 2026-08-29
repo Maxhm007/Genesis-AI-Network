@@ -40,6 +40,15 @@ jobs:
       contents: read
       issues: read
     steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
       - name: Detect capacity or stale claims and wake authoritative dispatcher
         env:
           GH_TOKEN: ${{ github.token }}
@@ -54,13 +63,6 @@ jobs:
             --json number,title,updatedAt,labels \
             > "$RUNNER_TEMP/open-issues.json"
 
-          active=$(jq '[.[]
-            | select(
-                (([.labels[].name] | index("genesis-repair-in-progress")) != null) or
-                (([.labels[].name] | index("genesis-validating")) != null)
-              )
-          ] | length' "$RUNNER_TEMP/open-issues.json")
-
           cutoff=$(date -u -d "$GENESIS_ISSUE_REPAIR_STALE_MINUTES minutes ago" +%Y-%m-%dT%H:%M:%SZ)
           stale_count=$(jq --arg cutoff "$cutoff" '[
             .[]
@@ -71,44 +73,19 @@ jobs:
             | select((.updatedAt // "") < $cutoff)
           ] | length' "$RUNNER_TEMP/open-issues.json")
 
-          # Old unresolved Issue-backed work must retain its age even when comments,
-          # retries, or status updates touch updatedAt. GitHub Issue number is the
-          # repository-local monotonic creation order, so it is the stable fairness
-          # key. Persistent control/reporting channels are deliberately excluded.
-          eligible_filter='[
-            .[]
-            | ([.labels[].name] // []) as $labels
-            | select(
-                ($labels | index("genesis-autonomous")) != null or
-                ($labels | index("genesis-task")) != null or
-                (.title | startswith("[Genesis Task]")) or
-                (.title | startswith("[Genesis Repair]")) or
-                (.title | startswith("[Genesis Self Improvement]")) or
-                (.title | startswith("Genesis challenge:"))
-              )
-            | select(($labels | index("genesis-repair-in-progress")) == null)
-            | select(($labels | index("genesis-validating")) == null)
-            | select(($labels | index("genesis-blocked")) == null)
-            | select(($labels | index("genesis-solved")) == null)
-            | select(($labels | index("genesis-persistent")) == null)
-            | select(($labels | index("genesis-control")) == null)
-            | select((.title | startswith("Genesis Control:")) | not)
-          ] | sort_by(.number, .updatedAt)'
-
-          eligible=$(jq "$eligible_filter | length" "$RUNNER_TEMP/open-issues.json")
-          available=$((GENESIS_ISSUE_REPAIR_MAX_PARALLEL - active))
-          if (( available < 0 )); then
-            available=0
-          fi
-
-          launch_count="$available"
-          if (( eligible < launch_count )); then
-            launch_count="$eligible"
-          fi
+          # Use the exact same selector as the mutation-authorized dispatcher.
+          # This prevents specialist/control/duplicate Issues from starving the
+          # generic coding lane with successful no-work dispatches.
+          plan_json=$(python scripts/select_issue_repair_batch.py \
+            --issues-json "$RUNNER_TEMP/open-issues.json" \
+            --max-parallel "$GENESIS_ISSUE_REPAIR_MAX_PARALLEL")
+          mapfile -t selected < <(jq -r '.selected_issue_numbers[]' <<<"$plan_json")
+          active=$(jq '.active_issue_numbers | length' <<<"$plan_json")
+          available=$(jq '.available_slots' <<<"$plan_json")
+          launch_count="${#selected[@]}"
 
           if (( launch_count > 0 )); then
-            echo "Autorepair heartbeat launching $launch_count explicit independent pulse(s): active=$active eligible=$eligible stale=$stale_count capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"
-            mapfile -t selected < <(jq -r --argjson limit "$launch_count" "$eligible_filter | .[:\$limit][] | .number" "$RUNNER_TEMP/open-issues.json")
+            echo "Autorepair heartbeat launching $launch_count selected repair pulse(s): active=$active available=$available stale=$stale_count capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL plan=$plan_json"
             lane=0
             for issue_number in "${selected[@]}"; do
               lane=$((lane + 1))
@@ -124,5 +101,5 @@ jobs:
               --repo "$GITHUB_REPOSITORY" \
               --ref main
           else
-            echo "Autorepair heartbeat idle: active=$active eligible=$eligible stale=$stale_count capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"
+            echo "Autorepair heartbeat idle: active=$active available=$available stale=$stale_count capacity=$GENESIS_ISSUE_REPAIR_MAX_PARALLEL plan=$plan_json"
           fi

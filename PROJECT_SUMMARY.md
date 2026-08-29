@@ -34,6 +34,12 @@ The software-evolution path is:
 
 Genesis does not grant AI-generated code direct authority over stable `main`.
 
+GitHub Issue autorepair uses one shared eligibility selector for both its
+read-only heartbeat and mutation-authorized dispatcher. Specialist,
+persistent, control, solved, blocked and duplicate Issues cannot occupy the
+generic coding lane. A source Issue is closed only after its exact candidate
+passes independent validation and is promoted to `main`.
+
 ## Application status
 
 ### Windows desktop
