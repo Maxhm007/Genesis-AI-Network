@@ -6,8 +6,10 @@ from datetime import datetime, timezone
 from pathlib import Path
 
 from .github_issue_task_router import issue_authority_enabled, issue_backed, route_unbacked_tasks
+from .github_issue_terminal_reconciler import reconcile_terminal_github_issues
 from .modules.task_queue import PersistentTaskQueue
 from .providers import ProviderRegistry
+from .specialist_issue_completion import publish_specialist_completion_evidence
 from .team import AITeam
 
 
@@ -55,6 +57,18 @@ class ImmortalityResearchWorker:
             f"CURRENT_REFERENCE={task.payload.get('current_reference_as_of')} SOURCES={task.payload.get('sources')}"
         )
 
+    @staticmethod
+    def _issue_closed(issue_number: int, reconciliation: dict) -> bool:
+        if issue_number <= 0:
+            return False
+        if issue_number in (reconciliation.get("already_closed") or []):
+            return True
+        return any(
+            int(item.get("github_issue_number") or 0) == issue_number
+            for item in (reconciliation.get("closed") or [])
+            if isinstance(item, dict)
+        )
+
     def run_one(self) -> dict:
         authority = issue_authority_enabled(self.root)
         issue_sync = route_unbacked_tasks(self.root)
@@ -88,27 +102,66 @@ class ImmortalityResearchWorker:
             self.queue.transition(task.task_id, "assigned", module_id=module_id)
         self.queue.transition(task.task_id, "running", module_id=module_id)
         outputs = self.team.run_task(task.objective, context=self._context(task))
+        issue_number = int(task.payload.get("github_issue_number") or 0)
         review = {
             "task": asdict(task),
             "created_at": datetime.now(timezone.utc).isoformat(),
             "status": "candidate_review",
             "team_outputs": outputs,
-            "github_issue_number": int(task.payload.get("github_issue_number") or 0),
+            "github_issue_number": issue_number,
             "rule": "Candidate evidence only. Completion of this work item does not promote evidence, benchmark claims, knowledge, scores, or protected code.",
         }
         out_dir = self.root / "runtime" / "task_reviews"
         out_dir.mkdir(parents=True, exist_ok=True)
-        (out_dir / f"{task.task_id}.json").write_text(json.dumps(review, indent=2) + "\n", encoding="utf-8")
-        self.queue.transition(task.task_id, "review", module_id=module_id)
+        review_path = out_dir / f"{task.task_id}.json"
+        review_path.write_text(json.dumps(review, indent=2) + "\n", encoding="utf-8")
+        review_task = self.queue.transition(task.task_id, "review", module_id=module_id)
+        team_members = [str(item.get("agent") or "") for item in outputs]
+
+        evidence_result = None
+        if authority and issue_number > 0:
+            evidence_result = publish_specialist_completion_evidence(
+                self.root,
+                review_task,
+                review_path=review_path,
+                team_members=team_members,
+            )
+            if not evidence_result.get("reported"):
+                return {
+                    "status": "github_issue_reconciliation_pending",
+                    "reason": evidence_result.get("reason") or evidence_result.get("status"),
+                    "task_id": task.task_id,
+                    "task_type": task_type,
+                    "priority": task.priority,
+                    "state": review_task.state,
+                    "github_issue_number": issue_number,
+                    "review_artifact": str(review_path.relative_to(self.root)),
+                    "team_members": team_members,
+                    "github_issue_authority_enforced": authority,
+                    "github_issue_sync": issue_sync,
+                    "github_completion_evidence": evidence_result,
+                    "github_issue_reconciled": False,
+                }
+
         updated = self.queue.transition(task.task_id, "complete", module_id=module_id)
+        terminal_reconciliation = None
+        issue_reconciled = False
+        if authority and issue_number > 0:
+            terminal_reconciliation = reconcile_terminal_github_issues(self.root)
+            issue_reconciled = self._issue_closed(issue_number, terminal_reconciliation)
+
         return {
-            "status": "review_completed",
+            "status": "review_completed" if not authority or issue_number <= 0 or issue_reconciled else "github_issue_close_pending",
             "task_id": task.task_id,
             "task_type": task_type,
             "priority": task.priority,
             "state": updated.state,
-            "github_issue_number": int(task.payload.get("github_issue_number") or 0),
-            "team_members": [item.get("agent") for item in outputs],
+            "github_issue_number": issue_number,
+            "review_artifact": str(review_path.relative_to(self.root)),
+            "team_members": team_members,
             "github_issue_authority_enforced": authority,
             "github_issue_sync": issue_sync,
+            "github_completion_evidence": evidence_result,
+            "github_terminal_reconciliation": terminal_reconciliation,
+            "github_issue_reconciled": issue_reconciled,
         }
