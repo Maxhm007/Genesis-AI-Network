@@ -142,6 +142,7 @@ def test_reconciliation_rejects_user_authored_or_ambiguous_evidence(tmp_path: Pa
 def test_dispatcher_closes_only_after_exact_grounding_test_passes() -> None:
     text = Path(".github/workflows/github-issue-autorepair.yml").read_text(encoding="utf-8")
 
+    assert "python -m pip install --disable-pip-version-check -r requirements.txt" in text
     assert "python -m scripts.reconcile_satisfied_issue" in text
     assert 'python -m pytest "$node_id" -q' in text
     assert 'select(.eligible == true)' in text
