@@ -16,6 +16,7 @@ GENERATION_SUPERSEDEABLE_STATES = {"failed", "blocked", "quarantined"}
 EXPLICIT_SUPERSEDEABLE_STATES = {"new", "assigned", "paused", "blocked", "failed", "quarantined"}
 PROTECTED_LABELS = {"genesis-persistent", "genesis-control"}
 PROTECTED_TITLE_PREFIXES = ("Genesis Control:",)
+SPECIALIST_HANDOFF_REASONS = {"issue_route_migrated_to_self_improvement_specialist"}
 LINEAGE_KEYS = (
     "problem_fingerprint",
     "issue_key",
@@ -86,6 +87,13 @@ def _protected_issue(issue: dict) -> bool:
 
 def _close_reason(tasks: list[GenesisTask]) -> str:
     return "completed" if any(task.state == "complete" for task in tasks) else "not_planned"
+
+
+def _is_specialist_handoff(task: GenesisTask) -> bool:
+    """Return whether cancellation transfers Issue authority rather than ending work."""
+    if task.state != "cancelled":
+        return False
+    return str(task.state_reason or "").strip() in SPECIALIST_HANDOFF_REASONS
 
 
 def _work_generation(task: GenesisTask) -> int:
@@ -176,7 +184,9 @@ def reconcile_terminal_github_issues(
     Historical rows are never ignored merely because they are old. A non-terminal
     row stops closure unless auditable supersession evidence explicitly retires it.
     Protected/control Issues remain untouched, and running/review work is never
-    auto-cancelled by reconciliation.
+    auto-cancelled by reconciliation. A cancelled row that explicitly hands Issue
+    authority to a specialist lane is not a final disposition by itself; the Issue
+    stays open until a substantive replacement row is linked.
     """
     root = Path(root).resolve()
     runtime = root / "runtime"
@@ -200,6 +210,7 @@ def reconcile_terminal_github_issues(
         "already_closed": [],
         "superseded": [],
         "skipped_active": [],
+        "skipped_handoff": [],
         "skipped_protected": [],
         "blocked": [],
     }
@@ -260,7 +271,19 @@ def reconcile_terminal_github_issues(
                 )
             tasks = [queue.get(task.task_id) or task for task in tasks]
 
-        active = [task for task in tasks if task.state not in TERMINAL_STATES]
+        handoff_tasks = [task for task in tasks if _is_specialist_handoff(task)]
+        substantive_tasks = [task for task in tasks if not _is_specialist_handoff(task)]
+        if handoff_tasks and not substantive_tasks:
+            result["skipped_handoff"].append(
+                {
+                    "github_issue_number": issue_number,
+                    "handoff_task_ids": [task.task_id for task in handoff_tasks],
+                    "reason": "awaiting_specialist_replacement",
+                }
+            )
+            continue
+
+        active = [task for task in substantive_tasks if task.state not in TERMINAL_STATES]
         if active:
             result["skipped_active"].append(
                 {
@@ -289,7 +312,7 @@ def reconcile_terminal_github_issues(
             result["skipped_protected"].append(issue_number)
             continue
 
-        state_reason = _close_reason(tasks)
+        state_reason = _close_reason(substantive_tasks)
         updated = requester(
             "PATCH",
             f"/issues/{issue_number}",
