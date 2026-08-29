@@ -11,6 +11,9 @@ VALIDATING_LABEL = "genesis-validating"
 BLOCKED_LABEL = "genesis-blocked"
 SOLVED_LABEL = "genesis-solved"
 ACTION_FAILURE_LABEL = "genesis-action-failure"
+PERSISTENT_LABEL = "genesis-persistent"
+CONTROL_LABEL = "genesis-control"
+DUPLICATE_LABEL = "duplicate"
 DEFAULT_MAX_PARALLEL = 5
 
 AUTHORIZED_TITLE_PREFIXES = (
@@ -18,7 +21,6 @@ AUTHORIZED_TITLE_PREFIXES = (
     "[Genesis Repair]",
     "[Genesis Self Improvement]",
     "Genesis challenge:",
-    "Genesis Control:",
 )
 
 # These Issue-backed task families have dedicated non-code execution/review lanes.
@@ -112,7 +114,17 @@ def _is_eligible(row: dict) -> bool:
         return False
     if not _uses_generic_code_repair(row):
         return False
-    if labels & {IN_PROGRESS_LABEL, VALIDATING_LABEL, BLOCKED_LABEL, SOLVED_LABEL}:
+    if labels & {
+        IN_PROGRESS_LABEL,
+        VALIDATING_LABEL,
+        BLOCKED_LABEL,
+        SOLVED_LABEL,
+        PERSISTENT_LABEL,
+        CONTROL_LABEL,
+        DUPLICATE_LABEL,
+    }:
+        return False
+    if str(row.get("title") or "").strip().startswith("Genesis Control:"):
         return False
     return True
 
