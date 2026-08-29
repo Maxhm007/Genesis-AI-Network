@@ -42,7 +42,9 @@ def test_heartbeat_preserves_single_lane_capacity_and_queue_filters() -> None:
     text = HEARTBEAT.read_text(encoding="utf-8")
 
     assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '1'" in text
-    assert "python scripts/select_issue_repair_batch.py" in text
+    # Module execution keeps the repository root on sys.path so the script can
+    # import the shared genesis selector in a clean GitHub Actions checkout.
+    assert "python -m scripts.select_issue_repair_batch" in text
     assert '--issues-json "$RUNNER_TEMP/open-issues.json"' in text
     assert '--max-parallel "$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"' in text
     assert ".selected_issue_numbers[]" in text

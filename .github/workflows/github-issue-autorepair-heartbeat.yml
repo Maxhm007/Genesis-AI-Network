@@ -76,7 +76,7 @@ jobs:
           # Use the exact same selector as the mutation-authorized dispatcher.
           # This prevents specialist/control/duplicate Issues from starving the
           # generic coding lane with successful no-work dispatches.
-          plan_json=$(python scripts/select_issue_repair_batch.py \
+          plan_json=$(python -m scripts.select_issue_repair_batch \
             --issues-json "$RUNNER_TEMP/open-issues.json" \
             --max-parallel "$GENESIS_ISSUE_REPAIR_MAX_PARALLEL")
           mapfile -t selected < <(jq -r '.selected_issue_numbers[]' <<<"$plan_json")
