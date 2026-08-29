@@ -103,7 +103,11 @@ def test_specialist_comment_failure_does_not_report_completion(tmp_path: Path) -
 
 
 class FakeTeam:
+    def __init__(self) -> None:
+        self.calls = 0
+
     def run_task(self, objective: str, *, context: str):
+        self.calls += 1
         return [
             {"agent": "Gene 0", "output": "candidate evidence"},
             {"agent": "Gene 2", "output": "review"},
@@ -111,12 +115,17 @@ class FakeTeam:
         ]
 
 
-def _worker_task(worker: research_tasks.ImmortalityResearchWorker, *, issue_number: int = 340):
+def _worker_task(
+    worker: research_tasks.ImmortalityResearchWorker,
+    *,
+    issue_number: int = 340,
+    fingerprint: str | None = None,
+):
     payload = {"task_type": "competitive_ai_improvement"}
     if issue_number:
         payload["github_issue_number"] = issue_number
     task, _ = worker.queue.create_unique(
-        f"worker-specialist-{issue_number}",
+        fingerprint or f"worker-specialist-{issue_number}",
         "Measure frontier competitive benchmark evidence without self-awarding a score.",
         module_id="genesis.capability",
         priority=100,
@@ -147,6 +156,7 @@ def test_worker_posts_evidence_then_completes_and_closes_issue(monkeypatch, tmp_
     result = worker.run_one()
 
     assert evidence_calls == [("review", True, ["Gene 0", "Gene 2", "Gene 3"])]
+    assert worker.team.calls == 1
     assert worker.queue.get(task.task_id).state == "complete"
     assert result["status"] == "review_completed"
     assert result["github_issue_reconciled"] is True
@@ -175,9 +185,84 @@ def test_worker_leaves_task_in_review_when_github_evidence_fails(monkeypatch, tm
 
     result = worker.run_one()
 
+    assert worker.team.calls == 1
     assert worker.queue.get(task.task_id).state == "review"
     assert result["status"] == "github_issue_reconciliation_pending"
     assert result["github_issue_reconciled"] is False
+
+
+def test_worker_retries_review_reconciliation_without_rerunning_research(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(research_tasks, "issue_authority_enabled", lambda root: True)
+    monkeypatch.setattr(research_tasks, "route_unbacked_tasks", lambda root: {"status": "ok"})
+    evidence_attempts = {"count": 0}
+
+    def fake_publish(root, task, *, review_path, team_members):
+        evidence_attempts["count"] += 1
+        if evidence_attempts["count"] == 1:
+            return {
+                "status": "blocked",
+                "reported": False,
+                "reason": "github_completion_evidence_comment_failed",
+            }
+        return {"status": "reported", "reported": True, "github_issue_number": 340}
+
+    monkeypatch.setattr(research_tasks, "publish_specialist_completion_evidence", fake_publish)
+    monkeypatch.setattr(
+        research_tasks,
+        "reconcile_terminal_github_issues",
+        lambda root: {"status": "ok", "closed": [{"github_issue_number": 340}], "already_closed": []},
+    )
+    worker = research_tasks.ImmortalityResearchWorker(tmp_path)
+    worker.team = FakeTeam()
+    task = _worker_task(worker)
+
+    first = worker.run_one()
+    second = worker.run_one()
+
+    assert first["status"] == "github_issue_reconciliation_pending"
+    assert first["research_reexecuted"] is True
+    assert second["status"] == "review_completed"
+    assert second["research_reexecuted"] is False
+    assert worker.team.calls == 1
+    assert evidence_attempts["count"] == 2
+    assert worker.queue.get(task.task_id).state == "complete"
+
+
+def test_reconciled_completed_task_does_not_starve_new_specialist_work(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(research_tasks, "issue_authority_enabled", lambda root: True)
+    monkeypatch.setattr(research_tasks, "route_unbacked_tasks", lambda root: {"status": "ok"})
+    closed_issues = {340}
+
+    def fake_reconcile(root):
+        return {
+            "status": "ok",
+            "closed": [],
+            "already_closed": sorted(closed_issues),
+        }
+
+    def fake_publish(root, task, *, review_path, team_members):
+        issue_number = int(task.payload.get("github_issue_number") or 0)
+        closed_issues.add(issue_number)
+        return {"status": "reported", "reported": True, "github_issue_number": issue_number}
+
+    monkeypatch.setattr(research_tasks, "reconcile_terminal_github_issues", fake_reconcile)
+    monkeypatch.setattr(research_tasks, "publish_specialist_completion_evidence", fake_publish)
+    worker = research_tasks.ImmortalityResearchWorker(tmp_path)
+    worker.team = FakeTeam()
+
+    completed = _worker_task(worker, issue_number=340, fingerprint="completed-340")
+    worker.queue.transition(completed.task_id, "assigned", module_id="genesis.capability")
+    worker.queue.transition(completed.task_id, "running", module_id="genesis.capability")
+    worker.queue.transition(completed.task_id, "review", module_id="genesis.capability")
+    worker.queue.transition(completed.task_id, "complete", module_id="genesis.capability")
+    fresh = _worker_task(worker, issue_number=341, fingerprint="fresh-341")
+
+    result = worker.run_one()
+
+    assert result["task_id"] == fresh.task_id
+    assert result["github_issue_number"] == 341
+    assert worker.team.calls == 1
+    assert worker.queue.get(fresh.task_id).state == "complete"
 
 
 def test_worker_without_issue_authority_completes_without_github_mutation(monkeypatch, tmp_path: Path) -> None:
@@ -195,6 +280,7 @@ def test_worker_without_issue_authority_completes_without_github_mutation(monkey
 
     result = worker.run_one()
 
+    assert worker.team.calls == 1
     assert worker.queue.get(task.task_id).state == "complete"
     assert result["status"] == "review_completed"
     assert result["github_issue_number"] == 0
