@@ -171,6 +171,8 @@ jobs:
       - name: Scan public scientific and cross-domain sources through immortality lens
         run: python scripts/immortality_scan.py
       - name: Advance one persistent Genesis task
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/research_task_worker.py
       - name: Run bounded self-learning pass
         run: python scripts/self_learn.py
