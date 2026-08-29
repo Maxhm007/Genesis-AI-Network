@@ -2,6 +2,16 @@
 
 All notable Genesis AI Network milestones are documented here.
 
+## v0.1.2 - 29-Aug-2026 - 02:50 PM - Repair Heartbeat selector import
+
+### Fixed
+
+- Run the shared Issue Autorepair selector as a Python module so clean GitHub Actions checkouts retain the repository root on the import path.
+
+### Validation
+
+- Reproduced the live Heartbeat failure on merged `main` as `ModuleNotFoundError: No module named 'genesis'` and added a workflow regression assertion for module execution.
+
 ## v0.1.1 - 29-Aug-2026 - 02:37 PM - Restore automatic issue repair progress
 
 ### Fixed
