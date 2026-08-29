@@ -46,6 +46,10 @@ test passes on the current `main`. This bounded path does not accept
 user-authored, ambiguous or unsupported evidence and does not bypass candidate
 validation when a code change is still required.
 
+The already-satisfied reconciliation path is live-verified: Issue `#426`
+closed automatically as completed with `genesis-solved` after its exact
+grounding pytest node passed on `main`.
+
 ## Application status
 
 ### Windows desktop

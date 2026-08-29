@@ -2,6 +2,13 @@
 
 All notable Genesis AI Network milestones are documented here.
 
+## v0.1.5 - 29-Aug-2026 - 05:57 PM - Verify live automatic Issue closure
+
+### Verified
+
+- Confirmed the deployed dispatcher automatically closed Issue `#426` as completed, added `genesis-solved` and recorded the exact passing grounding test in the bot comment.
+- Released the temporary hold on genuine repair Issue `#348` and re-awakened the Heartbeat queue.
+
 ## v0.1.4 - 29-Aug-2026 - 05:50 PM - Install reconciliation test dependencies
 
 ### Fixed
