@@ -85,6 +85,8 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Install grounding-test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
       - name: Reconcile stale claims, then build and claim one repair lane
         id: plan
         env:

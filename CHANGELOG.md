@@ -2,6 +2,16 @@
 
 All notable Genesis AI Network milestones are documented here.
 
+## v0.1.4 - 29-Aug-2026 - 05:50 PM - Install reconciliation test dependencies
+
+### Fixed
+
+- Install the repository test requirements in the authoritative Issue admission job before evaluating an already-satisfied task's exact grounding test.
+
+### Validation
+
+- Reproduced the live fallback as `No module named pytest` and added a workflow regression assertion for dependency installation before reconciliation.
+
 ## v0.1.3 - 29-Aug-2026 - 05:30 PM - Reconcile already-satisfied repair Issues
 
 ### Fixed
