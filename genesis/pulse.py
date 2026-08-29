@@ -6,7 +6,9 @@ from pathlib import Path
 from scripts.autonomous_engineering import ingest_open_issue_backlog
 from scripts.gene_continuous_work import run_step
 
+from .github_issue_authority_reconciler import reconcile_closed_github_issue_tasks
 from .github_issue_task_router import issue_authority_enabled, route_unbacked_tasks
+from .github_issue_terminal_reconciler import reconcile_terminal_github_issues
 
 
 DEFAULT_IDLE_DISCOVERY_BURST = 4
@@ -82,11 +84,12 @@ def workflow_chain_decision(
 class GenePulse:
     """Execute one resumable unit of authoritative GitHub Issue work.
 
-    repository Issues are authoritative. Every remaining internal task is bound
-    to an Issue before any worker runs. If GitHub intake or task binding is
-    unavailable, the Pulse fails closed. A second sync after the bounded step
-    immediately publishes any newly discovered task before another Pulse can
-    execute it.
+    Repository Issues are authoritative. Before intake can create another work
+    generation, terminal task state is reconciled so already-completed Issues can
+    close. After the current open-Issue snapshot is read, any linked cached task
+    whose Issue is absent is checked against GitHub and cancelled only when the
+    exact Issue is confirmed closed. These mutations occur inside Gene Pulse so
+    the normal persistent cache save makes them durable before any worker runs.
     """
 
     def __init__(self, root: Path, logical_id: str = "gene-node-1") -> None:
@@ -171,22 +174,62 @@ class GenePulse:
 
     def run(self) -> PulseResult:
         authority = issue_authority_enabled(self.root)
+        terminal_reconcile_before = {
+            "status": "not_repository_runtime",
+            "blocked": [],
+        }
         backlog = {
             "status": "not_repository_runtime",
             "open_issue_count": 0,
             "created_count": 0,
+            "issues": [],
         }
+        closed_issue_sync = {
+            "status": "not_repository_runtime",
+            "blocked": [],
+        }
+
         if authority:
+            # Reconcile before intake. Otherwise a completed open Issue could gain
+            # a fresh generation before its terminal cached generation is allowed
+            # to close the authoritative GitHub Issue.
+            terminal_reconcile_before = reconcile_terminal_github_issues(self.root)
+            if terminal_reconcile_before.get("status") in {"blocked", "partial"}:
+                return self._authority_blocked(
+                    "github_issue_sync_blocked",
+                    detail={"github_terminal_reconcile_before": terminal_reconcile_before},
+                )
+
             try:
                 backlog = ingest_open_issue_backlog(self.root)
             except Exception as exc:
                 return self._authority_blocked(
                     "github_issue_intake_blocked",
                     detail={
+                        "github_terminal_reconcile_before": terminal_reconcile_before,
                         "github_open_issue_backlog": {
                             "status": "blocked",
                             "error": f"{type(exc).__name__}: {exc}"[:2000],
-                        }
+                        },
+                    },
+                )
+
+            open_issue_numbers = {
+                int(row.get("issue") or 0)
+                for row in list(backlog.get("issues") or [])
+                if int(row.get("issue") or 0) > 0
+            }
+            closed_issue_sync = reconcile_closed_github_issue_tasks(
+                self.root,
+                open_issue_numbers=open_issue_numbers,
+            )
+            if closed_issue_sync.get("status") in {"blocked", "partial"}:
+                return self._authority_blocked(
+                    "github_issue_sync_blocked",
+                    detail={
+                        "github_terminal_reconcile_before": terminal_reconcile_before,
+                        "github_open_issue_backlog": backlog,
+                        "github_closed_issue_sync": closed_issue_sync,
                     },
                 )
 
@@ -195,14 +238,18 @@ class GenePulse:
             return self._authority_blocked(
                 "github_issue_sync_blocked",
                 detail={
+                    "github_terminal_reconcile_before": terminal_reconcile_before,
                     "github_open_issue_backlog": backlog,
+                    "github_closed_issue_sync": closed_issue_sync,
                     "github_issue_sync_before": issue_sync_before,
                 },
             )
 
         payload = run_step(self.logical_id)
         issue_sync_after = route_unbacked_tasks(self.root)
+        payload["github_terminal_reconcile_before"] = terminal_reconcile_before
         payload["github_open_issue_backlog"] = backlog
+        payload["github_closed_issue_sync"] = closed_issue_sync
         payload["github_issue_sync_before"] = issue_sync_before
         payload["github_issue_sync_after"] = issue_sync_after
         payload["task_authority"] = "github_issues" if authority else "temporary_test_runtime"
