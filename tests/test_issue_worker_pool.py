@@ -57,6 +57,20 @@ def test_blocked_solved_and_claimed_issues_are_not_selected() -> None:
     assert batch.selected_issue_numbers == (23,)
 
 
+def test_duplicate_control_and_persistent_issues_are_not_selected() -> None:
+    rows = [
+        _issue(24, "2026-08-26T01:00:00Z", "genesis-task", "duplicate"),
+        _issue(25, "2026-08-26T02:00:00Z", "genesis-task", "genesis-persistent"),
+        _issue(26, "2026-08-26T03:00:00Z", "genesis-task", "genesis-control"),
+        _issue(27, "2026-08-26T04:00:00Z", "genesis-task", title="Genesis Control: persistent dashboard"),
+        _issue(28, "2026-08-26T05:00:00Z", "genesis-task", title="[Genesis Repair] repair the queue"),
+    ]
+
+    batch = select_issue_repair_batch(rows)
+
+    assert batch.selected_issue_numbers == (28,)
+
+
 def test_non_code_issue_backed_tasks_stay_out_of_generic_autorepair() -> None:
     rows = [
         _issue(

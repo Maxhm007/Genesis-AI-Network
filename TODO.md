@@ -6,6 +6,7 @@ This file is a **human-readable near-term backlog**. It is not the authority for
 
 ## Immediate priorities
 
+- [ ] Verify the first live generic Issue completes through claim, worker, independent validation, exact promotion and automatic closure after the autorepair recovery release.
 - [ ] Complete the current proactive validation cycle for the capability-growth integration on `main`.
 - [x] Bootstrap the Android mobile application under `mobile/` and produce the first test APK.
 - [ ] Add production Android signing and a stable mobile release channel after alpha validation.

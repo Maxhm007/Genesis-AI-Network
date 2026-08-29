@@ -30,14 +30,22 @@ def test_heartbeat_preserves_single_lane_capacity_and_queue_filters() -> None:
     text = HEARTBEAT.read_text(encoding="utf-8")
 
     assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '1'" in text
-    assert 'index("genesis-repair-in-progress")' in text
+    assert "python scripts/select_issue_repair_batch.py" in text
+    assert '--issues-json "$RUNNER_TEMP/open-issues.json"' in text
+    assert '--max-parallel "$GENESIS_ISSUE_REPAIR_MAX_PARALLEL"' in text
+    assert ".selected_issue_numbers[]" in text
+    assert ".active_issue_numbers | length" in text
+    assert ".available_slots" in text
     assert 'index("genesis-validating")' in text
     assert 'index("genesis-autonomous")' in text
-    assert 'index("genesis-task")' in text
-    assert 'index("genesis-blocked")' in text
-    assert 'index("genesis-solved")' in text
-    assert "available=$((GENESIS_ISSUE_REPAIR_MAX_PARALLEL - active))" in text
     assert "if (( launch_count > 0 )); then" in text
+
+
+def test_heartbeat_does_not_maintain_a_second_divergent_eligibility_filter() -> None:
+    text = HEARTBEAT.read_text(encoding="utf-8")
+
+    assert "eligible_filter=" not in text
+    assert 'startswith("[Genesis Self Improvement]")' not in text
 
 
 def test_heartbeat_dispatches_explicit_issue_to_authoritative_dispatcher_only() -> None:

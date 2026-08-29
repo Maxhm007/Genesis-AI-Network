@@ -23,16 +23,20 @@ def test_chained_pulses_require_exact_parent_runtime_cache() -> None:
     assert parent_arg in coding
 
 
-def test_broad_runtime_restore_is_standalone_only() -> None:
+def test_broad_runtime_restore_is_standalone_or_explicit_recovery_only() -> None:
     root = Path(__file__).resolve().parents[1]
-    workflows = [
-        (root / ".github" / "workflows" / "gene-pulse.yml").read_text(encoding="utf-8"),
-        (root / ".github" / "workflows" / "coding-intelligence-pulse.yml").read_text(encoding="utf-8"),
-    ]
+    gene = (root / ".github" / "workflows" / "gene-pulse.yml").read_text(encoding="utf-8")
+    coding = (root / ".github" / "workflows" / "coding-intelligence-pulse.yml").read_text(encoding="utf-8")
 
-    for workflow in workflows:
-        standalone_guard = "if: env.RUNTIME_PARENT_RUN_ID == ''"
-        broad_restore = "gene-runtime-${{ env.GENE_ID }}-"
-        assert standalone_guard in workflow
-        assert broad_restore in workflow
-        assert workflow.index(standalone_guard) < workflow.index("restore-keys: |")
+    standalone_guard = "if: env.RUNTIME_PARENT_RUN_ID == ''"
+    recovery_guard = "if: env.RUNTIME_PARENT_RUN_ID != '' && steps.exact_runtime.outcome != 'success'"
+    broad_restore = "gene-runtime-${{ env.GENE_ID }}-"
+
+    assert recovery_guard in gene
+    assert gene.index(recovery_guard) < gene.index("restore-keys: |")
+    assert standalone_guard in gene
+    assert broad_restore in gene
+
+    assert standalone_guard in coding
+    assert broad_restore in coding
+    assert coding.index(standalone_guard) < coding.index("restore-keys: |")

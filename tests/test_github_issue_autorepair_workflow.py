@@ -97,6 +97,8 @@ def test_integration_preserves_independent_validation_security_and_exact_sha_pro
     assert "group: genesis-github-issue-autorepair-promotion" in text
     assert 'git merge-base --is-ancestor "$main_sha" "$CANDIDATE_SHA"' in text
     assert 'git push origin "$CANDIDATE_SHA:refs/heads/main"' in text
+    assert "--add-label genesis-solved" in text
+    assert 'gh issue close "$ISSUE_NUMBER"' in text
 
 
 def test_integration_tolerates_only_repository_policy_pr_creation_denial() -> None:

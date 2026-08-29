@@ -2,6 +2,20 @@
 
 All notable Genesis AI Network milestones are documented here.
 
+## v0.1.1 - 29-Aug-2026 - 02:37 PM - Restore automatic issue repair progress
+
+### Fixed
+
+- Unified the GitHub Issue Autorepair Heartbeat and authoritative dispatcher on the same tested issue selector, eliminating successful no-work dispatch loops caused by specialist tasks such as issue `#340`.
+- Excluded duplicate, persistent and control Issues from generic code autorepair while preserving specialist Issue ownership and exact validated closure.
+- Retried transient Gene Pulse artifact uploads and allowed a bounded latest-cache fallback when the exact predecessor cache is unavailable, preventing external GitHub evidence-service outages from permanently stopping the pulse chain.
+
+### Validation
+
+- Passed 36 focused selector, heartbeat, issue-closing, backlog-drain, runtime-cache and evidence-resilience tests.
+- Parsed both modified workflow YAML files successfully.
+- Full Windows suite reached 871 passed and 2 skipped; five pre-existing platform-specific failures remain in path/newline normalization, core-vitality state and SQLite worktree cleanup.
+
 ## [Unreleased]
 
 ### Added

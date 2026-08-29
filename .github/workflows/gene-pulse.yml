@@ -59,12 +59,23 @@ jobs:
           python-version: "3.12"
 
       - name: Restore exact predecessor Gene state
+        id: exact_runtime
         if: env.RUNTIME_PARENT_RUN_ID != ''
+        continue-on-error: true
         uses: actions/cache/restore@v4
         with:
           path: runtime
           key: gene-runtime-${{ env.GENE_ID }}-${{ env.RUNTIME_PARENT_RUN_ID }}
           fail-on-cache-miss: true
+
+      - name: Restore latest Gene state after predecessor cache failure
+        if: env.RUNTIME_PARENT_RUN_ID != '' && steps.exact_runtime.outcome != 'success'
+        uses: actions/cache/restore@v4
+        with:
+          path: runtime
+          key: gene-runtime-${{ env.GENE_ID }}-${{ github.run_id }}
+          restore-keys: |
+            gene-runtime-${{ env.GENE_ID }}-
 
       - name: Restore latest Gene state for standalone pulse
         if: env.RUNTIME_PARENT_RUN_ID == ''
@@ -272,7 +283,9 @@ jobs:
           key: gene-runtime-${{ env.GENE_ID }}-${{ github.run_id }}
 
       - name: Upload pulse and queue evidence
+        id: upload_evidence
         if: always()
+        continue-on-error: true
         uses: actions/upload-artifact@v4
         with:
           name: gene-pulse-${{ env.GENE_ID }}-${{ github.run_id }}
@@ -286,6 +299,32 @@ jobs:
             runtime/grce/${{ env.GENE_ID }}/candidate_handoff.json
           if-no-files-found: warn
           retention-days: 30
+
+      - name: Retry pulse evidence upload after transient artifact failure
+        id: retry_upload_evidence
+        if: always() && steps.upload_evidence.outcome == 'failure'
+        continue-on-error: true
+        uses: actions/upload-artifact@v4
+        with:
+          name: gene-pulse-${{ env.GENE_ID }}-${{ github.run_id }}-retry
+          path: |
+            runtime/pulse_result.json
+            runtime/discovery/
+            runtime/autonomy_pipeline/
+            runtime/genesis_tasks.sqlite3
+            runtime/competitive_benchmark_inputs/
+            runtime/competitive_benchmark_candidates/
+            runtime/grce/${{ env.GENE_ID }}/candidate_handoff.json
+          if-no-files-found: warn
+          retention-days: 30
+
+      - name: Report unavailable pulse evidence service
+        if: always() && steps.upload_evidence.outcome == 'failure' && steps.retry_upload_evidence.outcome == 'failure'
+        shell: bash
+        run: |
+          echo '::warning::Both pulse evidence upload attempts failed; runtime continuation will use the persisted cache and the next pulse may fall back to the latest available state.'
+          echo '### Pulse evidence warning' >> "$GITHUB_STEP_SUMMARY"
+          echo 'Both artifact upload attempts failed after the bounded queue transition. The pulse chain was not terminated by this external evidence-service outage.' >> "$GITHUB_STEP_SUMMARY"
 
       - name: Delegate provider-bound pulse
         if: steps.provider_gate.outputs.needs_local_provider == 'true'
