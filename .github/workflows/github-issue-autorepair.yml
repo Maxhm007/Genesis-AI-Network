@@ -17,6 +17,7 @@ on:
       - '.github/workflows/github-issue-autorepair-integration.yml'
       - 'genesis/issue_worker_pool.py'
       - 'scripts/select_issue_repair_batch.py'
+      - 'scripts/reconcile_satisfied_issue.py'
 
 permissions: {}
 
@@ -154,6 +155,46 @@ jobs:
           if [[ -n "$explicit" ]]; then
             selector+=(--explicit-issue-number "$explicit")
           fi
+
+          # Machine-generated discovery tasks can remain open after their
+          # accepted change has already reached main. Reconcile only a bounded
+          # number whose exact, uniquely located grounding test passes on this
+          # checkout; user-authored and ambiguous Issues always continue to the
+          # normal independently validated repair path.
+          for reconciliation_attempt in 1 2 3; do
+            plan_json="$("${selector[@]}")"
+            selected="$(jq -c '.selected_issue_numbers[:1]' <<<"$plan_json")"
+            selected_issue="$(jq -r '.[0] // empty' <<<"$selected")"
+            [[ -n "$selected_issue" ]] || break
+
+            gh issue view "$selected_issue" \
+              --repo "$GITHUB_REPOSITORY" \
+              --json number,title,state,body,labels \
+              > "$RUNNER_TEMP/reconcile-issue.json"
+            reconcile_json=$(python -m scripts.reconcile_satisfied_issue \
+              --issue-json "$RUNNER_TEMP/reconcile-issue.json")
+            node_id=$(jq -r 'select(.eligible == true) | .node_id // empty' <<<"$reconcile_json")
+            [[ -n "$node_id" ]] || break
+
+            if python -m pytest "$node_id" -q; then
+              echo "Issue #$selected_issue is already satisfied on main by passing grounding test $node_id."
+              gh issue edit "$selected_issue" \
+                --repo "$GITHUB_REPOSITORY" \
+                --add-label genesis-solved
+              gh issue edit "$selected_issue" \
+                --repo "$GITHUB_REPOSITORY" \
+                --remove-label genesis-repair-in-progress || true
+              gh issue close "$selected_issue" \
+                --repo "$GITHUB_REPOSITORY" \
+                --reason completed \
+                --comment "Genesis reconciled this machine-generated task as already satisfied on main. Exact grounding test passed: $node_id"
+              snapshot_issues
+              continue
+            fi
+            echo "Grounding test did not pass for issue #$selected_issue; continuing through normal repair validation."
+            break
+          done
+
           plan_json="$("${selector[@]}")"
           selected="$(jq -c '.selected_issue_numbers[:1]' <<<"$plan_json")"
 

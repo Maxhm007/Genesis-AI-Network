@@ -2,6 +2,18 @@
 
 All notable Genesis AI Network milestones are documented here.
 
+## v0.1.3 - 29-Aug-2026 - 05:30 PM - Reconcile already-satisfied repair Issues
+
+### Fixed
+
+- Added bounded automatic closure for machine-generated self-repair Issues whose exact, uniquely located grounding test already passes on current `main`.
+- Kept user-authored, ambiguous, unsupported and failing-test Issues on the normal independently validated repair path.
+
+### Validation
+
+- Verified the reconciliation planner accepts only trusted discovery provenance, an existing bounded `genesis/` target and a unique test function.
+- Added workflow assertions requiring the exact pytest node to pass before closure and limiting each admission run to three reconciliations.
+
 ## v0.1.2 - 29-Aug-2026 - 02:50 PM - Repair Heartbeat selector import
 
 ### Fixed

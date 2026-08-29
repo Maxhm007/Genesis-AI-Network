@@ -40,6 +40,12 @@ persistent, control, solved, blocked and duplicate Issues cannot occupy the
 generic coding lane. A source Issue is closed only after its exact candidate
 passes independent validation and is promoted to `main`.
 
+For machine-generated self-repair tasks only, the authoritative dispatcher
+also reconciles an already-satisfied Issue when its uniquely located grounding
+test passes on the current `main`. This bounded path does not accept
+user-authored, ambiguous or unsupported evidence and does not bypass candidate
+validation when a code change is still required.
+
 ## Application status
 
 ### Windows desktop
