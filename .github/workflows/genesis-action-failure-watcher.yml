@@ -5,6 +5,7 @@ on:
     workflows:
       - Genesis Tiny Problem Detection Test
       - Genesis Oldest Real Issue Solver
+      - Genesis Bounded Repair Worker
     types: [completed]
   workflow_dispatch:
 
