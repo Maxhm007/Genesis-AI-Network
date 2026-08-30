@@ -28,9 +28,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # Ignore runs that predate the clean watcher cutover. Every newer
-          # failed run is eligible regardless of workflow name.
-          baseline_run_id=33325523147
+          # Ignore setup failures that predate the verified watcher cutover.
+          # Every newer failed run is eligible regardless of workflow name.
+          baseline_run_id=33325584236
 
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             interval=20
@@ -42,7 +42,7 @@ jobs:
             echo "Watcher continuous mode: scan all Actions every 5 minutes"
           fi
 
-          if ! gh label view genesis-action-failure --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1; then
+          if ! gh label list --repo "$GITHUB_REPOSITORY" --limit 100 --json name --jq '.[].name' | grep -Fxq genesis-action-failure; then
             gh label create genesis-action-failure \
               --repo "$GITHUB_REPOSITORY" \
               --color d1242f \
