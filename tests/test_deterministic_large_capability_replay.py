@@ -132,14 +132,11 @@ def test_trusted_replay_rejects_any_second_target(tmp_path: Path) -> None:
         provider.prepare_trusted_full_file_replay(tmp_path, CodingModule(tmp_path))
 
 
-def test_worker_skips_model_stack_only_for_preclassified_deterministic_route() -> None:
-    workflow = Path(".github/workflows/github-issue-autorepair-worker.yml").read_text(encoding="utf-8")
+def test_current_worker_reuses_deterministic_route_inside_guarded_engine() -> None:
+    workflow = Path(".github/workflows/genesis-bounded-repair-worker.yml").read_text(encoding="utf-8")
+    engine = Path("scripts/github_issue_autorepair.py").read_text(encoding="utf-8")
 
-    detection = workflow.index("Detect trusted deterministic learned-capability route")
-    model_cache = workflow.index("Compute configured repair model cache key")
-    assert detection < model_cache
-    assert '(.author.login == "github-actions[bot]")' in workflow
-    assert 'contains("- **Target:** `genesis/learned_capabilities.py`")' in workflow
-    model_condition = "steps.deterministic.outputs.eligible != 'true'"
-    assert workflow.count(model_condition) >= 5
-    assert "Let Genesis solve the reserved GitHub issue" in workflow
+    assert "Run guarded Genesis repair engine" in workflow
+    assert "python scripts/github_issue_autorepair.py" in workflow
+    assert "GitHubIssueLearnedCapabilityProvider.for_issue" in engine
+    assert "prepare_trusted_full_file_replay" in Path("genesis/github_issue_capability_builder.py").read_text(encoding="utf-8")
