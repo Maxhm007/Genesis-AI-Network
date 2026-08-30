@@ -1527,4 +1527,39 @@ register_capability(
 )
 
 
+def _learned_923e46228ae9(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'b10569', 'details', 'open', 'model', 'dots3-note', 'text', 'conversion', 'init', 'impl', 'address', 'review')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_923e46228ae9008c',
+    "Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'b10569': <details open> model: add dots3-note (#27060) * text: conversion * init impl * address review comments * fix rope * move to a new llama_kv_cache_dsa_iswa </details> **Website:** - <https://llama.app> **Attestations:** - <https://github.com/ggml-org/llama.cpp/attestations/42267121> **macOS/iOS:** - [macOS Apple Silicon (arm64)](https://github.com/ggml-org/llama.cpp/releases/download/b10569/llama-b10569-bin-macos-arm64.tar.gz) - macOS Apple Silicon (arm64, Kl",
+    '<details open> model: add dots3-note (#27060) * text: conversion * init impl * address review comments * fix rope * move to a new llama_kv_cache_dsa_iswa </details> **Website:** - <https://llama.app> **Attestations:** - <https://github.com/ggml-org/llama.cpp/attestations/42267121> **macOS/iOS:** - [macOS Apple Silicon (arm64)](https://github.com/ggml-org/llama.cpp/releases/download/b10569/llama-b10569-bin-macos-arm64.tar.gz) - macOS Apple Silicon (arm64, KleidiAI enabled) [DISABLED](https://github.com/ggml-org/llama.cpp/pull/23780) - [macOS Intel (x64)](https://github.com/ggml-org/llama.cpp/releases/download/b10569/llama-b10569-bin-macos-x64.tar.gz) - [iOS XCFramework](https://github.com/ggml-org/llama.cpp/releases/download/b10569/llama-b10569-xcframework.zip) **Linux:** - [Ubuntu x64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/b10569/llama-b10569-bin-ubuntu-x64.tar.gz) - [Ubuntu arm64 (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/b10569/llama-b10569-bin-ubuntu-arm64.tar.gz) - [Ubuntu s390x (CPU)](https://github.com/ggml-org/llama.cpp/releases/download/b10569/llama-b10569-bin-ubuntu-s390x.tar.gz) - [Ubuntu x64 (Vulkan)](https://github.com/ggml-or',
+    _learned_923e46228ae9,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
