@@ -6,6 +6,7 @@ on:
       - Genesis Tiny Problem Detection Test
       - Genesis Oldest Real Issue Solver
       - Genesis Bounded Repair Worker
+      - Genesis Recent AI Capability Discovery
     types: [completed]
   workflow_dispatch:
 
@@ -78,9 +79,3 @@ jobs:
             --body "$body" \
             --label genesis-action-failure)
           echo "Created failure issue: $issue_url"
-
-  manual-check:
-    if: github.event_name == 'workflow_dispatch'
-    runs-on: ubuntu-latest
-    steps:
-      - run: echo 'Genesis Action Failure Watcher is installed for every current non-watcher workflow.'
