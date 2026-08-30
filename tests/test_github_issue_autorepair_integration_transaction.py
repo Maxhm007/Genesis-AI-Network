@@ -1,46 +1,46 @@
 from pathlib import Path
 
 
-INTEGRATION = Path(".github/workflows/github-issue-autorepair-integration.yml")
-DISPATCHER = Path(".github/workflows/github-issue-autorepair.yml")
+WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 
 
-def test_integration_transaction_is_serialized_from_rebase_through_promotion() -> None:
-    text = INTEGRATION.read_text(encoding="utf-8")
+def test_integration_transaction_is_serialized_per_issue() -> None:
+    text = WORKER.read_text(encoding="utf-8")
 
-    transaction_lock = "group: genesis-github-issue-autorepair-integration-transaction"
+    transaction_lock = "group: genesis-bounded-repair-${{ inputs.issue_number }}"
     assert transaction_lock in text
     assert text.index(transaction_lock) < text.index("jobs:")
     assert "cancel-in-progress: false" in text
 
-    prepare_at = text.index("prepare:")
-    rebase_at = text.index("git rebase origin/main")
-    validator_a_at = text.index("validator_a:")
-    validator_b_at = text.index("validator_b:")
-    secret_guard_at = text.index("secret_guard:")
-    promote_at = text.index("promote:")
 
-    assert prepare_at < rebase_at < validator_a_at < promote_at
-    assert rebase_at < validator_b_at < promote_at
-    assert rebase_at < secret_guard_at < promote_at
+def test_integration_rebuilds_candidate_on_latest_main() -> None:
+    text = WORKER.read_text(encoding="utf-8")
 
-
-def test_integration_requires_issue_specific_semantic_regression_evidence() -> None:
-    text = INTEGRATION.read_text(encoding="utf-8")
-
-    guard = "python scripts/issue_acceptance_guard.py"
-    assert text.count(guard) >= 3
-    assert "Require semantic regression evidence A" in text
-    assert "Require semantic regression evidence B" in text
-    assert "Reconfirm semantic acceptance before promotion" in text
-    assert "--base-ref origin/main" in text
-    assert '--repository "$GITHUB_REPOSITORY"' in text
-    assert "--issue-number '${{ inputs.issue_number }}'" in text
+    assert "for integration_attempt in 1 2 3" in text
+    assert "git fetch origin main" in text
+    assert 'git checkout -B "genesis/integration-${ISSUE_NUMBER}-${GITHUB_RUN_ID}" origin/main' in text
+    assert 'git cherry-pick "$CANDIDATE_SHA"' in text
+    assert 'integrated_base=$(git rev-parse HEAD^)' in text
+    assert 'latest_main=$(git rev-parse origin/main)' in text
+    assert "main moved during validation; rebuilding on latest main" in text
 
 
-def test_single_solver_lane_is_preserved() -> None:
-    text = DISPATCHER.read_text(encoding="utf-8")
+def test_integration_requires_exact_scope_and_full_regression_evidence() -> None:
+    text = WORKER.read_text(encoding="utf-8")
 
-    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '1'" in text
-    assert "solve_workers:" in text
-    assert "integrate_workers:" in text
+    assert "Rejected out-of-scope candidate path" in text
+    assert "python -m py_compile \"$TARGET\"" in text
+    assert 'python -m pytest -q "$target_test"' in text
+    assert text.count("python -m pytest -q") >= 3
+
+
+def test_exact_candidate_is_promoted_only_after_validation() -> None:
+    text = WORKER.read_text(encoding="utf-8")
+
+    candidate_at = text.index('git cat-file -e "${CANDIDATE_SHA}^{commit}"')
+    tests_at = text.index("python -m pytest -q", candidate_at)
+    push_at = text.index("git push origin HEAD:main", tests_at)
+    post_reset_at = text.index("git reset --hard origin/main", push_at)
+    close_at = text.index("state=closed", post_reset_at)
+
+    assert candidate_at < tests_at < push_at < post_reset_at < close_at
