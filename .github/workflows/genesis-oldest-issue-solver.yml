@@ -10,124 +10,164 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: write
 
 concurrency:
   group: genesis-oldest-real-issue-solver
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  solve-one-oldest-real-issue:
+  continuous-oldest-real-issue-solver:
     runs-on: ubuntu-latest
+    timeout-minutes: 340
     steps:
       - name: Checkout
         uses: actions/checkout@v4
-
-      - name: Select oldest real open issue
-        id: select
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-          issue=$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \
-            --jq '[.[]
-              | select(.pull_request == null)
-              | select(.number != 1)
-              | select((.title | startswith("Genesis Chat:")) | not)
-              | select((.title | startswith("[Genesis Hourly Report]")) | not)
-              | select((.title | startswith("[Genesis Gene Chat]")) | not)
-              | select((.body // "" | contains("Persistent GitHub-native reporting channel")) | not)
-            ][0]')
-
-          if [ -z "$issue" ] || [ "$issue" = "null" ]; then
-            echo "number=" >> "$GITHUB_OUTPUT"
-            echo "No real open issue found"
-            exit 0
-          fi
-
-          number=$(printf '%s' "$issue" | jq -r '.number')
-          title=$(printf '%s' "$issue" | jq -r '.title')
-          echo "number=$number" >> "$GITHUB_OUTPUT"
-          echo "title=$title" >> "$GITHUB_OUTPUT"
-          echo "Selected oldest real issue #$number: $title"
-
-      - name: Claim selected real issue
-        if: steps.select.outputs.number != ''
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ steps.select.outputs.number }}
-        run: |
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body "Genesis Issue Solver selected this as the oldest real open issue for one bounded autonomous solving attempt. Solver run: ${GITHUB_RUN_ID}. No new issue was created."
-
-      - name: Validate current repository state
-        if: steps.select.outputs.number != ''
-        id: validate
-        env:
-          ISSUE_NUMBER: ${{ steps.select.outputs.number }}
-        run: |
-          set -euo pipefail
-
-          if [ "$ISSUE_NUMBER" = "5" ]; then
-            if [ -f runtime/competitive_benchmark_results.json ]; then
-              measured=$(python - <<'PY'
-          import json
-          from pathlib import Path
-          p = Path('runtime/competitive_benchmark_results.json')
-          try:
-              data = json.loads(p.read_text())
-              print(len(data.get('benchmarks', {})))
-          except Exception:
-              print(0)
-          PY
-              )
-            else
-              measured=0
-            fi
-
-            echo "measured=$measured" >> "$GITHUB_OUTPUT"
-            if [ "$measured" -gt 0 ]; then
-              echo "condition_may_be_resolved=true" >> "$GITHUB_OUTPUT"
-            else
-              echo "condition_may_be_resolved=false" >> "$GITHUB_OUTPUT"
-            fi
-            echo "Issue #5 benchmark evidence count: $measured"
-          else
-            echo "measured=unknown" >> "$GITHUB_OUTPUT"
-            echo "condition_may_be_resolved=false" >> "$GITHUB_OUTPUT"
-          fi
+        with:
+          fetch-depth: 0
 
       - name: Install validation dependencies
-        if: steps.select.outputs.number != ''
         run: |
           python -m pip install --disable-pip-version-check -q pytest cryptography PyYAML requests
 
-      - name: Run bounded baseline validation
-        if: steps.select.outputs.number != ''
-        id: tests
-        continue-on-error: true
-        run: |
-          python -m pytest -q
-
-      - name: Resolve only with real evidence
-        if: steps.select.outputs.number == '5'
+      - name: Run oldest real issue solver loop
         env:
           GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ steps.select.outputs.number }}
-          CONDITION_RESOLVED: ${{ steps.validate.outputs.condition_may_be_resolved }}
-          MEASURED: ${{ steps.validate.outputs.measured }}
-          TEST_OUTCOME: ${{ steps.tests.outcome }}
+        shell: bash
         run: |
           set -euo pipefail
 
-          if [ "$CONDITION_RESOLVED" = "true" ] && [ "$TEST_OUTCOME" = "success" ]; then
-            gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-              --comment "Genesis Issue Solver found real benchmark evidence on current main (measured benchmark records: ${MEASURED}) and the baseline validation passed. Closing only because current repository evidence no longer matches the original unmeasured benchmark condition. Solver run: ${GITHUB_RUN_ID}."
-          else
-            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-              --body "Genesis Issue Solver completed a bounded real solving attempt. Current validated benchmark records found on main: ${MEASURED}. Baseline test outcome: ${TEST_OUTCOME}. The original capability/benchmark gap is therefore not proven resolved, so Genesis is leaving this real issue OPEN rather than fabricating success. The next safe solving requirement is real comparable benchmark execution plus independently validated evidence. Solver run: ${GITHUB_RUN_ID}."
-          fi
+          interval=300
+          max_cycles=64
+          marker='<!-- genesis-oldest-real-issue-solver -->'
 
-      - name: Report
+          echo "Genesis Issue Solver continuous mode: one oldest real issue every 5 minutes"
+
+          upsert_status() {
+            local issue_number="$1"
+            local body="$2"
+            local comment_id
+            comment_id=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments?per_page=100" \
+              --jq --arg marker "$marker" '[.[] | select(.body | startswith($marker))][0].id // empty')
+            if [ -n "$comment_id" ]; then
+              gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" \
+                --method PATCH \
+                -f body="$body" >/dev/null
+            else
+              gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments" \
+                --method POST \
+                -f body="$body" >/dev/null
+            fi
+          }
+
+          for cycle in $(seq 1 "$max_cycles"); do
+            echo "=== Genesis real issue solver cycle $cycle/$max_cycles ==="
+            git fetch origin main
+            git reset --hard origin/main
+
+            issue=$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \
+              --jq '[.[]
+                | select(.pull_request == null)
+                | select(.number != 1)
+                | select((.title | startswith("Genesis Chat:")) | not)
+                | select((.title | startswith("[Genesis Hourly Report]")) | not)
+                | select((.title | startswith("[Genesis Gene Chat]")) | not)
+                | select((.body // "" | contains("Persistent GitHub-native reporting channel")) | not)
+              ][0]')
+
+            checked_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
+
+            if [ -z "$issue" ] || [ "$issue" = "null" ]; then
+              echo "No real open issue found at $checked_at"
+            else
+              issue_number=$(printf '%s' "$issue" | jq -r '.number')
+              title=$(printf '%s' "$issue" | jq -r '.title')
+              echo "Selected oldest real issue #$issue_number: $title"
+
+              if [ "$issue_number" = "5" ]; then
+                if [ -f runtime/competitive_benchmark_results.json ]; then
+                  measured=$(python - <<'PY'
+import json
+from pathlib import Path
+p = Path('runtime/competitive_benchmark_results.json')
+try:
+    data = json.loads(p.read_text(encoding='utf-8'))
+    print(len(data.get('benchmarks', {})))
+except Exception:
+    print(0)
+PY
+                  )
+                else
+                  measured=0
+                fi
+
+                set +e
+                python -m pytest -q > /tmp/genesis-oldest-real-issue-tests.log 2>&1
+                test_rc=$?
+                set -e
+                if [ "$test_rc" -eq 0 ]; then
+                  test_outcome=success
+                else
+                  test_outcome=failure
+                fi
+
+                if [ "$measured" -gt 0 ] && [ "$test_outcome" = "success" ]; then
+                  gh issue close "$issue_number" \
+                    --repo "$GITHUB_REPOSITORY" \
+                    --comment "Genesis Issue Solver found real benchmark evidence on current main (measured benchmark records: ${measured}) and repository validation passed. Closing based on current evidence. Solver run: ${GITHUB_RUN_ID}, cycle: ${cycle}."
+                  result=resolved_and_closed
+                else
+                  result=still_open
+                  body=$(cat <<EOF
+${marker}
+**Genesis Issue Solver — automatic 5-minute process**
+
+- Selected oldest real issue: #${issue_number} — ${title}
+- Last check (UTC): ${checked_at}
+- Solver run: ${GITHUB_RUN_ID}
+- Cycle: ${cycle}/${max_cycles}
+- Validated benchmark records on current main: ${measured}
+- Repository validation: ${test_outcome}
+- Result: **still unresolved; issue remains open**
+- Next automatic check: about 5 minutes
+
+Genesis will not create a replacement issue and will not close this issue without evidence that its real condition is resolved.
+EOF
+                  )
+                  upsert_status "$issue_number" "$body"
+                fi
+              else
+                body=$(cat <<EOF
+${marker}
+**Genesis Issue Solver — automatic 5-minute process**
+
+- Selected oldest real issue: #${issue_number} — ${title}
+- Last check (UTC): ${checked_at}
+- Solver run: ${GITHUB_RUN_ID}
+- Cycle: ${cycle}/${max_cycles}
+- Result: **selected and held as the current oldest real issue**
+- Next automatic check: about 5 minutes
+
+This minimal solver currently preserves one-issue-at-a-time ordering and never creates new issues. Broader issue-specific repair routes can be added without merging the Issue Creator and Issue Solver processes.
+EOF
+                )
+                upsert_status "$issue_number" "$body"
+              fi
+            fi
+
+            if [ "$cycle" -lt "$max_cycles" ]; then
+              echo "Next oldest-real-issue check in $interval seconds"
+              sleep "$interval"
+            fi
+          done
+
+      - name: Start successor solver run
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
         run: |
-          echo "Selected real issue: #${{ steps.select.outputs.number }} ${{ steps.select.outputs.title }}"
-          echo "This solver never creates issues and never closes a real issue without repository evidence."
+          echo "Starting successor Genesis oldest-real-issue solver run"
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/genesis-oldest-issue-solver.yml/dispatches" \
+            -f ref=main
