@@ -1,0 +1,38 @@
+name: Genesis Heartbeat Cutover
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-heartbeat-cutover.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel obsolete detector runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for run_id in 33323118451 33323428900; do
+            status=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}" --jq '.status' 2>/dev/null || echo missing)
+            echo "Run ${run_id}: ${status}"
+            if [ "$status" = "in_progress" ] || [ "$status" = "queued" ] || [ "$status" = "pending" ] || [ "$status" = "waiting" ]; then
+              gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+            fi
+          done
+
+      - name: Start heartbeat-enabled detector
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          sleep 5
+          gh api \
+            --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/genesis-basic-loop-test.yml/dispatches" \
+            -f ref=main
