@@ -3,7 +3,8 @@ from pathlib import Path
 from genesis.pulse import adaptive_recovery_interval, recovery_pulse_due
 
 
-AUTOREPAIR = Path(".github/workflows/github-issue-autorepair.yml")
+SOLVER = Path(".github/workflows/genesis-oldest-issue-solver.yml")
+WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 
 
 def test_adaptive_recovery_interval_accelerates_under_high_backlog() -> None:
@@ -35,18 +36,18 @@ def test_recovery_pulse_due_uses_selected_interval() -> None:
     assert recovery_pulse_due(last_completed_age_seconds=600, interval_minutes=10) is True
 
 
-def test_autorepair_admission_is_event_driven_for_open_reopen_and_authorized_labels() -> None:
-    text = AUTOREPAIR.read_text(encoding="utf-8")
-    assert "types: [opened, reopened, labeled]" in text
-    assert "github.event_name != 'issues' ||" in text
-    assert "github.event.action != 'labeled' ||" in text
-    assert "github.event.label.name == 'genesis-autonomous'" in text
-    assert "github.event.label.name == 'genesis-task'" in text
+def test_current_solver_runs_five_minute_safety_net_and_self_chains() -> None:
+    text = SOLVER.read_text(encoding="utf-8")
+    assert "interval=300" in text
+    assert "max_cycles=64" in text
+    assert "Start successor solver run" in text
+    assert "genesis-oldest-issue-solver.yml/dispatches" in text
 
 
-def test_autorepair_preserves_immediate_refill_and_single_lane_capacity() -> None:
-    text = AUTOREPAIR.read_text(encoding="utf-8")
-    assert "GENESIS_ISSUE_REPAIR_MAX_PARALLEL: '1'" in text
-    assert "refill:" in text
-    assert "gh workflow run github-issue-autorepair-heartbeat.yml" in text
-    assert "github-issue-autorepair-integration.yml" in text
+def test_current_repair_capacity_is_single_issue_lane() -> None:
+    solver = SOLVER.read_text(encoding="utf-8")
+    worker = WORKER.read_text(encoding="utf-8")
+    assert "group: genesis-oldest-real-issue-solver" in solver
+    assert "cancel-in-progress: true" in solver
+    assert "genesis-repair-in-progress" in solver
+    assert "group: genesis-bounded-repair-${{ inputs.issue_number }}" in worker
