@@ -16,5 +16,5 @@ jobs:
     steps:
       - name: Intentional verification failure
         run: |
-          echo 'Intentional one-time failure to verify Genesis Action Failure Watcher.'
+          echo 'Intentional one-time failure to verify Genesis Action Failure Watcher after clean cutover.'
           exit 1
