@@ -113,6 +113,11 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/benchmark_task_worker.py
 
+      - name: Detect pending specialist Proactive handoff
+        id: specialist_handoff
+        shell: bash
+        run: python scripts/specialist_handoff_gate.py --github-output "$GITHUB_OUTPUT"
+
       - name: Record delegated provider pulse
         if: steps.provider_gate.outputs.needs_local_provider == 'true'
         run: |
@@ -287,8 +292,20 @@ jobs:
           if-no-files-found: warn
           retention-days: 30
 
+      - name: Yield next autonomous slot to specialist Proactive lane
+        if: steps.specialist_handoff.outputs.pending == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Yielding to Proactive Development for Issue(s): ${{ steps.specialist_handoff.outputs.issue_numbers }}"
+          gh workflow run proactive-development.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
+
       - name: Delegate provider-bound pulse
-        if: steps.provider_gate.outputs.needs_local_provider == 'true'
+        if: steps.specialist_handoff.outputs.pending != 'true' && steps.provider_gate.outputs.needs_local_provider == 'true'
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
@@ -299,7 +316,7 @@ jobs:
             -f runtime_parent_run_id="$GITHUB_RUN_ID"
 
       - name: Request next pulse
-        if: steps.provider_gate.outputs.needs_local_provider != 'true' && env.CONTINUE_CHAIN == 'true' && (steps.pulse.outputs.continue == 'true' || steps.pulse.outputs.idle_continue == 'true')
+        if: steps.specialist_handoff.outputs.pending != 'true' && steps.provider_gate.outputs.needs_local_provider != 'true' && env.CONTINUE_CHAIN == 'true' && (steps.pulse.outputs.continue == 'true' || steps.pulse.outputs.idle_continue == 'true')
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
