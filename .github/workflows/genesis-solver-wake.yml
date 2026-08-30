@@ -1,0 +1,23 @@
+name: Genesis Solver Wake
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-solver-wake.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  wake:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch current issue solver
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh api --method POST \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/genesis-oldest-issue-solver.yml/dispatches" \
+            -f ref=main
