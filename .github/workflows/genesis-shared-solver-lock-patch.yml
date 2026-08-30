@@ -86,4 +86,6 @@ jobs:
           rm .github/workflows/genesis-shared-solver-lock-patch.yml
           git add .github/workflows/genesis-oldest-issue-solver.yml tests/test_dual_solver_issue_lock.py .github/workflows/genesis-shared-solver-lock-patch.yml
           git commit -m "Enforce shared issue lock across dual solvers"
+          git fetch origin main
+          git rebase origin/main
           git push origin HEAD:main
