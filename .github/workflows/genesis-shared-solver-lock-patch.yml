@@ -71,6 +71,9 @@ jobs:
           test.write_text('''from pathlib import Path\n\n\ndef test_dual_solvers_share_one_issue_lock_without_permanent_assignment():\n    oldest = Path(\".github/workflows/genesis-oldest-issue-solver.yml\").read_text()\n    priority = Path(\".github/workflows/genesis-priority-issue-solver.yml\").read_text()\n    worker = Path(\".github/workflows/genesis-bounded-repair-worker.yml\").read_text()\n\n    # The actual repair worker is serialized per issue even if two dispatches race.\n    assert \"group: genesis-bounded-repair-${{ inputs.issue_number }}\" in worker\n    assert \"cancel-in-progress: false\" in worker\n\n    # Oldest lane must not select an issue already tentatively owned by priority,\n    # and must recheck the shared reservation after its own tentative claim.\n    assert \"'genesis-priority-claim'\" in oldest\n    assert \"'genesis-validating'\" in oldest\n    assert \"shared_owner=\" in oldest\n    assert \"another solver already owns the shared reservation\" in oldest\n\n    # Priority lane must see all temporary oldest-lane ownership labels and back off.\n    for label in (\"genesis-claimed\", \"genesis-working\", \"genesis-verifying\",\n                  \"genesis-repair-in-progress\", \"genesis-validating\"):\n        assert label in priority\n    assert \"Priority solver backed off\" in priority\n\n    # Solver-specific exhaustion remains separate, so either lane may later work\n    # an issue after the shared temporary reservation is released.\n    assert \"genesis-solver-exhausted\" in oldest\n    assert \"genesis-priority-exhausted\" in priority\n''')
           PY
 
+      - name: Install contract-test dependency
+        run: python -m pip install --disable-pip-version-check pytest
+
       - name: Run shared-lock contract test
         run: python -m pytest -q tests/test_dual_solver_issue_lock.py
 
