@@ -1,0 +1,24 @@
+name: Genesis Safe Upgrade Cutover
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-safe-upgrade-cutover.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  cutover:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel obsolete long-lived runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          for run_id in 33325186297 33325778487; do
+            gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/cancel" || true
+          done
