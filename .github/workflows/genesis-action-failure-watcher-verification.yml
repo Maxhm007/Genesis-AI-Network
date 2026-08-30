@@ -1,0 +1,20 @@
+name: Genesis Action Failure Watcher Verification
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-action-failure-watcher-verification.yml
+
+permissions:
+  contents: read
+
+jobs:
+  intentional-failure:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Intentional verification failure
+        run: |
+          echo 'Intentional one-time failure to verify Genesis Action Failure Watcher.'
+          exit 1
