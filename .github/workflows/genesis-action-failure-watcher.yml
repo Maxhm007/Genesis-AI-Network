@@ -5,7 +5,6 @@ on:
     workflows:
       - Genesis Tiny Problem Detection Test
       - Genesis Oldest Real Issue Solver
-      - Genesis Action Failure Watcher Verification
     types: [completed]
   workflow_dispatch:
 
