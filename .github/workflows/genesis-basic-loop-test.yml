@@ -1,0 +1,70 @@
+name: Genesis Basic Issue Loop Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-basic-loop-test.yml
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: genesis-basic-loop-test
+  cancel-in-progress: false
+
+jobs:
+  basic-loop:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Open Genesis test issue
+        id: issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          body='This issue was opened automatically by the Genesis basic loop test. Success means Genesis makes the tiny status change, verifies it, comments the result, and closes this same issue without human intervention.'
+          response=$(gh api "repos/${GITHUB_REPOSITORY}/issues" \
+            --method POST \
+            -f title='[Genesis Basic Test] Complete one autonomous issue loop' \
+            -f body="$body")
+          issue_number=$(printf '%s' "$response" | jq -r '.number')
+          issue_url=$(printf '%s' "$response" | jq -r '.html_url')
+          echo "number=$issue_number" >> "$GITHUB_OUTPUT"
+          echo "url=$issue_url" >> "$GITHUB_OUTPUT"
+
+      - name: Complete tiny task
+        env:
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
+        run: |
+          printf 'Genesis autonomous loop OK\nIssue: #%s\nRun: %s\n' "$ISSUE_NUMBER" "$GITHUB_RUN_ID" > genesis_basic_loop_status.txt
+          git config user.name 'Genesis Basic Loop'
+          git config user.email 'genesis-basic-loop@users.noreply.github.com'
+          git add genesis_basic_loop_status.txt
+          git commit -m "Genesis completes basic issue #${ISSUE_NUMBER}"
+          git push origin HEAD:main
+
+      - name: Verify result
+        run: |
+          test -f genesis_basic_loop_status.txt
+          grep -Fx 'Genesis autonomous loop OK' genesis_basic_loop_status.txt
+          grep -Fx "Issue: #${{ steps.issue.outputs.number }}" genesis_basic_loop_status.txt
+
+      - name: Close the same issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
+        run: |
+          commit_sha=$(git rev-parse HEAD)
+          gh issue close "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --comment "Genesis basic loop completed successfully. Tiny task was applied and verified. Commit: $commit_sha"
+
+      - name: Report
+        run: |
+          echo "Genesis opened, completed, verified, and closed issue #${{ steps.issue.outputs.number }}"
+          echo "Issue URL: ${{ steps.issue.outputs.url }}"
