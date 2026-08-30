@@ -1,0 +1,92 @@
+name: Genesis Shared Solver Lock Patch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-shared-solver-lock-patch.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Apply minimal shared-lock hardening
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/genesis-oldest-issue-solver.yml')
+          text = path.read_text()
+
+          old_selection = "if labels & {'genesis-claimed', 'genesis-working', 'genesis-verifying', 'genesis-repair-in-progress'}:"
+          new_selection = "if labels & {'genesis-claimed', 'genesis-working', 'genesis-verifying', 'genesis-repair-in-progress', 'genesis-validating', 'genesis-priority-claim'}:"
+          if old_selection not in text:
+              raise SystemExit('oldest solver active-label selection anchor not found')
+          text = text.replace(old_selection, new_selection, 1)
+
+          old_claim = '''              add_label "$issue_number" genesis-claimed
+              add_label "$issue_number" genesis-working
+              remove_label "$issue_number" genesis-verifying
+
+              claimed_body='''
+          new_claim = '''              add_label "$issue_number" genesis-claimed
+              add_label "$issue_number" genesis-working
+              remove_label "$issue_number" genesis-verifying
+
+              # Cross-solver race guard. The priority lane waits for these oldest-
+              # solver labels before dispatching; this lane now also rechecks the
+              # shared repair/validation reservation after claiming. If priority
+              # already converted its tentative claim into the shared reservation,
+              # this lane releases its temporary labels and moves on. If both only
+              # tentatively claim at the same instant, oldest wins deterministically
+              # and the priority lane backs off on genesis-claimed/genesis-working.
+              sleep 3
+              refreshed=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json state,labels)
+              state=$(printf '%s' "$refreshed" | jq -r '.state')
+              shared_owner=$(printf '%s' "$refreshed" | jq -r '([.labels[].name] | any(. == "genesis-repair-in-progress" or . == "genesis-validating"))')
+              if [[ "$state" != "OPEN" || "$shared_owner" == "true" ]]; then
+                echo "Oldest solver backed off #$issue_number because another solver already owns the shared reservation"
+                clear_active_labels "$issue_number"
+                if [ "$cycle" -lt "$max_cycles" ]; then
+                  echo "Next eligible issue check in $interval seconds"
+                  sleep "$interval"
+                fi
+                continue
+              fi
+
+              claimed_body='''
+          if old_claim not in text:
+              raise SystemExit('oldest solver claim anchor not found')
+          text = text.replace(old_claim, new_claim, 1)
+          path.write_text(text)
+
+          test = Path('tests/test_dual_solver_issue_lock.py')
+          test.write_text('''from pathlib import Path\n\n\ndef test_dual_solvers_share_one_issue_lock_without_permanent_assignment():\n    oldest = Path(\".github/workflows/genesis-oldest-issue-solver.yml\").read_text()\n    priority = Path(\".github/workflows/genesis-priority-issue-solver.yml\").read_text()\n    worker = Path(\".github/workflows/genesis-bounded-repair-worker.yml\").read_text()\n\n    # The actual repair worker is serialized per issue even if two dispatches race.\n    assert \"group: genesis-bounded-repair-${{ inputs.issue_number }}\" in worker\n    assert \"cancel-in-progress: false\" in worker\n\n    # Oldest lane must not select an issue already tentatively owned by priority,\n    # and must recheck the shared reservation after its own tentative claim.\n    assert \"'genesis-priority-claim'\" in oldest\n    assert \"'genesis-validating'\" in oldest\n    assert \"shared_owner=\" in oldest\n    assert \"genesis-repair-in-progress\" in oldest\n    assert \"another solver already owns the shared reservation\" in oldest\n\n    # Priority lane must see all temporary oldest-lane ownership labels and back off.\n    for label in (\"genesis-claimed\", \"genesis-working\", \"genesis-verifying\",\n                  \"genesis-repair-in-progress\", \"genesis-validating\"):\n        assert label in priority\n    assert \"Priority solver backed off\" in priority\n\n    # Neither solver permanently owns an issue: solver-specific exhausted labels\n    # are intentionally different and the shared repair reservation is temporary.\n    assert \"genesis-solver-exhausted\" in oldest\n    assert \"genesis-priority-exhausted\" in priority\n''')
+          PY
+
+      - name: Run shared-lock contract test
+        run: python -m pytest -q tests/test_dual_solver_issue_lock.py
+
+      - name: Commit patch and remove temporary patch workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name "Genesis Safety Patch"
+          git config user.email "genesis-safety@users.noreply.github.com"
+          rm .github/workflows/genesis-shared-solver-lock-patch.yml
+          git add .github/workflows/genesis-oldest-issue-solver.yml tests/test_dual_solver_issue_lock.py .github/workflows/genesis-shared-solver-lock-patch.yml
+          git commit -m "Enforce shared issue lock across dual solvers"
+          git push origin HEAD:main
