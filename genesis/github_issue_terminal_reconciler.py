@@ -17,6 +17,11 @@ EXPLICIT_SUPERSEDEABLE_STATES = {"new", "assigned", "paused", "blocked", "failed
 PROTECTED_LABELS = {"genesis-persistent", "genesis-control"}
 PROTECTED_TITLE_PREFIXES = ("Genesis Control:",)
 SPECIALIST_HANDOFF_REASONS = {"issue_route_migrated_to_self_improvement_specialist"}
+SPECIALIST_TASK_TYPES = {
+    "competitive_ai_improvement",
+    "competitive_reference_refresh",
+    "immortality_research",
+}
 LINEAGE_KEYS = (
     "problem_fingerprint",
     "issue_key",
@@ -94,6 +99,11 @@ def _is_specialist_handoff(task: GenesisTask) -> bool:
     if task.state != "cancelled":
         return False
     return str(task.state_reason or "").strip() in SPECIALIST_HANDOFF_REASONS
+
+
+def _is_specialist_replacement(task: GenesisTask) -> bool:
+    """Return whether this row is real work owned by the specialist lane."""
+    return str(task.payload.get("task_type") or "").strip() in SPECIALIST_TASK_TYPES
 
 
 def _work_generation(task: GenesisTask) -> int:
@@ -186,7 +196,7 @@ def reconcile_terminal_github_issues(
     Protected/control Issues remain untouched, and running/review work is never
     auto-cancelled by reconciliation. A cancelled row that explicitly hands Issue
     authority to a specialist lane is not a final disposition by itself; the Issue
-    stays open until a substantive replacement row is linked.
+    stays open until a real supported specialist replacement row is linked.
     """
     root = Path(root).resolve()
     runtime = root / "runtime"
@@ -228,8 +238,6 @@ def reconcile_terminal_github_issues(
         supersession = _supersession_reasons(tasks)
         issue: dict | None = None
 
-        # Supersession mutates durable queue history, so verify the GitHub Issue
-        # first and preserve protected/control channels before cancelling anything.
         if supersession:
             fetched = requester("GET", f"/issues/{issue_number}", None)
             if not isinstance(fetched, dict):
@@ -273,7 +281,8 @@ def reconcile_terminal_github_issues(
 
         handoff_tasks = [task for task in tasks if _is_specialist_handoff(task)]
         substantive_tasks = [task for task in tasks if not _is_specialist_handoff(task)]
-        if handoff_tasks and not substantive_tasks:
+        specialist_replacements = [task for task in substantive_tasks if _is_specialist_replacement(task)]
+        if handoff_tasks and not specialist_replacements:
             result["skipped_handoff"].append(
                 {
                     "github_issue_number": issue_number,
