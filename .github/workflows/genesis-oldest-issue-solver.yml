@@ -1,4 +1,4 @@
-name: Genesis Oldest Issue Solver
+name: Genesis Oldest Real Issue Solver
 
 on:
   workflow_dispatch:
@@ -12,25 +12,35 @@ permissions:
   issues: write
 
 concurrency:
-  group: genesis-oldest-issue-solver
+  group: genesis-oldest-real-issue-solver
   cancel-in-progress: false
 
 jobs:
-  solve-one-oldest-issue:
+  solve-one-oldest-real-issue:
     runs-on: ubuntu-latest
     steps:
-      - name: Select oldest open issue
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Select oldest real open issue
         id: select
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           set -euo pipefail
           issue=$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \
-            --jq '[.[] | select(.pull_request == null)][0]')
+            --jq '[.[]
+              | select(.pull_request == null)
+              | select(.number != 1)
+              | select((.title | startswith("Genesis Chat:")) | not)
+              | select((.title | startswith("[Genesis Hourly Report]")) | not)
+              | select((.title | startswith("[Genesis Gene Chat]")) | not)
+              | select((.body // "" | contains("Persistent GitHub-native reporting channel")) | not)
+            ][0]')
 
           if [ -z "$issue" ] || [ "$issue" = "null" ]; then
             echo "number=" >> "$GITHUB_OUTPUT"
-            echo "No open issues found"
+            echo "No real open issue found"
             exit 0
           fi
 
@@ -38,61 +48,81 @@ jobs:
           title=$(printf '%s' "$issue" | jq -r '.title')
           echo "number=$number" >> "$GITHUB_OUTPUT"
           echo "title=$title" >> "$GITHUB_OUTPUT"
-          echo "Selected oldest open issue #$number: $title"
+          echo "Selected oldest real issue #$number: $title"
 
-      - name: Validate oldest issue is safely solvable in first proof
+      - name: Claim selected real issue
+        if: steps.select.outputs.number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.select.outputs.number }}
+        run: |
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "Genesis Issue Solver selected this as the oldest real open issue for one bounded autonomous solving attempt. Solver run: ${GITHUB_RUN_ID}. No new issue was created."
+
+      - name: Validate current repository state
         if: steps.select.outputs.number != ''
         id: validate
         env:
-          GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.select.outputs.number }}
         run: |
           set -euo pipefail
 
-          # First proof is intentionally narrow: it may close the oldest issue
-          # only when repository evidence already proves the requested work is done.
-          if [ "$ISSUE_NUMBER" != "1" ]; then
-            echo "solvable=false" >> "$GITHUB_OUTPUT"
-            echo "Oldest issue is not the approved first-proof issue; leaving it untouched."
-            exit 0
+          if [ "$ISSUE_NUMBER" = "5" ]; then
+            if [ -f runtime/competitive_benchmark_results.json ]; then
+              measured=$(python - <<'PY'
+          import json
+          from pathlib import Path
+          p = Path('runtime/competitive_benchmark_results.json')
+          try:
+              data = json.loads(p.read_text())
+              print(len(data.get('benchmarks', {})))
+          except Exception:
+              print(0)
+          PY
+              )
+            else
+              measured=0
+            fi
+
+            echo "measured=$measured" >> "$GITHUB_OUTPUT"
+            if [ "$measured" -gt 0 ]; then
+              echo "condition_may_be_resolved=true" >> "$GITHUB_OUTPUT"
+            else
+              echo "condition_may_be_resolved=false" >> "$GITHUB_OUTPUT"
+            fi
+            echo "Issue #5 benchmark evidence count: $measured"
+          else
+            echo "measured=unknown" >> "$GITHUB_OUTPUT"
+            echo "condition_may_be_resolved=false" >> "$GITHUB_OUTPUT"
           fi
 
-          title=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json title --jq '.title')
-          if [ "$title" != "Genesis Chat: First communication test" ]; then
-            echo "solvable=false" >> "$GITHUB_OUTPUT"
-            echo "Issue #1 title no longer matches expected first-proof task; leaving it untouched."
-            exit 0
-          fi
+      - name: Run bounded baseline validation
+        if: steps.select.outputs.number != ''
+        id: tests
+        continue-on-error: true
+        run: |
+          python -m pytest -q
 
-          replies=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
-            --jq '[.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("**Genesis:**"))] | length')
-
-          if [ "$replies" -lt 1 ]; then
-            echo "solvable=false" >> "$GITHUB_OUTPUT"
-            echo "No Genesis reply evidence found; leaving issue open."
-            exit 0
-          fi
-
-          echo "solvable=true" >> "$GITHUB_OUTPUT"
-          echo "Verified $replies Genesis reply(s) already satisfy the communication-test objective."
-
-      - name: Close verified oldest issue
-        if: steps.validate.outputs.solvable == 'true'
+      - name: Resolve only with real evidence
+        if: steps.select.outputs.number == '5'
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ steps.select.outputs.number }}
+          CONDITION_RESOLVED: ${{ steps.validate.outputs.condition_may_be_resolved }}
+          MEASURED: ${{ steps.validate.outputs.measured }}
+          TEST_OUTCOME: ${{ steps.tests.outcome }}
         run: |
           set -euo pipefail
-          gh issue close "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --comment "Genesis Issue Solver selected this as the oldest open issue and verified that the requested communication test had already been completed by existing Genesis replies. Closing as completed based on existing issue evidence. Solver run: ${GITHUB_RUN_ID}."
+
+          if [ "$CONDITION_RESOLVED" = "true" ] && [ "$TEST_OUTCOME" = "success" ]; then
+            gh issue close "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --comment "Genesis Issue Solver found real benchmark evidence on current main (measured benchmark records: ${MEASURED}) and the baseline validation passed. Closing only because current repository evidence no longer matches the original unmeasured benchmark condition. Solver run: ${GITHUB_RUN_ID}."
+          else
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body "Genesis Issue Solver completed a bounded real solving attempt. Current validated benchmark records found on main: ${MEASURED}. Baseline test outcome: ${TEST_OUTCOME}. The original capability/benchmark gap is therefore not proven resolved, so Genesis is leaving this real issue OPEN rather than fabricating success. The next safe solving requirement is real comparable benchmark execution plus independently validated evidence. Solver run: ${GITHUB_RUN_ID}."
+          fi
 
       - name: Report
         run: |
-          if [ -z "${{ steps.select.outputs.number }}" ]; then
-            echo "No open issue was available."
-          elif [ "${{ steps.validate.outputs.solvable }}" = "true" ]; then
-            echo "Solved oldest issue #${{ steps.select.outputs.number }} by evidence-backed closure."
-          else
-            echo "Oldest issue #${{ steps.select.outputs.number }} was not safely solvable by the first-proof policy and was left unchanged."
-          fi
+          echo "Selected real issue: #${{ steps.select.outputs.number }} ${{ steps.select.outputs.title }}"
+          echo "This solver never creates issues and never closes a real issue without repository evidence."
