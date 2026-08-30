@@ -2,6 +2,8 @@ name: Genesis Tiny Problem Detection Test
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '*/30 * * * *'
 
 permissions:
   contents: write
