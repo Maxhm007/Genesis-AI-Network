@@ -14,7 +14,7 @@ jobs:
   cancel:
     runs-on: ubuntu-latest
     steps:
-      - name: Cancel unsafe in-flight worker
+      - name: Cancel obsolete solver instance
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/33327388862/cancel" || true
+        run: gh api --method POST "repos/${GITHUB_REPOSITORY}/actions/runs/33327369728/cancel" || true
