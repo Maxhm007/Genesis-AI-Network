@@ -16,5 +16,5 @@ jobs:
     steps:
       - name: Intentional verification failure
         run: |
-          echo 'Intentional one-time failure to verify the corrected Genesis Action Failure Watcher.'
+          echo 'Intentional one-time failure to verify native Genesis Action Failure Watcher.'
           exit 1
