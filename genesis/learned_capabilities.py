@@ -1632,4 +1632,39 @@ register_capability(
 )
 
 
+def _learned_0088a69ee3f1(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'v0.2.0', 'overview', 'version', 'been', 'released', 'nightly', 'build', 'b10566', 'https', 'github.com', 'ggml-org')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_0088a69ee3f14b6f',
+    "Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'v0.2.0': ## Overview New version has been released. **Nightly build:** [b10566](https://github.com/ggml-org/llama.cpp/releases/tag/b10566) **Web UI:** the `nightly-tag.txt` asset contains the tag of the corresponding nightly release **More info:** [dist : releases and versioning of ggml-org projects](https://github.com/ggml-org/ggml/discussions/1579) ## Changelog since v0.1.2 bb4caa754 llama.cpp : bump version to 0.2.0 (#27498) c4b0225d8 scripts : add release.sh for",
+    '## Overview New version has been released. **Nightly build:** [b10566](https://github.com/ggml-org/llama.cpp/releases/tag/b10566) **Web UI:** the `nightly-tag.txt` asset contains the tag of the corresponding nightly release **More info:** [dist : releases and versioning of ggml-org projects](https://github.com/ggml-org/ggml/discussions/1579) ## Changelog since v0.1.2 bb4caa754 llama.cpp : bump version to 0.2.0 (#27498) c4b0225d8 scripts : add release.sh for release preparation (#27497) 5de25a748 sync : ggml 01ff204fb ggml : bump version to 0.21.0 (ggml/1597) 353b32d8b ci : remove duplicate flag (#27488) 7a0e42fd0 Revert "sycl : add Q2_K reordered MMVQ and ESIMD kernels (#26336)" (#27486) 5b6ddc967 ui: Settings navigation cleanup (#27241) e467c2ff6 ci : add nightly-tag.txt to make-release (#27485) 171974745 ci : release clean-up (#27477) 62b226906 kleidiai : add SME2 F32 GEMV kernel support (#26891) ff14356e0 sycl : add Q2_K reordered MMVQ and ESIMD kernels (#26336) 5fff12845 test : make the FA V-is-view-of-K case a test case parameter (#27394) 9e89a196b sycl : Add Q5_K ESIMD kernel (#26376) cd26896c1 opencl: keep the vocab-scale K-quant lm_head on the CPU for Adreno A7X (compiler i',
+    _learned_0088a69ee3f1,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
