@@ -136,9 +136,22 @@ jobs:
 
             issue_number=$(python - <<'PY'
           import json
+          import re
           from pathlib import Path
 
           issues = json.loads(Path('/tmp/genesis-open-issues.json').read_text())
+          protected_targets = {
+              'genesis/autonomy_guard.py',
+              'genesis/autonomy_proof.py',
+              'genesis/blockchain.py',
+              'genesis/ephemeral_validator.py',
+              'genesis/security.py',
+              'genesis/selfdev.py',
+              'genesis/issue_solver.py',
+              'genesis/file_self_review.py',
+              'genesis/file_self_review_policy.py',
+          }
+
           for issue in issues:
               if issue.get('pull_request'):
                   continue
@@ -179,11 +192,46 @@ jobs:
                   continue
 
               is_action_failure = lower_title.startswith('genesis action failure:') or lower_title.startswith('[genesis action failure]')
-              is_machine_task = 'genesis-task' in labels
+              is_syntax_report = 'syntax error' in lower_body
 
-              # Legacy blocked action/task issues remain eligible for one fresh
-              # current-main revalidation. New exhausted issues are filtered above.
-              if 'genesis-blocked' in labels and not (is_action_failure or is_machine_task):
+              # Action failures have a safe current-main reconciliation route.
+              if is_action_failure:
+                  print(number)
+                  break
+
+              # Syntax reports are read-only revalidated with py_compile, even when
+              # the target itself is protected from modification.
+              if is_syntax_report:
+                  print(number)
+                  break
+
+              # Benchmark/capability issues that explicitly require post-promotion
+              # measured improvement cannot be truthfully closed by code tests alone.
+              # Leave them for a benchmark/evidence lane instead of consuming the
+              # generic repair worker.
+              requires_measurement = any(
+                  phrase in lower_body
+                  for phrase in (
+                      'post-promotion benchmark',
+                      'post-promotion remeasurement',
+                      'benchmark re-measurement',
+                      'benchmark remeasurement',
+                      'measured score improves',
+                      'same comparable benchmark',
+                  )
+              )
+              if requires_measurement:
+                  continue
+
+              # Generic code repair is eligible only when the issue declares one
+              # exact, existing, non-protected Genesis Python target.
+              match = re.search(r'^- \*\*Target:\*\* `([^`]+)`', body, re.MULTILINE)
+              target = match.group(1).strip() if match else ''
+              if not target.startswith('genesis/') or not target.endswith('.py'):
+                  continue
+              if '..' in target or target in protected_targets:
+                  continue
+              if not Path(target).is_file():
                   continue
 
               print(number)
