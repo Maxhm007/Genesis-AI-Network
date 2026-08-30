@@ -250,7 +250,7 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --body "Genesis verified and promoted a bounded repair. Candidate: \`${CANDIDATE_SHA}\`. Promoted main SHA: \`${promoted_sha}\`. Verified target: \`${TARGET}\`. Evidence: target compilation, target-specific tests when present, and the full repository test suite passed after promotion. Worker run: ${GITHUB_RUN_ID}."
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-verified >/dev/null
-          for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-claimed genesis-working genesis-verifying genesis-blocked; do
+          for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-claimed genesis-working genesis-verifying genesis-blocked genesis-solver-exhausted; do
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
           done
           gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --method PATCH -f state=closed -f state_reason=completed >/dev/null
@@ -275,20 +275,30 @@ jobs:
             evidence_status=$(jq -r '.status // ""' runtime/github_issue_autorepair.json)
           fi
 
+          solver_attempt=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments?per_page=100" \
+            | jq -r '[.[] | select((.body // "") | startswith("<!-- genesis-oldest-real-issue-solver -->"))][0].body // ""' \
+            | sed -nE 's/.*genesis-solver-attempt:([0-9]+).*/\1/p' \
+            | head -n1)
+          solver_attempt=${solver_attempt:-0}
+
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress >/dev/null 2>&1 || true
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-validating >/dev/null 2>&1 || true
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-claimed >/dev/null 2>&1 || true
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-working >/dev/null 2>&1 || true
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-verifying >/dev/null 2>&1 || true
 
-          if [[ "$evidence_status" == "blocked" ]]; then
+          if [[ "$evidence_status" == "blocked" || "$solver_attempt" -ge 3 ]]; then
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-blocked >/dev/null 2>&1 || true
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-autonomous >/dev/null 2>&1 || true
+            retry_state='bounded attempts exhausted; queue will move on'
           else
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous >/dev/null 2>&1 || true
+            retry_state='issue remains open for the bounded retry policy'
           fi
 
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body "Genesis bounded repair did not promote a verified change in worker run ${GITHUB_RUN_ID} (repair status: \`${evidence_status:-worker_failed_before_evidence}\`). The repair reservation was released safely; the issue remains open for the bounded retry policy."
+            --body "Genesis bounded repair did not promote a verified change in worker run ${GITHUB_RUN_ID} (repair status: \`${evidence_status:-worker_failed_before_evidence}\`, solver attempt: ${solver_attempt}/3). The repair reservation was released safely; ${retry_state}."
 
       - name: Preserve bounded repair evidence
         if: always()
