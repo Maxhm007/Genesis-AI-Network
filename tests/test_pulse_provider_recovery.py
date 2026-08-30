@@ -173,6 +173,10 @@ def test_resume_one_prefers_highest_priority_provider_wait(monkeypatch, tmp_path
         "scripts.pulse_provider_recovery._eligible_provider_names",
         lambda root=tmp_path: ["qwen-test-provider"],
     )
+    monkeypatch.setattr(
+        "scripts.pulse_provider_recovery._drain_context",
+        lambda: {"active": False, "open_issue_count": 0, "high_water": 0},
+    )
     result = resume_one(tmp_path)
 
     assert result["status"] == "provider_wait_resumed"
