@@ -2,86 +2,112 @@ name: Genesis Tiny Problem Detection Test
 
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '2/5 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-basic-loop-test.yml
 
 permissions:
   contents: write
   issues: write
+  actions: write
 
 concurrency:
   group: genesis-tiny-problem-detection-test
   cancel-in-progress: false
 
 jobs:
-  detect-and-resolve:
+  continuous-detector:
     runs-on: ubuntu-latest
+    timeout-minutes: 340
     steps:
       - name: Checkout
         uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
 
-      - name: Detect predefined tiny problem
-        id: detect
-        run: |
-          if [ ! -f genesis_detected_issue_status.txt ]; then
-            echo "problem=true" >> "$GITHUB_OUTPUT"
-            echo "Detected problem: genesis_detected_issue_status.txt is missing"
-          else
-            echo "problem=false" >> "$GITHUB_OUTPUT"
-            echo "No predefined tiny problem detected"
-          fi
-
-      - name: Open issue for detected problem
-        if: steps.detect.outputs.problem == 'true'
-        id: issue
+      - name: Run detector loop
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          body='Genesis detected that genesis_detected_issue_status.txt was missing. This issue must remain open until Genesis creates the file, verifies its expected content, records the commit, and closes this same issue.'
-          response=$(gh api "repos/${GITHUB_REPOSITORY}/issues" \
+          set -euo pipefail
+
+          # The deployment push performs three fast proof cycles, then hands off
+          # to the normal workflow-dispatch loop. Normal cycles run every 5 min.
+          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
+            interval=20
+            max_cycles=3
+            echo "Bootstrap proof mode: 3 cycles, 20 seconds apart"
+          else
+            interval=300
+            max_cycles=64
+            echo "Continuous mode: 64 cycles, 5 minutes apart"
+          fi
+
+          for cycle in $(seq 1 "$max_cycles"); do
+            echo "=== Genesis detector cycle $cycle/$max_cycles ==="
+
+            git fetch origin main
+            git reset --hard origin/main
+
+            if [ ! -f genesis_detected_issue_status.txt ]; then
+              echo "Detected problem: genesis_detected_issue_status.txt is missing"
+
+              issue_number=$(gh issue list \
+                --repo "$GITHUB_REPOSITORY" \
+                --state open \
+                --search '"[Genesis Detected] Missing tiny status file" in:title' \
+                --json number \
+                --jq '.[0].number // empty')
+
+              if [ -z "$issue_number" ]; then
+                body='Genesis detected that genesis_detected_issue_status.txt was missing. This issue must remain open until Genesis creates the file, verifies its expected content, records the commit, and closes this same issue.'
+                response=$(gh api "repos/${GITHUB_REPOSITORY}/issues" \
+                  --method POST \
+                  -f title='[Genesis Detected] Missing tiny status file' \
+                  -f body="$body")
+                issue_number=$(printf '%s' "$response" | jq -r '.number')
+                echo "Opened issue #$issue_number"
+              else
+                echo "Using existing open issue #$issue_number"
+              fi
+
+              printf 'Genesis detected and resolved a tiny repository problem\nIssue: #%s\nRun: %s\nCycle: %s\n' \
+                "$issue_number" "$GITHUB_RUN_ID" "$cycle" > genesis_detected_issue_status.txt
+
+              git config user.name 'Genesis Tiny Detector'
+              git config user.email 'genesis-tiny-detector@users.noreply.github.com'
+              git add genesis_detected_issue_status.txt
+              git commit -m "Genesis resolves detected issue #${issue_number}"
+              git push origin HEAD:main
+
+              test -f genesis_detected_issue_status.txt
+              grep -Fx 'Genesis detected and resolved a tiny repository problem' genesis_detected_issue_status.txt
+              grep -Fx "Issue: #${issue_number}" genesis_detected_issue_status.txt
+
+              commit_sha=$(git rev-parse HEAD)
+              gh issue close "$issue_number" \
+                --repo "$GITHUB_REPOSITORY" \
+                --comment "Genesis detected the missing file, fixed it, and verified the result. Commit: $commit_sha"
+
+              echo "Detected, fixed, verified, and closed issue #$issue_number"
+            else
+              echo "No predefined tiny problem detected"
+            fi
+
+            if [ "$cycle" -lt "$max_cycles" ]; then
+              echo "Next check in $interval seconds"
+              sleep "$interval"
+            fi
+          done
+
+      - name: Start successor detector run
+        if: ${{ always() }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          echo "Starting successor Genesis detector run"
+          gh api \
             --method POST \
-            -f title='[Genesis Detected] Missing tiny status file' \
-            -f body="$body")
-          issue_number=$(printf '%s' "$response" | jq -r '.number')
-          issue_url=$(printf '%s' "$response" | jq -r '.html_url')
-          echo "number=$issue_number" >> "$GITHUB_OUTPUT"
-          echo "url=$issue_url" >> "$GITHUB_OUTPUT"
-
-      - name: Fix detected problem
-        if: steps.detect.outputs.problem == 'true'
-        env:
-          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
-        run: |
-          printf 'Genesis detected and resolved a tiny repository problem\nIssue: #%s\nRun: %s\n' "$ISSUE_NUMBER" "$GITHUB_RUN_ID" > genesis_detected_issue_status.txt
-          git config user.name 'Genesis Tiny Detector'
-          git config user.email 'genesis-tiny-detector@users.noreply.github.com'
-          git add genesis_detected_issue_status.txt
-          git commit -m "Genesis resolves detected issue #${ISSUE_NUMBER}"
-          git push origin HEAD:main
-
-      - name: Verify fix
-        if: steps.detect.outputs.problem == 'true'
-        run: |
-          test -f genesis_detected_issue_status.txt
-          grep -Fx 'Genesis detected and resolved a tiny repository problem' genesis_detected_issue_status.txt
-          grep -Fx "Issue: #${{ steps.issue.outputs.number }}" genesis_detected_issue_status.txt
-
-      - name: Close detected issue
-        if: steps.detect.outputs.problem == 'true'
-        env:
-          GH_TOKEN: ${{ github.token }}
-          ISSUE_NUMBER: ${{ steps.issue.outputs.number }}
-        run: |
-          commit_sha=$(git rev-parse HEAD)
-          gh issue close "$ISSUE_NUMBER" \
-            --repo "$GITHUB_REPOSITORY" \
-            --comment "Genesis detected the missing file, fixed it, and verified the result. Commit: $commit_sha"
-
-      - name: Report
-        run: |
-          if [ "${{ steps.detect.outputs.problem }}" = "true" ]; then
-            echo "Detected, opened, fixed, verified, and closed issue #${{ steps.issue.outputs.number }}"
-            echo "Issue URL: ${{ steps.issue.outputs.url }}"
-          else
-            echo "No issue created because the predefined tiny problem does not exist."
-          fi
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/genesis-basic-loop-test.yml/dispatches" \
+            -f ref=main
