@@ -186,7 +186,7 @@ jobs:
                   continue
 
               # Never let two solver cycles work the same issue simultaneously.
-              if labels & {'genesis-claimed', 'genesis-working', 'genesis-verifying', 'genesis-repair-in-progress'}:
+              if labels & {'genesis-claimed', 'genesis-working', 'genesis-verifying', 'genesis-repair-in-progress', 'genesis-validating', 'genesis-priority-claim'}:
                   continue
               if 'genesis-solver-exhausted' in labels:
                   continue
@@ -259,6 +259,26 @@ jobs:
               add_label "$issue_number" genesis-working
               remove_label "$issue_number" genesis-verifying
 
+              # Cross-solver race guard. The priority lane waits for these oldest-
+              # solver labels before dispatching; this lane now also rechecks the
+              # shared repair/validation reservation after claiming. If priority
+              # already converted its tentative claim into the shared reservation,
+              # this lane releases its temporary labels and moves on. If both only
+              # tentatively claim at the same instant, oldest wins deterministically
+              # and the priority lane backs off on genesis-claimed/genesis-working.
+              sleep 3
+              refreshed=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json state,labels)
+              state=$(printf '%s' "$refreshed" | jq -r '.state')
+              shared_owner=$(printf '%s' "$refreshed" | jq -r '([.labels[].name] | any(. == "genesis-repair-in-progress" or . == "genesis-validating"))')
+              if [[ "$state" != "OPEN" || "$shared_owner" == "true" ]]; then
+                echo "Oldest solver backed off #$issue_number because another solver already owns the shared reservation"
+                clear_active_labels "$issue_number"
+                if [ "$cycle" -lt "$max_cycles" ]; then
+                  echo "Next eligible issue check in $interval seconds"
+                  sleep "$interval"
+                fi
+                continue
+              fi
               claimed_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Issue Solver — claimed**\n\n- Issue: #%s — %s\n- Claimed (UTC): %s\n- Solver run: %s\n- Cycle: %s/%s\n- Attempt: **%s/%s**\n- State: **working**\n\nOnly this issue is being processed by this solver cycle.' \
                 "$marker" "$attempt" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$cycle" "$max_cycles" "$attempt" "$max_attempts")
               upsert_status "$issue_number" "$claimed_body"
