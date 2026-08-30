@@ -2,10 +2,6 @@ name: Genesis Tiny Problem Detection Test
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-basic-loop-test.yml
 
 permissions:
   contents: write
