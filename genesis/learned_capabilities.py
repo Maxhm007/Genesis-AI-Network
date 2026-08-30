@@ -78,7 +78,7 @@ def _learned_2ab48edef009(
         return reference
     if candidate and candidate in choices:
         return candidate
-    return choices[0] if choices else None
+    pass
 
 register_capability(
     'runtime_device_alignment_2ab48edef009',
