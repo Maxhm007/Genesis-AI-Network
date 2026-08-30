@@ -34,22 +34,50 @@ jobs:
           set -euo pipefail
 
           marker='<!-- genesis-oldest-real-issue-solver -->'
+          max_attempts=3
+
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             interval=20
             max_cycles=3
-            echo "Bootstrap mode: 3 issue-solver cycles, 20 seconds apart"
+            echo "Bootstrap mode: 3 safe issue-solver cycles, 20 seconds apart"
           else
             interval=300
             max_cycles=64
-            echo "Continuous mode: one eligible issue-solver cycle every 5 minutes"
+            echo "Continuous mode: one safe issue-solver cycle every 5 minutes"
           fi
+
+          ensure_label() {
+            local name="$1"
+            local color="$2"
+            local description="$3"
+            if ! gh label list --repo "$GITHUB_REPOSITORY" --limit 200 --json name \
+              | jq -e --arg name "$name" 'any(.[]; .name == $name)' >/dev/null; then
+              gh label create "$name" --repo "$GITHUB_REPOSITORY" \
+                --color "$color" --description "$description"
+            fi
+          }
+
+          add_label() {
+            gh issue edit "$1" --repo "$GITHUB_REPOSITORY" --add-label "$2" >/dev/null
+          }
+
+          remove_label() {
+            gh issue edit "$1" --repo "$GITHUB_REPOSITORY" --remove-label "$2" >/dev/null 2>&1 || true
+          }
+
+          clear_active_labels() {
+            local issue_number="$1"
+            remove_label "$issue_number" genesis-claimed
+            remove_label "$issue_number" genesis-working
+            remove_label "$issue_number" genesis-verifying
+          }
 
           upsert_status() {
             local issue_number="$1"
             local body="$2"
             local comment_id
             comment_id=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments?per_page=100" \
-              | jq -r --arg marker "$marker" '[.[] | select(.body | startswith($marker))][0].id // empty')
+              | jq -r --arg marker "$marker" '[.[] | select((.body // "") | startswith($marker))][0].id // empty')
             if [ -n "$comment_id" ]; then
               gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" \
                 --method PATCH -f body="$body" >/dev/null
@@ -59,8 +87,42 @@ jobs:
             fi
           }
 
+          get_previous_attempt() {
+            local issue_number="$1"
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments?per_page=100" \
+              | jq -r --arg marker "$marker" \
+                '[.[] | select((.body // "") | startswith($marker))][0].body // ""' \
+              | sed -nE 's/.*genesis-solver-attempt:([0-9]+).*/\1/p' \
+              | head -n1
+          }
+
+          mark_retry_or_blocked() {
+            local issue_number="$1"
+            local title="$2"
+            local checked_at="$3"
+            local attempt="$4"
+            local result="$5"
+
+            clear_active_labels "$issue_number"
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              add_label "$issue_number" genesis-blocked
+              status_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Issue Solver — bounded attempt exhausted**\n\n- Issue: #%s — %s\n- Last check (UTC): %s\n- Solver run: %s\n- Attempt: **%s/%s**\n- Result: **%s**\n- State: **blocked**\n\nGenesis did not close this issue because verified completion evidence is missing. The queue may continue to the next eligible issue.' \
+                "$marker" "$attempt" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$attempt" "$max_attempts" "$result")
+            else
+              status_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Issue Solver — retry scheduled**\n\n- Issue: #%s — %s\n- Last check (UTC): %s\n- Solver run: %s\n- Attempt: **%s/%s**\n- Result: **%s**\n- State: **open; eligible for another bounded attempt**\n\nGenesis will not close this issue without verified completion evidence.' \
+                "$marker" "$attempt" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$attempt" "$max_attempts" "$result")
+            fi
+            upsert_status "$issue_number" "$status_body"
+          }
+
+          ensure_label genesis-claimed 1f6feb 'Claimed by the Genesis Issue Solver'
+          ensure_label genesis-working fbca04 'Genesis Issue Solver is actively working this issue'
+          ensure_label genesis-verifying 8250df 'Genesis is verifying completion evidence'
+          ensure_label genesis-blocked d73a4a 'Genesis exhausted bounded attempts or requires an unavailable dependency'
+          ensure_label genesis-verified 0e8a16 'Genesis verified the issue completion condition before closure'
+
           for cycle in $(seq 1 "$max_cycles"); do
-            echo "=== Genesis eligible issue solver cycle $cycle/$max_cycles ==="
+            echo "=== Genesis safe issue solver cycle $cycle/$max_cycles ==="
             git fetch origin main
             git reset --hard origin/main
 
@@ -104,26 +166,25 @@ jobs:
                   continue
               if lower_title.startswith('genesis model lab:'):
                   continue
-              if 'genesis-validating' in labels or 'genesis-repair-in-progress' in labels:
+
+              # Never let two solver cycles work the same issue simultaneously.
+              if labels & {'genesis-claimed', 'genesis-working', 'genesis-verifying'}:
                   continue
 
-              # Action failures are eligible even if a legacy repair lane marked
-              # them blocked: current-main reconciliation may prove them stale.
-              if lower_title.startswith('genesis action failure:'):
+              # A newly blocked issue leaves the active queue. Legacy action/task
+              # issues may still carry an old genesis-blocked label, so those two
+              # bounded classes remain eligible for current-main reconciliation.
+              is_action_failure = lower_title.startswith('genesis action failure:') or lower_title.startswith('[genesis action failure]')
+              is_machine_task = 'genesis-task' in labels
+              if 'genesis-blocked' in labels and not (is_action_failure or is_machine_task):
+                  continue
+
+              if is_action_failure or is_machine_task:
                   print(number)
                   break
 
-              # Machine-generated bounded tasks can be revalidated even when a
-              # previous repair attempt marked them blocked.
-              if 'genesis-task' in labels:
-                  print(number)
-                  break
-
-              # Ordinary bounded user issues remain eligible unless explicitly
-              # marked as blocked by the current solver architecture.
-              if 'genesis-blocked' not in labels:
-                  print(number)
-                  break
+              print(number)
+              break
           PY
             )
 
@@ -134,47 +195,69 @@ jobs:
               issue_json=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}")
               title=$(printf '%s' "$issue_json" | jq -r '.title')
               body_text=$(printf '%s' "$issue_json" | jq -r '.body // ""')
-              echo "Selected oldest eligible issue #$issue_number: $title"
 
-              # First real solving route: historical Action failures are checked
-              # against current main. If their referenced workflow was deliberately
-              # removed, the failure is no longer an active defect and is closed.
-              if [[ "$title" == Genesis\ Action\ failure:* ]]; then
+              previous_attempt=$(get_previous_attempt "$issue_number" || true)
+              previous_attempt=${previous_attempt:-0}
+              attempt=$((previous_attempt + 1))
+              if [ "$attempt" -gt "$max_attempts" ]; then
+                attempt=$max_attempts
+              fi
+
+              echo "Claiming issue #$issue_number: $title (attempt $attempt/$max_attempts)"
+              add_label "$issue_number" genesis-claimed
+              add_label "$issue_number" genesis-working
+              remove_label "$issue_number" genesis-verifying
+
+              claimed_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Issue Solver — claimed**\n\n- Issue: #%s — %s\n- Claimed (UTC): %s\n- Solver run: %s\n- Cycle: %s/%s\n- Attempt: **%s/%s**\n- State: **working**\n\nOnly this issue is being processed by this solver cycle.' \
+                "$marker" "$attempt" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$cycle" "$max_cycles" "$attempt" "$max_attempts")
+              upsert_status "$issue_number" "$claimed_body"
+
+              resolved=false
+
+              # Route 1: historical Action failures. Only close when current main
+              # proves the referenced workflow no longer exists.
+              if [[ "$title" == Genesis\ Action\ failure:* || "$title" == \[Genesis\ Action\ Failure\]* ]]; then
                 workflow_path=$(printf '%s' "$body_text" | sed -nE 's/.*\(`([^`]*\.github\/workflows\/[^`]*)`\).*/\1/p' | head -n1)
                 if [ -z "$workflow_path" ]; then
                   workflow_path=$(printf '%s' "$body_text" | grep -oE '\.github/workflows/[A-Za-z0-9._-]+\.(yml|yaml)' | head -n1 || true)
                 fi
 
                 if [ -n "$workflow_path" ] && [ ! -f "$workflow_path" ]; then
+                  remove_label "$issue_number" genesis-working
+                  add_label "$issue_number" genesis-verifying
                   gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
-                    --body "Genesis Issue Solver revalidated this historical Action failure against current \`main\`. The referenced workflow \`${workflow_path}\` no longer exists after the deliberate workflow reset, so this specific failure cannot recur in the current runtime. Closing this stale failure as no longer applicable; this does not claim the broader capability is complete. Solver run: ${GITHUB_RUN_ID}, cycle: ${cycle}."
+                    --body "Genesis verification evidence: the referenced workflow \`${workflow_path}\` is absent from current \`main\`. This exact historical Action failure cannot recur from that removed workflow. Solver run: ${GITHUB_RUN_ID}, attempt: ${attempt}/${max_attempts}."
+                  add_label "$issue_number" genesis-verified
+                  clear_active_labels "$issue_number"
                   gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" \
                     --method PATCH -f state=closed -f state_reason=not_planned >/dev/null
-                  echo "Closed stale Action failure #$issue_number"
-                else
-                  status_body=$(printf '%s\n**Genesis Issue Solver — automatic process**\n\n- Selected oldest eligible issue: #%s — %s\n- Last check (UTC): %s\n- Solver run: %s\n- Cycle: %s/%s\n- Result: **live Action failure still requires a bounded repair route; left open**\n\nThe solver skipped blocked/umbrella issues to reach this work item, but it will not fabricate a repair or close a live failure without evidence.' \
-                    "$marker" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$cycle" "$max_cycles")
-                  upsert_status "$issue_number" "$status_body"
+                  resolved=true
+                  echo "Verified and closed stale Action failure #$issue_number"
                 fi
 
-              # Second real solving route: revalidate machine-generated syntax
-              # defects against the exact current target before attempting repair.
+              # Route 2: syntax-error issues. Current-main compilation is the
+              # acceptance test. Passing compilation is evidence, not assumption.
               elif printf '%s' "$body_text" | grep -qi 'Syntax error'; then
                 target=$(printf '%s' "$body_text" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
                 if [ -n "$target" ] && [ -f "$target" ]; then
+                  remove_label "$issue_number" genesis-working
+                  add_label "$issue_number" genesis-verifying
                   if python -m py_compile "$target"; then
                     gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
-                      --body "Genesis Issue Solver revalidated the reported syntax defect against current \`main\`. Target \`${target}\` compiles successfully, so the reported syntax-error condition is no longer present. Closing as already satisfied on current main. Solver run: ${GITHUB_RUN_ID}, cycle: ${cycle}."
+                      --body "Genesis verification evidence: \`python -m py_compile ${target}\` passed on current \`main\`. The reported syntax-error condition is not present. Solver run: ${GITHUB_RUN_ID}, attempt: ${attempt}/${max_attempts}."
+                    add_label "$issue_number" genesis-verified
+                    clear_active_labels "$issue_number"
                     gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" \
                       --method PATCH -f state=closed -f state_reason=completed >/dev/null
-                    echo "Closed satisfied syntax issue #$issue_number"
+                    resolved=true
+                    echo "Verified and closed satisfied syntax issue #$issue_number"
                   fi
                 fi
+              fi
 
-              else
-                status_body=$(printf '%s\n**Genesis Issue Solver — automatic process**\n\n- Selected oldest eligible issue: #%s — %s\n- Last check (UTC): %s\n- Solver run: %s\n- Cycle: %s/%s\n- Result: **eligible, but no safe bounded repair route is installed for this issue type yet**\n\nThe issue remains open. Genesis will not mark work solved without a verified change or current-main evidence that the condition disappeared.' \
-                  "$marker" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$cycle" "$max_cycles")
-                upsert_status "$issue_number" "$status_body"
+              if [ "$resolved" != true ]; then
+                mark_retry_or_blocked "$issue_number" "$title" "$checked_at" "$attempt" \
+                  "no verified completion evidence or safe bounded repair route available"
               fi
             fi
 
