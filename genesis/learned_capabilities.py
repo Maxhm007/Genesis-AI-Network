@@ -1177,4 +1177,39 @@ register_capability(
 )
 
 
+def _learned_849abffda26c(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'langgraph-sdk', 'changes', 'since', 'sdk-py', 'feat', 'decrypt', 'replacement', 'result', 'langgraph', 'chore', 'deps')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_849abffda26cfcb3',
+    "Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'langgraph-sdk==0.4.3': Changes since sdk==0.4.2 * release(sdk-py): 0.4.3 (#8657) * feat(sdk-py): add decrypt replacement result (#8598) * release(langgraph): 1.2.11 (#8595) * chore(deps): bump the minor-and-patch group across 1 directory with 5 updates (#8532) * release(checkpoint): 4.2.0 (#8563) * chore: enforce PLC0415 in tests for the remaining packages (#8547) * release(langgraph): 1.2.10 (#8462) * chore(deps): bump websockets from 15.0.1 to 16.0 in /libs/sdk-py",
+    'Changes since sdk==0.4.2 * release(sdk-py): 0.4.3 (#8657) * feat(sdk-py): add decrypt replacement result (#8598) * release(langgraph): 1.2.11 (#8595) * chore(deps): bump the minor-and-patch group across 1 directory with 5 updates (#8532) * release(checkpoint): 4.2.0 (#8563) * chore: enforce PLC0415 in tests for the remaining packages (#8547) * release(langgraph): 1.2.10 (#8462) * chore(deps): bump websockets from 15.0.1 to 16.0 in /libs/sdk-py in the major group (#8253) * fix(sdk-py): support clearing cron end_time via update(end_time=None) (#8334) * release(langgraph): 1.2.9 (#8316) * release(langgraph): 1.2.8 (#8292) * chore(deps): bump websockets from 15.0.1 to 16.0 in /libs/langgraph in the major group (#8256) * chore(deps): bump the minor-and-patch group in /libs/sdk-py with 9 updates (#8252) * release(langgraph): 1.2.7 (#8223) * chore(deps-dev): bump starlette from 1.0.1 to 1.3.1 in /libs/sdk-py (#8104) * chore(deps): bump langsmith from 0.8.0 to 0.8.18 in /libs/sdk-py (#8174) * release(langgraph): 1.2.6 (#8139) * docs: standardize package `README.md` structure (#8064) * release(langgraph): 1.2.5 (#8062) * fix(langgraph): merge `lc_versions` config metadata (#8052) * chore(de',
+    _learned_849abffda26c,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
