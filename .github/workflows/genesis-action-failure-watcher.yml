@@ -30,7 +30,7 @@ jobs:
 
           # Ignore setup failures that predate the verified watcher cutover.
           # Every newer failed run is eligible regardless of workflow name.
-          baseline_run_id=33325584236
+          baseline_run_id=33325684634
 
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             interval=20
@@ -73,7 +73,7 @@ jobs:
                 --state all \
                 --limit 1000 \
                 --json number,title \
-                --jq --arg title "$title" '[.[] | select(.title == $title)][0].number // empty')
+                | jq -r --arg title "$title" '[.[] | select(.title == $title)][0].number // empty')
 
               if [ -n "$existing" ]; then
                 echo "Run $run_id already represented by issue #$existing"
