@@ -104,9 +104,12 @@ jobs:
             local result="$5"
 
             clear_active_labels "$issue_number"
+            remove_label "$issue_number" genesis-repair-in-progress
             if [ "$attempt" -ge "$max_attempts" ]; then
               add_label "$issue_number" genesis-blocked
-              status_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Issue Solver — bounded attempt exhausted**\n\n- Issue: #%s — %s\n- Last check (UTC): %s\n- Solver run: %s\n- Attempt: **%s/%s**\n- Result: **%s**\n- State: **blocked**\n\nGenesis did not close this issue because verified completion evidence is missing. The queue may continue to the next eligible issue.' \
+              add_label "$issue_number" genesis-solver-exhausted
+              remove_label "$issue_number" genesis-autonomous
+              status_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Issue Solver — bounded attempt exhausted**\n\n- Issue: #%s — %s\n- Last check (UTC): %s\n- Solver run: %s\n- Attempt: **%s/%s**\n- Result: **%s**\n- State: **blocked**\n\nGenesis did not close this issue because verified completion evidence is missing. The queue will continue to the next eligible issue.' \
                 "$marker" "$attempt" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$attempt" "$max_attempts" "$result")
             else
               status_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Issue Solver — retry scheduled**\n\n- Issue: #%s — %s\n- Last check (UTC): %s\n- Solver run: %s\n- Attempt: **%s/%s**\n- Result: **%s**\n- State: **open; eligible for another bounded attempt**\n\nGenesis will not close this issue without verified completion evidence.' \
@@ -118,7 +121,9 @@ jobs:
           ensure_label genesis-claimed 1f6feb 'Claimed by the Genesis Issue Solver'
           ensure_label genesis-working fbca04 'Genesis Issue Solver is actively working this issue'
           ensure_label genesis-verifying 8250df 'Genesis is verifying completion evidence'
+          ensure_label genesis-repair-in-progress b60205 'Reserved for one bounded Genesis repair worker'
           ensure_label genesis-blocked d73a4a 'Genesis exhausted bounded attempts or requires an unavailable dependency'
+          ensure_label genesis-solver-exhausted 6e7781 'Genesis Issue Solver exhausted its bounded attempts and moved on'
           ensure_label genesis-verified 0e8a16 'Genesis verified the issue completion condition before closure'
 
           for cycle in $(seq 1 "$max_cycles"); do
@@ -168,20 +173,18 @@ jobs:
                   continue
 
               # Never let two solver cycles work the same issue simultaneously.
-              if labels & {'genesis-claimed', 'genesis-working', 'genesis-verifying'}:
+              if labels & {'genesis-claimed', 'genesis-working', 'genesis-verifying', 'genesis-repair-in-progress'}:
+                  continue
+              if 'genesis-solver-exhausted' in labels:
                   continue
 
-              # A newly blocked issue leaves the active queue. Legacy action/task
-              # issues may still carry an old genesis-blocked label, so those two
-              # bounded classes remain eligible for current-main reconciliation.
               is_action_failure = lower_title.startswith('genesis action failure:') or lower_title.startswith('[genesis action failure]')
               is_machine_task = 'genesis-task' in labels
+
+              # Legacy blocked action/task issues remain eligible for one fresh
+              # current-main revalidation. New exhausted issues are filtered above.
               if 'genesis-blocked' in labels and not (is_action_failure or is_machine_task):
                   continue
-
-              if is_action_failure or is_machine_task:
-                  print(number)
-                  break
 
               print(number)
               break
@@ -213,6 +216,7 @@ jobs:
               upsert_status "$issue_number" "$claimed_body"
 
               resolved=false
+              dispatched=false
 
               # Route 1: historical Action failures. Only close when current main
               # proves the referenced workflow no longer exists.
@@ -228,16 +232,19 @@ jobs:
                   gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
                     --body "Genesis verification evidence: the referenced workflow \`${workflow_path}\` is absent from current \`main\`. This exact historical Action failure cannot recur from that removed workflow. Solver run: ${GITHUB_RUN_ID}, attempt: ${attempt}/${max_attempts}."
                   add_label "$issue_number" genesis-verified
+                  remove_label "$issue_number" genesis-blocked
+                  remove_label "$issue_number" genesis-solver-exhausted
                   clear_active_labels "$issue_number"
                   gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" \
                     --method PATCH -f state=closed -f state_reason=not_planned >/dev/null
                   resolved=true
                   echo "Verified and closed stale Action failure #$issue_number"
                 fi
+              fi
 
-              # Route 2: syntax-error issues. Current-main compilation is the
-              # acceptance test. Passing compilation is evidence, not assumption.
-              elif printf '%s' "$body_text" | grep -qi 'Syntax error'; then
+              # Route 2: syntax-error issues. Passing current-main compilation is
+              # sufficient evidence that the exact reported syntax defect vanished.
+              if [ "$resolved" != true ] && printf '%s' "$body_text" | grep -qi 'Syntax error'; then
                 target=$(printf '%s' "$body_text" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
                 if [ -n "$target" ] && [ -f "$target" ]; then
                   remove_label "$issue_number" genesis-working
@@ -246,18 +253,64 @@ jobs:
                     gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
                       --body "Genesis verification evidence: \`python -m py_compile ${target}\` passed on current \`main\`. The reported syntax-error condition is not present. Solver run: ${GITHUB_RUN_ID}, attempt: ${attempt}/${max_attempts}."
                     add_label "$issue_number" genesis-verified
+                    remove_label "$issue_number" genesis-blocked
+                    remove_label "$issue_number" genesis-solver-exhausted
                     clear_active_labels "$issue_number"
                     gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" \
                       --method PATCH -f state=closed -f state_reason=completed >/dev/null
                     resolved=true
                     echo "Verified and closed satisfied syntax issue #$issue_number"
+                  else
+                    clear_active_labels "$issue_number"
+                    add_label "$issue_number" genesis-working
                   fi
                 fi
               fi
 
+              # Route 3: real bounded code repair. The solver only reserves and
+              # dispatches. The worker may edit exactly the declared safe target,
+              # validate on latest main, promote, verify again, then close.
               if [ "$resolved" != true ]; then
-                mark_retry_or_blocked "$issue_number" "$title" "$checked_at" "$attempt" \
-                  "no verified completion evidence or safe bounded repair route available"
+                target=$(printf '%s' "$body_text" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
+                safe_target=true
+                if [[ -z "$target" || "$target" != genesis/*.py || "$target" == *".."* || ! -f "$target" ]]; then
+                  safe_target=false
+                fi
+                case "$target" in
+                  genesis/autonomy_guard.py|genesis/autonomy_proof.py|genesis/blockchain.py|genesis/ephemeral_validator.py|genesis/security.py|genesis/selfdev.py|genesis/issue_solver.py|genesis/file_self_review.py|genesis/file_self_review_policy.py)
+                    safe_target=false
+                    ;;
+                esac
+
+                if [[ "$safe_target" == true ]]; then
+                  echo "Dispatching bounded repair worker for #$issue_number target $target"
+                  add_label "$issue_number" genesis-repair-in-progress
+                  add_label "$issue_number" genesis-autonomous
+                  remove_label "$issue_number" genesis-blocked
+                  remove_label "$issue_number" genesis-solver-exhausted
+                  clear_active_labels "$issue_number"
+
+                  dispatched_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Issue Solver — bounded repair dispatched**\n\n- Issue: #%s — %s\n- Dispatched (UTC): %s\n- Solver run: %s\n- Cycle: %s/%s\n- Attempt: **%s/%s**\n- Target: `%s`\n- State: **reserved for bounded repair worker**\n\nThe worker may modify only the declared safe target (and its matching test), and may close only after fresh full validation on current main.' \
+                    "$marker" "$attempt" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$cycle" "$max_cycles" "$attempt" "$max_attempts" "$target")
+                  upsert_status "$issue_number" "$dispatched_body"
+
+                  if gh workflow run genesis-bounded-repair-worker.yml \
+                    --repo "$GITHUB_REPOSITORY" --ref main -f issue_number="$issue_number"; then
+                    dispatched=true
+                  else
+                    remove_label "$issue_number" genesis-repair-in-progress
+                    mark_retry_or_blocked "$issue_number" "$title" "$checked_at" "$attempt" \
+                      "bounded repair worker dispatch failed"
+                  fi
+                fi
+              fi
+
+              if [ "$resolved" != true ] && [ "$dispatched" != true ]; then
+                current_labels=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")')
+                if [[ "$current_labels" != *"genesis-solver-exhausted"* ]]; then
+                  mark_retry_or_blocked "$issue_number" "$title" "$checked_at" "$attempt" \
+                    "no verified completion evidence or safe bounded repair route available"
+                fi
               fi
             fi
 
