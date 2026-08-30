@@ -1422,4 +1422,39 @@ register_capability(
 )
 
 
+def _learned_161b50a4231b(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'langgraph-checkpoint-postgres', 'changes', 'since', 'checkpointpostgres', 'checkpoint-postgres', 'checkpoint', 'test', 'checkpoint-sqlite', 'conformance', 'suite', 'find')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_161b50a4231bce0d',
+    "Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'langgraph-checkpoint-postgres==3.1.2': Changes since checkpointpostgres==3.1.1 * release(checkpoint-postgres): 3.1.2 (#8565) * release(checkpoint): 4.2.0 (#8563) * test(checkpoint-postgres,checkpoint-sqlite): run the conformance suite (#8537) * fix(checkpoint-postgres): find plain-value seeds when walking delta history (#8535) * chore: enable RUF100 and clear unused noqa directives (#8546) * chore(checkpoint-postgres,checkpoint-sqlite): enable PLC0415 lint rule (#85",
+    'Changes since checkpointpostgres==3.1.1 * release(checkpoint-postgres): 3.1.2 (#8565) * release(checkpoint): 4.2.0 (#8563) * test(checkpoint-postgres,checkpoint-sqlite): run the conformance suite (#8537) * fix(checkpoint-postgres): find plain-value seeds when walking delta history (#8535) * chore: enable RUF100 and clear unused noqa directives (#8546) * chore(checkpoint-postgres,checkpoint-sqlite): enable PLC0415 lint rule (#8540) * chore(deps): bump the minor-and-patch group in /libs/checkpoint-postgres with 5 updates (#8497)',
+    _learned_161b50a4231b,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
