@@ -1,0 +1,98 @@
+name: Genesis Oldest Issue Solver
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-oldest-issue-solver.yml
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-oldest-issue-solver
+  cancel-in-progress: false
+
+jobs:
+  solve-one-oldest-issue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Select oldest open issue
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          issue=$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \
+            --jq '[.[] | select(.pull_request == null)][0]')
+
+          if [ -z "$issue" ] || [ "$issue" = "null" ]; then
+            echo "number=" >> "$GITHUB_OUTPUT"
+            echo "No open issues found"
+            exit 0
+          fi
+
+          number=$(printf '%s' "$issue" | jq -r '.number')
+          title=$(printf '%s' "$issue" | jq -r '.title')
+          echo "number=$number" >> "$GITHUB_OUTPUT"
+          echo "title=$title" >> "$GITHUB_OUTPUT"
+          echo "Selected oldest open issue #$number: $title"
+
+      - name: Validate oldest issue is safely solvable in first proof
+        if: steps.select.outputs.number != ''
+        id: validate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.select.outputs.number }}
+        run: |
+          set -euo pipefail
+
+          # First proof is intentionally narrow: it may close the oldest issue
+          # only when repository evidence already proves the requested work is done.
+          if [ "$ISSUE_NUMBER" != "1" ]; then
+            echo "solvable=false" >> "$GITHUB_OUTPUT"
+            echo "Oldest issue is not the approved first-proof issue; leaving it untouched."
+            exit 0
+          fi
+
+          title=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json title --jq '.title')
+          if [ "$title" != "Genesis Chat: First communication test" ]; then
+            echo "solvable=false" >> "$GITHUB_OUTPUT"
+            echo "Issue #1 title no longer matches expected first-proof task; leaving it untouched."
+            exit 0
+          fi
+
+          replies=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments" \
+            --jq '[.[] | select(.user.login == "github-actions[bot]") | select(.body | contains("**Genesis:**"))] | length')
+
+          if [ "$replies" -lt 1 ]; then
+            echo "solvable=false" >> "$GITHUB_OUTPUT"
+            echo "No Genesis reply evidence found; leaving issue open."
+            exit 0
+          fi
+
+          echo "solvable=true" >> "$GITHUB_OUTPUT"
+          echo "Verified $replies Genesis reply(s) already satisfy the communication-test objective."
+
+      - name: Close verified oldest issue
+        if: steps.validate.outputs.solvable == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.select.outputs.number }}
+        run: |
+          set -euo pipefail
+          gh issue close "$ISSUE_NUMBER" \
+            --repo "$GITHUB_REPOSITORY" \
+            --comment "Genesis Issue Solver selected this as the oldest open issue and verified that the requested communication test had already been completed by existing Genesis replies. Closing as completed based on existing issue evidence. Solver run: ${GITHUB_RUN_ID}."
+
+      - name: Report
+        run: |
+          if [ -z "${{ steps.select.outputs.number }}" ]; then
+            echo "No open issue was available."
+          elif [ "${{ steps.validate.outputs.solvable }}" = "true" ]; then
+            echo "Solved oldest issue #${{ steps.select.outputs.number }} by evidence-backed closure."
+          else
+            echo "Oldest issue #${{ steps.select.outputs.number }} was not safely solvable by the first-proof policy and was left unchanged."
+          fi
