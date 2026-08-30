@@ -1,46 +1,50 @@
 name: Genesis Action Failure Watcher
 
 on:
+  workflow_run:
+    workflows:
+      - Genesis Tiny Problem Detection Test
+      - Genesis Oldest Real Issue Solver
+      - Genesis Action Failure Watcher Verification
+    types: [completed]
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-action-failure-watcher.yml
 
 permissions:
   contents: read
-  actions: write
+  actions: read
   issues: write
 
-concurrency:
-  group: genesis-action-failure-watcher
-  cancel-in-progress: true
-
 jobs:
-  continuous-failure-watcher:
+  create-failure-issue:
+    if: github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
-    timeout-minutes: 340
     steps:
-      - name: Watch all Actions for new failures
+      - name: Create issue for failed Action run
         env:
           GH_TOKEN: ${{ github.token }}
+          RUN_ID: ${{ github.event.workflow_run.id }}
+          WORKFLOW_NAME: ${{ github.event.workflow_run.name }}
+          RUN_URL: ${{ github.event.workflow_run.html_url }}
+          HEAD_SHA: ${{ github.event.workflow_run.head_sha }}
+          HEAD_BRANCH: ${{ github.event.workflow_run.head_branch }}
+          EVENT_NAME: ${{ github.event.workflow_run.event }}
+          RUN_ATTEMPT: ${{ github.event.workflow_run.run_attempt }}
+          CREATED_AT: ${{ github.event.workflow_run.created_at }}
         shell: bash
         run: |
           set -euo pipefail
 
-          # Ignore setup failures that predate the verified watcher cutover.
-          # Every newer failed run is eligible regardless of workflow name.
-          # A push to this file also serves as an immediate wake-up scan.
-          baseline_run_id=33325684634
+          title="[Genesis Action Failure] ${WORKFLOW_NAME} — run ${RUN_ID}"
+          existing=$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state all \
+            --limit 1000 \
+            --json number,title \
+            | jq -r --arg title "$title" '[.[] | select(.title == $title)][0].number // empty')
 
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            interval=20
-            max_cycles=3
-            echo "Watcher bootstrap: 3 scans, 20 seconds apart"
-          else
-            interval=300
-            max_cycles=64
-            echo "Watcher continuous mode: scan all Actions every 5 minutes"
+          if [ -n "$existing" ]; then
+            echo "Failure run ${RUN_ID} already has issue #${existing}; no duplicate created."
+            exit 0
           fi
 
           if ! gh label list --repo "$GITHUB_REPOSITORY" --limit 100 --json name --jq '.[].name' | grep -Fxq genesis-action-failure; then
@@ -50,73 +54,33 @@ jobs:
               --description 'Created automatically when a GitHub Action run fails'
           fi
 
-          for cycle in $(seq 1 "$max_cycles"); do
-            echo "=== Action failure watcher cycle $cycle/$max_cycles ==="
+          jobs_json=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100")
+          failed_summary=$(printf '%s' "$jobs_json" | jq -r '
+            [.jobs[] | select(.conclusion == "failure") | {
+              job: .name,
+              failed_steps: [.steps[]? | select(.conclusion == "failure") | .name]
+            }]
+            | if length == 0 then
+                "Failure details were not available from the jobs API."
+              else
+                map("- Job: **" + .job + "**\n  - Failed step(s): " +
+                    (if (.failed_steps|length) == 0 then "not reported" else (.failed_steps|join(", ")) end))
+                | join("\n")
+              end')
 
-            runs_json=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs?status=failure&per_page=100")
-            mapfile -t failed_run_ids < <(printf '%s' "$runs_json" | jq -r --argjson baseline "$baseline_run_id" '.workflow_runs[] | select(.id > $baseline) | .id' | sort -n)
+          marker="<!-- genesis-action-failure-run:${RUN_ID} -->"
+          body=$(printf '%s\nGenesis detected a failed GitHub Actions run. This issue was created automatically by the independent **Action Failure Watcher**. The watcher does not repair or close issues.\n\n- **Workflow:** %s\n- **Run ID:** %s\n- **Run attempt:** %s\n- **Trigger event:** %s\n- **Branch:** %s\n- **Head SHA:** %s\n- **Created (UTC):** %s\n- **Run:** %s\n\n### Failure evidence\n%s\n\n### Processing rule\nThis issue now belongs to the normal GitHub issue queue. The independent Issue Solver may validate, repair, verify, and close it. The Action Failure Watcher itself performs no repair.' \
+            "$marker" "$WORKFLOW_NAME" "$RUN_ID" "$RUN_ATTEMPT" "$EVENT_NAME" "$HEAD_BRANCH" "$HEAD_SHA" "$CREATED_AT" "$RUN_URL" "$failed_summary")
 
-            for run_id in "${failed_run_ids[@]}"; do
-              [ -n "$run_id" ] || continue
+          issue_url=$(gh issue create \
+            --repo "$GITHUB_REPOSITORY" \
+            --title "$title" \
+            --body "$body" \
+            --label genesis-action-failure)
+          echo "Created failure issue: $issue_url"
 
-              run=$(printf '%s' "$runs_json" | jq -c --argjson id "$run_id" '.workflow_runs[] | select(.id == $id)')
-              workflow_name=$(printf '%s' "$run" | jq -r '.name // .path // "Unknown workflow"')
-              run_url=$(printf '%s' "$run" | jq -r '.html_url // ""')
-              head_sha=$(printf '%s' "$run" | jq -r '.head_sha // ""')
-              head_branch=$(printf '%s' "$run" | jq -r '.head_branch // ""')
-              event_name=$(printf '%s' "$run" | jq -r '.event // ""')
-              run_attempt=$(printf '%s' "$run" | jq -r '.run_attempt // 1')
-              created_at=$(printf '%s' "$run" | jq -r '.created_at // ""')
-              title="[Genesis Action Failure] ${workflow_name} — run ${run_id}"
-
-              existing=$(gh issue list \
-                --repo "$GITHUB_REPOSITORY" \
-                --state all \
-                --limit 1000 \
-                --json number,title \
-                | jq -r --arg title "$title" '[.[] | select(.title == $title)][0].number // empty')
-
-              if [ -n "$existing" ]; then
-                echo "Run $run_id already represented by issue #$existing"
-                continue
-              fi
-
-              jobs_json=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${run_id}/jobs?per_page=100")
-              failed_summary=$(printf '%s' "$jobs_json" | jq -r '
-                [.jobs[] | select(.conclusion == "failure") | {
-                  job: .name,
-                  failed_steps: [.steps[]? | select(.conclusion == "failure") | .name]
-                }]
-                | if length == 0 then
-                    "Failure details were not available from the jobs API."
-                  else
-                    map("- Job: **" + .job + "**\n  - Failed step(s): " +
-                      (if (.failed_steps|length) == 0 then "not reported" else (.failed_steps|join(", ")) end))
-                    | join("\n")
-                  end')
-
-              marker="<!-- genesis-action-failure-run:${run_id} -->"
-              body=$(printf '%s\nGenesis detected a failed GitHub Actions run. This issue was created automatically by the independent **Action Failure Watcher**. The watcher does not repair or close issues.\n\n- **Workflow:** %s\n- **Run ID:** %s\n- **Run attempt:** %s\n- **Trigger event:** %s\n- **Branch:** %s\n- **Head SHA:** %s\n- **Created (UTC):** %s\n- **Run:** %s\n\n### Failure evidence\n%s\n\n### Processing rule\nThis issue now belongs to the normal GitHub issue queue. The independent Issue Solver may validate, repair, verify, and close it. The Action Failure Watcher itself performs no repair.' \
-                "$marker" "$workflow_name" "$run_id" "$run_attempt" "$event_name" "$head_branch" "$head_sha" "$created_at" "$run_url" "$failed_summary")
-
-              issue_url=$(gh issue create \
-                --repo "$GITHUB_REPOSITORY" \
-                --title "$title" \
-                --body "$body" \
-                --label genesis-action-failure)
-              echo "Created failure issue for run $run_id: $issue_url"
-            done
-
-            if [ "$cycle" -lt "$max_cycles" ]; then
-              sleep "$interval"
-            fi
-          done
-
-      - name: Start successor watcher run
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/genesis-action-failure-watcher.yml/dispatches" \
-            -f ref=main
+  manual-check:
+    if: github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo 'Genesis Action Failure Watcher is installed for every current non-watcher workflow.'
