@@ -96,6 +96,11 @@ jobs:
             echo "condition_may_be_resolved=false" >> "$GITHUB_OUTPUT"
           fi
 
+      - name: Install validation dependencies
+        if: steps.select.outputs.number != ''
+        run: |
+          python -m pip install --disable-pip-version-check -q pytest cryptography PyYAML requests
+
       - name: Run bounded baseline validation
         if: steps.select.outputs.number != ''
         id: tests
