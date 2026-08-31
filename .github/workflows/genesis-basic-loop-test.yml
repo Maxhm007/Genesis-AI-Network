@@ -66,17 +66,15 @@ jobs:
                 --jq '.[0].number // empty')
 
               if [ -z "$issue_number" ]; then
-                body=$(cat <<'EOF'
-Genesis autonomously detected a real logic regression in the module version rollback decision.
-
-- **Target:** `genesis/modules/versioning.py`
-- **Observed defect:** `ModuleVersionManager.should_rollback()` currently uses `after_percent > before_percent - regression_tolerance`.
-- **Expected behavior:** rollback is required only when the post-change score is lower than the pre-change score beyond the allowed regression tolerance.
-- **Verification:** the corrected target must compile and the repository test suite must pass before this issue is closed.
-
-This issue was created by the Genesis detector. The detector must not repair or close it; the normal Genesis Issue Solver / bounded repair path owns resolution.
-EOF
-)
+                body=$(printf '%s\n' \
+                  'Genesis autonomously detected a real logic regression in the module version rollback decision.' \
+                  '' \
+                  '- **Target:** `genesis/modules/versioning.py`' \
+                  '- **Observed defect:** `ModuleVersionManager.should_rollback()` currently uses `after_percent > before_percent - regression_tolerance`.' \
+                  '- **Expected behavior:** rollback is required only when the post-change score is lower than the pre-change score beyond the allowed regression tolerance.' \
+                  '- **Verification:** the corrected target must compile and the repository test suite must pass before this issue is closed.' \
+                  '' \
+                  'This issue was created by the Genesis detector. The detector must not repair or close it; the normal Genesis Issue Solver / bounded repair path owns resolution.')
                 response=$(gh api "repos/${GITHUB_REPOSITORY}/issues" \
                   --method POST \
                   -f title='[Genesis Detected] Fix reversed rollback comparison' \
