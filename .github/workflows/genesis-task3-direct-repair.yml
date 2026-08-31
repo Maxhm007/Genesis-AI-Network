@@ -1,0 +1,21 @@
+name: Genesis Task 3 Direct Repair Dispatch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-task3-direct-repair.yml
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch bounded repair worker for issue 560
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run genesis-bounded-repair-worker.yml --repo "$GITHUB_REPOSITORY" --ref main -f issue_number=560
