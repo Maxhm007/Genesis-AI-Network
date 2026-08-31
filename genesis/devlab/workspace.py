@@ -76,3 +76,5 @@ class LabWorkspace:
     def stage_edit(self, snapshot: LabSnapshot, proposal: EditProposal) -> str:
         self.validate_edit(proposal, snapshot.source_path)
         return self.write_lab_candidate(snapshot, proposal.content)
+        self.validate_edit(proposal, snapshot.source_path)
+        return self.write_lab_candidate(snapshot, proposal.content)
