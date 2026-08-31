@@ -1,0 +1,20 @@
+name: Task 4 Dispatch Production Repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/task4-dispatch-production-repair.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch Issue 561 to production bounded worker
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run genesis-bounded-repair-worker.yml --repo "$GITHUB_REPOSITORY" --ref main -f issue_number=561
