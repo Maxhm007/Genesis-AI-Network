@@ -1,0 +1,62 @@
+name: Genesis Task 3 Code Regression Test
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-task3-code-regression-test.yml
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+jobs:
+  detect-and-queue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+
+      - name: Detect real code regression and create repair issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          target='genesis/modules/versioning.py'
+          bad='return after_percent > before_percent - regression_tolerance'
+          title='[Genesis Detected] Fix reversed rollback comparison'
+
+          if ! grep -Fq "$bad" "$target"; then
+            echo 'Task #3 defect is not present; nothing to queue.'
+            exit 0
+          fi
+
+          issue_number=$(gh issue list --repo "$GITHUB_REPOSITORY" --state open \
+            --search '"[Genesis Detected] Fix reversed rollback comparison" in:title' \
+            --json number --jq '.[0].number // empty')
+
+          if [ -z "$issue_number" ]; then
+            body=$(printf '%s\n' \
+              'Genesis autonomously detected a real logic regression in the module version rollback decision.' \
+              '' \
+              '- **Target:** `genesis/modules/versioning.py`' \
+              '- **Observed defect:** `ModuleVersionManager.should_rollback()` uses the wrong comparison direction.' \
+              '- **Expected behavior:** return true only when `after_percent < before_percent - regression_tolerance`.' \
+              '- **Verification:** compile the target and pass the full repository test suite before closing.' \
+              '' \
+              'Created by Genesis Task #3 detector. The detector does not repair or close this issue.')
+            response=$(gh api "repos/${GITHUB_REPOSITORY}/issues" --method POST \
+              -f title="$title" -f body="$body")
+            issue_number=$(printf '%s' "$response" | jq -r '.number')
+            echo "Genesis created repair issue #$issue_number"
+          else
+            echo "Genesis found existing repair issue #$issue_number"
+          fi
+
+          gh workflow run genesis-oldest-issue-solver.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo "Queued Genesis Issue Solver for #$issue_number"
