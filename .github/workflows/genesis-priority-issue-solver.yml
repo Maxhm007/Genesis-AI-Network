@@ -98,8 +98,7 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \
-              > /tmp/genesis-priority-open-issues.json
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/genesis-priority-open-issues.json
 
             issue_number=$(python - <<'PY'
           import json
@@ -192,7 +191,6 @@ jobs:
               except ValueError:
                   created = datetime.now(timezone.utc)
 
-              # Highest numeric priority wins. Creation time is only a tie-breaker.
               ranked.append((-priority, created, number))
 
           ranked.sort()
@@ -221,8 +219,6 @@ jobs:
                 echo "Priority solver tentatively claiming #$issue_number at priority ${priority:-0} (attempt $attempt/$max_attempts)"
                 add_label "$issue_number" genesis-priority-claim
 
-                # Give the oldest solver a short window to reveal a simultaneous
-                # standard claim. If it did, this lane backs off without dispatching.
                 sleep 3
                 refreshed=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json state,labels)
                 state=$(printf '%s' "$refreshed" | jq -r '.state')
@@ -257,19 +253,3 @@ jobs:
                 fi
               fi
             fi
-
-            if [ "$cycle" -lt "$max_cycles" ]; then
-              echo "Next priority issue check in 660 seconds (11 minutes)"
-              sleep "$interval"
-            fi
-          done
-
-      - name: Start successor priority solver run
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "Starting successor Genesis priority issue solver run"
-          gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/genesis-priority-issue-solver.yml/dispatches" \
-            -f ref=main
