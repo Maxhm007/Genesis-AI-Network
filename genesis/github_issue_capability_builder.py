@@ -9,15 +9,7 @@ from .deterministic_capability_builder import DeterministicLearnedCapabilityProv
 
 
 class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvider):
-    """Adapt trusted Genesis-generated GitHub capability tasks to deterministic builders.
-
-    GitHub issue text remains untrusted evidence. This adapter only activates for
-    the exact machine-authored task envelope emitted by Genesis evolution learning.
-    Known lessons use explicit deterministic templates. Other structured lessons
-    use a syntax-safe evidence-grounding capability instead of free-form code
-    generation; unrelated or user-authored issues still fall back to the bounded
-    coding-provider route.
-    """
+    """Adapt trusted Genesis-generated GitHub tasks to deterministic builders."""
 
     MACHINE_AUTHOR = "github-actions[bot]"
     TASK_MARKER = "<!-- genesis-task-id:task-"
@@ -25,6 +17,17 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
     SOURCE_LINE = "- **Source:** `genesis.evolution_learning`"
     TARGET_LINE = "- **Target:** `genesis/learned_capabilities.py`"
     MAX_GENERIC_TERMS = 16
+    PROTECTED_DETECTED_TARGETS = {
+        "genesis/autonomy_guard.py",
+        "genesis/autonomy_proof.py",
+        "genesis/blockchain.py",
+        "genesis/ephemeral_validator.py",
+        "genesis/security.py",
+        "genesis/selfdev.py",
+        "genesis/issue_solver.py",
+        "genesis/file_self_review.py",
+        "genesis/file_self_review_policy.py",
+    }
     GENERIC_STOPWORDS = {
         "acceptance",
         "capability",
@@ -168,12 +171,86 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
         return provider
 
     @classmethod
+    def _detected_exact_expression_provider(
+        cls,
+        root: Path,
+        issue: dict,
+        coding: CodingModule,
+    ) -> GitHubIssueLearnedCapabilityProvider | None:
+        """Build one deterministic return-expression edit from machine-authored defect evidence."""
+        author = str(dict(issue.get("user") or {}).get("login") or "")
+        title = str(issue.get("title") or "").strip()
+        body = str(issue.get("body") or "")
+        if author != cls.MACHINE_AUTHOR or not title.startswith("[Genesis Detected]"):
+            return None
+
+        target_match = re.search(r"^- \*\*Target:\*\* `([^`]+)`", body, re.M)
+        expected_match = re.search(r"^- \*\*Expected behavior:\*\*[^\n]*`([^`\n]+)`", body, re.M)
+        if target_match is None or expected_match is None:
+            return None
+
+        target_path = target_match.group(1).replace("\\", "/").lstrip("./")
+        expected = expected_match.group(1).strip()
+        if (
+            not target_path.startswith("genesis/")
+            or not target_path.endswith(".py")
+            or ".." in Path(target_path).parts
+            or target_path in cls.PROTECTED_DETECTED_TARGETS
+            or not expected
+            or "\n" in expected
+        ):
+            return None
+
+        coding.executor._validate_paths([target_path])
+        target = (Path(root).resolve() / target_path).resolve()
+        if not target.is_file():
+            return None
+        current = target.read_text(encoding="utf-8")
+
+        identifiers = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", expected))
+        if not identifiers:
+            return None
+        candidates: list[int] = []
+        lines = current.splitlines(keepends=True)
+        for index, line in enumerate(lines):
+            stripped = line.strip()
+            if not stripped.startswith("return "):
+                continue
+            line_ids = set(re.findall(r"[A-Za-z_][A-Za-z0-9_]*", stripped))
+            if identifiers <= line_ids:
+                candidates.append(index)
+        if len(candidates) != 1:
+            return None
+
+        index = candidates[0]
+        old_line = lines[index]
+        indent = old_line[: len(old_line) - len(old_line.lstrip(" \t"))]
+        replacement = expected if expected.startswith("return ") else f"return {expected}"
+        newline = "\n" if old_line.endswith("\n") else ""
+        lines[index] = f"{indent}{replacement}{newline}"
+        updated = "".join(lines)
+        if updated == current:
+            return None
+        compile(updated, target_path, "exec")
+
+        proposal = {
+            "title": f"Repair detected expression in {target_path}",
+            "rationale": "Deterministic exact-expression repair grounded in machine-authored Genesis detector evidence.",
+            "files": {target_path: updated},
+        }
+        return cls(proposal)
+
+    @classmethod
     def for_issue(
         cls,
         root: Path,
         issue: dict,
         coding: CodingModule,
     ) -> GitHubIssueLearnedCapabilityProvider | None:
+        detected = cls._detected_exact_expression_provider(Path(root).resolve(), issue, coding)
+        if detected is not None:
+            return detected
+
         author = str(dict(issue.get("user") or {}).get("login") or "")
         title = str(issue.get("title") or "").strip()
         body = str(issue.get("body") or "")
