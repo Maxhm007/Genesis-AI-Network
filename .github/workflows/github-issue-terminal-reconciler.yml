@@ -35,6 +35,15 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Restore resumable terminal task cache
+        uses: actions/cache/restore@v4
+        with:
+          path: runtime
+          key: genesis-terminal-runtime-${{ github.run_id }}
+          restore-keys: |
+            genesis-terminal-runtime-
+            gene-runtime-gene-node-1-
+
       - name: Reconcile terminal Issue-backed work
         env:
           GITHUB_TOKEN: ${{ github.token }}
@@ -53,3 +62,10 @@ jobs:
           if result.get('status') not in {'ok', 'not_repository_runtime'}:
               raise SystemExit(f"terminal reconciliation failed: {result}")
           PY
+
+      - name: Save reconciled resumable task cache
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: runtime
+          key: genesis-terminal-runtime-${{ github.run_id }}
