@@ -1842,4 +1842,39 @@ register_capability(
 )
 
 
+def _learned_df9a2fce458b(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('several', 'generation', 'improvements', 'fixes', 'were', 'made', 'including', 'enabling', 'batched', 'audio', 'qwen2.5', 'huggingface', 'transformers', 'v5.15.0', 'published', 'omni')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_df9a2fce458b',
+    'Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Several generation improvements and bug fixes were made, including enabling batched audio generation for Qwen2.5/3-Om....',
+    "huggingface/transformers release 'Release: v5.15.0', published 2026-08-10T10:28:13Z: Several generation improvements and bug fixes were made, including enabling batched audio generation for Qwen2.5/3-Omni, allowing sliding window cache layers to work with speculative decoding, and fixing memory overhead from static cache persistence across `generate()` calls. Multiple model-specific bugs were also resolved, including crashes in KyutaiSpeechToText, MusicgenForCausalLM, CTRL flex-attention, and assisted decoding for EncoderDecoder cache and OlmoHybrid models. Source: https://github.com/huggingface/transformers/releases/tag/v5.15.0",
+    _learned_df9a2fce458b,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
