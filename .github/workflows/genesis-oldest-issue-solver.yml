@@ -131,8 +131,7 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
 
-            gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \
-              > /tmp/genesis-open-issues.json
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/genesis-open-issues.json
 
             issue_number=$(python - <<'PY'
           import json
@@ -162,7 +161,6 @@ jobs:
               lower_title = title.lower()
               lower_body = body.lower()
 
-              # Persistent communication/reporting channels are not work items.
               if number == 1:
                   continue
               if lower_title.startswith('genesis chat:'):
@@ -174,8 +172,6 @@ jobs:
               if 'persistent github-native reporting channel' in lower_body:
                   continue
 
-              # External trust-domain work and broad umbrella state/epic issues
-              # remain open but must never freeze the bounded solver queue.
               if 'external-authority / independent-secret provisioning blocker' in lower_body:
                   continue
               if lower_title.startswith('[genesis escalation] ai capability below target'):
@@ -185,7 +181,6 @@ jobs:
               if lower_title.startswith('genesis model lab:'):
                   continue
 
-              # Never let two solver cycles work the same issue simultaneously.
               if labels & {'genesis-claimed', 'genesis-working', 'genesis-verifying', 'genesis-repair-in-progress', 'genesis-validating', 'genesis-priority-claim'}:
                   continue
               if 'genesis-solver-exhausted' in labels:
@@ -194,21 +189,14 @@ jobs:
               is_action_failure = lower_title.startswith('genesis action failure:') or lower_title.startswith('[genesis action failure]')
               is_syntax_report = 'syntax error' in lower_body
 
-              # Action failures have a safe current-main reconciliation route.
               if is_action_failure:
                   print(number)
                   break
 
-              # Syntax reports are read-only revalidated with py_compile, even when
-              # the target itself is protected from modification.
               if is_syntax_report:
                   print(number)
                   break
 
-              # Benchmark/capability issues that explicitly require post-promotion
-              # measured improvement cannot be truthfully closed by code tests alone.
-              # Leave them for a benchmark/evidence lane instead of consuming the
-              # generic repair worker.
               requires_measurement = any(
                   phrase in lower_body
                   for phrase in (
@@ -223,8 +211,6 @@ jobs:
               if requires_measurement:
                   continue
 
-              # Generic code repair is eligible only when the issue declares one
-              # exact, existing, non-protected Genesis Python target.
               match = re.search(r'^- \*\*Target:\*\* `([^`]+)`', body, re.MULTILINE)
               target = match.group(1).strip() if match else ''
               if not target.startswith('genesis/') or not target.endswith('.py'):
@@ -259,13 +245,6 @@ jobs:
               add_label "$issue_number" genesis-working
               remove_label "$issue_number" genesis-verifying
 
-              # Cross-solver race guard. The priority lane waits for these oldest-
-              # solver labels before dispatching; this lane now also rechecks the
-              # shared repair/validation reservation after claiming. If priority
-              # already converted its tentative claim into the shared reservation,
-              # this lane releases its temporary labels and moves on. If both only
-              # tentatively claim at the same instant, oldest wins deterministically
-              # and the priority lane backs off on genesis-claimed/genesis-working.
               sleep 3
               refreshed=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json state,labels)
               state=$(printf '%s' "$refreshed" | jq -r '.state')
@@ -286,8 +265,6 @@ jobs:
               resolved=false
               dispatched=false
 
-              # Route 1: historical Action failures. Only close when current main
-              # proves the referenced workflow no longer exists.
               if [[ "$title" == Genesis\ Action\ failure:* || "$title" == \[Genesis\ Action\ Failure\]* ]]; then
                 workflow_path=$(printf '%s' "$body_text" | sed -nE 's/.*\(`([^`]*\.github\/workflows\/[^`]*)`\).*/\1/p' | head -n1)
                 if [ -z "$workflow_path" ]; then
@@ -310,8 +287,6 @@ jobs:
                 fi
               fi
 
-              # Route 2: syntax-error issues. Passing current-main compilation is
-              # sufficient evidence that the exact reported syntax defect vanished.
               if [ "$resolved" != true ] && printf '%s' "$body_text" | grep -qi 'Syntax error'; then
                 target=$(printf '%s' "$body_text" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
                 if [ -n "$target" ] && [ -f "$target" ]; then
@@ -335,9 +310,6 @@ jobs:
                 fi
               fi
 
-              # Route 3: real bounded code repair. The solver only reserves and
-              # dispatches. The worker may edit exactly the declared safe target,
-              # validate on latest main, promote, verify again, then close.
               if [ "$resolved" != true ]; then
                 target=$(printf '%s' "$body_text" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
                 safe_target=true
