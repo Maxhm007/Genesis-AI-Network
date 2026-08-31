@@ -1,0 +1,69 @@
+name: Genesis Exhausted Issue Requeue
+
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - genesis/coding.py
+      - genesis/learned_capabilities.py
+      - scripts/github_issue_autorepair.py
+      - scripts/requeue_exhausted_issues.py
+      - .github/workflows/genesis-exhausted-issue-requeue.yml
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+concurrency:
+  group: genesis-exhausted-issue-requeue
+  cancel-in-progress: false
+
+jobs:
+  release-new-generation:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Release eligible exhausted Issues for this repair generation
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GENESIS_EXHAUSTED_REQUEUE_LIMIT: '5'
+        run: |
+          set -euo pipefail
+          python scripts/requeue_exhausted_issues.py
+          cat runtime/exhausted_issue_requeue.json
+
+      - name: Wake oldest solver only when idle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          released=$(jq '.released | length' runtime/exhausted_issue_requeue.json)
+          if [ "$released" -eq 0 ]; then
+            echo 'No exhausted Issues released.'
+            exit 0
+          fi
+
+          running=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-oldest-issue-solver.yml \
+            --status in_progress --limit 1 --json databaseId --jq 'length')
+          queued=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-oldest-issue-solver.yml \
+            --status queued --limit 1 --json databaseId --jq 'length')
+          if [ "$running" -eq 0 ] && [ "$queued" -eq 0 ]; then
+            gh workflow run genesis-oldest-issue-solver.yml --repo "$GITHUB_REPOSITORY" --ref main
+            echo 'Woke the normal oldest Issue solver.'
+          else
+            echo 'Oldest Issue solver is already active or queued; no duplicate wake dispatched.'
+          fi
