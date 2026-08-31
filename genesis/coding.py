@@ -107,6 +107,11 @@ class CodingModule:
             return "", 1
         objective_lower = objective.lower()
         objective_tokens = cls._tokens(objective)
+        objective_fragments = tuple(
+            fragment.strip()
+            for fragment in re.findall(r"`([^`\n]{3,300})`", objective)
+            if fragment.strip()
+        )
         best: tuple[int, int, int, int, int, str, int] | None = None
         for path_index, (path, text) in enumerate(context.items()):
             for line_number, line in enumerate(text.splitlines(), start=1):
@@ -116,7 +121,8 @@ class CodingModule:
                 overlap = len(objective_tokens & cls._tokens(stripped))
                 exact_bonus = 100 if stripped.lower() in objective_lower else 0
                 marker_bonus = 200 if "INSERTION_POINT" in stripped and stripped.lower() in objective_lower else 0
-                score = overlap + exact_bonus + marker_bonus
+                fragment_bonus = 500 if any(fragment in stripped for fragment in objective_fragments) else 0
+                score = overlap + exact_bonus + marker_bonus + fragment_bonus
                 rank = (score, marker_bonus, exact_bonus, -path_index, -line_number)
                 if best is None or rank > best[:5]:
                     best = (*rank, path, line_number)
@@ -411,6 +417,14 @@ class CodingModule:
             {"edits": [{"path": preferred_path, "start_line": preferred_line, "end_line": preferred_line, "new": "replacement text"}]},
             separators=(",", ":"),
         )
+        grounded_source_line = ""
+        if preferred_path and preferred_line >= 1:
+            try:
+                source_lines = (self.root / preferred_path).read_text(encoding="utf-8").splitlines()
+                if preferred_line <= len(source_lines):
+                    grounded_source_line = source_lines[preferred_line - 1]
+            except OSError:
+                grounded_source_line = ""
         return (
             original_prompt
             + "\nRETRY: previous JSON was invalid. Change strategy using ERROR and repository evidence; do not repeat the rejected edit.\n"
@@ -418,11 +432,13 @@ class CodingModule:
             + f"PREVIOUS: {previous}\n"
             + f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
             + f"GROUNDED_LINE_HINT: {preferred_path}:{preferred_line}\n"
+            + f"GROUNDED_SOURCE_LINE: {grounded_source_line}\n"
             + f"Return ONLY the same JSON shape as: {example}. "
             + "The hint is derived from OBJECTIVE/NUMBERED_CONTEXT; verify it before using it and never copy an unrelated line number. "
             + "Copy the path exactly from VALID_PATHS/NUMBERED_CONTEXT. Do not invent, summarize, rename, or substitute the path. "
             + "Choose line numbers exactly from NUMBERED_CONTEXT. Exactly one edit. Do not copy old source text. "
             + "For Python, prefer replacing one complete standalone statement; do not remove the only body of try/except/if/for/while/with/class/def blocks. "
+            + "If the defect is inside a Python expression, replace the entire GROUNDED_SOURCE_LINE statement and preserve required leading syntax such as return, raise, assert, or assignment. "
             + "If the selected line is the sole body statement, new must contain executable Python, not only whitespace or comments. "
             + "No title, rationale, markdown, commentary, new files, policy changes, test weakening, or protected paths.\n"
         )
