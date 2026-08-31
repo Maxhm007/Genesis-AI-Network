@@ -1,0 +1,31 @@
+name: Task 4 Duplicate Cleanup
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/task4-duplicate-cleanup.yml
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  close-duplicates:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Close stale exact-title duplicates of verified issue 561
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title='[Genesis Detected] Fix reversed rollback comparison'
+          gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
+            --search '"[Genesis Detected] Fix reversed rollback comparison" in:title' \
+            --json number,title --jq '.[] | select(.title == "[Genesis Detected] Fix reversed rollback comparison") | .number' \
+            | while read -r issue; do
+                [ "$issue" = '561' ] && continue
+                gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --reason 'not planned' \
+                  --comment 'Duplicate of verified Genesis repair issue #561. The rollback defect is fixed on main and #561 completed the repair→verify→close proof.'
+              done
