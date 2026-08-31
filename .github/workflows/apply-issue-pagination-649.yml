@@ -1,0 +1,62 @@
+name: Apply Issue Pagination 649
+
+on:
+  push:
+    branches:
+      - fix/full-open-issue-pagination-649
+    paths:
+      - .github/workflows/apply-issue-pagination-649.yml
+
+permissions:
+  contents: write
+
+jobs:
+  patch-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: fix/full-open-issue-pagination-649
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Patch only the open-Issue fetch
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          path = Path('.github/workflows/genesis-oldest-issue-solver.yml')
+          text = path.read_text(encoding='utf-8')
+          old = '''            gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \\
+              > /tmp/genesis-open-issues.json'''
+          new = '''            gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \\
+              --jq '.[]' | jq -s '.' > /tmp/genesis-open-issues.json'''
+          if old not in text:
+              if new in text:
+                  raise SystemExit(0)
+              raise SystemExit('expected single-page Issue fetch not found')
+          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Focused pagination contract
+        run: python -m pytest -q tests/test_oldest_issue_solver_pagination.py
+      - name: Full repository tests
+        run: python -m pytest -q
+      - name: Commit validated solver patch
+        shell: bash
+        run: |
+          set -euo pipefail
+          git config user.name 'Genesis Repair Validation'
+          git config user.email 'genesis-repair@users.noreply.github.com'
+          git add .github/workflows/genesis-oldest-issue-solver.yml tests/test_oldest_issue_solver_pagination.py
+          if git diff --cached --quiet; then
+            echo 'Pagination patch already committed.'
+            exit 0
+          fi
+          git commit -m 'Scan the full open Issue queue fairly (#649)'
+          git push origin HEAD:fix/full-open-issue-pagination-649
