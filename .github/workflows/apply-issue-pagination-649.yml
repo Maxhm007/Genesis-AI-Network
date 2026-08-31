@@ -22,30 +22,42 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
-      - name: Patch only the open-Issue fetch
+      - name: Patch open-Issue fetches to scan all pages
         shell: bash
         run: |
           set -euo pipefail
           python - <<'PY'
-          import re
           from pathlib import Path
 
-          path = Path('.github/workflows/genesis-oldest-issue-solver.yml')
-          text = path.read_text(encoding='utf-8')
-          if 'gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100"' in text:
-              raise SystemExit(0)
-          pattern = re.compile(
-              r'(?m)^(\s*)gh api "repos/\$\{GITHUB_REPOSITORY\}/issues\?state=open&sort=created&direction=asc&per_page=100" \\\n\s*> /tmp/genesis-open-issues\.json$'
+          targets = (
+              (Path('.github/workflows/genesis-oldest-issue-solver.yml'), '/tmp/genesis-open-issues.json'),
+              (Path('.github/workflows/genesis-priority-issue-solver.yml'), '/tmp/genesis-priority-open-issues.json'),
           )
-          match = pattern.search(text)
-          if not match:
-              raise SystemExit('expected single-page Issue fetch not found')
-          indent = match.group(1)
-          replacement = (
-              f'{indent}gh api --paginate "repos/${{GITHUB_REPOSITORY}}/issues?state=open&sort=created&direction=asc&per_page=100" \\\n'
-              f"{indent}  --jq '.[]' | jq -s '.' > /tmp/genesis-open-issues.json"
-          )
-          path.write_text(pattern.sub(replacement, text, count=1), encoding='utf-8')
+          marker = 'gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100"'
+          replacement = 'gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" --jq \'.[]\' | jq -s \'.\''
+
+          for path, output in targets:
+              lines = path.read_text(encoding='utf-8').splitlines()
+              if any('gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100"' in line for line in lines):
+                  continue
+              found = False
+              new_lines = []
+              skip_next = False
+              for index, line in enumerate(lines):
+                  if skip_next:
+                      skip_next = False
+                      continue
+                  if marker in line:
+                      indent = line[: len(line) - len(line.lstrip())]
+                      new_lines.append(f"{indent}{replacement} > {output}")
+                      if index + 1 < len(lines) and output in lines[index + 1]:
+                          skip_next = True
+                      found = True
+                  else:
+                      new_lines.append(line)
+              if not found:
+                  raise SystemExit(f'expected single-page Issue fetch not found in {path}')
+              path.write_text('\n'.join(new_lines) + '\n', encoding='utf-8')
           PY
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
@@ -59,7 +71,7 @@ jobs:
           set -euo pipefail
           git config user.name 'Genesis Repair Validation'
           git config user.email 'genesis-repair@users.noreply.github.com'
-          git add .github/workflows/genesis-oldest-issue-solver.yml tests/test_oldest_issue_solver_pagination.py
+          git add .github/workflows/genesis-oldest-issue-solver.yml .github/workflows/genesis-priority-issue-solver.yml tests/test_oldest_issue_solver_pagination.py
           if git diff --cached --quiet; then
             echo 'Pagination patch already committed.'
             exit 0
