@@ -1,0 +1,123 @@
+name: Genesis Task 3 Known Failure Repair
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-task3-repair-known-failure.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: genesis-task3-known-failure-repair
+  cancel-in-progress: false
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_NAME: genesis-task3-known-failure-repair
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '300'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '512'
+  GENESIS_REPAIR_FALLBACK_MODEL: Qwen/Qwen2.5-Coder-0.5B-Instruct
+  GENESIS_REPAIR_ESCALATION_MODEL: Qwen/Qwen2.5-Coder-1.5B-Instruct
+  GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS: '512'
+
+jobs:
+  repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install repository dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Record failing baseline without blocking repair
+        run: |
+          set +e
+          python -m pytest -q > /tmp/task3-baseline.txt 2>&1
+          baseline_rc=$?
+          set -e
+          cat /tmp/task3-baseline.txt
+          if [[ "$baseline_rc" -eq 0 ]]; then
+            echo 'Baseline is already healthy; no repair needed.'
+            exit 0
+          fi
+          echo "Known failing baseline recorded (exit ${baseline_rc}); continuing into bounded repair."
+
+      - name: Install local repair intelligence
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors
+
+      - name: Start Genesis coding provider
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python scripts/pulse_coding_provider.py \
+            --model "$GENESIS_REPAIR_FALLBACK_MODEL" \
+            --escalation-model "$GENESIS_REPAIR_ESCALATION_MODEL" \
+            --host 127.0.0.1 --port 8766 \
+            --max-new-tokens "$GENESIS_PROVIDER_MAX_NEW_TOKENS" \
+            --escalation-max-new-tokens "$GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS" \
+            > /tmp/task3-provider.log 2>&1 &
+          for i in {1..120}; do
+            if curl -fsS http://127.0.0.1:8766/health >/dev/null 2>&1; then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/task3-provider.log || true
+          exit 1
+
+      - name: Run Genesis guarded repair engine
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          git config user.name 'Genesis AI'
+          git config user.email 'genesis-ai@users.noreply.github.com'
+          gh issue edit 560 --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous >/dev/null
+          python scripts/github_issue_autorepair.py --issue-number 560 --repository "$GITHUB_REPOSITORY"
+
+      - name: Validate and promote Genesis candidate
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f runtime/github_issue_autorepair.json
+          status=$(jq -r '.status // ""' runtime/github_issue_autorepair.json)
+          branch=$(jq -r '.candidate_branch // ""' runtime/github_issue_autorepair.json)
+          sha=$(jq -r '.candidate_sha // ""' runtime/github_issue_autorepair.json)
+          test "$status" = candidate_created
+          test -n "$branch"
+          test -n "$sha"
+          git fetch origin main "$branch"
+          git checkout -B genesis/task3-integration origin/main
+          git cherry-pick "$sha"
+          python -m py_compile genesis/modules/versioning.py
+          python -m pytest -q tests/test_versioning.py
+          python -m pytest -q
+          git fetch origin main
+          test "$(git rev-parse HEAD^)" = "$(git rev-parse origin/main)"
+          git push origin HEAD:main
+          promoted=$(git rev-parse HEAD)
+          gh issue comment 560 --repo "$GITHUB_REPOSITORY" --body "Genesis Task #3 repair verified and promoted. Candidate: \`$sha\`. Promoted main SHA: \`$promoted\`. Verification: target compilation, versioning tests, and full repository test suite all passed."
+          gh issue edit 560 --repo "$GITHUB_REPOSITORY" --add-label genesis-verified >/dev/null
+          for label in genesis-repair-in-progress genesis-autonomous genesis-claimed genesis-working genesis-verifying genesis-blocked genesis-solver-exhausted; do
+            gh issue edit 560 --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+          done
+          gh issue close 560 --repo "$GITHUB_REPOSITORY" --reason completed
+          git push origin --delete "$branch" >/dev/null 2>&1 || true
