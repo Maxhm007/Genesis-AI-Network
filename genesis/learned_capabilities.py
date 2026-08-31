@@ -1737,4 +1737,39 @@ register_capability(
 )
 
 
+def _learned_05e11793dee7(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('uses', 'multiple', 'query', 'heads', 'score', 'compressed', 'blocks', 'selects', 'most', 'relevant', 'contiguous', 'token', 'huggingface', 'transformers', 'v5.16.0', 'published')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_05e11793dee7',
+    'Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: QSA uses multiple query heads to score compressed key blocks, selects the most relevant contiguous token blocks, and....',
+    "huggingface/transformers release 'Release: v5.16.0', published 2026-08-26T12:35:15Z: QSA uses multiple query heads to score compressed key blocks, selects the most relevant contiguous token blocks, and keeps the incomplete trailing block uncompressed. This block-level selection reduces indexing overhead and improves memory locality for long sequences. Combined with Gated DeltaNet, QSA makes Qwen4-Exp the first hybrid architecture to integrate linear and sparse attention, substantially improving inference efficiency for long-context workloads. Source: https://github.com/huggingface/transformers/releases/tag/v5.16.0",
+    _learned_05e11793dee7,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
