@@ -20,12 +20,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          title='[Genesis Detected] Fix reversed rollback comparison'
           gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 200 \
             --search '"[Genesis Detected] Fix reversed rollback comparison" in:title' \
             --json number,title --jq '.[] | select(.title == "[Genesis Detected] Fix reversed rollback comparison") | .number' \
             | while read -r issue; do
                 [ "$issue" = '561' ] && continue
-                gh issue close "$issue" --repo "$GITHUB_REPOSITORY" --reason 'not planned' \
-                  --comment 'Duplicate of verified Genesis repair issue #561. The rollback defect is fixed on main and #561 completed the repair→verify→close proof.'
+                gh api "repos/${GITHUB_REPOSITORY}/issues/${issue}" --method PATCH \
+                  -f state=closed -f state_reason=not_planned >/dev/null
               done
