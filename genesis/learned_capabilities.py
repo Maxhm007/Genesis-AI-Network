@@ -1772,4 +1772,39 @@ register_capability(
 )
 
 
+def _learned_104c4fcba936(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('deepseek', 'sparse', 'works', 'end-to-end', 'plain', 'decode', 'dspark', 'speculative', 'decoding', 'vllm-project', 'vllm', 'v0.28.0', 'published', 'joined', 'quark', 'nvfp4')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_104c4fcba936',
+    'Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: **DeepSeek V4**: sparse MLA now works end-to-end for plain decode, MTP, and DSpark speculative decoding (#51538), joi....',
+    "vllm-project/vllm release 'v0.28.0', published 2026-08-26T09:46:30Z: **DeepSeek V4**: sparse MLA now works end-to-end for plain decode, MTP, and DSpark speculative decoding (#51538), joined by AMD Quark NVFP4 support (#47972), reasoning-effort prompts and mappings (#50580), sparse top-k metadata kernel optimizations (#52084, #51967), narrowed eager CUDA graph regions (#51430, #52401), and ROCm enablement on gfx11 and gfx950 (#47017, #52212). Source: https://github.com/vllm-project/vllm/releases/tag/v0.28.0",
+    _learned_104c4fcba936,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
