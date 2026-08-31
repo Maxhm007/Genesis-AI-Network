@@ -23,7 +23,10 @@ def test_oldest_issue_solver_preserves_skip_boundaries():
     text = OLDEST.read_text(encoding="utf-8")
 
     assert "genesis-solver-exhausted" in text
-    assert "Persistent communication/reporting channels are not work items." in text
+    assert "lower_title.startswith('genesis chat:')" in text
+    assert "lower_title.startswith('[genesis hourly report]')" in text
+    assert "lower_title.startswith('[genesis gene chat]')" in text
+    assert "'persistent github-native reporting channel' in lower_body" in text
     assert "protected_targets" in text
     assert "requires_measurement" in text
 
@@ -32,5 +35,7 @@ def test_priority_issue_solver_preserves_skip_boundaries():
     text = PRIORITY.read_text(encoding="utf-8")
 
     assert "genesis-priority-exhausted" in text
+    assert "lower_title.startswith(('genesis chat:', '[genesis hourly report]', '[genesis gene chat]'))" in text
+    assert "'persistent github-native reporting channel' in lower_body" in text
     assert "protected_targets" in text
     assert "requires_measurement" in text

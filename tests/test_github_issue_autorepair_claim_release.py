@@ -18,7 +18,7 @@ def test_solver_does_not_reclaim_active_repair_reservation() -> None:
     text = SOLVER.read_text(encoding="utf-8")
 
     assert "genesis-repair-in-progress" in text
-    assert "Never let two solver cycles work the same issue simultaneously" in text
+    assert "if labels & {'genesis-claimed', 'genesis-working', 'genesis-verifying', 'genesis-repair-in-progress', 'genesis-validating', 'genesis-priority-claim'}:" in text
 
 
 def test_worker_requires_exact_reservation_before_code_work() -> None:
