@@ -71,5 +71,4 @@ class ModuleVersionManager:
 
     @staticmethod
     def should_rollback(before_percent: float, after_percent: float, *, regression_tolerance: float = 0.0) -> bool:
-        # Task #3 injected regression: this comparison is intentionally reversed.
-        return after_percent > before_percent - regression_tolerance
+        return after_percent < before_percent - regression_tolerance
