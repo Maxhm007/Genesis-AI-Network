@@ -1702,4 +1702,39 @@ register_capability(
 )
 
 
+def _learned_27487ea59e3d(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('glm-5.3-flash', 'first', 'natively', 'multimodal', 'model', 'glm-5', 'series', 'with', 'total', 'parameters', 'just', 'huggingface', 'transformers', 'v5.16.1', 'published', 'active')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_27487ea59e3d',
+    'Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: GLM-5.3-Flash, the first **natively multimodal model** in the GLM-5 series. With 320B total parameters and just 18B a....',
+    "huggingface/transformers release 'Release v5.16.1', published 2026-08-26T14:50:01Z: GLM-5.3-Flash, the first **natively multimodal model** in the GLM-5 series. With 320B total parameters and just 18B active parameters, it outperforms GLM-5.2 across benchmarks and real-world workloads at one-tenth the price, while approaching Claude Opus 4.8 on coding and agentic benchmarks. Source: https://github.com/huggingface/transformers/releases/tag/v5.16.1",
+    _learned_27487ea59e3d,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
