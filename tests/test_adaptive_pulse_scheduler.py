@@ -3,7 +3,7 @@ from pathlib import Path
 from genesis.pulse import adaptive_recovery_interval, recovery_pulse_due
 
 
-SOLVER = Path(".github/workflows/genesis-oldest-issue-solver.yml")
+CONTROLLER = Path(".github/workflows/genesis-sequential-issue-controller.yml")
 WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 
 
@@ -36,18 +36,20 @@ def test_recovery_pulse_due_uses_selected_interval() -> None:
     assert recovery_pulse_due(last_completed_age_seconds=600, interval_minutes=10) is True
 
 
-def test_current_solver_runs_five_minute_safety_net_and_self_chains() -> None:
-    text = SOLVER.read_text(encoding="utf-8")
-    assert "interval=300" in text
-    assert "max_cycles=64" in text
-    assert "Start successor solver run" in text
-    assert "genesis-oldest-issue-solver.yml/dispatches" in text
+def test_current_controller_has_independent_ten_minute_safety_net() -> None:
+    text = CONTROLLER.read_text(encoding="utf-8")
+    assert "schedule:" in text
+    assert "cron: '*/10 * * * *'" in text
+    assert "group: genesis-sequential-issue-controller" in text
+    assert "Start successor solver run" not in text
+    assert "genesis-oldest-issue-solver.yml/dispatches" not in text
 
 
 def test_current_repair_capacity_is_single_issue_lane() -> None:
-    solver = SOLVER.read_text(encoding="utf-8")
+    controller = CONTROLLER.read_text(encoding="utf-8")
     worker = WORKER.read_text(encoding="utf-8")
-    assert "group: genesis-oldest-real-issue-solver" in solver
-    assert "cancel-in-progress: true" in solver
-    assert "genesis-repair-in-progress" in solver
+    assert "active_count=" in controller
+    assert "strict sequential mode will not start another issue" in controller
+    assert "genesis-repair-in-progress" in controller
+    assert "genesis-validating" in controller
     assert "group: genesis-bounded-repair-${{ inputs.issue_number }}" in worker
