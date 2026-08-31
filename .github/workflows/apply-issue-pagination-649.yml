@@ -27,19 +27,25 @@ jobs:
         run: |
           set -euo pipefail
           python - <<'PY'
+          import re
           from pathlib import Path
 
           path = Path('.github/workflows/genesis-oldest-issue-solver.yml')
           text = path.read_text(encoding='utf-8')
-          old = '''            gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \\
-              > /tmp/genesis-open-issues.json'''
-          new = '''            gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \\
-              --jq '.[]' | jq -s '.' > /tmp/genesis-open-issues.json'''
-          if old not in text:
-              if new in text:
-                  raise SystemExit(0)
+          if 'gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100"' in text:
+              raise SystemExit(0)
+          pattern = re.compile(
+              r'(?m)^(\s*)gh api "repos/\$\{GITHUB_REPOSITORY\}/issues\?state=open&sort=created&direction=asc&per_page=100" \\\n\s*> /tmp/genesis-open-issues\.json$'
+          )
+          match = pattern.search(text)
+          if not match:
               raise SystemExit('expected single-page Issue fetch not found')
-          path.write_text(text.replace(old, new, 1), encoding='utf-8')
+          indent = match.group(1)
+          replacement = (
+              f'{indent}gh api --paginate "repos/${{GITHUB_REPOSITORY}}/issues?state=open&sort=created&direction=asc&per_page=100" \\\n'
+              f"{indent}  --jq '.[]' | jq -s '.' > /tmp/genesis-open-issues.json"
+          )
+          path.write_text(pattern.sub(replacement, text, count=1), encoding='utf-8')
           PY
       - name: Install dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
