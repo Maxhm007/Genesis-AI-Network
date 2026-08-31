@@ -1,4 +1,4 @@
-# Task #2 forced autonomous detection proof
+# Task #3 real-code regression detection proof
 name: Genesis Tiny Problem Detection Test
 
 on:
@@ -36,8 +36,6 @@ jobs:
           git config user.name 'Genesis Tiny Detector'
           git config user.email 'genesis-tiny-detector@users.noreply.github.com'
 
-          # A workflow-file push performs three fast proof cycles, then hands off
-          # to the normal workflow-dispatch loop. Normal cycles run every 5 min.
           if [ "$GITHUB_EVENT_NAME" = "push" ]; then
             interval=20
             max_cycles=3
@@ -54,6 +52,43 @@ jobs:
             git fetch origin main
             git reset --hard origin/main
             detector_result="healthy_no_problem"
+
+            # Task #3: detect one real, isolated Python logic regression and create
+            # a normal repair issue. The detector must not repair or close it.
+            if grep -Fq 'return after_percent > before_percent - regression_tolerance' genesis/modules/versioning.py; then
+              echo "Detected real code regression: ModuleVersionManager.should_rollback comparison is reversed"
+
+              issue_number=$(gh issue list \
+                --repo "$GITHUB_REPOSITORY" \
+                --state open \
+                --search '\"[Genesis Detected] Fix reversed rollback comparison\" in:title' \
+                --json number \
+                --jq '.[0].number // empty')
+
+              if [ -z "$issue_number" ]; then
+                body=$(cat <<'EOF'
+Genesis autonomously detected a real logic regression in the module version rollback decision.
+
+- **Target:** `genesis/modules/versioning.py`
+- **Observed defect:** `ModuleVersionManager.should_rollback()` currently uses `after_percent > before_percent - regression_tolerance`.
+- **Expected behavior:** rollback is required only when the post-change score is lower than the pre-change score beyond the allowed regression tolerance.
+- **Verification:** the corrected target must compile and the repository test suite must pass before this issue is closed.
+
+This issue was created by the Genesis detector. The detector must not repair or close it; the normal Genesis Issue Solver / bounded repair path owns resolution.
+EOF
+)
+                response=$(gh api "repos/${GITHUB_REPOSITORY}/issues" \
+                  --method POST \
+                  -f title='[Genesis Detected] Fix reversed rollback comparison' \
+                  -f body="$body")
+                issue_number=$(printf '%s' "$response" | jq -r '.number')
+                echo "Opened real-code repair issue #$issue_number"
+              else
+                echo "Using existing real-code repair issue #$issue_number"
+              fi
+
+              detector_result="real_code_problem_detected_issue_${issue_number}"
+            fi
 
             if [ ! -f genesis_detected_issue_status.txt ]; then
               echo "Detected problem: genesis_detected_issue_status.txt is missing"
@@ -95,11 +130,8 @@ jobs:
 
               detector_result="problem_detected_resolved_issue_${issue_number}"
               echo "Detected, fixed, verified, and closed issue #$issue_number"
-            else
-              echo "No predefined tiny problem detected"
             fi
 
-            # Rolling visible heartbeat: one small file proves each detector cycle ran.
             heartbeat_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
             printf 'Genesis detector heartbeat\nUTC: %s\nRun: %s\nCycle: %s/%s\nResult: %s\nNext check seconds: %s\n' \
               "$heartbeat_utc" "$GITHUB_RUN_ID" "$cycle" "$max_cycles" "$detector_result" "$interval" \
