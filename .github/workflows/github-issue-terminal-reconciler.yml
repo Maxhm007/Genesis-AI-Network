@@ -1,0 +1,55 @@
+name: Genesis Terminal Issue Reconciler
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/5 * * * *'
+  push:
+    branches:
+      - main
+    paths:
+      - .github/workflows/github-issue-terminal-reconciler.yml
+      - genesis/github_issue_terminal_reconciler.py
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-terminal-issue-reconciler
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Reconcile terminal Issue-backed work
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from pathlib import Path
+
+          from genesis.github_issue_terminal_reconciler import reconcile_terminal_github_issues
+
+          result = reconcile_terminal_github_issues(Path('.'))
+          print(json.dumps(result, indent=2, sort_keys=True))
+          if result.get('status') not in {'ok', 'not_repository_runtime'}:
+              raise SystemExit(f"terminal reconciliation failed: {result}")
+          PY
