@@ -5,6 +5,7 @@ from genesis.pulse import adaptive_recovery_interval, recovery_pulse_due
 
 CONTROLLER = Path(".github/workflows/genesis-sequential-issue-controller.yml")
 WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
+WAKEUP = Path(".github/workflows/genesis-repair-worker-successor-wakeup.yml")
 
 
 def test_adaptive_recovery_interval_accelerates_under_high_backlog() -> None:
@@ -43,6 +44,26 @@ def test_current_controller_has_independent_ten_minute_safety_net() -> None:
     assert "group: genesis-sequential-issue-controller" in text
     assert "Start successor solver run" not in text
     assert "genesis-oldest-issue-solver.yml/dispatches" not in text
+
+
+def test_worker_completion_wakes_authoritative_controller_without_self_respawn() -> None:
+    text = WAKEUP.read_text(encoding="utf-8")
+    assert "workflow_run:" in text
+    assert "Genesis Bounded Repair Worker" in text
+    assert "completed" in text
+    assert "gh workflow run genesis-sequential-issue-controller.yml" in text
+    assert "--ref main" in text
+    assert "genesis-bounded-repair-worker.yml" not in text
+    assert "Start successor solver run" not in text
+
+
+def test_wakeup_merge_triggers_one_immediate_controller_probe() -> None:
+    text = WAKEUP.read_text(encoding="utf-8")
+    assert "push:" in text
+    assert "branches: [main]" in text
+    assert ".github/workflows/genesis-repair-worker-successor-wakeup.yml" in text
+    assert "group: genesis-repair-worker-successor-wakeup" in text
+    assert "cancel-in-progress: true" in text
 
 
 def test_current_repair_capacity_is_single_issue_lane() -> None:
