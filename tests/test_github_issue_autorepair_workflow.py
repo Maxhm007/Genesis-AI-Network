@@ -1,18 +1,19 @@
 from pathlib import Path
 
 
-SOLVER = Path(".github/workflows/genesis-oldest-issue-solver.yml")
+CONTROLLER = Path(".github/workflows/genesis-sequential-issue-controller.yml")
 WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 REPAIR_ENGINE = Path("scripts/github_issue_autorepair.py")
 
 
-def test_solver_keeps_issue_selection_single_lane() -> None:
-    text = SOLVER.read_text(encoding="utf-8")
+def test_controller_keeps_issue_selection_single_lane() -> None:
+    text = CONTROLLER.read_text(encoding="utf-8")
 
-    assert "group: genesis-oldest-real-issue-solver" in text
-    assert "cancel-in-progress: true" in text
+    assert "group: genesis-sequential-issue-controller" in text
+    assert "cancel-in-progress: false" in text
     assert "max_attempts=3" in text
-    assert "one safe issue-solver cycle every 5 minutes" in text
+    assert "cron: '*/10 * * * *'" in text
+    assert "Claiming exactly one issue" in text
 
 
 def test_worker_is_per_issue_serialized_and_bounded() -> None:

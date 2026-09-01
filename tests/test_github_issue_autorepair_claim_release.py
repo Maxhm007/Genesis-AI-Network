@@ -1,12 +1,12 @@
 from pathlib import Path
 
 
-SOLVER = Path(".github/workflows/genesis-oldest-issue-solver.yml")
+CONTROLLER = Path(".github/workflows/genesis-sequential-issue-controller.yml")
 WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 
 
-def test_solver_reserves_issue_before_dispatching_repair_worker() -> None:
-    text = SOLVER.read_text(encoding="utf-8")
+def test_controller_reserves_issue_before_dispatching_repair_worker() -> None:
+    text = CONTROLLER.read_text(encoding="utf-8")
 
     assert "genesis-repair-in-progress" in text
     assert "genesis-bounded-repair-worker.yml" in text
@@ -14,11 +14,12 @@ def test_solver_reserves_issue_before_dispatching_repair_worker() -> None:
     assert '-f issue_number="$issue_number"' in text
 
 
-def test_solver_does_not_reclaim_active_repair_reservation() -> None:
-    text = SOLVER.read_text(encoding="utf-8")
+def test_controller_does_not_start_second_active_repair_reservation() -> None:
+    text = CONTROLLER.read_text(encoding="utf-8")
 
-    assert "genesis-repair-in-progress" in text
-    assert "if labels & {'genesis-claimed', 'genesis-working', 'genesis-verifying', 'genesis-repair-in-progress', 'genesis-validating', 'genesis-priority-claim'}:" in text
+    assert "active = {'genesis-repair-in-progress', 'genesis-validating'}" in text
+    assert 'if [ "$active_count" -gt 0 ]; then' in text
+    assert "strict sequential mode will not start another issue" in text
 
 
 def test_worker_requires_exact_reservation_before_code_work() -> None:

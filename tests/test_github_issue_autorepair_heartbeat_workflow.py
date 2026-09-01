@@ -4,7 +4,7 @@ from genesis.issue_worker_pool import select_issue_repair_batch
 from scripts.reconcile_satisfied_issue import reconciliation_plan
 
 
-SOLVER = Path(".github/workflows/genesis-oldest-issue-solver.yml")
+CONTROLLER = Path(".github/workflows/genesis-sequential-issue-controller.yml")
 WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 
 
@@ -18,12 +18,12 @@ def _issue(number: int, *labels: str, title: str = "") -> dict:
     }
 
 
-def test_solver_is_the_only_queue_admission_lane_for_bounded_worker() -> None:
-    solver = SOLVER.read_text(encoding="utf-8")
+def test_controller_is_the_only_queue_admission_lane_for_bounded_worker() -> None:
+    controller = CONTROLLER.read_text(encoding="utf-8")
     worker = WORKER.read_text(encoding="utf-8")
 
-    assert "genesis-bounded-repair-worker.yml" in solver
-    assert "genesis-repair-in-progress" in solver
+    assert "genesis-bounded-repair-worker.yml" in controller
+    assert "genesis-repair-in-progress" in controller
     assert "workflow_dispatch:" in worker
     assert "issue_number:" in worker
     assert "issues:" not in worker.split("on:", 1)[1].split("permissions:", 1)[0]
