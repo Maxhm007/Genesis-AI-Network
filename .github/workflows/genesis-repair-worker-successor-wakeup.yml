@@ -1,0 +1,36 @@
+name: Genesis Repair Worker Successor Wakeup
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Genesis Bounded Repair Worker
+    types:
+      - completed
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-repair-worker-successor-wakeup.yml
+
+permissions:
+  contents: read
+  actions: write
+
+concurrency:
+  group: genesis-repair-worker-successor-wakeup
+  cancel-in-progress: true
+
+jobs:
+  wake-sequential-controller:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Wake the authoritative sequential issue controller
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh workflow run genesis-sequential-issue-controller.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
