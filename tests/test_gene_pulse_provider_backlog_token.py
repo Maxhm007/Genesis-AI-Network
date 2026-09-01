@@ -10,7 +10,7 @@ def test_bounded_repair_provider_has_only_required_permissions() -> None:
     permissions = text.split("permissions:", 1)[1].split("concurrency:", 1)[0]
     assert "contents: write" in permissions
     assert "issues: write" in permissions
-    assert "actions: read" in permissions
+    assert "actions: write" in permissions
     assert "pull-requests:" not in permissions
     assert "checks:" not in permissions
 
