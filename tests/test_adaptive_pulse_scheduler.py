@@ -53,7 +53,7 @@ def test_worker_completion_wakes_authoritative_controller_without_self_respawn()
     assert "completed" in text
     assert "gh workflow run genesis-sequential-issue-controller.yml" in text
     assert "--ref main" in text
-    assert "genesis-bounded-repair-worker.yml" not in text
+    assert "gh workflow run genesis-bounded-repair-worker.yml" not in text
     assert "Start successor solver run" not in text
 
 
@@ -62,8 +62,18 @@ def test_wakeup_merge_triggers_one_immediate_controller_probe() -> None:
     assert "push:" in text
     assert "branches: [main]" in text
     assert ".github/workflows/genesis-repair-worker-successor-wakeup.yml" in text
+    assert ".github/workflows/genesis-bounded-repair-worker.yml" in text
     assert "group: genesis-repair-worker-successor-wakeup" in text
     assert "cancel-in-progress: true" in text
+
+
+def test_bounded_worker_directly_hands_back_to_authoritative_controller() -> None:
+    text = WORKER.read_text(encoding="utf-8")
+    assert "actions: write" in text
+    assert "Wake sequential controller for next issue" in text
+    assert "gh workflow run genesis-sequential-issue-controller.yml" in text
+    assert "--ref main" in text
+    assert text.index("Preserve bounded repair evidence") < text.index("Wake sequential controller for next issue")
 
 
 def test_current_repair_capacity_is_single_issue_lane() -> None:
