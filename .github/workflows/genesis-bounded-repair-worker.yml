@@ -11,7 +11,7 @@ on:
 permissions:
   contents: write
   issues: write
-  actions: read
+  actions: write
 
 concurrency:
   group: genesis-bounded-repair-${{ inputs.issue_number }}
@@ -310,3 +310,16 @@ jobs:
             /tmp/genesis-bounded-repair-provider.log
           if-no-files-found: ignore
           retention-days: 30
+
+      - name: Wake sequential controller for next issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh workflow run genesis-sequential-issue-controller.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main; then
+            echo 'Direct successor dispatch failed; workflow_run and cron fallbacks remain available.' >&2
+          fi
