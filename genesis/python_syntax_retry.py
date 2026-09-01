@@ -109,6 +109,27 @@ def _syntax_retry_guidance(module: CodingModule, raw: str, error: Exception) -> 
     )
 
 
+def _retry_sequence_guidance(module: CodingModule, attempt: int) -> str:
+    """Make deterministic syntax retries materially different across bounded attempts."""
+    next_attempt = max(2, min(module.MAX_PROPOSAL_ATTEMPTS, int(attempt) + 1))
+    guidance = f"\nPYTHON_SYNTAX_RETRY_ATTEMPT: {next_attempt}/{module.MAX_PROPOSAL_ATTEMPTS}\n"
+    if next_attempt >= module.MAX_PROPOSAL_ATTEMPTS:
+        guidance += (
+            "FINAL_PYTHON_SYNTAX_RETRY: The previous AST-guided retry also failed. "
+            "Do not repeat the same path/range/replacement combination shown in PREVIOUS. "
+            "Use OBJECTIVE plus AST_SAFE_STATEMENT_CONTEXT/NUMBERED_CONTEXT to choose a materially different, "
+            "syntactically complete one-edit strategy on the same valid path. If the previous edit used an interior "
+            "fragment, use the exact AST-safe statement boundary; if that exact boundary/replacement already failed, "
+            "choose a different complete standalone statement relevant to OBJECTIVE. Never weaken validation or tests.\n"
+        )
+    else:
+        guidance += (
+            "PYTHON_SYNTAX_RETRY_STRATEGY: Apply the AST-safe boundary guidance and do not repeat the rejected "
+            "path/range/replacement combination from PREVIOUS. Return exactly one syntactically complete edit.\n"
+        )
+    return guidance
+
+
 def _repair_prompt_with_ast_guidance(
     self: CodingModule,
     original_prompt: str,
@@ -119,7 +140,10 @@ def _repair_prompt_with_ast_guidance(
     edit_hint: tuple[str, int],
 ) -> str:
     base = _ORIGINAL_REPAIR_PROMPT(self, original_prompt, raw, error, attempt, allowed_paths, edit_hint)
-    return base + _syntax_retry_guidance(self, raw, error)
+    syntax_guidance = _syntax_retry_guidance(self, raw, error)
+    if not syntax_guidance:
+        return base
+    return base + syntax_guidance + _retry_sequence_guidance(self, attempt)
 
 
 def install_python_syntax_retry_guidance() -> None:
