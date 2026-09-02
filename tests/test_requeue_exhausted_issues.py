@@ -3,6 +3,7 @@ from pathlib import Path
 from scripts.requeue_exhausted_issues import (
     ENGINE_PATHS,
     eligible_exhausted_issue,
+    eligible_generation_retry_issue,
     engine_generation,
     reset_attempt_status,
 )
@@ -44,6 +45,17 @@ def test_only_exhausted_safe_target_issue_is_requeue_eligible(tmp_path: Path):
 
     assert eligible_exhausted_issue(_issue(body, []), tmp_path)[0] is False
     assert eligible_exhausted_issue(_issue(body, ["genesis-solver-exhausted", "genesis-working"]), tmp_path)[0] is False
+
+
+def test_infrastructure_blocked_issue_waits_for_generation_retry(tmp_path: Path):
+    target = tmp_path / "genesis/example.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    body = "- **Target:** `genesis/example.py`\n\nRetry only after repair infrastructure changes."
+
+    issue = _issue(body, ["genesis-infrastructure-blocked"])
+    assert eligible_exhausted_issue(issue, tmp_path) == (False, "not_exhausted")
+    assert eligible_generation_retry_issue(issue, tmp_path) == (True, "genesis/example.py")
 
 
 def test_measurement_and_protected_issues_are_not_requeued(tmp_path: Path):
