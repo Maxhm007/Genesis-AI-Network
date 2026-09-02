@@ -1,6 +1,7 @@
 from pathlib import Path
 
 from scripts.requeue_exhausted_issues import (
+    ENGINE_PATHS,
     eligible_exhausted_issue,
     engine_generation,
     reset_attempt_status,
@@ -17,11 +18,7 @@ def _issue(body: str, labels: list[str], title: str = "[Genesis Task] repair") -
 
 
 def test_engine_generation_is_stable_and_content_sensitive(tmp_path: Path):
-    for relative in (
-        "genesis/coding.py",
-        "scripts/github_issue_autorepair.py",
-        "genesis/learned_capabilities.py",
-    ):
+    for relative in ENGINE_PATHS:
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(relative, encoding="utf-8")
@@ -30,7 +27,8 @@ def test_engine_generation_is_stable_and_content_sensitive(tmp_path: Path):
     second = engine_generation(tmp_path)
     assert first == second
 
-    (tmp_path / "genesis/coding.py").write_text("changed", encoding="utf-8")
+    tracked = tmp_path / ENGINE_PATHS[0]
+    tracked.write_text("changed", encoding="utf-8")
     assert engine_generation(tmp_path) != first
 
 
