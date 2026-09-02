@@ -1,9 +1,12 @@
 from pathlib import Path
 
 from scripts.requeue_exhausted_issues import (
+    ENGINE_PATHS,
     eligible_exhausted_issue,
     engine_generation,
+    pre_repair_failure_after_marker,
     reset_attempt_status,
+    rollback_attempt_status,
 )
 
 
@@ -17,11 +20,8 @@ def _issue(body: str, labels: list[str], title: str = "[Genesis Task] repair") -
 
 
 def test_engine_generation_is_stable_and_content_sensitive(tmp_path: Path):
-    for relative in (
-        "genesis/coding.py",
-        "scripts/github_issue_autorepair.py",
-        "genesis/learned_capabilities.py",
-    ):
+    assert ".github/workflows/genesis-bounded-repair-worker.yml" in ENGINE_PATHS
+    for relative in ENGINE_PATHS:
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(relative, encoding="utf-8")
@@ -30,7 +30,8 @@ def test_engine_generation_is_stable_and_content_sensitive(tmp_path: Path):
     second = engine_generation(tmp_path)
     assert first == second
 
-    (tmp_path / "genesis/coding.py").write_text("changed", encoding="utf-8")
+    tracked = tmp_path / ENGINE_PATHS[0]
+    tracked.write_text("changed", encoding="utf-8")
     assert engine_generation(tmp_path) != first
 
 
@@ -46,6 +47,26 @@ def test_only_exhausted_safe_target_issue_is_requeue_eligible(tmp_path: Path):
 
     assert eligible_exhausted_issue(_issue(body, []), tmp_path)[0] is False
     assert eligible_exhausted_issue(_issue(body, ["genesis-solver-exhausted", "genesis-working"]), tmp_path)[0] is False
+
+
+def test_pre_repair_failure_rolls_back_only_the_dispatched_attempt():
+    status = (
+        "<!-- genesis-oldest-real-issue-solver -->\n"
+        "<!-- genesis-solver-attempt:2 -->\n"
+        "- Attempt: **2/3**\n"
+    )
+    rolled_back = rollback_attempt_status(status)
+    assert "genesis-solver-attempt:1" in rolled_back
+    assert "Attempt: **1/3**" in rolled_back
+
+
+def test_pre_repair_failure_is_quarantined_only_after_current_generation_marker():
+    marker = "<!-- genesis-requeue-engine:current -->"
+    failure = "Genesis bounded repair did not promote a verified change (repair status: `worker_failed_before_evidence`)."
+
+    assert pre_repair_failure_after_marker([{"body": failure}], marker) is True
+    assert pre_repair_failure_after_marker([{"body": failure}, {"body": marker}], marker) is False
+    assert pre_repair_failure_after_marker([{"body": marker}, {"body": failure}], marker) is True
 
 
 def test_measurement_and_protected_issues_are_not_requeued(tmp_path: Path):
