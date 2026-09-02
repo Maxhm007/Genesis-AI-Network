@@ -16,6 +16,7 @@ EVIDENCE_PATH = RUNTIME / "exhausted_issue_requeue.json"
 ENGINE_PATHS = (
     "genesis/coding.py",
     "genesis/compact_edit_budget.py",
+    ".github/workflows/genesis-bounded-repair-worker.yml",
     "scripts/github_issue_autorepair.py",
     "genesis/learned_capabilities.py",
 )
