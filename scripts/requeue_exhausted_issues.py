@@ -29,8 +29,6 @@ ACTIVE_LABELS = {
     "genesis-priority-claim",
 }
 EXHAUSTED_LABELS = {"genesis-solver-exhausted", "genesis-priority-exhausted"}
-INFRASTRUCTURE_BLOCKED_LABEL = "genesis-infrastructure-blocked"
-GENERATION_RETRY_LABELS = EXHAUSTED_LABELS | {INFRASTRUCTURE_BLOCKED_LABEL}
 PROTECTED_TARGETS = {
     "genesis/autonomy_guard.py",
     "genesis/autonomy_proof.py",
@@ -51,8 +49,10 @@ MEASUREMENT_PHRASES = (
     "same comparable benchmark",
 )
 TARGET_RE = re.compile(r"^- \*\*Target:\*\* `([^`]+)`", re.MULTILINE)
-OLD_ATTEMPT_RE = re.compile(r"<!-- genesis-solver-attempt:\d+ -->")
-PRIORITY_ATTEMPT_RE = re.compile(r"<!-- genesis-priority-solver-attempt:\d+ -->")
+OLD_ATTEMPT_RE = re.compile(r"<!-- genesis-solver-attempt:(\d+) -->")
+PRIORITY_ATTEMPT_RE = re.compile(r"<!-- genesis-priority-solver-attempt:(\d+) -->")
+ATTEMPT_DISPLAY_RE = re.compile(r"Attempt: \*\*(\d+)/(\d+)\*\*")
+PRE_REPAIR_FAILURE_PHRASE = "repair status: `worker_failed_before_evidence`"
 
 
 def engine_generation(root: Path = ROOT) -> str:
@@ -118,16 +118,54 @@ def eligible_exhausted_issue(issue: dict, root: Path = ROOT) -> tuple[bool, str]
     return _eligible_retry_target(issue, root)
 
 
-def eligible_generation_retry_issue(issue: dict, root: Path = ROOT) -> tuple[bool, str]:
-    if not issue_labels(issue) & GENERATION_RETRY_LABELS:
-        return False, "not_generation_blocked"
-    return _eligible_retry_target(issue, root)
-
-
 def reset_attempt_status(body: str) -> str:
     body = OLD_ATTEMPT_RE.sub("<!-- genesis-solver-attempt:0 -->", str(body or ""), count=1)
     body = PRIORITY_ATTEMPT_RE.sub("<!-- genesis-priority-solver-attempt:0 -->", body, count=1)
     return body
+
+
+def rollback_attempt_status(body: str) -> str:
+    text = str(body or "")
+    rolled_from: int | None = None
+
+    def rollback_old(match: re.Match[str]) -> str:
+        nonlocal rolled_from
+        rolled_from = int(match.group(1))
+        return f"<!-- genesis-solver-attempt:{max(0, rolled_from - 1)} -->"
+
+    text = OLD_ATTEMPT_RE.sub(rollback_old, text, count=1)
+    if rolled_from is None:
+        def rollback_priority(match: re.Match[str]) -> str:
+            nonlocal rolled_from
+            rolled_from = int(match.group(1))
+            return f"<!-- genesis-priority-solver-attempt:{max(0, rolled_from - 1)} -->"
+
+        text = PRIORITY_ATTEMPT_RE.sub(rollback_priority, text, count=1)
+
+    if rolled_from is not None:
+        rolled_to = max(0, rolled_from - 1)
+
+        def rollback_display(match: re.Match[str]) -> str:
+            if int(match.group(1)) != rolled_from:
+                return match.group(0)
+            return f"Attempt: **{rolled_to}/{match.group(2)}**"
+
+        text = ATTEMPT_DISPLAY_RE.sub(rollback_display, text, count=1)
+    return text
+
+
+def pre_repair_failure_after_marker(comments: list[dict], marker: str) -> bool:
+    marker_index = -1
+    failure_index = -1
+    for index, row in enumerate(comments):
+        if not isinstance(row, dict):
+            continue
+        body = str(row.get("body") or "")
+        if body.startswith(marker):
+            marker_index = index
+        if PRE_REPAIR_FAILURE_PHRASE in body:
+            failure_index = index
+    return failure_index > marker_index
 
 
 def _request(repository: str, token: str, method: str, path: str, payload: dict | None = None):
@@ -170,22 +208,79 @@ def _open_issues(repository: str, token: str) -> list[dict]:
 def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
     generation = engine_generation(root)
     marker = f"<!-- genesis-requeue-engine:{generation} -->"
+    issues = _open_issues(repository, token)
     result = {
         "status": "ok",
         "engine_generation": generation,
         "released": [],
+        "infrastructure_quarantined": [],
         "skipped_same_generation": [],
         "skipped": [],
     }
+    quarantined: set[int] = set()
 
-    for issue in _open_issues(repository, token):
+    # A worker that failed before repair evidence did not spend a coding attempt.
+    # Roll that dispatch marker back and quarantine the issue for this exact engine
+    # generation so successor wakeups cannot burn the remaining bounded attempts.
+    for issue in issues:
+        number = int(issue.get("number") or 0)
+        labels = issue_labels(issue)
+        if labels & (ACTIVE_LABELS | EXHAUSTED_LABELS):
+            continue
+        if "genesis-autonomous" not in labels:
+            continue
+        eligible, target = _eligible_retry_target(issue, root)
+        if not eligible:
+            continue
+        comments = _request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
+        if not pre_repair_failure_after_marker(comments, marker):
+            continue
+
+        for row in comments:
+            if not isinstance(row, dict):
+                continue
+            body = str(row.get("body") or "")
+            if body.startswith("<!-- genesis-oldest-real-issue-solver -->") or body.startswith("<!-- genesis-priority-issue-solver -->"):
+                rolled_back = rollback_attempt_status(body)
+                if rolled_back != body:
+                    _request(repository, token, "PATCH", f"/issues/comments/{row['id']}", {"body": rolled_back})
+
+        _request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/labels",
+            {"labels": ["genesis-blocked", "genesis-solver-exhausted"]},
+        )
+        encoded = urllib.parse.quote("genesis-autonomous", safe="")
+        _request(repository, token, "DELETE", f"/issues/{number}/labels/{encoded}")
+        _request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/comments",
+            {
+                "body": (
+                    marker
+                    + "\nGenesis worker failed before repair evidence existed, so this dispatch did not consume a coding attempt. "
+                    + "The issue is quarantined for this repair-engine generation to prevent successor wakeups from repeatedly spending infrastructure runs. "
+                    + f"It can be released automatically after a repair capability change. Engine generation: `{generation}`. Target: `{target}`."
+                )
+            },
+        )
+        quarantined.add(number)
+        result["infrastructure_quarantined"].append({"issue": number, "target": target})
+
+    for issue in issues:
         if len(result["released"]) >= max(1, limit):
             break
         number = int(issue.get("number") or 0)
+        if number in quarantined:
+            continue
         labels = issue_labels(issue)
-        eligible, reason = eligible_generation_retry_issue(issue, root)
+        eligible, reason = eligible_exhausted_issue(issue, root)
         if not eligible:
-            if labels & GENERATION_RETRY_LABELS:
+            if labels & EXHAUSTED_LABELS:
                 result["skipped"].append({"issue": number, "reason": reason})
             continue
 
@@ -203,12 +298,7 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
                 if reset != body:
                     _request(repository, token, "PATCH", f"/issues/comments/{row['id']}", {"body": reset})
 
-        for label in (
-            "genesis-solver-exhausted",
-            "genesis-priority-exhausted",
-            "genesis-blocked",
-            INFRASTRUCTURE_BLOCKED_LABEL,
-        ):
+        for label in ("genesis-solver-exhausted", "genesis-priority-exhausted", "genesis-blocked"):
             encoded = urllib.parse.quote(label, safe="")
             _request(repository, token, "DELETE", f"/issues/{number}/labels/{encoded}")
 
@@ -220,7 +310,7 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
             {
                 "body": (
                     marker
-                    + "\nGenesis repair capability changed. This previously exhausted or infrastructure-blocked Issue is released for one new bounded solver generation. "
+                    + "\nGenesis repair capability changed. This previously exhausted Issue is released for one new bounded solver generation. "
                     + f"Engine generation: `{generation}`. Existing safety, target, validation and attempt limits remain unchanged."
                 )
             },
