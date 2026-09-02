@@ -5,6 +5,7 @@ from pathlib import Path
 import pytest
 
 from genesis.coding import CodingModule
+from scripts.requeue_exhausted_issues import ENGINE_PATHS
 
 
 TARGET = "genesis/large_existing_target.py"
@@ -81,3 +82,7 @@ def test_compact_edit_replacement_byte_limit_remains_enforced(tmp_path: Path) ->
             },
             "bounded-model-route",
         )
+
+
+def test_compact_edit_budget_policy_changes_repair_engine_generation() -> None:
+    assert "genesis/compact_edit_budget.py" in ENGINE_PATHS
