@@ -29,6 +29,8 @@ ACTIVE_LABELS = {
     "genesis-priority-claim",
 }
 EXHAUSTED_LABELS = {"genesis-solver-exhausted", "genesis-priority-exhausted"}
+INFRASTRUCTURE_BLOCKED_LABEL = "genesis-infrastructure-blocked"
+GENERATION_RETRY_LABELS = EXHAUSTED_LABELS | {INFRASTRUCTURE_BLOCKED_LABEL}
 PROTECTED_TARGETS = {
     "genesis/autonomy_guard.py",
     "genesis/autonomy_proof.py",
@@ -76,10 +78,8 @@ def issue_labels(issue: dict) -> set[str]:
     return result
 
 
-def eligible_exhausted_issue(issue: dict, root: Path = ROOT) -> tuple[bool, str]:
+def _eligible_retry_target(issue: dict, root: Path) -> tuple[bool, str]:
     labels = issue_labels(issue)
-    if not labels & EXHAUSTED_LABELS:
-        return False, "not_exhausted"
     if labels & ACTIVE_LABELS:
         return False, "active"
 
@@ -110,6 +110,18 @@ def eligible_exhausted_issue(issue: dict, root: Path = ROOT) -> tuple[bool, str]
     if not (root / target).is_file():
         return False, "missing_target"
     return True, target
+
+
+def eligible_exhausted_issue(issue: dict, root: Path = ROOT) -> tuple[bool, str]:
+    if not issue_labels(issue) & EXHAUSTED_LABELS:
+        return False, "not_exhausted"
+    return _eligible_retry_target(issue, root)
+
+
+def eligible_generation_retry_issue(issue: dict, root: Path = ROOT) -> tuple[bool, str]:
+    if not issue_labels(issue) & GENERATION_RETRY_LABELS:
+        return False, "not_generation_blocked"
+    return _eligible_retry_target(issue, root)
 
 
 def reset_attempt_status(body: str) -> str:
@@ -170,9 +182,10 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
         if len(result["released"]) >= max(1, limit):
             break
         number = int(issue.get("number") or 0)
-        eligible, reason = eligible_exhausted_issue(issue, root)
+        labels = issue_labels(issue)
+        eligible, reason = eligible_generation_retry_issue(issue, root)
         if not eligible:
-            if issue_labels(issue) & EXHAUSTED_LABELS:
+            if labels & GENERATION_RETRY_LABELS:
                 result["skipped"].append({"issue": number, "reason": reason})
             continue
 
@@ -190,7 +203,12 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
                 if reset != body:
                     _request(repository, token, "PATCH", f"/issues/comments/{row['id']}", {"body": reset})
 
-        for label in ("genesis-solver-exhausted", "genesis-priority-exhausted", "genesis-blocked"):
+        for label in (
+            "genesis-solver-exhausted",
+            "genesis-priority-exhausted",
+            "genesis-blocked",
+            INFRASTRUCTURE_BLOCKED_LABEL,
+        ):
             encoded = urllib.parse.quote(label, safe="")
             _request(repository, token, "DELETE", f"/issues/{number}/labels/{encoded}")
 
@@ -202,7 +220,7 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
             {
                 "body": (
                     marker
-                    + "\nGenesis repair capability changed. This previously exhausted Issue is released for one new bounded solver generation. "
+                    + "\nGenesis repair capability changed. This previously exhausted or infrastructure-blocked Issue is released for one new bounded solver generation. "
                     + f"Engine generation: `{generation}`. Existing safety, target, validation and attempt limits remain unchanged."
                 )
             },
