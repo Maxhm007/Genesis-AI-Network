@@ -68,6 +68,17 @@ from .coding_provider_policy import install_coding_provider_policy as _install_c
 _install_coding_provider_policy()
 del _install_coding_provider_policy
 
+# Full-file model proposals retain the strict total-byte ceiling. Compact edits are
+# independently bounded by edit count/replacement bytes, so do not charge them for
+# repository content that already existed before the model's edit. Materialized
+# candidates still pass ordinary path, syntax, review, validation, and promotion gates.
+from .compact_edit_budget import (
+    install_compact_edit_materialization_budget as _install_compact_edit_materialization_budget,
+)
+
+_install_compact_edit_materialization_budget()
+del _install_compact_edit_materialization_budget
+
 # System-level GitHub issues may legitimately point at bounded scripts rather than
 # ordinary package code. Keep scripts outside the normal self-development sandbox,
 # ground repair context in the requested outcome, and force any script proposal
