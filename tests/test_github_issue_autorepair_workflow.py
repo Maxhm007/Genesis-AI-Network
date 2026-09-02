@@ -42,7 +42,7 @@ def test_worker_uses_free_replaceable_bounded_coder() -> None:
     assert "Qwen/Qwen2.5-Coder-0.5B-Instruct" in text
     assert "Qwen/Qwen2.5-Coder-1.5B-Instruct" in text
     assert "GENESIS_PROVIDER_MAX_NEW_TOKENS: '512'" in text
-    assert "GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS: '512'" in text
+    assert "GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS: '128'" in text
     assert "GENESIS_PROVIDER_TIMEOUT_SECONDS: '300'" in text
     assert "scripts/pulse_coding_provider.py" in text
 
