@@ -15,6 +15,7 @@ RUNTIME = ROOT / "runtime"
 EVIDENCE_PATH = RUNTIME / "exhausted_issue_requeue.json"
 ENGINE_PATHS = (
     "genesis/coding.py",
+    "genesis/compact_edit_budget.py",
     "scripts/github_issue_autorepair.py",
     "genesis/learned_capabilities.py",
 )
