@@ -10,6 +10,7 @@ on:
     paths:
       - .github/workflows/github-issue-terminal-reconciler.yml
       - genesis/github_issue_cleanup.py
+      - genesis/github_issue_legacy_cleanup.py
       - genesis/github_issue_terminal_reconciler.py
 
 permissions:
@@ -57,6 +58,7 @@ jobs:
           from pathlib import Path
 
           from genesis.github_issue_cleanup import cleanup_obsolete_github_issues
+          from genesis.github_issue_legacy_cleanup import cleanup_legacy_managed_duplicates
           from genesis.github_issue_terminal_reconciler import reconcile_terminal_github_issues
 
           cleanup = cleanup_obsolete_github_issues(Path('.'))
@@ -64,6 +66,12 @@ jobs:
           print(json.dumps(cleanup, indent=2, sort_keys=True))
           if cleanup.get('status') not in {'ok', 'not_repository_runtime'}:
               raise SystemExit(f"issue cleanup failed: {cleanup}")
+
+          legacy = cleanup_legacy_managed_duplicates(Path('.'))
+          print("Legacy managed cleanup:")
+          print(json.dumps(legacy, indent=2, sort_keys=True))
+          if legacy.get('status') not in {'ok', 'not_repository_runtime'}:
+              raise SystemExit(f"legacy issue cleanup failed: {legacy}")
 
           result = reconcile_terminal_github_issues(Path('.'))
           print("Terminal reconciliation:")
