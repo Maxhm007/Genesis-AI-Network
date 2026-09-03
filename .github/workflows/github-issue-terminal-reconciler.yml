@@ -9,6 +9,7 @@ on:
       - main
     paths:
       - .github/workflows/github-issue-terminal-reconciler.yml
+      - genesis/github_issue_cleanup.py
       - genesis/github_issue_terminal_reconciler.py
 
 permissions:
@@ -44,7 +45,7 @@ jobs:
             genesis-terminal-runtime-
             gene-runtime-gene-node-1-
 
-      - name: Reconcile terminal Issue-backed work
+      - name: Cleanup obsolete Issue records and reconcile terminal work
         env:
           GITHUB_TOKEN: ${{ github.token }}
           PYTHONPATH: ${{ github.workspace }}
@@ -55,9 +56,17 @@ jobs:
           import json
           from pathlib import Path
 
+          from genesis.github_issue_cleanup import cleanup_obsolete_github_issues
           from genesis.github_issue_terminal_reconciler import reconcile_terminal_github_issues
 
+          cleanup = cleanup_obsolete_github_issues(Path('.'))
+          print("Issue cleanup:")
+          print(json.dumps(cleanup, indent=2, sort_keys=True))
+          if cleanup.get('status') not in {'ok', 'not_repository_runtime'}:
+              raise SystemExit(f"issue cleanup failed: {cleanup}")
+
           result = reconcile_terminal_github_issues(Path('.'))
+          print("Terminal reconciliation:")
           print(json.dumps(result, indent=2, sort_keys=True))
           if result.get('status') not in {'ok', 'not_repository_runtime'}:
               raise SystemExit(f"terminal reconciliation failed: {result}")
