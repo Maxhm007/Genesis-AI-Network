@@ -1,158 +1,17 @@
-# Task #3 real-code regression detection proof
+# Disabled: the original closed-loop proof has completed its purpose.
+# Keep this workflow only as an inert manual marker so it cannot create test issues,
+# write detector heartbeats, mutate repository files, or self-dispatch successor runs.
 name: Genesis Tiny Problem Detection Test
 
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-basic-loop-test.yml
 
 permissions:
-  contents: write
-  issues: write
-  actions: write
-
-concurrency:
-  group: genesis-tiny-problem-detection-test
-  cancel-in-progress: true
+  contents: read
 
 jobs:
-  continuous-detector:
+  disabled:
     runs-on: ubuntu-latest
-    timeout-minutes: 340
     steps:
-      - name: Checkout
-        uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Run detector loop
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          set -euo pipefail
-
-          git config user.name 'Genesis Tiny Detector'
-          git config user.email 'genesis-tiny-detector@users.noreply.github.com'
-
-          if [ "$GITHUB_EVENT_NAME" = "push" ]; then
-            interval=20
-            max_cycles=3
-            echo "Bootstrap proof mode: 3 cycles, 20 seconds apart"
-          else
-            interval=300
-            max_cycles=64
-            echo "Continuous mode: 64 cycles, 5 minutes apart"
-          fi
-
-          for cycle in $(seq 1 "$max_cycles"); do
-            echo "=== Genesis detector cycle $cycle/$max_cycles ==="
-
-            git fetch origin main
-            git reset --hard origin/main
-            detector_result="healthy_no_problem"
-
-            # Task #3: detect one real, isolated Python logic regression and create
-            # a normal repair issue. The detector must not repair or close it.
-            if grep -Fq 'return after_percent > before_percent - regression_tolerance' genesis/modules/versioning.py; then
-              echo "Detected real code regression: ModuleVersionManager.should_rollback comparison is reversed"
-
-              issue_number=$(gh issue list \
-                --repo "$GITHUB_REPOSITORY" \
-                --state open \
-                --search '\"[Genesis Detected] Fix reversed rollback comparison\" in:title' \
-                --json number \
-                --jq '.[0].number // empty')
-
-              if [ -z "$issue_number" ]; then
-                body=$(printf '%s\n' \
-                  'Genesis autonomously detected a real logic regression in the module version rollback decision.' \
-                  '' \
-                  '- **Target:** `genesis/modules/versioning.py`' \
-                  '- **Observed defect:** `ModuleVersionManager.should_rollback()` currently uses `after_percent > before_percent - regression_tolerance`.' \
-                  '- **Expected behavior:** rollback is required only when the post-change score is lower than the pre-change score beyond the allowed regression tolerance.' \
-                  '- **Verification:** the corrected target must compile and the repository test suite must pass before this issue is closed.' \
-                  '' \
-                  'This issue was created by the Genesis detector. The detector must not repair or close it; the normal Genesis Issue Solver / bounded repair path owns resolution.')
-                response=$(gh api "repos/${GITHUB_REPOSITORY}/issues" \
-                  --method POST \
-                  -f title='[Genesis Detected] Fix reversed rollback comparison' \
-                  -f body="$body")
-                issue_number=$(printf '%s' "$response" | jq -r '.number')
-                echo "Opened real-code repair issue #$issue_number"
-              else
-                echo "Using existing real-code repair issue #$issue_number"
-              fi
-
-              detector_result="real_code_problem_detected_issue_${issue_number}"
-            fi
-
-            if [ ! -f genesis_detected_issue_status.txt ]; then
-              echo "Detected problem: genesis_detected_issue_status.txt is missing"
-
-              issue_number=$(gh issue list \
-                --repo "$GITHUB_REPOSITORY" \
-                --state open \
-                --search '\"[Genesis Detected] Missing tiny status file\" in:title' \
-                --json number \
-                --jq '.[0].number // empty')
-
-              if [ -z "$issue_number" ]; then
-                body='Genesis detected that genesis_detected_issue_status.txt was missing. This issue must remain open until Genesis creates the file, verifies its expected content, records the commit, and closes this same issue.'
-                response=$(gh api "repos/${GITHUB_REPOSITORY}/issues" \
-                  --method POST \
-                  -f title='[Genesis Detected] Missing tiny status file' \
-                  -f body="$body")
-                issue_number=$(printf '%s' "$response" | jq -r '.number')
-                echo "Opened issue #$issue_number"
-              else
-                echo "Using existing open issue #$issue_number"
-              fi
-
-              printf 'Genesis detected and resolved a tiny repository problem\nIssue: #%s\nRun: %s\nCycle: %s\n' \
-                "$issue_number" "$GITHUB_RUN_ID" "$cycle" > genesis_detected_issue_status.txt
-
-              git add genesis_detected_issue_status.txt
-              git commit -m "Genesis resolves detected issue #${issue_number}"
-              git push origin HEAD:main
-
-              test -f genesis_detected_issue_status.txt
-              grep -Fx 'Genesis detected and resolved a tiny repository problem' genesis_detected_issue_status.txt
-              grep -Fx "Issue: #${issue_number}" genesis_detected_issue_status.txt
-
-              commit_sha=$(git rev-parse HEAD)
-              gh issue close "$issue_number" \
-                --repo "$GITHUB_REPOSITORY" \
-                --comment "Genesis detected the missing file, fixed it, and verified the result. Commit: $commit_sha"
-
-              detector_result="problem_detected_resolved_issue_${issue_number}"
-              echo "Detected, fixed, verified, and closed issue #$issue_number"
-            fi
-
-            heartbeat_utc=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-            printf 'Genesis detector heartbeat\nUTC: %s\nRun: %s\nCycle: %s/%s\nResult: %s\nNext check seconds: %s\n' \
-              "$heartbeat_utc" "$GITHUB_RUN_ID" "$cycle" "$max_cycles" "$detector_result" "$interval" \
-              > genesis_detector_heartbeat.txt
-
-            git add genesis_detector_heartbeat.txt
-            git commit -m "Genesis detector heartbeat ${GITHUB_RUN_ID}/${cycle}"
-            git push origin HEAD:main
-            echo "Heartbeat recorded at $heartbeat_utc: $detector_result"
-
-            if [ "$cycle" -lt "$max_cycles" ]; then
-              echo "Next check in $interval seconds"
-              sleep "$interval"
-            fi
-          done
-
-      - name: Start successor detector run
-        if: ${{ always() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          echo "Starting successor Genesis detector run"
-          gh api \
-            --method POST \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/genesis-basic-loop-test.yml/dispatches" \
-            -f ref=main
+      - name: Tiny test disabled
+        run: echo "Genesis Tiny Problem Detection Test is disabled."
