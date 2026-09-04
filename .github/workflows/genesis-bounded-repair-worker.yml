@@ -204,6 +204,8 @@ jobs:
             fi
           done
 
+          gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""' > /tmp/genesis-issue-body.md
+
           promoted_sha=''
           for integration_attempt in 1 2 3; do
             echo "Integration attempt ${integration_attempt}/3"
@@ -213,6 +215,14 @@ jobs:
               git cherry-pick --abort || true
               continue
             fi
+
+            integrated_base=$(git rev-parse HEAD^)
+            git show "${integrated_base}:${TARGET}" > /tmp/genesis-semantic-base.py
+            python -m genesis.learned_capability_acceptance \
+              --issue-body-file /tmp/genesis-issue-body.md \
+              --target "$TARGET" \
+              --base-file /tmp/genesis-semantic-base.py \
+              --candidate-file "$TARGET"
 
             python -m py_compile "$TARGET"
             if [[ -f "$target_test" ]]; then
