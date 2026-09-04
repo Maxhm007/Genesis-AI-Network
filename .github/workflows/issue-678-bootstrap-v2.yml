@@ -1,0 +1,66 @@
+name: Issue 678 Semantic Acceptance Validation
+
+on:
+  push:
+    branches:
+      - genesis/fix-678-semantic-acceptance-v2
+    paths:
+      - .github/workflows/issue-678-bootstrap-v2.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: genesis/fix-678-semantic-acceptance-v2
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply exact issue 678 existing-file edits
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import base64
+          from pathlib import Path
+
+          learned = Path('genesis/learned_capabilities.py')
+          text = learned.read_text(encoding='utf-8')
+          needle = base64.b64decode('ICAgIGlmIGNhbmRpZGF0ZSBhbmQgY2FuZGlkYXRlIGluIGNob2ljZXM6CiAgICAgICAgcmV0dXJuIGNhbmRpZGF0ZQogICAgaW1wb3J0IHRvcmNoCgpyZWdpc3Rlcl9jYXBhYmlsaXR5KAogICAgJ3J1bnRpbWVfZGV2aWNlX2FsaWdubWVudF8yYWI0OGVkZWYwMDknLA==').decode()
+          replacement = base64.b64decode('ICAgIGlmIGNhbmRpZGF0ZSBhbmQgY2FuZGlkYXRlIGluIGNob2ljZXM6CiAgICAgICAgcmV0dXJuIGNhbmRpZGF0ZQogICAgcGFzcwoKcmVnaXN0ZXJfY2FwYWJpbGl0eSgKICAgICdydW50aW1lX2RldmljZV9hbGlnbm1lbnRfMmFiNDhlZGVmMDA5Jyw=').decode()
+          if text.count(needle) != 1:
+              raise SystemExit('expected exactly one invalid #427 import torch patch')
+          learned.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
+
+          worker = Path('.github/workflows/genesis-bounded-repair-worker.yml')
+          body = worker.read_text(encoding='utf-8')
+          old = base64.b64decode('ICAgICAgICAgIHByb21vdGVkX3NoYT0nJwogICAgICAgICAgZm9yIGludGVncmF0aW9uX2F0dGVtcHQgaW4gMSAyIDM7IGRvCiAgICAgICAgICAgIGVjaG8gIkludGVncmF0aW9uIGF0dGVtcHQgJHtpbnRlZ3JhdGlvbl9hdHRlbXB0fS8zIgogICAgICAgICAgICBnaXQgZmV0Y2ggb3JpZ2luIG1haW4KICAgICAgICAgICAgZ2l0IGNoZWNrb3V0IC1CICJnZW5lc2lzL2ludGVncmF0aW9uLSR7SVNTVUVfTlVNQkVSfS0ke0dJVEhVQl9SVU5fSUR9IiBvcmlnaW4vbWFpbgogICAgICAgICAgICBpZiAhIGdpdCBjaGVycnktcGljayAiJENBTkRJREFURV9TSEEiOyB0aGVuCiAgICAgICAgICAgICAgZ2l0IGNoZXJyeS1waWNrIC0tYWJvcnQgfHwgdHJ1ZQogICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgIGZpCgogICAgICAgICAgICBweXRob24gLW0gcHlfY29tcGlsZSAiJFRBUkdFVCIK').decode()
+          new = base64.b64decode('ICAgICAgICAgIGdoIGlzc3VlIHZpZXcgIiRJU1NVRV9OVU1CRVIiIC0tcmVwbyAiJEdJVEhVQl9SRVBPU0lUT1JZIiAtLWpzb24gYm9keSAtLWpxICcuYm9keSAvLyAiIicgPiAvdG1wL2dlbmVzaXMtaXNzdWUtYm9keS5tZAoKICAgICAgICAgIHByb21vdGVkX3NoYT0nJwogICAgICAgICAgZm9yIGludGVncmF0aW9uX2F0dGVtcHQgaW4gMSAyIDM7IGRvCiAgICAgICAgICAgIGVjaG8gIkludGVncmF0aW9uIGF0dGVtcHQgJHtpbnRlZ3JhdGlvbl9hdHRlbXB0fS8zIgogICAgICAgICAgICBnaXQgZmV0Y2ggb3JpZ2luIG1haW4KICAgICAgICAgICAgZ2l0IGNoZWNrb3V0IC1CICJnZW5lc2lzL2ludGVncmF0aW9uLSR7SVNTVUVfTlVNQkVSfS0ke0dJVEhVQl9SVU5fSUR9IiBvcmlnaW4vbWFpbgogICAgICAgICAgICBpZiAhIGdpdCBjaGVycnktcGljayAiJENBTkRJREFURV9TSEEiOyB0aGVuCiAgICAgICAgICAgICAgZ2l0IGNoZXJyeS1waWNrIC0tYWJvcnQgfHwgdHJ1ZQogICAgICAgICAgICAgIGNvbnRpbnVlCiAgICAgICAgICAgIGZpCgogICAgICAgICAgICBpbnRlZ3JhdGVkX2Jhc2U9JChnaXQgcmV2LXBhcnNlIEhFQUReKQogICAgICAgICAgICBnaXQgc2hvdyAiJHtpbnRlZ3JhdGVkX2Jhc2V9OiR7VEFSR0VUfSIgPiAvdG1wL2dlbmVzaXMtc2VtYW50aWMtYmFzZS5weQogICAgICAgICAgICBweXRob24gLW0gZ2VuZXNpcy5sZWFybmVkX2NhcGFiaWxpdHlfYWNjZXB0YW5jZSBcCiAgICAgICAgICAgICAgLS1pc3N1ZS1ib2R5LWZpbGUgL3RtcC9nZW5l<SECRET>9kaWUtbWFya2Rvd24gXAogICAgICAgICAgICAgIC0tdGFyZ2V0ICIkVEFSR0VUIiBcCiAgICAgICAgICAgICAgLS1iYXNlLWZpbGUgL3RtcC9nZW5lc2lzLXNlbWFudGljLWJhc2UucHkgXAogICAgICAgICAgICAgIC0tY2FuZGlkYXRlLWZpbGUgIiRUQVJHRVQiCgogICAgICAgICAgICBweXRob24gLW0gcHlfY29tcGlsZSAiJFRBUkdFVCIK').decode()
+          if body.count(old) != 1:
+              raise SystemExit('bounded worker semantic-gate insertion point not found exactly once')
+          worker.write_text(body.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Focused semantic acceptance tests
+        run: |
+          python -m pytest -q tests/test_learned_capability_acceptance.py
+          python -m py_compile genesis/learned_capabilities.py genesis/learned_capability_acceptance.py
+      - name: Full repository tests
+        run: python -m pytest -q
+      - name: Commit tested repair and self-delete helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/issue-678-bootstrap-v2.yml
+          git config user.name "Genesis Repair"
+          git config user.email "genesis-ai@users.noreply.github.com"
+          git add genesis/learned_capabilities.py .github/workflows/genesis-bounded-repair-worker.yml .github/workflows/issue-678-bootstrap-v2.yml
+          git commit -m "Complete semantic acceptance repair (#678)"
+          git push origin HEAD:genesis/fix-678-semantic-acceptance-v2
