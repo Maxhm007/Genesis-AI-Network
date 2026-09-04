@@ -1,13 +1,21 @@
 # Disabled: the original closed-loop proof has completed its purpose.
-# Keep this workflow only as an inert manual marker so it cannot create test issues,
-# write detector heartbeats, mutate repository files, or self-dispatch successor runs.
+# This temporary inert push trigger uses the original concurrency group so an
+# already-running legacy detector is cancelled without creating new test work.
 name: Genesis Tiny Problem Detection Test
 
 on:
   workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-basic-loop-test.yml
 
 permissions:
   contents: read
+
+concurrency:
+  group: genesis-tiny-problem-detection-test
+  cancel-in-progress: true
 
 jobs:
   disabled:
