@@ -19,7 +19,7 @@ MANAGED_MARKER_RE = re.compile(
     re.IGNORECASE,
 )
 TARGET_RE = re.compile(r"^- \*\*Target:\*\* `([^`]+)`", re.MULTILINE)
-PYTHON_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])(genesis/[A-Za-z0-9_./-]+\.py)(?![A-Za-z0-9_/-])")
+PYTHON_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])(genesis/[A-Za-z0-9_./-]+\.py)(?![A-Za-z0-9_/-]|\.[A-Za-z0-9_-])")
 TASK_TYPE_RE = re.compile(r"^- \*\*Task type:\*\* `([^`]+)`", re.MULTILINE)
 PROTECTED_TARGETS = {
     "genesis/autonomy_guard.py",
