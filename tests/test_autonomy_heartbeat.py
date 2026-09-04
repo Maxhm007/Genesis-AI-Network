@@ -8,14 +8,15 @@ WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 WATCHER = Path(".github/workflows/genesis-action-failure-watcher.yml")
 
 
-def test_issue_creator_has_bounded_five_minute_continuity() -> None:
+def test_issue_creator_is_intentionally_manual_only_and_inert() -> None:
     text = CREATOR.read_text(encoding="utf-8")
 
-    assert "interval=300" in text
-    assert "max_cycles=64" in text
-    assert "Start successor detector run" in text
-    assert "genesis-basic-loop-test.yml/dispatches" in text
-    assert "cancel-in-progress: true" in text
+    assert "workflow_dispatch:" in text
+    assert "schedule:" not in text
+    assert "interval=300" not in text
+    assert "Start successor detector run" not in text
+    assert "genesis-basic-loop-test.yml/dispatches" not in text
+    assert "Genesis Tiny Problem Detection Test is disabled." in text
 
 
 def test_issue_controller_has_independent_scheduled_continuity() -> None:
