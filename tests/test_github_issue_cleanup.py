@@ -248,3 +248,20 @@ def test_repair_issue_with_python_path_is_not_inferred_into_single_file_lane(tmp
 
     assert result["routed"] == []
     assert "**Target:**" not in github.issues[355]["body"]
+
+def test_dotted_suffix_after_python_path_is_not_treated_as_safe_target(tmp_path: Path) -> None:
+    target = tmp_path / "genesis" / "example.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    github = FakeGithub([
+        _issue(
+            356,
+            title="[Genesis Task] backup artifact reference",
+            body="Evidence mentions genesis/example.py.bak only.",
+        )
+    ])
+
+    result = cleanup_obsolete_github_issues(tmp_path, requester=github)
+
+    assert result["routed"] == []
+    assert "**Target:**" not in github.issues[356]["body"]
