@@ -138,3 +138,113 @@ def test_different_fingerprints_stay_open_even_with_same_managed_title(tmp_path:
     assert result["closed"] == []
     assert github.issues[5]["state"] == "open"
     assert github.issues[429]["state"] == "open"
+
+
+def test_benchmark_runner_task_gets_deterministic_existing_target(tmp_path: Path) -> None:
+    target = tmp_path / "genesis" / "benchmark_execution.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    github = FakeGithub([
+        _issue(
+            350,
+            title="[Genesis Task] benchmark runner integration",
+            body=(
+                "- **Task type:** `benchmark_runner_integration`\n"
+                "Make the comparable benchmark runner executable."
+            ),
+        )
+    ])
+
+    result = cleanup_obsolete_github_issues(tmp_path, requester=github)
+
+    assert result["routed"] == [
+        {
+            "github_issue_number": 350,
+            "target": "genesis/benchmark_execution.py",
+            "reason": "task_type_map:benchmark_runner_integration",
+        }
+    ]
+    assert "- **Target:** `genesis/benchmark_execution.py`" in github.issues[350]["body"]
+
+
+def test_single_evidenced_python_path_is_routed_for_ordinary_task(tmp_path: Path) -> None:
+    target = tmp_path / "genesis" / "example.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    github = FakeGithub([
+        _issue(
+            351,
+            title="[Genesis Task] repair evidenced behavior",
+            body="Current failure evidence points to `genesis/example.py` only.",
+        )
+    ])
+
+    result = cleanup_obsolete_github_issues(tmp_path, requester=github)
+
+    assert result["routed"][0]["target"] == "genesis/example.py"
+    assert result["routed"][0]["reason"] == "single_evidenced_python_path"
+
+
+def test_ambiguous_or_protected_python_paths_are_not_routed(tmp_path: Path) -> None:
+    genesis = tmp_path / "genesis"
+    genesis.mkdir(parents=True)
+    (genesis / "one.py").write_text("VALUE = 1\n", encoding="utf-8")
+    (genesis / "two.py").write_text("VALUE = 2\n", encoding="utf-8")
+    (genesis / "security.py").write_text("VALUE = 3\n", encoding="utf-8")
+    github = FakeGithub([
+        _issue(
+            352,
+            title="[Genesis Task] ambiguous repair",
+            body="Evidence mentions genesis/one.py and genesis/two.py.",
+        ),
+        _issue(
+            353,
+            title="[Genesis Task] protected repair",
+            body="Evidence mentions only genesis/security.py.",
+        ),
+    ])
+
+    result = cleanup_obsolete_github_issues(tmp_path, requester=github)
+
+    assert result["routed"] == []
+    assert "**Target:**" not in github.issues[352]["body"]
+    assert "**Target:**" not in github.issues[353]["body"]
+
+
+def test_measurement_task_is_not_forced_into_generic_repair(tmp_path: Path) -> None:
+    target = tmp_path / "genesis" / "example.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    github = FakeGithub([
+        _issue(
+            354,
+            title="[Genesis Task] measured capability growth",
+            body=(
+                "Evidence mentions genesis/example.py.\n"
+                "The same comparable benchmark must show measured score improves."
+            ),
+        )
+    ])
+
+    result = cleanup_obsolete_github_issues(tmp_path, requester=github)
+
+    assert result["routed"] == []
+    assert "**Target:**" not in github.issues[354]["body"]
+
+
+def test_repair_issue_with_python_path_is_not_inferred_into_single_file_lane(tmp_path: Path) -> None:
+    target = tmp_path / "genesis" / "example.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    github = FakeGithub([
+        _issue(
+            355,
+            title="[Genesis Repair] control-plane repair",
+            body="One part mentions genesis/example.py but the repair may require other boundaries.",
+        )
+    ])
+
+    result = cleanup_obsolete_github_issues(tmp_path, requester=github)
+
+    assert result["routed"] == []
+    assert "**Target:**" not in github.issues[355]["body"]
