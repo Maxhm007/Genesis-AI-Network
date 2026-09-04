@@ -18,6 +18,32 @@ MANAGED_MARKER_RE = re.compile(
     r"<!--\s*(genesis-ops|genesis-chatgpt-escalation):([A-Za-z0-9._-]+)\s*-->",
     re.IGNORECASE,
 )
+TARGET_RE = re.compile(r"^- \*\*Target:\*\* `([^`]+)`", re.MULTILINE)
+PYTHON_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])(genesis/[A-Za-z0-9_./-]+\.py)(?![A-Za-z0-9_./-])")
+TASK_TYPE_RE = re.compile(r"^- \*\*Task type:\*\* `([^`]+)`", re.MULTILINE)
+PROTECTED_TARGETS = {
+    "genesis/autonomy_guard.py",
+    "genesis/autonomy_proof.py",
+    "genesis/blockchain.py",
+    "genesis/ephemeral_validator.py",
+    "genesis/security.py",
+    "genesis/selfdev.py",
+    "genesis/issue_solver.py",
+    "genesis/file_self_review.py",
+    "genesis/file_self_review_policy.py",
+}
+MEASUREMENT_PHRASES = (
+    "post-promotion benchmark",
+    "post-promotion remeasurement",
+    "benchmark re-measurement",
+    "benchmark remeasurement",
+    "measured score improves",
+    "same comparable benchmark",
+)
+TASK_TYPE_TARGETS = {
+    "benchmark_runner_integration": "genesis/benchmark_execution.py",
+}
+ROUTING_NOTE_HEADER = "### Genesis deterministic routing evidence"
 
 GithubRequester = Callable[[str, str, dict | None], object | None]
 
@@ -130,16 +156,84 @@ def _close_issue(
     }
 
 
+def _safe_existing_target(root: Path, target: str) -> bool:
+    candidate = str(target or "").strip().replace("\\", "/")
+    if not candidate.startswith("genesis/") or not candidate.endswith(".py"):
+        return False
+    if ".." in candidate or candidate in PROTECTED_TARGETS:
+        return False
+    return (root / candidate).is_file()
+
+
+def _task_type(body: str) -> str:
+    match = TASK_TYPE_RE.search(str(body or ""))
+    return match.group(1).strip() if match else ""
+
+
+def _routing_target(issue: dict, root: Path) -> tuple[str, str] | None:
+    """Return one conservative generic-code target when routing evidence is deterministic.
+
+    Existing explicit targets are left untouched. Inference is restricted to ordinary
+    ``[Genesis Task]`` records because repair/control/specialist issues can require
+    multi-file or non-code handling even when a Python path appears in prose.
+    """
+    title = str(issue.get("title") or "").strip()
+    body = str(issue.get("body") or "")
+    labels = _issue_labels(issue)
+    lower_title = title.lower()
+    lower_body = body.lower()
+
+    if TARGET_RE.search(body):
+        return None
+    if not title.startswith("[Genesis Task]"):
+        return None
+    if labels & {"genesis-solver-exhausted", "genesis-persistent", "genesis-control", "duplicate"}:
+        return None
+    if lower_title.startswith(("[genesis escalation]", "[genesis ops]")):
+        return None
+    if "external-authority / independent-secret provisioning blocker" in lower_body:
+        return None
+    if any(phrase in lower_body for phrase in MEASUREMENT_PHRASES):
+        return None
+
+    task_type = _task_type(body)
+    mapped = TASK_TYPE_TARGETS.get(task_type, "")
+    if mapped and _safe_existing_target(root, mapped):
+        return mapped, f"task_type_map:{task_type}"
+
+    candidates = sorted(set(PYTHON_PATH_RE.findall(body)))
+    if len(candidates) != 1:
+        return None
+    candidate = candidates[0]
+    if not _safe_existing_target(root, candidate):
+        return None
+    return candidate, "single_evidenced_python_path"
+
+
+def _append_routing_target(body: str, target: str, reason: str) -> str:
+    text = str(body or "").rstrip()
+    note = (
+        f"{ROUTING_NOTE_HEADER}\n"
+        f"- **Target:** `{target}`\n"
+        f"- **Routing basis:** `{reason}`\n\n"
+        "Genesis added this target only because the issue already supplied deterministic bounded routing evidence. "
+        "This does not waive tests, Security, protected-file rules, independent validation, or verified closure."
+    )
+    return f"{text}\n\n{note}\n" if text else f"{note}\n"
+
+
 def cleanup_obsolete_github_issues(
     root: Path,
     *,
     requester: GithubRequester | None = None,
 ) -> dict:
-    """Conservatively close Issue records that are explicitly obsolete or superseded.
+    """Conservatively close obsolete records and route deterministically inferable tasks.
 
-    This is record cleanup, not repair. It never treats age, title similarity, or a
-    failed repair attempt as closure evidence. Only explicit close labels or an exact
-    Genesis-managed marker/fingerprint supersession can close an Issue here.
+    Cleanup never treats age, title similarity, or a failed repair attempt as closure
+    evidence. Routing never invents a target: it is limited to an explicit task-type
+    mapping or exactly one safe current Python path already evidenced by an ordinary
+    Genesis Task. Specialist, measurement, protected and exhausted work stays out of
+    the generic repair lane.
     """
     root = Path(root).resolve()
     runtime = root / "runtime"
@@ -152,6 +246,7 @@ def cleanup_obsolete_github_issues(
         "enforced": bool(explicit_requester or issue_authority_enabled(root)),
         "scanned": 0,
         "closed": [],
+        "routed": [],
         "kept_current": [],
         "skipped_protected": [],
         "blocked": [],
@@ -236,8 +331,28 @@ def cleanup_obsolete_github_issues(
             else:
                 result["closed"].append(closed)
 
+    closed_numbers = {int(row["github_issue_number"]) for row in result["closed"]}
+    for issue in sorted(remaining, key=_issue_number):
+        number = _issue_number(issue)
+        if number <= 0 or number in closed_numbers:
+            continue
+        route = _routing_target(issue, root)
+        if route is None:
+            continue
+        target, reason = route
+        new_body = _append_routing_target(str(issue.get("body") or ""), target, reason)
+        updated = requester("PATCH", f"/issues/{number}", {"body": new_body})
+        if not isinstance(updated, dict) or str(updated.get("body") or "") != new_body:
+            result["blocked"].append(
+                {"github_issue_number": number, "reason": "deterministic_target_route_failed"}
+            )
+            continue
+        result["routed"].append(
+            {"github_issue_number": number, "target": target, "reason": reason}
+        )
+
     if result["blocked"]:
-        result["status"] = "partial" if result["closed"] else "blocked"
+        result["status"] = "partial" if result["closed"] or result["routed"] else "blocked"
     report_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result
 
