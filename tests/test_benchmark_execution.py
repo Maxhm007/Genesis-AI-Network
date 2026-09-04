@@ -2,7 +2,30 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import json
+
+from pathlib import Path
 from genesis.benchmark_execution import BenchmarkExecutionPlanner
+from genesis.modules.task_queue import PersistentTaskQueue
+from genesis.selfdev import normalize_selfdev_path
+
+def make_task(root: Path, benchmark_id: str = "terminal_bench_2_1"):
+    queue = PersistentTaskQueue(root / "runtime" / "genesis_tasks.sqlite3")
+    return queue.create(
+        f"Measure {benchmark_id}",
+        module_id="genesis.evaluation",
+        priority=92,
+        payload={
+            "task_type": "frontier_benchmark_measurement",
+            "benchmark": {"benchmark_id": benchmark_id},
+        },
+    )
+
+def quarantine(queue: PersistentTaskQueue, task_id: str) -> None:
+    queue.transition(task_id, "assigned", module_id="genesis.coding")
+    queue.transition(task_id, "running", module_id="genesis.coding")
+    queue.transition(task_id, "failed", module_id="genesis.coding")
+    queue.transition(task_id, "quarantined", module_id="genesis.coding")
 from genesis.modules.task_queue import PersistentTaskQueue
 from genesis.selfdev import normalize_selfdev_path
 
