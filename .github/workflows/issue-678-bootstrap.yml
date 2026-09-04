@@ -1,0 +1,247 @@
+name: Issue 678 Semantic Acceptance Bootstrap
+
+on:
+  push:
+    branches:
+      - genesis/fix-678-semantic-acceptance
+    paths:
+      - .github/workflows/issue-678-bootstrap.yml
+
+permissions:
+  contents: write
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: genesis/fix-678-semantic-acceptance
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply bounded issue 678 repair
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          learned = Path('genesis/learned_capabilities.py')
+          text = learned.read_text(encoding='utf-8')
+          needle = (
+              '    if candidate and candidate in choices:\n'
+              '        return candidate\n'
+              '    import torch\n\n'
+              'register_capability(\n'
+              "    'runtime_device_alignment_2ab48edef009',"
+          )
+          replacement = (
+              '    if candidate and candidate in choices:\n'
+              '        return candidate\n'
+              '    pass\n\n'
+              'register_capability(\n'
+              "    'runtime_device_alignment_2ab48edef009',"
+          )
+          if text.count(needle) != 1:
+              raise SystemExit('expected exactly one #427 invalid import torch patch')
+          learned.write_text(text.replace(needle, replacement, 1), encoding='utf-8')
+
+          module = Path('genesis/learned_capability_acceptance.py')
+          module.write_text('''from __future__ import annotations
+
+import argparse
+import ast
+import json
+from pathlib import Path
+
+
+LEARNED_CAPABILITY_TARGET = "genesis/learned_capabilities.py"
+_REQUIREMENT_PHRASES = (
+    "adds one registered executable capability",
+    "add one registered executable capability",
+    "new registered executable capability",
+)
+
+
+def requires_new_registration(issue_body: str, target: str) -> bool:
+    """Return whether this Issue explicitly requires a new learned capability registration."""
+    if str(target or "").strip().replace("\\\\", "/") != LEARNED_CAPABILITY_TARGET:
+        return False
+    lower = str(issue_body or "").lower()
+    return any(phrase in lower for phrase in _REQUIREMENT_PHRASES)
+
+
+def top_level_registration_names(source: str) -> set[str]:
+    """Parse executable top-level register_capability calls and return static names."""
+    tree = ast.parse(str(source or ""))
+    names: set[str] = set()
+    for node in tree.body:
+        if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+            continue
+        call = node.value
+        if not isinstance(call.func, ast.Name) or call.func.id != "register_capability":
+            continue
+        if len(call.args) < 4:
+            continue
+        name = call.args[0]
+        if isinstance(name, ast.Constant) and isinstance(name.value, str) and name.value.strip():
+            names.add(name.value.strip())
+    return names
+
+
+def validate_learned_capability_candidate(*, issue_body: str, target: str, base_source: str, candidate_source: str) -> dict:
+    """Independently enforce Issue-level learned-capability structural acceptance."""
+    required = requires_new_registration(issue_body, target)
+    result = {"required": required, "target": str(target or "")}
+    if not required:
+        result.update({"ok": True, "added_registrations": []})
+        return result
+    before = top_level_registration_names(base_source)
+    after = top_level_registration_names(candidate_source)
+    added = sorted(after - before)
+    result["added_registrations"] = added
+    result["ok"] = bool(added)
+    if not added:
+        raise ValueError(
+            "semantic acceptance failed: Issue requires a new registered executable "
+            "learned capability, but candidate adds no new top-level register_capability call"
+        )
+    return result
+
+
+def main() -> int:
+    parser = argparse.ArgumentParser()
+    parser.add_argument("--issue-body-file", required=True)
+    parser.add_argument("--target", required=True)
+    parser.add_argument("--base-file", required=True)
+    parser.add_argument("--candidate-file", required=True)
+    args = parser.parse_args()
+    result = validate_learned_capability_candidate(
+        issue_body=Path(args.issue_body_file).read_text(encoding="utf-8"),
+        target=args.target,
+        base_source=Path(args.base_file).read_text(encoding="utf-8"),
+        candidate_source=Path(args.candidate_file).read_text(encoding="utf-8"),
+    )
+    print(json.dumps(result, sort_keys=True))
+    return 0
+
+
+if __name__ == "__main__":
+    raise SystemExit(main())
+''', encoding='utf-8')
+
+          tests = Path('tests/test_learned_capability_acceptance.py')
+          tests.write_text('''import pytest
+
+from genesis.learned_capability_acceptance import (
+    requires_new_registration,
+    top_level_registration_names,
+    validate_learned_capability_candidate,
+)
+
+ISSUE_BODY = "Acceptance: The learned-capability module adds one registered executable capability."
+BASE = """\ndef old_handler():\n    return 1\n\nregister_capability('old', 'desc', 'evidence', old_handler)\n"""
+
+
+def test_issue_427_style_nonsemantic_patch_is_rejected():
+    candidate = BASE.replace("return 1", "import torch\n    return 1")
+    with pytest.raises(ValueError, match="adds no new top-level register_capability"):
+        validate_learned_capability_candidate(
+            issue_body=ISSUE_BODY,
+            target="genesis/learned_capabilities.py",
+            base_source=BASE,
+            candidate_source=candidate,
+        )
+
+
+def test_real_new_top_level_registration_is_accepted():
+    candidate = BASE + """\ndef new_handler():\n    return 2\n\nregister_capability('new', 'desc', 'evidence', new_handler)\n"""
+    result = validate_learned_capability_candidate(
+        issue_body=ISSUE_BODY,
+        target="genesis/learned_capabilities.py",
+        base_source=BASE,
+        candidate_source=candidate,
+    )
+    assert result["ok"] is True
+    assert result["added_registrations"] == ["new"]
+
+
+def test_comments_strings_and_nested_calls_do_not_count():
+    candidate = BASE + """\nTEXT = \"register_capability('fake', 'd', 'e', handler)\"\n# register_capability('comment', 'd', 'e', handler)\ndef later():\n    register_capability('nested', 'd', 'e', later)\n"""
+    assert top_level_registration_names(candidate) == {"old"}
+    with pytest.raises(ValueError):
+        validate_learned_capability_candidate(
+            issue_body=ISSUE_BODY,
+            target="genesis/learned_capabilities.py",
+            base_source=BASE,
+            candidate_source=candidate,
+        )
+
+
+def test_gate_only_applies_to_explicit_learned_capability_requirement():
+    assert requires_new_registration(ISSUE_BODY, "genesis/learned_capabilities.py") is True
+    assert requires_new_registration("Fix a bug.", "genesis/learned_capabilities.py") is False
+    assert requires_new_registration(ISSUE_BODY, "genesis/coding.py") is False
+''', encoding='utf-8')
+
+          workflow = Path('.github/workflows/genesis-bounded-repair-worker.yml')
+          body = workflow.read_text(encoding='utf-8')
+          old = '''          promoted_sha=''
+          for integration_attempt in 1 2 3; do
+            echo "Integration attempt ${integration_attempt}/3"
+            git fetch origin main
+            git checkout -B "genesis/integration-${ISSUE_NUMBER}-${GITHUB_RUN_ID}" origin/main
+            if ! git cherry-pick "$CANDIDATE_SHA"; then
+              git cherry-pick --abort || true
+              continue
+            fi
+
+            python -m py_compile "$TARGET"
+'''
+          new = '''          gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""' > /tmp/genesis-issue-body.md
+
+          promoted_sha=''
+          for integration_attempt in 1 2 3; do
+            echo "Integration attempt ${integration_attempt}/3"
+            git fetch origin main
+            git checkout -B "genesis/integration-${ISSUE_NUMBER}-${GITHUB_RUN_ID}" origin/main
+            if ! git cherry-pick "$CANDIDATE_SHA"; then
+              git cherry-pick --abort || true
+              continue
+            fi
+
+            integrated_base=$(git rev-parse HEAD^)
+            git show "${integrated_base}:${TARGET}" > /tmp/genesis-semantic-base.py
+            python -m genesis.learned_capability_acceptance \\
+              --issue-body-file /tmp/genesis-issue-body.md \\
+              --target "$TARGET" \\
+              --base-file /tmp/genesis-semantic-base.py \\
+              --candidate-file "$TARGET"
+
+            python -m py_compile "$TARGET"
+'''
+          if body.count(old) != 1:
+              raise SystemExit('bounded worker integration insertion point not found exactly once')
+          workflow.write_text(body.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Focused semantic acceptance tests
+        run: |
+          python -m pytest -q tests/test_learned_capability_acceptance.py
+          python -m py_compile genesis/learned_capabilities.py genesis/learned_capability_acceptance.py
+      - name: Full repository tests
+        run: python -m pytest -q
+      - name: Commit tested repair and remove temporary workflow
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/issue-678-bootstrap.yml
+          git config user.name "Genesis Repair"
+          git config user.email "genesis-ai@users.noreply.github.com"
+          git add genesis/learned_capabilities.py genesis/learned_capability_acceptance.py tests/test_learned_capability_acceptance.py .github/workflows/genesis-bounded-repair-worker.yml .github/workflows/issue-678-bootstrap.yml
+          git commit -m "Fix semantic acceptance gate for learned capabilities (#678)"
+          git push origin HEAD:genesis/fix-678-semantic-acceptance
