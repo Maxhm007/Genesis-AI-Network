@@ -1,0 +1,81 @@
+name: Issue 685 Clean Baseline Repair
+
+on:
+  push:
+    branches:
+      - genesis/fix-685-clean-baseline
+    paths:
+      - .github/workflows/issue-685-baseline.yml
+
+permissions:
+  contents: write
+
+jobs:
+  repair-and-test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: genesis/fix-685-clean-baseline
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply bounded baseline fixes
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          from pathlib import Path
+
+          cleanup = Path('genesis/github_issue_cleanup.py')
+          text = cleanup.read_text(encoding='utf-8')
+          old = 'PYTHON_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])(genesis/[A-Za-z0-9_./-]+\\.py)(?![A-Za-z0-9_./-])")'
+          new = 'PYTHON_PATH_RE = re.compile(r"(?<![A-Za-z0-9_./-])(genesis/[A-Za-z0-9_./-]+\\.py)(?![A-Za-z0-9_/-])")'
+          if text.count(old) != 1:
+              raise SystemExit('routing regex insertion point not found exactly once')
+          cleanup.write_text(text.replace(old, new, 1), encoding='utf-8')
+
+          test = Path('tests/test_autonomy_heartbeat.py')
+          text = test.read_text(encoding='utf-8')
+          old = '''def test_issue_creator_has_bounded_five_minute_continuity() -> None:
+    text = CREATOR.read_text(encoding="utf-8")
+
+    assert "interval=300" in text
+    assert "max_cycles=64" in text
+    assert "Start successor detector run" in text
+    assert "genesis-basic-loop-test.yml/dispatches" in text
+    assert "cancel-in-progress: true" in text
+'''
+          new = '''def test_issue_creator_is_intentionally_manual_only_and_inert() -> None:
+    text = CREATOR.read_text(encoding="utf-8")
+
+    assert "workflow_dispatch:" in text
+    assert "schedule:" not in text
+    assert "interval=300" not in text
+    assert "Start successor detector run" not in text
+    assert "genesis-basic-loop-test.yml/dispatches" not in text
+    assert "Genesis Tiny Problem Detection Test is disabled." in text
+'''
+          if text.count(old) != 1:
+              raise SystemExit('stale Tiny Test assertion block not found exactly once')
+          test.write_text(text.replace(old, new, 1), encoding='utf-8')
+          PY
+      - name: Install dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Focused baseline tests
+        run: |
+          python -m pytest -q tests/test_autonomy_heartbeat.py tests/test_github_issue_cleanup.py
+      - name: Full repository tests
+        run: python -m pytest -q
+      - name: Commit tested repair and self-delete helper
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/issue-685-baseline.yml
+          git config user.name "Genesis Repair"
+          git config user.email "genesis-ai@users.noreply.github.com"
+          git add genesis/github_issue_cleanup.py tests/test_autonomy_heartbeat.py .github/workflows/issue-685-baseline.yml
+          git commit -m "Restore clean test baseline (#685)"
+          git push origin HEAD:genesis/fix-685-clean-baseline
