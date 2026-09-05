@@ -24,6 +24,18 @@ def test_navigation_fallback_converts_buttons_to_hash_links(tmp_path: Path):
     assert "document.querySelectorAll('.nav [data-view]')" in html
 
 
+def test_navigation_fallback_selected_state_follows_hash_target(tmp_path: Path):
+    page = tmp_path / "index.html"
+    page.write_text(_page(), encoding="utf-8")
+    nav.patch_navigation(page)
+    html = page.read_text(encoding="utf-8")
+    assert 'genesis-target-aware-navigation' in html
+    assert 'body:has(.view:target) .nav a.active{background:transparent;color:#9eb2c8;box-shadow:none}' in html
+    assert 'body:has(#view-overview:target) .nav a[data-view="overview"]' in html
+    assert 'body:has(#view-issues:target) .nav a[data-view="issues"]' in html
+    assert 'body:has(#view-tasks:target) .nav a[data-view="tasks"]' in html
+
+
 def test_navigation_fallback_is_idempotent(tmp_path: Path):
     page = tmp_path / "index.html"
     page.write_text(_page(), encoding="utf-8")
@@ -33,6 +45,7 @@ def test_navigation_fallback_is_idempotent(tmp_path: Path):
     second = page.read_text(encoding="utf-8")
     assert first == second
     assert second.count('genesis-no-js-navigation') == 1
+    assert second.count('genesis-target-aware-navigation') == 1
 
 
 def test_navigation_fallback_rejects_missing_target(tmp_path: Path):
