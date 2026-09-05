@@ -1,0 +1,343 @@
+name: Genesis Bounded Repair Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Existing GitHub issue reserved by the Genesis Issue Solver
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: genesis-bounded-repair-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_NAME: genesis-adaptive-bounded-repair
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '300'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '512'
+  GENESIS_REPAIR_FALLBACK_MODEL: Qwen/Qwen2.5-Coder-0.5B-Instruct
+  GENESIS_REPAIR_ESCALATION_MODEL: Qwen/Qwen2.5-Coder-1.5B-Instruct
+  GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS: '128'
+  HF_HOME: ~/.cache/huggingface
+  PIP_CACHE_DIR: ~/.cache/pip
+
+jobs:
+  repair-and-promote:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify reservation and safe explicit target
+        id: eligibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_json=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels,body,title)
+          state=$(jq -r '.state' <<<"$issue_json")
+          reserved=$(jq -r '([.labels[].name] | index("genesis-repair-in-progress")) != null' <<<"$issue_json")
+          body=$(jq -r '.body // ""' <<<"$issue_json")
+          target=$(printf '%s\n' "$body" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
+
+          safe=true
+          if [[ "$state" != "OPEN" || "$reserved" != "true" ]]; then
+            safe=false
+          fi
+          if [[ -z "$target" || "$target" != genesis/*.py || "$target" == *".."* || ! -f "$target" ]]; then
+            safe=false
+          fi
+          case "$target" in
+            genesis/autonomy_guard.py|genesis/autonomy_proof.py|genesis/blockchain.py|genesis/ephemeral_validator.py|genesis/security.py|genesis/selfdev.py|genesis/issue_solver.py|genesis/file_self_review.py|genesis/file_self_review_policy.py)
+              safe=false
+              ;;
+          esac
+
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "eligible=$safe" >> "$GITHUB_OUTPUT"
+
+          if [[ "$safe" != "true" ]]; then
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-blocked >/dev/null || true
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress >/dev/null 2>&1 || true
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body "Genesis bounded repair declined this issue because it has no safe explicit production target, the target is protected, or the reservation is no longer valid. No code was changed. Worker run: ${GITHUB_RUN_ID}."
+          fi
+
+      - name: Install repository dependencies
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Verify clean repository baseline
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: python -m pytest -q
+
+      - name: Restore open-model cache
+        if: steps.eligibility.outputs.eligible == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/pip
+          key: genesis-bounded-qwen-coder-${{ runner.os }}-py312-v1
+          restore-keys: |
+            genesis-bounded-qwen-coder-${{ runner.os }}-py312-
+
+      - name: Install free local repair intelligence
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors
+
+      - name: Start adaptive local coding provider
+        if: steps.eligibility.outputs.eligible == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python scripts/pulse_coding_provider.py \
+            --model "$GENESIS_REPAIR_FALLBACK_MODEL" \
+            --escalation-model "$GENESIS_REPAIR_ESCALATION_MODEL" \
+            --host 127.0.0.1 \
+            --port 8766 \
+            --max-new-tokens "$GENESIS_PROVIDER_MAX_NEW_TOKENS" \
+            --escalation-max-new-tokens "$GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS" \
+            > /tmp/genesis-bounded-repair-provider.log 2>&1 &
+          ready=false
+          for i in {1..120}; do
+            if python - <<'PY'
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=2) as response:
+                  raise SystemExit(0 if response.status == 200 else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ready" != true ]]; then
+            cat /tmp/genesis-bounded-repair-provider.log || true
+            exit 1
+          fi
+
+      - name: Configure Genesis Git identity
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: |
+          git config user.name "Genesis AI"
+          git config user.email "genesis-ai@users.noreply.github.com"
+
+      - name: Run guarded Genesis repair engine
+        if: steps.eligibility.outputs.eligible == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous >/dev/null
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-blocked >/dev/null 2>&1 || true
+          python scripts/github_issue_autorepair.py --issue-number "$ISSUE_NUMBER" --repository "$GITHUB_REPOSITORY"
+
+      - name: Read repair evidence
+        if: steps.eligibility.outputs.eligible == 'true'
+        id: evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f runtime/github_issue_autorepair.json
+          status=$(jq -r '.status // ""' runtime/github_issue_autorepair.json)
+          candidate_branch=$(jq -r '.candidate_branch // ""' runtime/github_issue_autorepair.json)
+          candidate_sha=$(jq -r '.candidate_sha // ""' runtime/github_issue_autorepair.json)
+          echo "status=$status" >> "$GITHUB_OUTPUT"
+          echo "candidate_branch=$candidate_branch" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$candidate_sha" >> "$GITHUB_OUTPUT"
+          echo "Repair engine status: $status"
+
+      - name: Independently validate and promote exact candidate
+        if: steps.evidence.outputs.status == 'candidate_created'
+        id: promotion
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          TARGET: ${{ steps.eligibility.outputs.target }}
+          CANDIDATE_BRANCH: ${{ steps.evidence.outputs.candidate_branch }}
+          CANDIDATE_SHA: ${{ steps.evidence.outputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CANDIDATE_BRANCH"
+          test -n "$CANDIDATE_SHA"
+          git fetch origin main "$CANDIDATE_BRANCH"
+          git cat-file -e "${CANDIDATE_SHA}^{commit}"
+
+          target_test="tests/test_$(basename "$TARGET" .py).py"
+          mapfile -t changed_files < <(git diff-tree --no-commit-id --name-only -r "$CANDIDATE_SHA")
+          if (( ${#changed_files[@]} == 0 )); then
+            echo "Candidate contains no changed files" >&2
+            exit 1
+          fi
+          for path in "${changed_files[@]}"; do
+            if [[ "$path" != "$TARGET" && "$path" != "$target_test" ]]; then
+              echo "Rejected out-of-scope candidate path: $path" >&2
+              exit 1
+            fi
+          done
+
+          gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""' > /tmp/genesis-issue-body.md
+
+          promoted_sha=''
+          for integration_attempt in 1 2 3; do
+            echo "Integration attempt ${integration_attempt}/3"
+            git fetch origin main
+            git checkout -B "genesis/integration-${ISSUE_NUMBER}-${GITHUB_RUN_ID}" origin/main
+            if ! git cherry-pick "$CANDIDATE_SHA"; then
+              git cherry-pick --abort || true
+              continue
+            fi
+
+            integrated_base=$(git rev-parse HEAD^)
+            git show "${integrated_base}:${TARGET}" > /tmp/genesis-semantic-base.py
+            python -m genesis.learned_capability_acceptance \
+              --issue-body-file /tmp/genesis-issue-body.md \
+              --target "$TARGET" \
+              --base-file /tmp/genesis-semantic-base.py \
+              --candidate-file "$TARGET"
+
+            python -m py_compile "$TARGET"
+            if [[ -f "$target_test" ]]; then
+              python -m pytest -q "$target_test"
+            fi
+            python -m pytest -q
+
+            git fetch origin main
+            integrated_base=$(git rev-parse HEAD^)
+            latest_main=$(git rev-parse origin/main)
+            if [[ "$integrated_base" != "$latest_main" ]]; then
+              echo "main moved during validation; rebuilding on latest main"
+              continue
+            fi
+
+            if git push origin HEAD:main; then
+              promoted_sha=$(git rev-parse HEAD)
+              break
+            fi
+          done
+
+          if [[ -z "$promoted_sha" ]]; then
+            echo "Candidate could not be promoted safely after 3 integration attempts" >&2
+            exit 1
+          fi
+
+          git fetch origin main
+          git reset --hard origin/main
+          python -m py_compile "$TARGET"
+          if [[ -f "$target_test" ]]; then
+            python -m pytest -q "$target_test"
+          fi
+          python -m pytest -q
+
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "Genesis verified and promoted a bounded repair. Candidate: \`${CANDIDATE_SHA}\`. Promoted main SHA: \`${promoted_sha}\`. Verified target: \`${TARGET}\`. Evidence: target compilation, target-specific tests when present, and the full repository test suite passed after promotion. Worker run: ${GITHUB_RUN_ID}."
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-verified >/dev/null
+          for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-claimed genesis-working genesis-verifying genesis-blocked genesis-solver-exhausted; do
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+          done
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --method PATCH -f state=closed -f state_reason=completed >/dev/null
+          git push origin --delete "$CANDIDATE_BRANCH" >/dev/null 2>&1 || true
+          echo "promoted_sha=$promoted_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Release unsuccessful reservation safely
+        if: always() && steps.eligibility.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_state=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state')
+          if [[ "$issue_state" == "CLOSED" ]]; then
+            exit 0
+          fi
+
+          evidence_status=''
+          if [[ -f runtime/github_issue_autorepair.json ]]; then
+            evidence_status=$(jq -r '.status // ""' runtime/github_issue_autorepair.json)
+          fi
+
+          solver_attempt=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}/comments?per_page=100" \
+            | jq -r '[.[] | select((.body // "") | startswith("<!-- genesis-oldest-real-issue-solver -->"))][0].body // ""' \
+            | sed -nE 's/.*genesis-solver-attempt:([0-9]+).*/\1/p' \
+            | head -n1)
+          solver_attempt=${solver_attempt:-0}
+
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress >/dev/null 2>&1 || true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-validating >/dev/null 2>&1 || true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-claimed >/dev/null 2>&1 || true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-working >/dev/null 2>&1 || true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-verifying >/dev/null 2>&1 || true
+
+          terminal_deferred=false
+          if [[ "$evidence_status" == "blocked" || "$solver_attempt" -ge 3 ]]; then
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-blocked >/dev/null 2>&1 || true
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-deferred >/dev/null 2>&1 || true
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-autonomous >/dev/null 2>&1 || true
+            retry_state='terminally deferred under the current repair-engine generation; a changed repair engine may reopen it automatically'
+            terminal_deferred=true
+          else
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous >/dev/null 2>&1 || true
+            retry_state='issue remains open for the bounded retry policy'
+          fi
+
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+            --body "Genesis bounded repair did not promote a verified change in worker run ${GITHUB_RUN_ID} (repair status: \`${evidence_status:-worker_failed_before_evidence}\`, solver attempt: ${solver_attempt}/3). The repair reservation was released safely; ${retry_state}."
+
+          if [[ "$terminal_deferred" == "true" ]]; then
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+              --method PATCH -f state=closed -f state_reason=not_planned >/dev/null
+          fi
+
+      - name: Preserve bounded repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-bounded-repair-${{ inputs.issue_number }}-${{ github.run_id }}
+          path: |
+            runtime/github_issue_autorepair.json
+            /tmp/genesis-bounded-repair-provider.log
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Wake sequential controller for next issue
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! gh workflow run genesis-sequential-issue-controller.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main; then
+            echo 'Direct successor dispatch failed; workflow_run and cron fallbacks remain available.' >&2
+          fi

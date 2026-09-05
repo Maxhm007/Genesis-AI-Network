@@ -17,7 +17,10 @@ ENGINE_PATHS = (
     "genesis/coding.py",
     "genesis/compact_edit_budget.py",
     ".github/workflows/genesis-bounded-repair-worker.yml",
+    ".github/workflows/genesis-sequential-issue-controller.yml",
     "scripts/github_issue_autorepair.py",
+    "scripts/requeue_exhausted_issues.py",
+    "genesis/github_issue_cleanup.py",
     "genesis/learned_capabilities.py",
 )
 ACTIVE_LABELS = {
@@ -96,10 +99,6 @@ def _eligible_retry_target(issue: dict, root: Path) -> tuple[bool, str]:
         return False, "external_authority"
     if lower_title.startswith(("[genesis escalation] ai capability below target", "[genesis ops] ai capability below target")):
         return False, "umbrella_state"
-    if lower_title.startswith("genesis model lab:"):
-        return False, "umbrella_state"
-    if any(phrase in lower_body for phrase in MEASUREMENT_PHRASES):
-        return False, "measurement_lane"
 
     match = TARGET_RE.search(body)
     target = match.group(1).strip() if match else ""
