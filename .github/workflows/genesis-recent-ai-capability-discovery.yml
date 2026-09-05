@@ -2,12 +2,15 @@ name: Genesis Recent AI Capability Discovery
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '7 */6 * * *'
   push:
     branches: [main]
     paths:
       - .github/workflows/genesis-recent-ai-capability-discovery.yml
       - scripts/discover_recent_ai_capability.py
       - tests/test_recent_ai_capability_discovery.py
+      - tests/test_issue_discovery_workflows.py
 
 permissions:
   contents: read
@@ -16,7 +19,7 @@ permissions:
 
 concurrency:
   group: genesis-recent-ai-capability-discovery
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   discover-and-create-one-issue:
@@ -37,26 +40,24 @@ jobs:
         run: python -m pip install --disable-pip-version-check pytest
 
       - name: Verify discovery contract
-        run: python -m pytest -q tests/test_recent_ai_capability_discovery.py
+        run: python -m pytest -q tests/test_recent_ai_capability_discovery.py tests/test_issue_discovery_workflows.py
 
-      - name: Ensure discovery labels
+      - name: Ensure discovery labels idempotently
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          if ! gh label list --repo "$GITHUB_REPOSITORY" --limit 200 --json name --jq '.[].name' | grep -Fxq genesis-task; then
-            gh label create genesis-task \
-              --repo "$GITHUB_REPOSITORY" \
-              --color 0e8a16 \
-              --description 'Authoritative GitHub Issue backing for Genesis autonomous tasks'
-          fi
-          if ! gh label list --repo "$GITHUB_REPOSITORY" --limit 200 --json name --jq '.[].name' | grep -Fxq genesis-capability-discovery; then
-            gh label create genesis-capability-discovery \
-              --repo "$GITHUB_REPOSITORY" \
-              --color 5319e7 \
-              --description 'Created by the independent recent AI capability discovery task'
-          fi
+          gh label create genesis-task \
+            --repo "$GITHUB_REPOSITORY" \
+            --color 0e8a16 \
+            --description 'Authoritative GitHub Issue backing for Genesis autonomous tasks' \
+            --force
+          gh label create genesis-capability-discovery \
+            --repo "$GITHUB_REPOSITORY" \
+            --color 5319e7 \
+            --description 'Created by the independent recent AI capability discovery task' \
+            --force
 
       - name: Discover recent required AI capability every 30 minutes
         env:
@@ -66,9 +67,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          # GitHub native schedule delivery was previously unreliable for this
-          # repository, so use the proven bounded self-dispatch pattern.
-          if [[ "$GITHUB_EVENT_NAME" == "push" ]]; then
+          # A native six-hour schedule is the recovery anchor. Manual/successor
+          # runs retain the proven bounded 30-minute discovery loop.
+          if [[ "$GITHUB_EVENT_NAME" == "push" || "$GITHUB_EVENT_NAME" == "schedule" ]]; then
             max_cycles=1
           else
             max_cycles=9
@@ -84,8 +85,10 @@ jobs:
             # and all prior issues before creating anything.
             python scripts/discover_recent_ai_capability.py
 
-            echo "30-minute capability-discovery interval"
-            sleep 1800
+            if [[ "$cycle" -lt "$max_cycles" ]]; then
+              echo "30-minute capability-discovery interval"
+              sleep 1800
+            fi
           done
 
       - name: Start successor discovery run
