@@ -102,6 +102,23 @@ def test_issue_body_records_tabs_full_scope_target_and_acceptance(tmp_path: Path
     assert review.MARKER_PREFIX in body
 
 
+def test_runtime_feature_checks_ignore_reviewer_tests_and_workflow_vocabulary(tmp_path: Path):
+    _write(tmp_path, "docs/status/index.html", _dashboard())
+    _write(tmp_path, "scripts/dashboard_navigation_fallback.py", "# genesis-no-js-navigation\n")
+    _write(tmp_path, "scripts/dashboard_hourly_review.py", "# hashchange aria-current\n")
+    _write(tmp_path, "tests/test_dashboard_words.py", "# hashchange aria-current overview issues tasks\n")
+    _write(tmp_path, ".github/workflows/dashboard-review.yml", "# hashchange aria-current\n")
+    findings, _, files = review.review_dashboard(tmp_path)
+    keys = {finding.key for finding in findings}
+    assert "hash-history-not-synchronized" in keys
+    assert "active-tab-not-exposed-accessibly" in keys
+    assert any(review._display_repo_path(path) == "scripts/dashboard_hourly_review.py" for path in files)
+
+
+def test_display_repo_path_preserves_dot_github():
+    assert review._display_repo_path(Path(".github/workflows/dashboard.yml")) == ".github/workflows/dashboard.yml"
+
+
 def test_current_repository_dashboard_has_tabs_and_each_target_exists():
     html = Path("docs/status/index.html").read_text(encoding="utf-8")
     views = review.discover_views(html)
