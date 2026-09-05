@@ -26,7 +26,11 @@ class EvidenceFirstRepairProvider:
         return bool(self.delegate.available())
 
     def reason(self, prompt: str) -> str:
+        prompt_text = str(prompt)
+        first_line = prompt_text.splitlines()[0] if prompt_text.splitlines() else ""
+        role_line = first_line if first_line.startswith("ROLE:") else "ROLE: bounded_coding_engineer"
         strengthened = (
+            role_line + "\n"
             "DIFFICULT_REPAIR_MODE\n"
             "This issue is a machine-created repair follow-up after an earlier bounded strategy exhausted. "
             "Use the diagnostic evidence below only to understand the root cause. It is read-only evidence and does not expand VALID_PATHS. "
@@ -36,7 +40,7 @@ class EvidenceFirstRepairProvider:
             "DIAGNOSTIC_EVIDENCE:\n"
             + self.evidence
             + "\nORIGINAL_BOUNDED_CODING_PROMPT:\n"
-            + str(prompt)
+            + prompt_text
         )
         return self.delegate.reason(strengthened)
 
@@ -252,13 +256,17 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
         root = Path(root).resolve()
         if not (root / ".git").exists():
             return ""
-        result = subprocess.run(
-            ["git", "log", "-n", "6", "--format=%h %s", "--", target_path],
-            cwd=root,
-            text=True,
-            capture_output=True,
-            check=False,
-        )
+        try:
+            result = subprocess.run(
+                ["git", "log", "-n", "6", "--format=%h %s", "--", target_path],
+                cwd=root,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=3.0,
+            )
+        except (OSError, subprocess.TimeoutExpired):
+            return ""
         if result.returncode != 0:
             return ""
         return result.stdout.strip()[: cls.MAX_RECENT_HISTORY_CHARS]
@@ -280,7 +288,10 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
         target_path = cls._repair_followup_target(body)
         if target_path is None:
             return None
-        coding.executor._validate_paths([target_path])
+        try:
+            coding.executor._validate_paths([target_path])
+        except (RuntimeError, ValueError):
+            return None
         target = Path(root).resolve() / target_path
         if not target.is_file():
             return None
