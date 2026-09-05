@@ -1,0 +1,41 @@
+name: Issue 419 Validation
+
+on:
+  push:
+    branches:
+      - genesis/solve-419-secure-android-api
+    paths:
+      - .github/workflows/issue-419-validation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: genesis/solve-419-secure-android-api
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply issue 419 patch
+        run: python scripts/issue_419_patch.py
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Focused Android contract tests
+        run: python -m pytest -q tests/test_android_secure_api_config.py tests/test_android_dashboard.py tests/test_android_backup_body.py tests/test_android_emergency_pulse_contract.py
+      - name: Full repository tests
+        run: python -m pytest -q
+      - name: Commit tested change and remove temporary helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/issue-419-validation.yml scripts/issue_419_patch.py
+          git config user.name "Genesis Repair"
+          git config user.email "genesis-ai@users.noreply.github.com"
+          git add mobile/app/src/main/java/org/genesisai/mobile/MainActivity.java tests/test_android_secure_api_config.py .github/workflows/issue-419-validation.yml scripts/issue_419_patch.py
+          git commit -m "Harden Android API origin validation (#419)"
+          git push origin HEAD:genesis/solve-419-secure-android-api
