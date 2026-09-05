@@ -1,0 +1,41 @@
+name: Issue 500 Validation
+
+on:
+  push:
+    branches:
+      - genesis/solve-500-gene-lifecycle
+    paths:
+      - .github/workflows/issue-500-validation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: genesis/solve-500-gene-lifecycle
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Integrate lifecycle with Gene 0 core
+        run: python scripts/issue_500_core_patch.py
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Focused lifecycle tests
+        run: python -m pytest -q tests/test_gene_lifecycle.py
+      - name: Full repository tests
+        run: python -m pytest -q
+      - name: Commit tested implementation and remove temporary helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/issue-500-validation.yml scripts/issue_500_core_patch.py
+          git config user.name "Genesis Repair"
+          git config user.email "genesis-ai@users.noreply.github.com"
+          git add genesis/gene_lifecycle.py genesis/core_processor.py tests/test_gene_lifecycle.py .github/workflows/issue-500-validation.yml scripts/issue_500_core_patch.py
+          git commit -m "Add bounded Gene 0 lifecycle manager (#500)"
+          git push origin HEAD:genesis/solve-500-gene-lifecycle
