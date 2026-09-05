@@ -89,6 +89,34 @@ def _combined_text(files: Iterable[Path]) -> str:
     return "\n".join(_read(path) for path in files)
 
 
+def _display_repo_path(path: Path) -> str:
+    value = path.as_posix()
+    for marker in ("/docs/", "/scripts/", "/tests/", "/.github/"):
+        if marker in value:
+            return value[value.index(marker) + 1 :]
+    if value.startswith("./"):
+        return value[2:]
+    return value
+
+
+def runtime_dashboard_files(files: Iterable[Path]) -> list[Path]:
+    """Return implementation sources that can prove runtime dashboard behavior.
+
+    Tests, the hourly reviewer itself, and workflow text remain part of the full
+    audit manifest, but cannot satisfy runtime feature checks merely by naming
+    the behavior that the reviewer is searching for.
+    """
+    runtime: list[Path] = []
+    for path in files:
+        display = _display_repo_path(path)
+        if display == "scripts/dashboard_hourly_review.py":
+            continue
+        if display.startswith("tests/") or display.startswith(".github/workflows/"):
+            continue
+        runtime.append(path)
+    return runtime
+
+
 def review_dashboard(root: Path = Path(".")) -> tuple[list[Finding], list[str], list[Path]]:
     dashboard = root / DASHBOARD
     files = dashboard_files(root)
@@ -113,7 +141,7 @@ def review_dashboard(root: Path = Path(".")) -> tuple[list[Finding], list[str], 
 
     html = _read(dashboard)
     views = discover_views(html)
-    combined = _combined_text(files)
+    combined = _combined_text(runtime_dashboard_files(files))
     findings: list[Finding] = []
 
     if not views:
@@ -194,7 +222,7 @@ def review_dashboard(root: Path = Path(".")) -> tuple[list[Finding], list[str], 
                 priority=90,
                 title="Add a no-JavaScript fallback for every dashboard tab",
                 target="scripts/dashboard_navigation_fallback.py",
-                evidence="No dashboard-related file contains the genesis-no-js-navigation reliability marker.",
+                evidence="No runtime dashboard source contains the genesis-no-js-navigation reliability marker.",
                 acceptance=(
                     "All current data-view controls remain navigable if enhancement JavaScript fails.",
                     "Fallback navigation is generated from the current tab list instead of a hard-coded subset.",
@@ -211,7 +239,7 @@ def review_dashboard(root: Path = Path(".")) -> tuple[list[Finding], list[str], 
                 title="Synchronize dashboard tab state with deep links and browser history",
                 target="scripts/dashboard_navigation_fallback.py",
                 evidence=(
-                    "The full dashboard file chain contains no hashchange handling. "
+                    "The runtime dashboard implementation contains no hashchange handling. "
                     "Deep links/back-forward navigation can change :target without synchronizing "
                     "the enhanced header/selected-state logic."
                 ),
@@ -232,7 +260,7 @@ def review_dashboard(root: Path = Path(".")) -> tuple[list[Finding], list[str], 
                 title="Expose the active dashboard tab to assistive technology",
                 target="scripts/dashboard_navigation_fallback.py",
                 evidence=(
-                    "No dashboard-related file uses aria-current, so the visually selected tab is not "
+                    "No runtime dashboard source uses aria-current, so the visually selected tab is not "
                     "programmatically exposed as the current navigation item."
                 ),
                 acceptance=(
@@ -262,7 +290,7 @@ def review_dashboard(root: Path = Path(".")) -> tuple[list[Finding], list[str], 
         )
 
     tests_text = "\n".join(
-        _read(path) for path in files if path.as_posix().startswith((root / "tests").as_posix())
+        _read(path) for path in files if _display_repo_path(path).startswith("tests/")
     )
     unmentioned_views = [view for view in views if view not in tests_text]
     if unmentioned_views:
@@ -347,14 +375,6 @@ def choose_finding(findings: Iterable[Finding], existing_open_issue_texts: Itera
         if marker.lower() not in existing:
             return finding
     return None
-
-
-def _display_repo_path(path: Path) -> str:
-    value = path.as_posix()
-    for marker in ("/docs/", "/scripts/", "/tests/", "/.github/"):
-        if marker in value:
-            return value[value.index(marker) + 1 :]
-    return value.lstrip("./")
 
 
 def issue_body(finding: Finding, views: list[str], files: list[Path]) -> str:
