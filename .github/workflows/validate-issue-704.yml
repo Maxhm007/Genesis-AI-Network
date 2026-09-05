@@ -1,0 +1,28 @@
+name: Validate Issue 704
+
+on:
+  push:
+    branches:
+      - genesis/unsolved-successor-handoff-704
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: genesis/unsolved-successor-handoff-704
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Focused handoff and requeue tests
+        run: python -m pytest -q tests/test_requeue_exhausted_issues.py tests/test_github_issue_autorepair_claim_release.py
+      - name: Full repository suite
+        run: python -m pytest -q
