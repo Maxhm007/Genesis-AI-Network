@@ -4,6 +4,13 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '5,15,25,35,45,55 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-specialist-issue-controller.yml
+      - .github/workflows/genesis-specialist-repair-worker.yml
+      - genesis/github_issue_capability_builder.py
+      - scripts/requeue_exhausted_issues.py
 
 permissions:
   contents: read
