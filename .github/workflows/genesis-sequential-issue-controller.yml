@@ -291,6 +291,15 @@ jobs:
               'genesis-claimed', 'genesis-working', 'genesis-verifying',
               'genesis-repair-in-progress', 'genesis-validating', 'genesis-priority-claim',
           }
+          concrete_repair_labels = {
+              'genesis-action-failure',
+              'genesis-repair',
+              'task3-failed-autonomy',
+              'needs-repair-engine-improvement',
+          }
+          urgent_candidates = []
+          repair_candidates = []
+          general_candidates = []
 
           for issue in issues:
               if issue.get('pull_request'):
@@ -316,8 +325,8 @@ jobs:
               is_action_failure = lower_title.startswith('genesis action failure:') or lower_title.startswith('[genesis action failure]')
               is_syntax_report = 'syntax error' in lower_body
               if is_action_failure or is_syntax_report:
-                  print(number)
-                  break
+                  urgent_candidates.append(number)
+                  continue
 
               match = re.search(r'^- \*\*Target:\*\* `([^`]+)`', body, re.MULTILINE)
               target = match.group(1).strip() if match else ''
@@ -327,8 +336,20 @@ jobs:
                   continue
               if not Path(target).is_file():
                   continue
-              print(number)
-              break
+
+              is_concrete_repair = (
+                  lower_title.startswith(('[genesis detected]', '[genesis repair]'))
+                  or bool(labels & concrete_repair_labels)
+              )
+              if is_concrete_repair:
+                  repair_candidates.append(number)
+              else:
+                  general_candidates.append(number)
+
+          for candidates in (urgent_candidates, repair_candidates, general_candidates):
+              if candidates:
+                  print(candidates[0])
+                  break
           PY
           )
 
