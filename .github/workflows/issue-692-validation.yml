@@ -1,0 +1,48 @@
+name: Issue 692 Validation
+
+on:
+  push:
+    branches:
+      - genesis/fix-solver-lifecycle-leaks-692
+
+permissions:
+  contents: write
+
+concurrency:
+  group: issue-692-validation
+  cancel-in-progress: true
+
+jobs:
+  test:
+    if: github.actor != 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: genesis/fix-solver-lifecycle-leaks-692
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply lifecycle leak patch
+        run: python scripts/issue_692_patch.py
+      - name: Install requirements
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Focused tests
+        run: python -m pytest -q tests/test_github_issue_cleanup.py tests/test_requeue_exhausted_issues.py tests/test_solver_terminal_policy.py tests/test_oldest_issue_solver_pagination.py
+      - name: Full repository tests
+        run: python -m pytest -q
+      - name: Stage exact tested workflows and commit non-workflow changes
+        shell: bash
+        run: |
+          set -euo pipefail
+          cp .github/workflows/genesis-bounded-repair-worker.yml scripts/issue_692_tested_worker.yml
+          cp .github/workflows/genesis-exhausted-issue-requeue.yml scripts/issue_692_tested_requeue.yml
+          git checkout -- .github/workflows/genesis-bounded-repair-worker.yml .github/workflows/genesis-exhausted-issue-requeue.yml
+          rm -f scripts/issue_692_patch.py
+          git config user.name 'github-actions[bot]'
+          git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
+          git add -A
+          git commit -m 'Stage issue 692 tested solver changes'
+          git push origin HEAD:genesis/fix-solver-lifecycle-leaks-692
