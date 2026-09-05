@@ -20,6 +20,7 @@ import java.io.InputStream;
 import java.io.InputStreamReader;
 import java.io.OutputStream;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
 import java.nio.charset.StandardCharsets;
 import java.util.concurrent.ExecutorService;
@@ -151,7 +152,20 @@ public class MainActivity extends Activity {
     private String normalizedBaseUrl() {
         String value = baseUrl.getText().toString().trim();
         while (value.endsWith("/")) value = value.substring(0, value.length() - 1);
-        if (!value.startsWith("https://")) throw new IllegalArgumentException("Use an HTTPS Genesis API URL");
+        try {
+            URI uri = new URI(value);
+            boolean secureOrigin = "https".equalsIgnoreCase(uri.getScheme())
+                    && uri.getHost() != null
+                    && !uri.getHost().isBlank()
+                    && uri.getUserInfo() == null
+                    && uri.getQuery() == null
+                    && uri.getFragment() == null;
+            if (!secureOrigin) {
+                throw new IllegalArgumentException("Use a credential-free HTTPS Genesis API origin");
+            }
+        } catch (java.net.URISyntaxException e) {
+            throw new IllegalArgumentException("Use a valid HTTPS Genesis API origin", e);
+        }
         getPreferences(MODE_PRIVATE).edit().putString("base_url", value).apply();
         return value;
     }
