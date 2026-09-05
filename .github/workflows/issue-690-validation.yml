@@ -25,7 +25,9 @@ jobs:
         with:
           python-version: '3.12'
       - name: Apply lifecycle patch
-        run: python scripts/issue_690_patch.py
+        run: |
+          python scripts/issue_690_patch.py
+          python scripts/issue_690_test_patch.py
       - name: Install requirements
         run: python -m pip install --disable-pip-version-check -r requirements.txt
       - name: Focused tests
@@ -36,7 +38,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          rm -f scripts/issue_690_patch.py .github/workflows/issue-690-validation.yml
+          rm -f scripts/issue_690_patch.py scripts/issue_690_test_patch.py .github/workflows/issue-690-validation.yml
           git config user.name 'github-actions[bot]'
           git config user.email '41898282+github-actions[bot]@users.noreply.github.com'
           git add -A
