@@ -321,3 +321,33 @@ def test_ops_record_supersedes_same_fingerprint_escalation(tmp_path: Path) -> No
     assert github.issues[429]["state"] == "closed"
     assert any(row["github_issue_number"] == 429 for row in result["closed"])
 
+
+
+def test_exact_duplicate_actionable_issues_keep_oldest_canonical(tmp_path: Path) -> None:
+    body = "- **Target:** `genesis/example.py`\nFix the exact same defect."
+    github = FakeGithub([
+        _issue(560, title="[Genesis Detected] Exact defect", body=body),
+        _issue(562, title="[Genesis Detected] Exact defect", body=body),
+        _issue(563, title="[Genesis Detected] Exact defect", body=body),
+    ])
+
+    result = cleanup_obsolete_github_issues(tmp_path, requester=github)
+
+    assert github.issues[560]["state"] == "open"
+    assert github.issues[562]["state"] == "closed"
+    assert github.issues[563]["state"] == "closed"
+    assert [row["github_issue_number"] for row in result["closed"]] == [562, 563]
+    assert any(row.get("managed_kind") == "exact_duplicate_canonical" and row["github_issue_number"] == 560 for row in result["kept_current"])
+
+
+def test_same_title_with_different_full_body_is_not_exact_duplicate(tmp_path: Path) -> None:
+    github = FakeGithub([
+        _issue(570, title="[Genesis Detected] Same title", body="- **Target:** `genesis/example.py`\nDefect A"),
+        _issue(571, title="[Genesis Detected] Same title", body="- **Target:** `genesis/example.py`\nDefect B"),
+    ])
+
+    result = cleanup_obsolete_github_issues(tmp_path, requester=github)
+
+    assert result["closed"] == []
+    assert github.issues[570]["state"] == "open"
+    assert github.issues[571]["state"] == "open"

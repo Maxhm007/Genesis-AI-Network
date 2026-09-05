@@ -41,7 +41,7 @@ def test_unsuccessful_worker_always_releases_reservation() -> None:
     assert "issue remains open for the bounded retry policy" in release
 
 
-def test_worker_marks_exhausted_attempt_and_allows_queue_to_move() -> None:
+def test_worker_terminally_defers_exhausted_attempt_and_allows_future_generation_retry() -> None:
     text = WORKER.read_text(encoding="utf-8")
 
     release_at = text.index("Release unsuccessful reservation safely")
@@ -49,7 +49,10 @@ def test_worker_marks_exhausted_attempt_and_allows_queue_to_move() -> None:
     assert 'solver_attempt=$(gh api' in release
     assert '"$solver_attempt" -ge 3' in release
     assert "--add-label genesis-solver-exhausted" in release
-    assert "bounded attempts exhausted; queue will move on" in release
+    assert "--add-label genesis-deferred" in release
+    assert "terminally deferred under the current repair-engine generation" in release
+    assert "-f state=closed -f state_reason=not_planned" in release
+    assert "changed repair engine may reopen it automatically" in release
 
 
 def test_successful_promotion_releases_active_labels_only_after_verification() -> None:

@@ -21,6 +21,9 @@ def _issue(body: str, labels: list[str], title: str = "[Genesis Task] repair") -
 
 def test_engine_generation_is_stable_and_content_sensitive(tmp_path: Path):
     assert ".github/workflows/genesis-bounded-repair-worker.yml" in ENGINE_PATHS
+    assert ".github/workflows/genesis-sequential-issue-controller.yml" in ENGINE_PATHS
+    assert "scripts/requeue_exhausted_issues.py" in ENGINE_PATHS
+    assert "genesis/github_issue_cleanup.py" in ENGINE_PATHS
     for relative in ENGINE_PATHS:
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -69,7 +72,7 @@ def test_pre_repair_failure_is_quarantined_only_after_current_generation_marker(
     assert pre_repair_failure_after_marker([{"body": marker}, {"body": failure}], marker) is True
 
 
-def test_measurement_and_protected_issues_are_not_requeued(tmp_path: Path):
+def test_measurement_issues_share_generation_retry_but_protected_targets_do_not(tmp_path: Path):
     protected = tmp_path / "genesis/security.py"
     protected.parent.mkdir(parents=True)
     protected.write_text("VALUE = 1\n", encoding="utf-8")
@@ -80,7 +83,7 @@ def test_measurement_and_protected_issues_are_not_requeued(tmp_path: Path):
     assert eligible_exhausted_issue(_issue(protected_body, ["genesis-solver-exhausted"]), tmp_path) == (False, "protected_target")
 
     measured_body = "- **Target:** `genesis/example.py`\nThe same comparable benchmark must show measured score improves."
-    assert eligible_exhausted_issue(_issue(measured_body, ["genesis-solver-exhausted"]), tmp_path) == (False, "measurement_lane")
+    assert eligible_exhausted_issue(_issue(measured_body, ["genesis-solver-exhausted"]), tmp_path) == (True, "genesis/example.py")
 
 
 def test_attempt_status_resets_for_new_engine_generation():
