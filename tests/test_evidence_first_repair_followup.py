@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import subprocess
 from pathlib import Path
 
 import genesis.github_issue_capability_builder as builder
@@ -81,6 +82,8 @@ def test_evidence_first_provider_preserves_delegate_contract_and_adds_read_only_
         "ROLE: bounded_coding_engineer\nVALID_PATHS:\n[\"genesis/alpha.py\"]\nReturn JSON only."
     )
     assert json.loads(raw)["edits"][0]["path"] == "genesis/alpha.py"
+    assert delegate.prompt.splitlines()[0] == "ROLE: bounded_coding_engineer"
+    assert "ROLE: bounded_coding_engineer" in delegate.prompt.splitlines()[:8]
     assert "DIFFICULT_REPAIR_MODE" in delegate.prompt
     assert "retry_pending_capability" in delegate.prompt
     assert "test_alpha_value" in delegate.prompt
@@ -133,5 +136,41 @@ def test_protected_followup_target_never_activates_evidence_first_route(tmp_path
         _followup_issue(target="genesis/security.py"),
         CodingModule(tmp_path),
     )
+
+    assert provider is None
+
+
+def test_recent_target_history_fails_closed_when_git_is_unavailable(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / ".git").mkdir()
+
+    def unavailable(*args, **kwargs):
+        raise FileNotFoundError("git missing")
+
+    monkeypatch.setattr(builder.subprocess, "run", unavailable)
+    assert GitHubIssueLearnedCapabilityProvider._recent_target_history(tmp_path, "genesis/alpha.py") == ""
+
+
+def test_recent_target_history_fails_closed_on_timeout(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / ".git").mkdir()
+
+    def timed_out(*args, **kwargs):
+        raise subprocess.TimeoutExpired(cmd=["git", "log"], timeout=3)
+
+    monkeypatch.setattr(builder.subprocess, "run", timed_out)
+    assert GitHubIssueLearnedCapabilityProvider._recent_target_history(tmp_path, "genesis/alpha.py") == ""
+
+
+def test_followup_path_validation_error_falls_back_safely(tmp_path: Path, monkeypatch) -> None:
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "runtime").mkdir()
+    (tmp_path / "genesis" / "alpha.py").write_text("VALUE = 1\n", encoding="utf-8")
+    monkeypatch.setenv("GENESIS_REPAIR_PROVIDER_URL", "http://127.0.0.1:8766")
+    coding = CodingModule(tmp_path)
+
+    def reject(_paths):
+        raise RuntimeError("boundary rejected")
+
+    monkeypatch.setattr(coding.executor, "_validate_paths", reject)
+    provider = GitHubIssueLearnedCapabilityProvider.for_issue(tmp_path, _followup_issue(), coding)
 
     assert provider is None
