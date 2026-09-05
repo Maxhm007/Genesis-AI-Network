@@ -6,6 +6,7 @@ on:
       - genesis/fix-solver-lifecycle-leaks-692-v2
     paths:
       - scripts/issue_692_v2_apply.py
+      - tests/test_github_issue_autorepair_claim_release.py
       - .github/workflows/issue-692-v2-validation.yml
   workflow_dispatch:
 
@@ -35,6 +36,7 @@ jobs:
           tests/test_requeue_exhausted_issues.py
           tests/test_solver_terminal_policy.py
           tests/test_github_issue_autorepair_workflow.py
+          tests/test_github_issue_autorepair_claim_release.py
       - name: Full repository tests
         run: python -m pytest -q
       - name: Commit tested non-workflow changes and stage exact tested workflows
