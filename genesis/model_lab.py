@@ -47,6 +47,12 @@ class ModelLab:
     adapters and promotion requires measured evidence. ``active`` additionally
     requires stored training provenance and a runtime artifact record; those
     records are integrity-checked again by the runtime provider before use.
+
+    Model families are versioned by their immutable lineage inputs. At most one
+    version of a model family may be active at a time. Replacing an active model
+    therefore requires the explicit ``rollback`` operation, which atomically
+    rejects the current version, activates a previously trusted fallback, and
+    records evidence on both lineages.
     """
 
     def __init__(self, root: Path) -> None:
@@ -148,6 +154,32 @@ class ModelLab:
             rows = db.execute("SELECT * FROM model_lineage ORDER BY created_at DESC").fetchall()
         return [self._from_row(row) for row in rows]
 
+    def versions(self, name: str) -> list[ModelLineage]:
+        """Return the immutable lineage versions for one named model family."""
+        family = str(name).strip()
+        if not family:
+            raise ValueError("model family name is required")
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM model_lineage WHERE name = ? ORDER BY created_at, model_id",
+                (family,),
+            ).fetchall()
+        return [self._from_row(row) for row in rows]
+
+    def active(self, name: str) -> ModelLineage | None:
+        """Return the single active version for a model family, if one exists."""
+        family = str(name).strip()
+        if not family:
+            raise ValueError("model family name is required")
+        with self._connect() as db:
+            rows = db.execute(
+                "SELECT * FROM model_lineage WHERE name = ? AND state = 'active' ORDER BY updated_at DESC",
+                (family,),
+            ).fetchall()
+        if len(rows) > 1:
+            raise RuntimeError(f"model family {family!r} has multiple active versions")
+        return self._from_row(rows[0]) if rows else None
+
     def add_evidence(self, model_id: str, evidence_type: str, payload: dict[str, Any]) -> None:
         if self.get(model_id) is None:
             raise KeyError(model_id)
@@ -212,6 +244,11 @@ class ModelLab:
                     "active model requires stored training provenance and runtime evidence: missing "
                     + ", ".join(missing)
                 )
+            active_version = self.active(current.name)
+            if active_version is not None and active_version.model_id != model_id:
+                raise ValueError(
+                    "another model version is already active for this family; use rollback for an atomic replacement"
+                )
         now = utc_now()
         with self._connect() as db:
             db.execute(
@@ -222,15 +259,104 @@ class ModelLab:
         assert updated is not None
         return updated
 
+    def rollback(self, active_model_id: str, fallback_model_id: str, *, reason: str) -> ModelLineage:
+        """Atomically replace an active model with a trusted previous version.
+
+        Rollback is intentionally stricter than ordinary promotion: the fallback
+        must already be trusted, belong to the same named model family, and have
+        benchmark, training-provenance, and runtime evidence. The currently
+        active version is rejected so it cannot silently become active again.
+        """
+        explanation = str(reason).strip()
+        if not explanation:
+            raise ValueError("rollback reason is required")
+        if active_model_id == fallback_model_id:
+            raise ValueError("rollback requires a distinct fallback model version")
+
+        current = self.get(active_model_id)
+        fallback = self.get(fallback_model_id)
+        if current is None:
+            raise KeyError(active_model_id)
+        if fallback is None:
+            raise KeyError(fallback_model_id)
+        if current.state != "active":
+            raise ValueError("rollback source must be the active model version")
+        if fallback.state != "trusted":
+            raise ValueError("rollback fallback must already be trusted")
+        if current.name != fallback.name:
+            raise ValueError("rollback versions must belong to the same model family")
+
+        evidence_types = {row["evidence_type"] for row in self.evidence(fallback_model_id)}
+        if fallback.benchmark_score is None or "benchmark" not in evidence_types:
+            raise ValueError("rollback fallback requires benchmark evidence")
+        missing = [kind for kind in ("training_provenance", "runtime") if kind not in evidence_types]
+        if missing:
+            raise ValueError(
+                "rollback fallback requires stored training provenance and runtime evidence: missing "
+                + ", ".join(missing)
+            )
+
+        active_version = self.active(current.name)
+        if active_version is None or active_version.model_id != current.model_id:
+            raise ValueError("rollback source is not the unique active model version")
+
+        now = utc_now()
+        source_payload = json.dumps(
+            {
+                "reason": explanation,
+                "fallback_model_id": fallback.model_id,
+                "previous_state": current.state,
+            },
+            sort_keys=True,
+        )
+        fallback_payload = json.dumps(
+            {
+                "reason": explanation,
+                "replaced_model_id": current.model_id,
+                "previous_state": fallback.state,
+            },
+            sort_keys=True,
+        )
+        with self._connect() as db:
+            db.execute(
+                "UPDATE model_lineage SET state = 'rejected', updated_at = ? WHERE model_id = ? AND state = 'active'",
+                (now, current.model_id),
+            )
+            db.execute(
+                "UPDATE model_lineage SET state = 'active', updated_at = ? WHERE model_id = ? AND state = 'trusted'",
+                (now, fallback.model_id),
+            )
+            db.execute(
+                "INSERT INTO model_evidence(model_id, evidence_type, payload_json, created_at) VALUES (?, ?, ?, ?)",
+                (current.model_id, "rollback", source_payload, now),
+            )
+            db.execute(
+                "INSERT INTO model_evidence(model_id, evidence_type, payload_json, created_at) VALUES (?, ?, ?, ?)",
+                (fallback.model_id, "rollback_activation", fallback_payload, now),
+            )
+
+        rolled_back = self.get(fallback.model_id)
+        assert rolled_back is not None
+        if rolled_back.state != "active":
+            raise RuntimeError("model rollback did not activate the fallback version")
+        return rolled_back
+
     def export_status(self) -> dict[str, Any]:
         items = self.list()
+        active_by_name = {
+            item.name: item.model_id
+            for item in items
+            if item.state == "active"
+        }
         return {
             "module": "genesis.model_lab",
             "models": [item.as_dict() for item in items],
             "counts": {state: sum(1 for item in items if item.state == state) for state in MODEL_STATES},
+            "active_by_name": active_by_name,
             "rule": (
                 "Genesis-owned models remain replaceable capabilities; activation requires measured benchmark evidence, "
-                "training provenance and a runtime artifact record."
+                "training provenance and a runtime artifact record, and active-version replacement requires an explicit "
+                "evidence-recorded rollback."
             ),
         }
 
