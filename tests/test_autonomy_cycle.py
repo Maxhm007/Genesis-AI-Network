@@ -43,9 +43,11 @@ class AutonomyCycleTests(unittest.TestCase):
                 (candidate_id,),
             ).fetchone()
             self.assertEqual(status, "candidate")
+            self.assertIsInstance(validation, str)
+            self.assertTrue(validation)
             details = json.loads(validation)
             self.assertFalse(details["structural_validation"])
-            self.assertIn("error", details)
+            self.assertTrue(details.get("error"))
 
 
 if __name__ == "__main__":
