@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .gene_compute import GeneComputeFabric
+from .gene_lifecycle import GeneLifecycleManager, GeneNeedEvidence
 from .modules.task_queue import GenesisTask, PersistentTaskQueue
 from .resource import ResourceModule, ResourceSnapshot
 from .task_router import TaskRouterModule
@@ -77,6 +78,17 @@ class GenesisCoreProcessor:
             "dispatch_allowed": score >= self.MIN_CAPACITY_SCORE,
             "snapshot": snapshot.as_dict(),
         }
+
+    def evaluate_gene_lifecycle(self, evidence: GeneNeedEvidence, *, now: float | None = None) -> dict:
+        """Allow Gene 0 to perform one bounded, issue-enabled lifecycle decision."""
+        registry_path = self.root / "GENE_REGISTRY.json"
+        if not registry_path.is_file():
+            return {"status": "registry_unavailable", "created": False}
+        manager = GeneLifecycleManager(
+            registry_path,
+            state_path=self.runtime / "gene_lifecycle_state.json",
+        )
+        return manager.evaluate_and_create(evidence, authority="Gene 0", now=now)
 
     def cycle(self, resource_snapshot: ResourceSnapshot | None = None) -> dict:
         """Run one central scheduling/coordination cycle.

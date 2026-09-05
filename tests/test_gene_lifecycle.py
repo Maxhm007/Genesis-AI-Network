@@ -136,3 +136,14 @@ def test_hard_limit_prevents_runaway_creation(tmp_path: Path) -> None:
     result = manager.evaluate_and_create(_strong_evidence(capability_gap="new_gap"), now=1000)
     assert result["status"] == "hard_limit_reached"
     assert result["created"] is False
+
+def test_core_processor_exposes_gene0_lifecycle_authority(tmp_path: Path) -> None:
+    from genesis.core_processor import GenesisCoreProcessor
+
+    _registry(tmp_path / "GENE_REGISTRY.json")
+    core = GenesisCoreProcessor(tmp_path)
+    result = core.evaluate_gene_lifecycle(_strong_evidence(), now=1000)
+    assert result["status"] == "candidate_created"
+    assert result["gene"]["serial"] == 4
+    assert (tmp_path / "runtime" / "gene_lifecycle_state.json").is_file()
+
