@@ -16,6 +16,18 @@ def test_controller_keeps_issue_selection_single_lane() -> None:
     assert "Claiming exactly one issue" in text
 
 
+def test_controller_retries_github_api_and_label_initialization_is_idempotent() -> None:
+    text = CONTROLLER.read_text(encoding="utf-8")
+
+    assert "gh_retry()" in text
+    assert "Transient GitHub command failure" in text
+    assert "gh label create" in text
+    assert "--force" in text
+    assert "gh label list" not in text
+    assert "gh_retry gh issue edit" in text
+    assert "gh_retry gh api --paginate" in text
+
+
 def test_worker_is_per_issue_serialized_and_bounded() -> None:
     text = WORKER.read_text(encoding="utf-8")
 
