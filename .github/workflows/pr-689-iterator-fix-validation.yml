@@ -1,0 +1,41 @@
+name: PR 689 Iterator Fix Validation
+
+on:
+  push:
+    branches:
+      - genesis/solve-learned-427-431-433
+    paths:
+      - .github/workflows/pr-689-iterator-fix-validation.yml
+
+permissions:
+  contents: write
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: genesis/solve-learned-427-431-433
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Apply iterator bound fixes
+        run: python scripts/review_689_iterator_fix.py
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Focused tests
+        run: python -m pytest -q tests/test_learned_capabilities_issue_cluster.py tests/test_learned_capability_acceptance.py
+      - name: Full repository tests
+        run: python -m pytest -q
+      - name: Commit tested fixes and remove temporary helpers
+        shell: bash
+        run: |
+          set -euo pipefail
+          rm .github/workflows/pr-689-iterator-fix-validation.yml scripts/review_689_iterator_fix.py
+          git config user.name "Genesis Repair"
+          git config user.email "genesis-ai@users.noreply.github.com"
+          git add genesis/learned_capabilities.py tests/test_learned_capabilities_issue_cluster.py .github/workflows/pr-689-iterator-fix-validation.yml scripts/review_689_iterator_fix.py
+          git commit -m "Bound learned capability iterators (#427 #431)"
+          git push origin HEAD:genesis/solve-learned-427-431-433
