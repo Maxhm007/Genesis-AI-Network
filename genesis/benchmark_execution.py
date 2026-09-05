@@ -33,7 +33,7 @@ class BenchmarkExecutionPlanner:
     def __init__(self, root: Path) -> None:
         self.root = Path(root).resolve()
         self.runtime = self.root / "runtime"
-        self.queue = PersistentTaskQueue(self.runtime / "genesis_tasks.sqlite3")
+        self.queue = PersistentTaskQueue(self.runtime / 'genesis_tasks.sqlite3')
         self.input_dir = self.runtime / "competitive_benchmark_inputs"
 
     @staticmethod
