@@ -43,23 +43,41 @@ jobs:
           stale_minutes=105
           stale_cutoff=$(date -u -d "${stale_minutes} minutes ago" '+%Y-%m-%dT%H:%M:%SZ')
 
+          gh_retry() {
+            local attempt=1
+            local max_tries=3
+            local delay
+            while true; do
+              if "$@"; then
+                return 0
+              fi
+              if [ "$attempt" -ge "$max_tries" ]; then
+                echo "GitHub command failed after ${max_tries} attempts: $*" >&2
+                return 1
+              fi
+              delay=$((attempt * 2))
+              echo "Transient GitHub command failure (attempt ${attempt}/${max_tries}); retrying in ${delay}s: $*" >&2
+              sleep "$delay"
+              attempt=$((attempt + 1))
+            done
+          }
+
           ensure_label() {
             local name="$1"
             local color="$2"
             local description="$3"
-            if ! gh label list --repo "$GITHUB_REPOSITORY" --limit 200 --json name \
-              | jq -e --arg name "$name" 'any(.[]; .name == $name)' >/dev/null; then
-              gh label create "$name" --repo "$GITHUB_REPOSITORY" \
-                --color "$color" --description "$description"
+            if ! gh_retry gh label create "$name" --repo "$GITHUB_REPOSITORY" \
+              --color "$color" --description "$description" --force >/dev/null; then
+              echo "Warning: unable to ensure label '${name}' after retries; continuing because it may already exist." >&2
             fi
           }
 
           add_label() {
-            gh issue edit "$1" --repo "$GITHUB_REPOSITORY" --add-label "$2" >/dev/null
+            gh_retry gh issue edit "$1" --repo "$GITHUB_REPOSITORY" --add-label "$2" >/dev/null
           }
 
           remove_label() {
-            gh issue edit "$1" --repo "$GITHUB_REPOSITORY" --remove-label "$2" >/dev/null 2>&1 || true
+            gh_retry gh issue edit "$1" --repo "$GITHUB_REPOSITORY" --remove-label "$2" >/dev/null 2>&1 || true
           }
 
           clear_transient_labels() {
@@ -80,20 +98,20 @@ jobs:
             local issue_number="$1"
             local body="$2"
             local comment_id
-            comment_id=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments?per_page=100" \
+            comment_id=$(gh_retry gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments?per_page=100" \
               | jq -r --arg marker "$marker" '[.[] | select((.body // "") | startswith($marker))][0].id // empty')
             if [ -n "$comment_id" ]; then
-              gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" \
+              gh_retry gh api "repos/${GITHUB_REPOSITORY}/issues/comments/${comment_id}" \
                 --method PATCH -f body="$body" >/dev/null
             else
-              gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments" \
+              gh_retry gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments" \
                 --method POST -f body="$body" >/dev/null
             fi
           }
 
           get_previous_attempt() {
             local issue_number="$1"
-            gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments?per_page=100" \
+            gh_retry gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments?per_page=100" \
               | jq -r --arg marker "$marker" \
                 '[.[] | select((.body // "") | startswith($marker))][0].body // ""' \
               | sed -nE 's/.*genesis-solver-attempt:([0-9]+).*/\1/p' \
@@ -122,7 +140,7 @@ jobs:
             fi
             upsert_status "$issue_number" "$status_body"
             if [ "$attempt" -ge "$max_attempts" ]; then
-              gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --method PATCH -f state=closed -f state_reason=not_planned >/dev/null
+              gh_retry gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --method PATCH -f state=closed -f state_reason=not_planned >/dev/null
             fi
           }
 
@@ -138,25 +156,33 @@ jobs:
 
           echo 'Stopping legacy long-running dispatch loops so this controller is the single queue scheduler.'
           for workflow in genesis-oldest-issue-solver.yml genesis-priority-issue-solver.yml; do
-            gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?status=in_progress&per_page=100" \
-              | jq -r '.workflow_runs[].id' \
-              | while read -r run_id; do
-                  [ -z "$run_id" ] && continue
-                  gh run cancel "$run_id" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || true
-                  echo "Cancelled legacy scheduler run ${run_id} (${workflow})."
-                done
+            if runs_json=$(gh_retry gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/${workflow}/runs?status=in_progress&per_page=100"); then
+              printf '%s' "$runs_json" \
+                | jq -r '.workflow_runs[].id' \
+                | while read -r run_id; do
+                    [ -z "$run_id" ] && continue
+                    gh run cancel "$run_id" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || true
+                    echo "Cancelled legacy scheduler run ${run_id} (${workflow})."
+                  done
+            else
+              echo "Warning: could not inspect legacy workflow ${workflow}; continuing." >&2
+            fi
           done
 
           echo "Cancelling bounded workers older than ${stale_minutes} minutes."
-          gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/genesis-bounded-repair-worker.yml/runs?status=in_progress&per_page=100" \
-            | jq -r --arg cutoff "$stale_cutoff" '.workflow_runs[] | select(.created_at < $cutoff) | .id' \
-            | while read -r run_id; do
-                [ -z "$run_id" ] && continue
-                gh run cancel "$run_id" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || true
-                echo "Cancelled stale bounded worker run ${run_id}."
-              done
+          if worker_runs=$(gh_retry gh api "repos/${GITHUB_REPOSITORY}/actions/workflows/genesis-bounded-repair-worker.yml/runs?status=in_progress&per_page=100"); then
+            printf '%s' "$worker_runs" \
+              | jq -r --arg cutoff "$stale_cutoff" '.workflow_runs[] | select(.created_at < $cutoff) | .id' \
+              | while read -r run_id; do
+                  [ -z "$run_id" ] && continue
+                  gh run cancel "$run_id" --repo "$GITHUB_REPOSITORY" >/dev/null 2>&1 || true
+                  echo "Cancelled stale bounded worker run ${run_id}."
+                done
+          else
+            echo 'Warning: could not inspect bounded worker runs; continuing.' >&2
+          fi
 
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/genesis-controller-open.json
+          gh_retry gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/genesis-controller-open.json
 
           python - "$stale_cutoff" <<'PY' > /tmp/genesis-stale-issues.txt
           import json
@@ -186,13 +212,13 @@ jobs:
             [ -z "$issue_number" ] && continue
             clear_reservation_labels "$issue_number"
             add_label "$issue_number" genesis-autonomous
-            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
+            gh_retry gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
               --body "Genesis Sequential Issue Controller recovered a stale repair reservation older than ${stale_minutes} minutes. No issue was closed and no verification rule was bypassed. Controller run: ${GITHUB_RUN_ID}." >/dev/null
             echo "Recovered stale reservation on issue #${issue_number}."
           done < /tmp/genesis-stale-issues.txt
 
           # Legacy solver-only transient claims are not authoritative after their runs were cancelled.
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/genesis-controller-open.json
+          gh_retry gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/genesis-controller-open.json
           python - <<'PY' > /tmp/genesis-transient-only.txt
           import json
           from pathlib import Path
@@ -222,7 +248,7 @@ jobs:
             echo 'Exhausted-issue generation requeue failed; continuing with the currently eligible queue.' >&2
           fi
 
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/genesis-controller-open.json
+          gh_retry gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/genesis-controller-open.json
 
           active_count=$(python - <<'PY'
           import json
@@ -312,7 +338,7 @@ jobs:
           fi
 
           checked_at=$(date -u '+%Y-%m-%dT%H:%M:%SZ')
-          issue_json=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}")
+          issue_json=$(gh_retry gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}")
           title=$(printf '%s' "$issue_json" | jq -r '.title')
           body_text=$(printf '%s' "$issue_json" | jq -r '.body // ""')
           previous_attempt=$(get_previous_attempt "$issue_number" || true)
@@ -330,7 +356,7 @@ jobs:
           add_label "$issue_number" genesis-working
 
           sleep 3
-          refreshed=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json state,labels)
+          refreshed=$(gh_retry gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json state,labels)
           state=$(printf '%s' "$refreshed" | jq -r '.state')
           shared_owner=$(printf '%s' "$refreshed" | jq -r '([.labels[].name] | any(. == "genesis-repair-in-progress" or . == "genesis-validating"))')
           if [[ "$state" != "OPEN" || "$shared_owner" == "true" ]]; then
@@ -351,13 +377,13 @@ jobs:
             if [ -n "$workflow_path" ] && [ ! -f "$workflow_path" ]; then
               remove_label "$issue_number" genesis-working
               add_label "$issue_number" genesis-verifying
-              gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
+              gh_retry gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
                 --body "Genesis verification evidence: referenced workflow \`${workflow_path}\` is absent from current \`main\`; this exact historical failure cannot recur from that removed workflow. Controller run: ${GITHUB_RUN_ID}, attempt: ${attempt}/${max_attempts}." >/dev/null
               add_label "$issue_number" genesis-verified
               remove_label "$issue_number" genesis-blocked
               remove_label "$issue_number" genesis-solver-exhausted
               clear_reservation_labels "$issue_number"
-              gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --method PATCH \
+              gh_retry gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --method PATCH \
                 -f state=closed -f state_reason=not_planned >/dev/null
               resolved=true
               echo "Verified and closed stale Action failure #${issue_number}."
@@ -370,13 +396,13 @@ jobs:
               remove_label "$issue_number" genesis-working
               add_label "$issue_number" genesis-verifying
               if python -m py_compile "$target"; then
-                gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
+                gh_retry gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
                   --body "Genesis verification evidence: \`python -m py_compile ${target}\` passed on current \`main\`; the reported syntax-error condition is not present. Controller run: ${GITHUB_RUN_ID}, attempt: ${attempt}/${max_attempts}." >/dev/null
                 add_label "$issue_number" genesis-verified
                 remove_label "$issue_number" genesis-blocked
                 remove_label "$issue_number" genesis-solver-exhausted
                 clear_reservation_labels "$issue_number"
-                gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --method PATCH \
+                gh_retry gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --method PATCH \
                   -f state=closed -f state_reason=completed >/dev/null
                 resolved=true
                 echo "Verified and closed satisfied syntax issue #${issue_number}."
@@ -405,7 +431,7 @@ jobs:
               dispatched_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Sequential Issue Controller — bounded repair dispatched**\n\n- Issue: #%s — %s\n- Dispatched (UTC): %s\n- Controller run: %s\n- Attempt: **%s/%s**\n- Target: `%s`\n- State: **the only active bounded repair reservation**\n\nThe existing worker may close only after fresh full validation on current main.' \
                 "$marker" "$attempt" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$attempt" "$max_attempts" "$target")
               upsert_status "$issue_number" "$dispatched_body"
-              if gh workflow run genesis-bounded-repair-worker.yml --repo "$GITHUB_REPOSITORY" --ref main \
+              if gh_retry gh workflow run genesis-bounded-repair-worker.yml --repo "$GITHUB_REPOSITORY" --ref main \
                 -f issue_number="$issue_number"; then
                 dispatched=true
                 echo "Dispatched bounded worker for #${issue_number}; controller stops here until that issue reaches a terminal/retry state."
@@ -418,7 +444,7 @@ jobs:
           fi
 
           if [ "$resolved" != true ] && [ "$dispatched" != true ]; then
-            current_labels=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")')
+            current_labels=$(gh_retry gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name] | join(",")')
             if [[ "$current_labels" != *"genesis-solver-exhausted"* ]]; then
               mark_retry_or_blocked "$issue_number" "$title" "$checked_at" "$attempt" \
                 'no verified completion evidence or safe bounded repair route available'
