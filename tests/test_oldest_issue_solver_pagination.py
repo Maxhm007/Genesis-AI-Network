@@ -28,6 +28,19 @@ def test_sequential_controller_preserves_safety_boundaries_without_skipping_work
     assert "external-authority / independent-secret provisioning blocker" not in text
 
 
+def test_sequential_controller_prioritizes_concrete_repairs_before_general_work():
+    text = CONTROLLER.read_text(encoding="utf-8")
+
+    assert "urgent_candidates = []" in text
+    assert "repair_candidates = []" in text
+    assert "general_candidates = []" in text
+    assert "lower_title.startswith(('[genesis detected]', '[genesis repair]'))" in text
+    assert "'genesis-repair'" in text
+    assert "'task3-failed-autonomy'" in text
+    assert "for candidates in (urgent_candidates, repair_candidates, general_candidates):" in text
+    assert "print(candidates[0])" in text
+
+
 def test_legacy_solver_entrypoints_do_not_scan_or_claim_the_queue():
     oldest = OLDEST.read_text(encoding="utf-8")
     priority = PRIORITY.read_text(encoding="utf-8")
