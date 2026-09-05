@@ -1925,11 +1925,14 @@ def _martingale_information_budget_427(step_divergences, peeking_penalty: float 
     if penalty < 0.0 or penalty != penalty or penalty == float("inf"):
         raise ValueError("peeking penalty must be finite and non-negative")
     divergence = sum(values)
+    budget = divergence + penalty
+    if divergence == float("inf") or budget == float("inf"):
+        raise ValueError("information budget exceeds finite bounds")
     return {
         "steps": len(values),
         "conditional_divergence": divergence,
         "peeking_penalty": penalty,
-        "information_budget": divergence + penalty,
+        "information_budget": budget,
     }
 
 register_capability(
@@ -1950,8 +1953,8 @@ def _lfm2_tensor_split_plan_431(model_family: str, device_weights) -> tuple[floa
     if not weights or len(weights) > 32 or any(item < 0.0 or item != item or item == float("inf") for item in weights):
         raise ValueError("device weights must be finite, non-negative, and bounded")
     total = sum(weights)
-    if total <= 0.0:
-        raise ValueError("tensor split requires positive total device weight")
+    if total <= 0.0 or total == float("inf"):
+        raise ValueError("tensor split requires positive finite total device weight")
     return tuple(item / total for item in weights)
 
 register_capability(
@@ -1991,7 +1994,14 @@ def _mmproj_device_selection_433(
     default: str | None = None,
 ) -> str | None:
     """Prefer explicit mmproj placement, then legacy configuration, then a safe default."""
-    choices = tuple(str(item).strip() for item in available if str(item).strip())
+    choices_list: list[str] = []
+    for index, item in enumerate(available):
+        if index >= 64:
+            raise ValueError("available device scan exceeds bound")
+        name = str(item).strip()
+        if name:
+            choices_list.append(name)
+    choices = tuple(choices_list)
     for candidate in (explicit_device, legacy_device, default):
         name = str(candidate).strip() if candidate is not None else ""
         if name and name in choices:

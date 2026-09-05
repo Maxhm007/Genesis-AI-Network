@@ -37,3 +37,18 @@ def test_issue_433_mmproj_device_selection_preserves_explicit_then_legacy_fallba
     assert run_capability("mmproj_device_selection_433", None, "cuda:0", available) == "cuda:0"
     assert run_capability("mmproj_device_selection_433", None, None, available, default="cpu") == "cpu"
     assert validate_registry() is True
+
+def test_issue_427_rejects_aggregate_float_overflow():
+    with pytest.raises(ValueError, match="finite bounds"):
+        run_capability("martingale_information_budget_427", [1e308, 1e308])
+
+
+def test_issue_431_rejects_weight_sum_overflow():
+    with pytest.raises(ValueError, match="positive finite"):
+        run_capability("lfm2_tensor_split_plan_431", "LFM2", [1e308, 1e308])
+
+
+def test_issue_433_bounds_available_device_scan():
+    with pytest.raises(ValueError, match="scan exceeds bound"):
+        run_capability("mmproj_device_selection_433", None, None, ["cpu"] * 65)
+
