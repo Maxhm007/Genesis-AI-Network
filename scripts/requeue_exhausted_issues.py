@@ -55,7 +55,10 @@ TARGET_RE = re.compile(r"^- \*\*Target:\*\* `([^`]+)`", re.MULTILINE)
 OLD_ATTEMPT_RE = re.compile(r"<!-- genesis-solver-attempt:(\d+) -->")
 PRIORITY_ATTEMPT_RE = re.compile(r"<!-- genesis-priority-solver-attempt:(\d+) -->")
 ATTEMPT_DISPLAY_RE = re.compile(r"Attempt: \*\*(\d+)/(\d+)\*\*")
+SUCCESSOR_PARENT_RE = re.compile(r"<!-- genesis-unsolved-successor-of:(\d+) -->")
 PRE_REPAIR_FAILURE_PHRASE = "repair status: `worker_failed_before_evidence`"
+HANDOFF_COMMENT_MARKER = "<!-- genesis-unsolved-handoff -->"
+REQUEUE_MARKER_PREFIX = "<!-- genesis-requeue-engine:"
 
 
 def engine_generation(root: Path = ROOT) -> str:
@@ -85,6 +88,8 @@ def _eligible_retry_target(issue: dict, root: Path) -> tuple[bool, str]:
     labels = issue_labels(issue)
     if labels & ACTIVE_LABELS:
         return False, "active"
+    if "genesis-superseded" in labels:
+        return False, "superseded"
 
     title = str(issue.get("title") or "").strip()
     body = str(issue.get("body") or "")
@@ -167,6 +172,75 @@ def pre_repair_failure_after_marker(comments: list[dict], marker: str) -> bool:
     return failure_index > marker_index
 
 
+def successor_marker(parent_number: int) -> str:
+    return f"<!-- genesis-unsolved-successor-of:{int(parent_number)} -->"
+
+
+def is_successor_issue(issue: dict) -> bool:
+    return bool(SUCCESSOR_PARENT_RE.search(str(issue.get("body") or "")))
+
+
+def find_existing_successor(issues: list[dict], parent_number: int) -> dict | None:
+    marker = successor_marker(parent_number)
+    for issue in issues:
+        if marker in str(issue.get("body") or ""):
+            return issue
+    return None
+
+
+def latest_failure_summary(comments: list[dict]) -> str:
+    preferred = (
+        "Genesis bounded repair did not promote a verified change",
+        "bounded attempt exhausted",
+        "repair status:",
+        "worker failed before repair evidence",
+    )
+    for row in reversed(comments):
+        if not isinstance(row, dict):
+            continue
+        body = str(row.get("body") or "").strip()
+        if body and any(phrase.lower() in body.lower() for phrase in preferred):
+            return body[:1800]
+    for row in reversed(comments):
+        if isinstance(row, dict) and str(row.get("body") or "").strip():
+            return str(row.get("body") or "").strip()[:1800]
+    return "No detailed worker evidence was available; the bounded solver reached terminal exhaustion without verified promotion."
+
+
+def build_successor_body(issue: dict, generation: str, failure_summary: str) -> str:
+    number = int(issue.get("number") or 0)
+    title = str(issue.get("title") or "").strip()
+    body = str(issue.get("body") or "")
+    target_match = TARGET_RE.search(body)
+    target = target_match.group(1).strip() if target_match else ""
+    target_line = f"- **Target:** `{target}`\n" if target else ""
+    return (
+        f"{successor_marker(number)}\n"
+        f"<!-- genesis-unsolved-root:{number} -->\n"
+        "This GitHub Issue is the new authoritative work item created because the parent Issue exhausted the current bounded repair strategy without verified completion.\n\n"
+        f"- **Parent issue:** #{number}\n"
+        f"- **Parent title:** {title}\n"
+        f"- **Task type:** `repair_followup`\n"
+        f"- **Repair-engine generation:** `{generation}`\n"
+        f"{target_line}\n"
+        "### Why the parent was not solved\n"
+        f"{failure_summary}\n\n"
+        "### Required next strategy\n"
+        "Do not repeat the same failed implementation/proposal unchanged. Diagnose the blocker from the parent evidence first, then use a materially different bounded strategy. If the blocker is repair-engine/provider/tooling behavior, improve or route around that limitation before retrying the original objective. If it is target logic, implement the smallest alternative correction supported by current repository evidence.\n\n"
+        "### Acceptance\n"
+        "Complete the parent objective with verifiable evidence. Existing tests, Security, independent validation, protected-file boundaries, signing boundaries, secret boundaries, owner control, and exact promotion requirements remain mandatory.\n\n"
+        "### Authority rule\n"
+        "This successor replaces the parent as the active GitHub Issue for this repair generation. The Sequential Issue Controller remains the only solve/verify/close lane. The closed parent must not be reopened while this successor is authoritative.\n"
+    )
+
+
+def _successor_title(issue: dict) -> str:
+    number = int(issue.get("number") or 0)
+    title = str(issue.get("title") or "").strip()
+    prefix = f"[Genesis Repair Follow-up] #{number} — "
+    return (prefix + title)[:240]
+
+
 def _request(repository: str, token: str, method: str, path: str, payload: dict | None = None):
     data = None if payload is None else json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
@@ -192,6 +266,14 @@ def _request(repository: str, token: str, method: str, path: str, payload: dict 
         raise RuntimeError(f"GitHub HTTP {exc.code} for {method} {path}: {detail}") from exc
 
 
+def _ensure_label(repository: str, token: str, name: str, color: str, description: str) -> None:
+    try:
+        _request(repository, token, "POST", "/labels", {"name": name, "color": color, "description": description})
+    except RuntimeError as exc:
+        if "HTTP 422" not in str(exc):
+            raise
+
+
 def _open_issues(repository: str, token: str) -> list[dict]:
     rows: list[dict] = []
     for page in range(1, 101):
@@ -204,6 +286,74 @@ def _open_issues(repository: str, token: str) -> list[dict]:
     return rows
 
 
+def create_successor_handoff(
+    repository: str,
+    token: str,
+    issue: dict,
+    issues: list[dict],
+    generation: str,
+    comments: list[dict],
+) -> dict:
+    number = int(issue.get("number") or 0)
+    if number <= 0:
+        raise RuntimeError("terminal handoff requires a valid parent issue number")
+    if is_successor_issue(issue):
+        raise RuntimeError("successor issues are held for a future repair-engine generation instead of creating an unbounded successor chain")
+
+    existing = find_existing_successor(issues, number)
+    if existing is None:
+        _ensure_label(repository, token, "genesis-repair", "b60205", "Concrete repair work prioritized by the Genesis Sequential Issue Controller")
+        created = _request(
+            repository,
+            token,
+            "POST",
+            "/issues",
+            {
+                "title": _successor_title(issue),
+                "body": build_successor_body(issue, generation, latest_failure_summary(comments)),
+                "labels": ["genesis-task", "genesis-autonomous", "genesis-repair"],
+            },
+        )
+        if not isinstance(created, dict) or not int(created.get("number") or 0):
+            raise RuntimeError("GitHub did not return a valid successor issue")
+        successor = created
+    else:
+        successor = existing
+
+    successor_number = int(successor.get("number") or 0)
+    successor_url = str(successor.get("html_url") or successor.get("url") or f"https://github.com/{repository}/issues/{successor_number}")
+
+    _ensure_label(repository, token, "genesis-superseded", "6e7781", "Closed because a linked successor Issue became the authoritative repair work item")
+    _request(
+        repository,
+        token,
+        "POST",
+        f"/issues/{number}/labels",
+        {"labels": ["genesis-blocked", "genesis-solver-exhausted", "genesis-deferred", "genesis-superseded"]},
+    )
+    encoded = urllib.parse.quote("genesis-autonomous", safe="")
+    _request(repository, token, "DELETE", f"/issues/{number}/labels/{encoded}")
+
+    if not any(HANDOFF_COMMENT_MARKER in str(row.get("body") or "") for row in comments if isinstance(row, dict)):
+        _request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/comments",
+            {
+                "body": (
+                    f"{HANDOFF_COMMENT_MARKER}\n"
+                    "Genesis could not produce a verified solution within this bounded repair generation. "
+                    f"The blocker/failure evidence has been carried into successor Issue #{successor_number}: {successor_url}. "
+                    "This parent is now superseded and will remain closed so the queue has one authoritative work item instead of duplicate retries."
+                )
+            },
+        )
+
+    _request(repository, token, "PATCH", f"/issues/{number}", {"state": "closed", "state_reason": "not_planned"})
+    return {"parent": number, "successor": successor_number, "successor_url": successor_url, "created": existing is None}
+
+
 def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
     generation = engine_generation(root)
     marker = f"<!-- genesis-requeue-engine:{generation} -->"
@@ -212,11 +362,77 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
         "status": "ok",
         "engine_generation": generation,
         "released": [],
+        "successor_handoffs": [],
+        "successor_handoff_failed": [],
+        "successor_generation_holds": [],
         "infrastructure_quarantined": [],
         "skipped_same_generation": [],
         "skipped": [],
     }
     quarantined: set[int] = set()
+    handed_off: set[int] = set()
+    terminal_hold: set[int] = set()
+
+    # Terminally deferred parents must not disappear as dead backlog. Create one
+    # linked successor that carries the failure evidence and becomes the new
+    # authoritative work item. Successors themselves do not form an unbounded
+    # chain: after they exhaust, hold them for the current engine generation and
+    # release that same successor only when the repair engine materially changes.
+    handoff_count = 0
+    for issue in issues:
+        if handoff_count >= max(1, limit):
+            break
+        number = int(issue.get("number") or 0)
+        labels = issue_labels(issue)
+        if not (labels & EXHAUSTED_LABELS and "genesis-deferred" in labels):
+            continue
+        if "genesis-superseded" in labels:
+            terminal_hold.add(number)
+            continue
+
+        comments = _request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
+        if is_successor_issue(issue):
+            engine_markers = [
+                str(row.get("body") or "")
+                for row in comments
+                if isinstance(row, dict) and str(row.get("body") or "").startswith(REQUEUE_MARKER_PREFIX)
+            ]
+            if any(text.startswith(marker) for text in engine_markers):
+                terminal_hold.add(number)
+                result["successor_generation_holds"].append({"issue": number, "generation": generation})
+                continue
+            if not engine_markers:
+                _request(
+                    repository,
+                    token,
+                    "POST",
+                    f"/issues/{number}/comments",
+                    {
+                        "body": (
+                            marker
+                            + "\nThis repair-follow-up Issue also exhausted the current bounded repair generation. "
+                            + "Genesis will not create an unbounded chain of duplicate successor Issues. "
+                            + "This same successor remains deferred until the repair-engine generation changes, when it may be released for one fresh bounded attempt set."
+                        )
+                    },
+                )
+                terminal_hold.add(number)
+                result["successor_generation_holds"].append({"issue": number, "generation": generation})
+                continue
+            # An older engine marker exists but the current one does not: the
+            # repair engine changed, so normal generation-release logic below may
+            # reopen this same successor without creating another successor.
+            continue
+
+        try:
+            handoff = create_successor_handoff(repository, token, issue, issues, generation, comments)
+        except Exception as exc:
+            terminal_hold.add(number)
+            result["successor_handoff_failed"].append({"issue": number, "error": str(exc)[:500]})
+            continue
+        handed_off.add(number)
+        handoff_count += 1
+        result["successor_handoffs"].append(handoff)
 
     # A worker that failed before repair evidence did not spend a coding attempt.
     # Roll that dispatch marker back and quarantine the issue for this exact engine
@@ -276,7 +492,7 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
         if len(result["released"]) >= max(1, limit):
             break
         number = int(issue.get("number") or 0)
-        if number in quarantined:
+        if number in quarantined or number in handed_off or number in terminal_hold:
             continue
         labels = issue_labels(issue)
         eligible, reason = eligible_exhausted_issue(issue, root)
