@@ -21,6 +21,7 @@ ENGINE_PATHS = (
     "scripts/github_issue_autorepair.py",
     "scripts/requeue_exhausted_issues.py",
     "genesis/github_issue_cleanup.py",
+    "genesis/github_issue_capability_builder.py",
     "genesis/learned_capabilities.py",
 )
 ACTIVE_LABELS = {
@@ -419,9 +420,6 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
                 terminal_hold.add(number)
                 result["successor_generation_holds"].append({"issue": number, "generation": generation})
                 continue
-            # An older engine marker exists but the current one does not: the
-            # repair engine changed, so normal generation-release logic below may
-            # reopen this same successor without creating another successor.
             continue
 
         try:
@@ -434,9 +432,6 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
         handoff_count += 1
         result["successor_handoffs"].append(handoff)
 
-    # A worker that failed before repair evidence did not spend a coding attempt.
-    # Roll that dispatch marker back and quarantine the issue for this exact engine
-    # generation so successor wakeups cannot burn the remaining bounded attempts.
     for issue in issues:
         number = int(issue.get("number") or 0)
         labels = issue_labels(issue)
@@ -553,11 +548,6 @@ def main() -> None:
     limit = int(os.environ.get("GENESIS_EXHAUSTED_REQUEUE_LIMIT", "5"))
     print(json.dumps(run(repository, token, limit=limit), indent=2, sort_keys=True))
 
-    # The Sequential Controller invokes this script immediately before it
-    # refreshes the open-Issue queue. Run the narrow verification-only detector
-    # reconciler here so an already-fixed machine regression cannot race ahead
-    # into a bounded repair reservation. Other requeue entrypoints keep their
-    # existing behavior unchanged.
     if os.environ.get("GITHUB_WORKFLOW", "").strip() == "Genesis Sequential Issue Controller":
         from genesis.github_issue_detected_reconciler import reconcile_satisfied_detected_issues
 
