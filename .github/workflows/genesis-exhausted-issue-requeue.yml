@@ -7,6 +7,7 @@ on:
     paths:
       - genesis/coding.py
       - genesis/learned_capabilities.py
+      - genesis/github_issue_capability_builder.py
       - genesis/github_issue_cleanup.py
       - scripts/github_issue_autorepair.py
       - scripts/requeue_exhausted_issues.py
