@@ -12,6 +12,7 @@ on:
       - genesis/github_issue_cleanup.py
       - genesis/github_issue_legacy_cleanup.py
       - genesis/github_issue_terminal_reconciler.py
+      - genesis/github_issue_detected_reconciler.py
 
 permissions:
   contents: read
@@ -58,6 +59,7 @@ jobs:
           from pathlib import Path
 
           from genesis.github_issue_cleanup import cleanup_obsolete_github_issues
+          from genesis.github_issue_detected_reconciler import reconcile_satisfied_detected_issues
           from genesis.github_issue_legacy_cleanup import cleanup_legacy_managed_duplicates
           from genesis.github_issue_terminal_reconciler import reconcile_terminal_github_issues
 
@@ -78,6 +80,12 @@ jobs:
           print(json.dumps(result, indent=2, sort_keys=True))
           if result.get('status') not in {'ok', 'not_repository_runtime'}:
               raise SystemExit(f"terminal reconciliation failed: {result}")
+
+          detected = reconcile_satisfied_detected_issues(Path('.'))
+          print("Satisfied detected regression reconciliation:")
+          print(json.dumps(detected, indent=2, sort_keys=True))
+          if detected.get('status') not in {'ok', 'not_repository_runtime'}:
+              raise SystemExit(f"detected issue reconciliation failed: {detected}")
           PY
 
       - name: Save reconciled resumable task cache
