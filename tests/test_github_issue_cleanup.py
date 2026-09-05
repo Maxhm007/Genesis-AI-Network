@@ -14,6 +14,8 @@ class FakeGithub:
         self.calls.append((method, path, payload))
         if method == "GET" and path.startswith("/issues?"):
             return [dict(issue) for issue in self.issues.values() if issue.get("state") == "open"]
+        if method == "POST" and path.startswith("/issues/") and path.endswith("/comments"):
+            return {"id": len(self.calls), "body": str((payload or {}).get("body") or "")}
         if path.startswith("/issues/"):
             number = int(path.rsplit("/", 1)[1])
             issue = self.issues.get(number)
@@ -77,7 +79,7 @@ def test_exact_managed_fingerprint_keeps_newest_and_closes_older(tmp_path: Path)
     assert "newer_issue=#428" in result["closed"][0]["reason"]
 
 
-def test_ops_and_escalation_with_same_fingerprint_are_separate_kinds(tmp_path: Path) -> None:
+def test_ops_and_escalation_with_same_fingerprint_keep_one_canonical_record(tmp_path: Path) -> None:
     github = FakeGithub([
         _issue(50, body="<!-- genesis-ops:same -->"),
         _issue(51, body="<!-- genesis-chatgpt-escalation:same -->"),
@@ -85,9 +87,10 @@ def test_ops_and_escalation_with_same_fingerprint_are_separate_kinds(tmp_path: P
 
     result = cleanup_obsolete_github_issues(tmp_path, requester=github)
 
-    assert result["closed"] == []
     assert github.issues[50]["state"] == "open"
-    assert github.issues[51]["state"] == "open"
+    assert github.issues[51]["state"] == "closed"
+    assert result["closed"][0]["github_issue_number"] == 51
+    assert "canonical_issue=#50" in result["closed"][0]["reason"]
 
 
 def test_protected_duplicate_is_never_closed(tmp_path: Path) -> None:
@@ -265,3 +268,56 @@ def test_dotted_suffix_after_python_path_is_not_treated_as_safe_target(tmp_path:
 
     assert result["routed"] == []
     assert "**Target:**" not in github.issues[356]["body"]
+
+def test_frontier_measurement_routes_to_benchmark_execution(tmp_path: Path) -> None:
+    target = tmp_path / "genesis" / "benchmark_execution.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    github = FakeGithub([
+        _issue(
+            375,
+            title="[Genesis Task] frontier benchmark measurement",
+            body="- **Task type:** `frontier_benchmark_measurement`\nRecord a real comparable measurement.",
+        )
+    ])
+    result = cleanup_obsolete_github_issues(tmp_path, requester=github)
+    assert result["routed"][0]["target"] == "genesis/benchmark_execution.py"
+
+
+def test_self_improvement_task_type_can_route_without_genesis_task_title(tmp_path: Path) -> None:
+    target = tmp_path / "genesis" / "pulse.py"
+    target.parent.mkdir(parents=True)
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+    github = FakeGithub([
+        _issue(
+            341,
+            title="[Genesis Self Improvement] gene velocity improvement",
+            body="- **Task type:** `gene_velocity_improvement`\nReduce validated development latency.",
+        )
+    ])
+    result = cleanup_obsolete_github_issues(tmp_path, requester=github)
+    assert result["routed"][0]["target"] == "genesis/pulse.py"
+
+
+def test_external_authority_blocker_is_terminally_closed(tmp_path: Path) -> None:
+    github = FakeGithub([
+        _issue(
+            55,
+            body="Treat this as an external-authority / independent-secret provisioning blocker, not a retryable code defect.",
+        )
+    ])
+    result = cleanup_obsolete_github_issues(tmp_path, requester=github)
+    assert github.issues[55]["state"] == "closed"
+    assert result["closed"][0]["reason"] == "external_authority_dependency_documented"
+
+
+def test_ops_record_supersedes_same_fingerprint_escalation(tmp_path: Path) -> None:
+    github = FakeGithub([
+        _issue(428, title="[Genesis Ops] AI capability below target", body="<!-- genesis-ops:same -->"),
+        _issue(429, title="[Genesis Escalation] AI capability below target", body="<!-- genesis-chatgpt-escalation:same -->"),
+    ])
+    result = cleanup_obsolete_github_issues(tmp_path, requester=github)
+    assert github.issues[428]["state"] == "open"
+    assert github.issues[429]["state"] == "closed"
+    assert any(row["github_issue_number"] == 429 for row in result["closed"])
+

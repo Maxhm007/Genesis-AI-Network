@@ -196,7 +196,7 @@ def _request(repository: str, token: str, method: str, path: str, payload: dict 
 def _open_issues(repository: str, token: str) -> list[dict]:
     rows: list[dict] = []
     for page in range(1, 101):
-        batch = _request(repository, token, "GET", f"/issues?state=open&sort=created&direction=asc&per_page=100&page={page}")
+        batch = _request(repository, token, "GET", f"/issues?state=all&sort=created&direction=asc&per_page=100&page={page}")
         if not isinstance(batch, list):
             raise RuntimeError("GitHub open-Issue response was not a list")
         rows.extend(row for row in batch if isinstance(row, dict) and not row.get("pull_request"))
@@ -225,6 +225,8 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
     for issue in issues:
         number = int(issue.get("number") or 0)
         labels = issue_labels(issue)
+        if str(issue.get("state") or "open") != "open":
+            continue
         if labels & (ACTIVE_LABELS | EXHAUSTED_LABELS):
             continue
         if "genesis-autonomous" not in labels:
@@ -298,7 +300,13 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
                 if reset != body:
                     _request(repository, token, "PATCH", f"/issues/comments/{row['id']}", {"body": reset})
 
-        for label in ("genesis-solver-exhausted", "genesis-priority-exhausted", "genesis-blocked"):
+        if str(issue.get("state") or "open") == "closed":
+            reopened = _request(repository, token, "PATCH", f"/issues/{number}", {"state": "open"})
+            if not isinstance(reopened, dict) or str(reopened.get("state") or "") != "open":
+                result["skipped"].append({"issue": number, "reason": "reopen_failed"})
+                continue
+
+        for label in ("genesis-solver-exhausted", "genesis-priority-exhausted", "genesis-blocked", "genesis-deferred"):
             encoded = urllib.parse.quote(label, safe="")
             _request(repository, token, "DELETE", f"/issues/{number}/labels/{encoded}")
 

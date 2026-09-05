@@ -15,15 +15,17 @@ def test_sequential_controller_fetches_all_open_issue_pages():
     assert "| jq -s '.' > /tmp/genesis-controller-open.json" in text
 
 
-def test_sequential_controller_preserves_skip_boundaries():
+def test_sequential_controller_preserves_safety_boundaries_without_skipping_work_classes():
     text = CONTROLLER.read_text(encoding="utf-8")
 
     assert "genesis-solver-exhausted" in text
+    assert "genesis-deferred" in text
     assert "lower_title.startswith(('genesis chat:', '[genesis hourly report]', '[genesis gene chat]'))" in text
     assert "'persistent github-native reporting channel' in lower_body" in text
     assert "protected_targets" in text
-    assert "requires_measurement" in text
-    assert "external-authority / independent-secret provisioning blocker" in text
+    assert "python -m genesis.github_issue_cleanup" in text
+    assert "requires_measurement" not in text
+    assert "external-authority / independent-secret provisioning blocker" not in text
 
 
 def test_legacy_solver_entrypoints_do_not_scan_or_claim_the_queue():
