@@ -297,11 +297,14 @@ jobs:
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-working >/dev/null 2>&1 || true
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-verifying >/dev/null 2>&1 || true
 
+          terminal_deferred=false
           if [[ "$evidence_status" == "blocked" || "$solver_attempt" -ge 3 ]]; then
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-blocked >/dev/null 2>&1 || true
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-deferred >/dev/null 2>&1 || true
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-autonomous >/dev/null 2>&1 || true
-            retry_state='bounded attempts exhausted; queue will move on'
+            retry_state='terminally deferred under the current repair-engine generation; a changed repair engine may reopen it automatically'
+            terminal_deferred=true
           else
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous >/dev/null 2>&1 || true
             retry_state='issue remains open for the bounded retry policy'
@@ -309,6 +312,11 @@ jobs:
 
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --body "Genesis bounded repair did not promote a verified change in worker run ${GITHUB_RUN_ID} (repair status: \`${evidence_status:-worker_failed_before_evidence}\`, solver attempt: ${solver_attempt}/3). The repair reservation was released safely; ${retry_state}."
+
+          if [[ "$terminal_deferred" == "true" ]]; then
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+              --method PATCH -f state=closed -f state_reason=not_planned >/dev/null
+          fi
 
       - name: Preserve bounded repair evidence
         if: always()

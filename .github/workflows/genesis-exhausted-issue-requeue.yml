@@ -7,8 +7,11 @@ on:
     paths:
       - genesis/coding.py
       - genesis/learned_capabilities.py
+      - genesis/github_issue_cleanup.py
       - scripts/github_issue_autorepair.py
       - scripts/requeue_exhausted_issues.py
+      - .github/workflows/genesis-bounded-repair-worker.yml
+      - .github/workflows/genesis-sequential-issue-controller.yml
       - .github/workflows/genesis-exhausted-issue-requeue.yml
 
 permissions:
@@ -45,7 +48,7 @@ jobs:
           python scripts/requeue_exhausted_issues.py
           cat runtime/exhausted_issue_requeue.json
 
-      - name: Wake oldest solver only when idle
+      - name: Wake authoritative Sequential Issue Controller only when idle
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
@@ -57,13 +60,13 @@ jobs:
             exit 0
           fi
 
-          running=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-oldest-issue-solver.yml \
+          running=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-sequential-issue-controller.yml \
             --status in_progress --limit 1 --json databaseId --jq 'length')
-          queued=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-oldest-issue-solver.yml \
+          queued=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-sequential-issue-controller.yml \
             --status queued --limit 1 --json databaseId --jq 'length')
           if [ "$running" -eq 0 ] && [ "$queued" -eq 0 ]; then
-            gh workflow run genesis-oldest-issue-solver.yml --repo "$GITHUB_REPOSITORY" --ref main
-            echo 'Woke the normal oldest Issue solver.'
+            gh workflow run genesis-sequential-issue-controller.yml --repo "$GITHUB_REPOSITORY" --ref main
+            echo 'Woke the authoritative Sequential Issue Controller.'
           else
-            echo 'Oldest Issue solver is already active or queued; no duplicate wake dispatched.'
+            echo 'Sequential Issue Controller is already active or queued; no duplicate wake dispatched.'
           fi

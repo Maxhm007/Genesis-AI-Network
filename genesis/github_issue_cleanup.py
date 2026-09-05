@@ -121,6 +121,24 @@ def _managed_key(issue: dict) -> tuple[str, str] | None:
     return match.group(1).lower(), match.group(2).lower()
 
 
+def _normalize_exact_text(value: object) -> str:
+    text = str(value or "").replace("\r\n", "\n").replace("\r", "\n").strip()
+    return "\n".join(line.rstrip() for line in text.split("\n"))
+
+
+def _exact_duplicate_key(issue: dict) -> tuple[str, str] | None:
+    """Return a key only for exact actionable records after harmless newline cleanup."""
+    if _protected_issue(issue) or _managed_key(issue) is not None:
+        return None
+    title = " ".join(str(issue.get("title") or "").split()).lower()
+    body = _normalize_exact_text(issue.get("body"))
+    if not title or not body:
+        return None
+    if title.startswith(("genesis chat:", "[genesis hourly report]", "[genesis gene chat]")):
+        return None
+    return title, body
+
+
 def _list_open_issues(requester: GithubRequester) -> list[dict] | None:
     issues: list[dict] = []
     for page in range(1, 101):
@@ -314,6 +332,36 @@ def cleanup_obsolete_github_issues(
             continue
 
         remaining.append(issue)
+
+    exact_groups: dict[tuple[str, str], list[dict]] = {}
+    for issue in remaining:
+        key = _exact_duplicate_key(issue)
+        if key is not None:
+            exact_groups.setdefault(key, []).append(issue)
+
+    for rows in exact_groups.values():
+        if len(rows) < 2:
+            continue
+        canonical = min(rows, key=_issue_number)
+        canonical_number = _issue_number(canonical)
+        result["kept_current"].append(
+            {"github_issue_number": canonical_number, "managed_kind": "exact_duplicate_canonical"}
+        )
+        for issue in sorted(rows, key=_issue_number):
+            number = _issue_number(issue)
+            if number == canonical_number:
+                continue
+            closed = _close_issue(
+                requester,
+                issue,
+                reason=f"exact_duplicate_of:#{canonical_number}",
+            )
+            if closed is None:
+                result["blocked"].append(
+                    {"github_issue_number": number, "reason": "exact_duplicate_close_failed"}
+                )
+            else:
+                result["closed"].append(closed)
 
     groups: dict[tuple[str, str], list[dict]] = {}
     for issue in remaining:
