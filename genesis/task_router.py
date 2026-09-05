@@ -12,7 +12,20 @@ from .problem_solver import AutonomousProblemSolver
 
 MODULE_RULES: tuple[tuple[tuple[str, ...], str], ...] = (
     (("security", "vulnerability", "secret", "attack", "auth"), "genesis.security"),
-    (("model", "provider", "inference", "reasoning", "benchmark model"), "genesis.model_scout"),
+    ((
+        "model",
+        "provider",
+        "inference",
+        "reasoning",
+        "benchmark model",
+        "speculative decoding",
+        "decode context parallel",
+        "decode-context parallel",
+        "moe",
+        "rocm",
+        "cuda graph",
+        "tensor parallel",
+    ), "genesis.model_scout"),
     (("research", "paper", "study", "evidence", "aging", "longevity", "immortality"), "genesis.research"),
     (("blockchain", "consensus", "peer", "distributed", "replication", "network"), "genesis.blockchain"),
     (("android", "desktop", "application", "apk", "windows", "ui"), "genesis.application"),

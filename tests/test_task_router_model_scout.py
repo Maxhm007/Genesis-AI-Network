@@ -99,3 +99,17 @@ def test_model_scout_recommends_validation_before_activation():
     by_name = {item.name: item for item in recommendations}
     assert by_name["candidate-small"].recommendation == "evaluate_next"
     assert by_name["candidate-validated"].recommendation == "candidate_for_activation"
+
+def test_vllm_runtime_release_signals_route_to_model_scout(tmp_path: Path):
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    for objective in (
+        "Tune speculative decoding confidence scheduling",
+        "Enable decode context parallel execution",
+        "Validate ROCm sparse MLA runtime",
+        "Narrow eager CUDA graph regions",
+        "Plan MoE tensor parallel execution",
+    ):
+        task = queue.create(objective)
+        decision = TaskRouterModule.route(task)
+        assert decision.module_id == "genesis.model_scout"
+
