@@ -31,6 +31,34 @@ def test_specialist_controller_serializes_with_generic_queue_and_routes_only_saf
     assert "genesis-specialist-repair-worker.yml" in specialist
 
 
+def test_specialist_controller_surfaces_actionable_no_target_work_once() -> None:
+    specialist = SPECIALIST_CONTROLLER.read_text(encoding="utf-8")
+
+    assert "genesis-needs-routing" in specialist
+    assert "[Genesis Task]" in specialist
+    assert "[Genesis Repair]" in specialist
+    assert "[Genesis Self Improvement]" in specialist
+    assert "application_development_requires_application_lane" in specialist
+    assert "workflow_control_plane_requires_privileged_decomposition" in specialist
+    assert "multi_file_or_new_file_gene_lifecycle_requires_decomposition" in specialist
+    assert "missing_deterministic_single_target_requires_decomposition" in specialist
+    assert "<!-- genesis-specialist-routing -->" in specialist
+    assert "if 'genesis-needs-routing' in labels" in specialist
+    assert "not being closed without completion evidence" in specialist
+    assert "[genesis ops]" in specialist.lower()
+    assert "[genesis gene chat]" in specialist.lower()
+
+
+def test_specialist_classification_does_not_break_active_repair_serialization() -> None:
+    specialist = SPECIALIST_CONTROLLER.read_text(encoding="utf-8")
+
+    classification_index = specialist.index("/tmp/genesis-needs-routing.txt")
+    reservation_index = specialist.index("active_count=$(jq")
+    dispatch_index = specialist.index("gh workflow run genesis-specialist-repair-worker.yml")
+    assert classification_index < reservation_index < dispatch_index
+    assert "metadata-only" in specialist
+
+
 def test_specialist_worker_uses_existing_guarded_repair_engine_and_exact_scope() -> None:
     worker = SPECIALIST_WORKER.read_text(encoding="utf-8")
 
