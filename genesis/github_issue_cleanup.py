@@ -42,7 +42,15 @@ MEASUREMENT_PHRASES = (
 )
 TASK_TYPE_TARGETS = {
     "benchmark_runner_integration": "genesis/benchmark_execution.py",
+    "frontier_benchmark_measurement": "genesis/benchmark_execution.py",
+    "capability_growth": "genesis/coding.py",
+    "model_evaluation": "genesis/model_scout.py",
+    "competitive_ai_improvement": "genesis/benchmark_execution.py",
+    "gene_velocity_improvement": "genesis/pulse.py",
 }
+EXTERNAL_TERMINAL_PHRASES = (
+    "external-authority / independent-secret provisioning blocker",
+)
 ROUTING_NOTE_HEADER = "### Genesis deterministic routing evidence"
 
 GithubRequester = Callable[[str, str, dict | None], object | None]
@@ -185,7 +193,11 @@ def _routing_target(issue: dict, root: Path) -> tuple[str, str] | None:
 
     if TARGET_RE.search(body):
         return None
-    if not title.startswith("[Genesis Task]"):
+    task_type = _task_type(body)
+    mapped = TASK_TYPE_TARGETS.get(task_type, "")
+    model_lab_target = "genesis/model_lab.py" if lower_title.startswith("genesis model lab:") else ""
+    mapped = mapped or model_lab_target
+    if not title.startswith("[Genesis Task]") and not mapped:
         return None
     if labels & {"genesis-solver-exhausted", "genesis-persistent", "genesis-control", "duplicate"}:
         return None
@@ -193,13 +205,11 @@ def _routing_target(issue: dict, root: Path) -> tuple[str, str] | None:
         return None
     if "external-authority / independent-secret provisioning blocker" in lower_body:
         return None
+    if mapped and _safe_existing_target(root, mapped):
+        reason = f"task_type_map:{task_type}" if task_type else "title_map:model_lab"
+        return mapped, reason
     if any(phrase in lower_body for phrase in MEASUREMENT_PHRASES):
         return None
-
-    task_type = _task_type(body)
-    mapped = TASK_TYPE_TARGETS.get(task_type, "")
-    if mapped and _safe_existing_target(root, mapped):
-        return mapped, f"task_type_map:{task_type}"
 
     candidates = sorted(set(PYTHON_PATH_RE.findall(body)))
     if len(candidates) != 1:
@@ -275,6 +285,17 @@ def cleanup_obsolete_github_issues(
             continue
         if _protected_issue(issue):
             result["skipped_protected"].append(number)
+            remaining.append(issue)
+            continue
+
+        lower_body = str(issue.get("body") or "").lower()
+        if any(phrase in lower_body for phrase in EXTERNAL_TERMINAL_PHRASES):
+            requester("POST", f"/issues/{number}/comments", {"body": "Genesis Issue Solver terminal reconciliation: the remaining action requires independent external authority/secret provisioning and cannot be performed safely by this repository. Internal code work is complete; closing this Issue as not planned instead of leaving permanent backlog. Reopen only when the external trust-domain evidence is available."})
+            closed = _close_issue(requester, issue, reason="external_authority_dependency_documented")
+            if closed is None:
+                result["blocked"].append({"github_issue_number": number, "reason": "external_terminal_close_failed"})
+            else:
+                result["closed"].append(closed)
             continue
 
         close_labels = sorted(_issue_labels(issue) & EXPLICIT_CLOSE_LABELS)
@@ -328,6 +349,35 @@ def cleanup_obsolete_github_issues(
                 result["blocked"].append(
                     {"github_issue_number": number, "reason": "managed_supersession_close_failed"}
                 )
+            else:
+                result["closed"].append(closed)
+
+    fingerprints: dict[str, list[dict]] = {}
+    for issue in remaining:
+        key = _managed_key(issue)
+        if key is not None:
+            fingerprints.setdefault(key[1], []).append(issue)
+    for fingerprint, rows in sorted(fingerprints.items()):
+        kinds = {_managed_key(row)[0] for row in rows if _managed_key(row) is not None}
+        if not {"genesis-ops", "genesis-chatgpt-escalation"}.issubset(kinds):
+            continue
+        ops_rows = [row for row in rows if (_managed_key(row) or ("", ""))[0] == "genesis-ops"]
+        if not ops_rows:
+            continue
+        canonical = max(ops_rows, key=_issue_number)
+        canonical_number = _issue_number(canonical)
+        for row in rows:
+            key = _managed_key(row)
+            number = _issue_number(row)
+            if key is None or key[0] != "genesis-chatgpt-escalation" or number in {0, canonical_number}:
+                continue
+            closed = _close_issue(
+                requester,
+                row,
+                reason=f"escalation_represented_by_ops:{fingerprint}:canonical_issue=#{canonical_number}",
+            )
+            if closed is None:
+                result["blocked"].append({"github_issue_number": number, "reason": "escalation_alias_close_failed"})
             else:
                 result["closed"].append(closed)
 
