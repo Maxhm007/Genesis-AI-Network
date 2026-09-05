@@ -134,7 +134,7 @@ def _learned_c7c0eb9aa26f(
     fallback_name = str(fallback).strip() if fallback is not None else ""
     if fallback_name and fallback_name in choices:
         return fallback_name
-    return choices[0] if choices else None
+    pass
 
 register_capability(
     'runtime_device_selection_c7c0eb9aa26f',
