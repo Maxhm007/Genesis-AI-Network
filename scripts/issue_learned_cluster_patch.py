@@ -1,0 +1,102 @@
+from pathlib import Path
+
+TARGET = Path("genesis/learned_capabilities.py")
+MARKER = "# Issue #427 — information-flow martingale evidence"
+APPEND = r'''
+
+
+# Issue #427 — information-flow martingale evidence distilled into a bounded local utility.
+def _martingale_information_budget_427(step_divergences, peeking_penalty: float = 0.0) -> dict[str, float | int]:
+    """Aggregate non-negative per-step information flow and an explicit anticipation penalty."""
+    values = tuple(float(item) for item in step_divergences)
+    if len(values) > 4096 or any(item < 0.0 or item != item or item == float("inf") for item in values):
+        raise ValueError("step divergences must be finite, non-negative, and bounded")
+    penalty = float(peeking_penalty)
+    if penalty < 0.0 or penalty != penalty or penalty == float("inf"):
+        raise ValueError("peeking penalty must be finite and non-negative")
+    divergence = sum(values)
+    return {
+        "steps": len(values),
+        "conditional_divergence": divergence,
+        "peeking_penalty": penalty,
+        "information_budget": divergence + penalty,
+    }
+
+register_capability(
+    "martingale_information_budget_427",
+    "Track a bounded martingale evidence budget as per-step conditional information flow plus an explicit random-time peeking penalty.",
+    "Issue #427 external lesson: exact variational martingale identities resolve tail-control information by the chain rule into per-step conditional divergences, while arbitrary random times add an e-process peeking penalty.",
+    _martingale_information_budget_427,
+)
+
+
+# Issue #431 — tensor-split support distilled from llama.cpp LFM2/LFM2MOE enablement.
+def _lfm2_tensor_split_plan_431(model_family: str, device_weights) -> tuple[float, ...]:
+    """Normalize a bounded device-weight plan for LFM2/LFM2MOE tensor splitting."""
+    family = str(model_family).strip().lower().replace("-", "").replace("_", "")
+    if family not in {"lfm2", "lfm2moe"}:
+        raise ValueError("tensor split plan is limited to LFM2/LFM2MOE")
+    weights = tuple(float(item) for item in device_weights)
+    if not weights or len(weights) > 32 or any(item < 0.0 or item != item or item == float("inf") for item in weights):
+        raise ValueError("device weights must be finite, non-negative, and bounded")
+    total = sum(weights)
+    if total <= 0.0:
+        raise ValueError("tensor split requires positive total device weight")
+    return tuple(item / total for item in weights)
+
+register_capability(
+    "lfm2_tensor_split_plan_431",
+    "Create a deterministic bounded tensor-split plan for LFM2/LFM2MOE across explicitly weighted devices.",
+    "Issue #431 external lesson: llama.cpp b10549 / PR #26993 enabled tensor split for LFM2 and LFM2MOE; Genesis applies the transferable policy as explicit normalized device partitioning without touching devices at import time.",
+    _lfm2_tensor_split_plan_431,
+)
+
+
+# Issue #432 — safe partial K tile handling distilled from llama.cpp Metal matmul tail fix.
+def _partial_k_tile_extent_432(total_k: int, loop_k: int, tile_k: int = 32) -> int:
+    """Clamp the current K tile to the remaining valid tensor extent."""
+    total = int(total_k)
+    offset = int(loop_k)
+    tile = int(tile_k)
+    if total < 0 or offset < 0 or tile < 1 or tile > 4096:
+        raise ValueError("K extents are out of bounds")
+    if offset >= total:
+        return 0
+    return min(tile, total - offset)
+
+register_capability(
+    "partial_k_tile_extent_432",
+    "Clamp a matmul K tile to the remaining valid extent so partial tails never request out-of-bounds elements.",
+    "Issue #432 external lesson: llama.cpp b10545 / PR #27450 fixed Metal tensor matmul tails by using dynamic K extent and min(tile, K-loop_k) clamping for non-32-aligned K.",
+    _partial_k_tile_extent_432,
+)
+
+
+# Issue #433 — explicit multimodal projection device routing with legacy fallback.
+def _mmproj_device_selection_433(
+    explicit_device: str | None,
+    legacy_device: str | None,
+    available,
+    *,
+    default: str | None = None,
+) -> str | None:
+    """Prefer explicit mmproj placement, then legacy configuration, then a safe default."""
+    choices = tuple(str(item).strip() for item in available if str(item).strip())
+    for candidate in (explicit_device, legacy_device, default):
+        name = str(candidate).strip() if candidate is not None else ""
+        if name and name in choices:
+            return name
+    return choices[0] if choices else None
+
+register_capability(
+    "mmproj_device_selection_433",
+    "Select multimodal-projection placement from an explicit device request while preserving a legacy device fallback and bounded available-device set.",
+    "Issue #433 external lesson: llama.cpp b10541 / PR #23255 added --mmproj-device plus backward-compatible MTMD_BACKEND_DEVICE routing and immediate backend selection; Genesis preserves the explicit-over-legacy precedence without import-time device access.",
+    _mmproj_device_selection_433,
+)
+'''
+
+text = TARGET.read_text(encoding="utf-8")
+if MARKER in text:
+    raise SystemExit("learned capability cluster already applied")
+TARGET.write_text(text.rstrip() + APPEND + "\n", encoding="utf-8")
