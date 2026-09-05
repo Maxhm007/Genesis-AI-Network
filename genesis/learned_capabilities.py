@@ -1918,9 +1918,15 @@ register_capability(
 # Issue #427 — information-flow martingale evidence distilled into a bounded local utility.
 def _martingale_information_budget_427(step_divergences, peeking_penalty: float = 0.0) -> dict[str, float | int]:
     """Aggregate non-negative per-step information flow and an explicit anticipation penalty."""
-    values = tuple(float(item) for item in step_divergences)
-    if len(values) > 4096 or any(item < 0.0 or item != item or item == float("inf") for item in values):
-        raise ValueError("step divergences must be finite, non-negative, and bounded")
+    values_list: list[float] = []
+    for index, item in enumerate(step_divergences):
+        if index >= 4096:
+            raise ValueError("step divergences exceed bounded input size")
+        value = float(item)
+        if value < 0.0 or value != value or value == float("inf"):
+            raise ValueError("step divergences must be finite, non-negative, and bounded")
+        values_list.append(value)
+    values = tuple(values_list)
     penalty = float(peeking_penalty)
     if penalty < 0.0 or penalty != penalty or penalty == float("inf"):
         raise ValueError("peeking penalty must be finite and non-negative")
@@ -1949,8 +1955,16 @@ def _lfm2_tensor_split_plan_431(model_family: str, device_weights) -> tuple[floa
     family = str(model_family).strip().lower().replace("-", "").replace("_", "")
     if family not in {"lfm2", "lfm2moe"}:
         raise ValueError("tensor split plan is limited to LFM2/LFM2MOE")
-    weights = tuple(float(item) for item in device_weights)
-    if not weights or len(weights) > 32 or any(item < 0.0 or item != item or item == float("inf") for item in weights):
+    weights_list: list[float] = []
+    for index, item in enumerate(device_weights):
+        if index >= 32:
+            raise ValueError("device weights exceed bounded input size")
+        value = float(item)
+        if value < 0.0 or value != value or value == float("inf"):
+            raise ValueError("device weights must be finite, non-negative, and bounded")
+        weights_list.append(value)
+    weights = tuple(weights_list)
+    if not weights:
         raise ValueError("device weights must be finite, non-negative, and bounded")
     total = sum(weights)
     if total <= 0.0 or total == float("inf"):

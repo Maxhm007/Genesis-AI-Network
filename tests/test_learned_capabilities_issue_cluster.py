@@ -52,3 +52,18 @@ def test_issue_433_bounds_available_device_scan():
     with pytest.raises(ValueError, match="scan exceeds bound"):
         run_capability("mmproj_device_selection_433", None, None, ["cpu"] * 65)
 
+def test_issue_427_bounds_iterator_consumption():
+    def values():
+        while True:
+            yield 0.01
+    with pytest.raises(ValueError, match="bounded input size"):
+        run_capability("martingale_information_budget_427", values())
+
+
+def test_issue_431_bounds_weight_iterator_consumption():
+    def weights():
+        while True:
+            yield 1.0
+    with pytest.raises(ValueError, match="bounded input size"):
+        run_capability("lfm2_tensor_split_plan_431", "LFM2", weights())
+
