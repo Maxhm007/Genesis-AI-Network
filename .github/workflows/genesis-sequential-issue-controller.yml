@@ -111,8 +111,9 @@ jobs:
             if [ "$attempt" -ge "$max_attempts" ]; then
               add_label "$issue_number" genesis-blocked
               add_label "$issue_number" genesis-solver-exhausted
+              add_label "$issue_number" genesis-deferred
               remove_label "$issue_number" genesis-autonomous
-              status_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Sequential Issue Controller — bounded attempt exhausted**\n\n- Issue: #%s — %s\n- Last check (UTC): %s\n- Controller run: %s\n- Attempt: **%s/%s**\n- Result: **%s**\n- State: **blocked until a new repair-engine generation can safely retry it**\n\nThe controller did not close this issue because verified completion evidence is missing. The queue may move to the next eligible issue.' \
+              status_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Sequential Issue Controller — bounded attempt exhausted**\n\n- Issue: #%s — %s\n- Last check (UTC): %s\n- Controller run: %s\n- Attempt: **%s/%s**\n- Result: **%s**\n- State: **terminally deferred; automatically reopenable after repair-engine generation changes**\n\nThe current repair generation exhausted its safe attempts. Genesis closes this issue as not planned instead of leaving permanent backlog; a future repair-engine generation can reopen it automatically.' \
                 "$marker" "$attempt" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$attempt" "$max_attempts" "$result")
             else
               add_label "$issue_number" genesis-autonomous
@@ -120,6 +121,9 @@ jobs:
                 "$marker" "$attempt" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$attempt" "$max_attempts" "$result")
             fi
             upsert_status "$issue_number" "$status_body"
+            if [ "$attempt" -ge "$max_attempts" ]; then
+              gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --method PATCH -f state=closed -f state_reason=not_planned >/dev/null
+            fi
           }
 
           ensure_label genesis-claimed 1f6feb 'Claimed by the Genesis Issue Solver'
@@ -130,6 +134,7 @@ jobs:
           ensure_label genesis-solver-exhausted 6e7781 'Genesis Issue Solver exhausted its bounded attempts and moved on'
           ensure_label genesis-verified 0e8a16 'Genesis verified the issue completion condition before closure'
           ensure_label genesis-autonomous 1f883d 'Authorized for Genesis autonomous repair'
+          ensure_label genesis-deferred 8c959f 'Closed after bounded solver exhaustion; automatically reopenable after repair-engine change'
 
           echo 'Stopping legacy long-running dispatch loops so this controller is the single queue scheduler.'
           for workflow in genesis-oldest-issue-solver.yml genesis-priority-issue-solver.yml; do
@@ -207,6 +212,11 @@ jobs:
             clear_transient_labels "$issue_number"
           done < /tmp/genesis-transient-only.txt
 
+          echo 'Routing and terminally reconciling every open Issue class before selection.'
+          if ! python -m genesis.github_issue_cleanup; then
+            echo 'Issue lifecycle preflight reported a partial result; continuing with safely routable work.' >&2
+          fi
+
           echo 'Safely releasing exhausted issues only when the repair-engine generation changed.'
           if ! python scripts/requeue_exhausted_issues.py; then
             echo 'Exhausted-issue generation requeue failed; continuing with the currently eligible queue.' >&2
@@ -272,12 +282,6 @@ jobs:
                   continue
               if 'persistent github-native reporting channel' in lower_body:
                   continue
-              if 'external-authority / independent-secret provisioning blocker' in lower_body:
-                  continue
-              if lower_title.startswith(('[genesis escalation] ai capability below target', '[genesis ops] ai capability below target')):
-                  continue
-              if lower_title.startswith('genesis model lab:'):
-                  continue
               if labels & active_labels:
                   continue
               if 'genesis-solver-exhausted' in labels:
@@ -288,17 +292,6 @@ jobs:
               if is_action_failure or is_syntax_report:
                   print(number)
                   break
-
-              requires_measurement = any(
-                  phrase in lower_body
-                  for phrase in (
-                      'post-promotion benchmark', 'post-promotion remeasurement',
-                      'benchmark re-measurement', 'benchmark remeasurement',
-                      'measured score improves', 'same comparable benchmark',
-                  )
-              )
-              if requires_measurement:
-                  continue
 
               match = re.search(r'^- \*\*Target:\*\* `([^`]+)`', body, re.MULTILINE)
               target = match.group(1).strip() if match else ''
