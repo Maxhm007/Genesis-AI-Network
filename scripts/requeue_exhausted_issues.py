@@ -20,6 +20,7 @@ ENGINE_PATHS = (
     ".github/workflows/genesis-sequential-issue-controller.yml",
     "scripts/github_issue_autorepair.py",
     "scripts/requeue_exhausted_issues.py",
+    "genesis/github_issue_capability_builder.py",
     "genesis/github_issue_cleanup.py",
     "genesis/learned_capabilities.py",
 )
