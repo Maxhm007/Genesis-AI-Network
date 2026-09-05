@@ -337,6 +337,18 @@ def main() -> None:
     limit = int(os.environ.get("GENESIS_EXHAUSTED_REQUEUE_LIMIT", "5"))
     print(json.dumps(run(repository, token, limit=limit), indent=2, sort_keys=True))
 
+    # The Sequential Controller invokes this script immediately before it
+    # refreshes the open-Issue queue. Run the narrow verification-only detector
+    # reconciler here so an already-fixed machine regression cannot race ahead
+    # into a bounded repair reservation. Other requeue entrypoints keep their
+    # existing behavior unchanged.
+    if os.environ.get("GITHUB_WORKFLOW", "").strip() == "Genesis Sequential Issue Controller":
+        from genesis.github_issue_detected_reconciler import reconcile_satisfied_detected_issues
+
+        detected = reconcile_satisfied_detected_issues(ROOT)
+        print("Satisfied detected regression controller preflight:")
+        print(json.dumps(detected, indent=2, sort_keys=True))
+
 
 if __name__ == "__main__":
     main()
