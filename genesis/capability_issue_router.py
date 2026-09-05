@@ -60,11 +60,7 @@ def _source_marker(task_id: str) -> str:
 
 def _is_source_capability_task(task: GenesisTask) -> bool:
     payload = dict(task.payload or {})
-    return (
-        payload.get("task_type") == "capability_growth"
-        and int(payload.get("github_issue_number") or 0) <= 0
-        and str(payload.get("source") or "") == "genesis.evolution_learning"
-    )
+    return payload.get('task_type') == 'capability_growth' and int(payload.get('github_issue_number') or 0) <= 0 and str(payload.get('source') or '') == 'genesis.evolution_learning'
 
 
 def _recoverable_paused(task: GenesisTask) -> bool:
