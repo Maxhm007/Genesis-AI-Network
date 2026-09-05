@@ -1,0 +1,64 @@
+name: Genesis Hourly Whole-Dashboard Review
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-hourly-dashboard-review.yml
+      - scripts/dashboard_hourly_review.py
+      - tests/test_dashboard_hourly_review.py
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-hourly-dashboard-review
+  cancel-in-progress: false
+
+jobs:
+  review-whole-dashboard:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - name: Checkout authoritative main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install focused test dependency
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Verify hourly whole-dashboard review contract
+        run: python -m pytest -q tests/test_dashboard_hourly_review.py
+
+      - name: Ensure dashboard review labels idempotently
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh label create genesis-task \
+            --repo "$GITHUB_REPOSITORY" \
+            --color 0e8a16 \
+            --description 'Authoritative GitHub Issue backing for Genesis autonomous tasks' \
+            --force
+          gh label create genesis-dashboard-review \
+            --repo "$GITHUB_REPOSITORY" \
+            --color 1d76db \
+            --description 'Created by the hourly whole-dashboard development and improvement review' \
+            --force
+
+      - name: Review every dashboard tab and the complete dashboard file chain
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        run: python scripts/dashboard_hourly_review.py
