@@ -128,7 +128,7 @@ class ModelScoutModule:
                 reason = "model is already active; continue telemetry and regression monitoring"
             elif candidate.state in {"validated", "trusted"}:
                 recommendation = "candidate_for_activation"
-                reason = "benchmark evidence exists; compare against the current active provider before activation"
+                reason = 'benchmark evidence exists; compare against the current active provider before activation'
             else:
                 recommendation = "evaluate_next"
                 reason = "model is not trusted enough for activation; advance only through quarantine, testing and validation"
