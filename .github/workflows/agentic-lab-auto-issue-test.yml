@@ -1,0 +1,250 @@
+name: Agentic Lab Automatic Issue Test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/agentic-lab-auto-issue-test.yml
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: agentic-lab-auto-issue-test
+  cancel-in-progress: false
+
+jobs:
+  auto-create-solve-verify-close:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      TARGET_FILE: agentic_lab/automatic_test_${{ github.run_id }}.txt
+      REQUIRED_CONTENT: Genesis Agentic Lab automatic test passed.
+
+    steps:
+      - name: Automatically create Agentic Lab issue
+        id: create_issue
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const target = process.env.TARGET_FILE;
+            const required = process.env.REQUIRED_CONTENT;
+            const runId = context.runId;
+
+            const body = [
+              '## Purpose',
+              'Automatically created by the isolated **Agentic Lab** for autonomous closed-loop test #2.',
+              '',
+              '## AGENTIC LAB ONLY',
+              'This issue must be solved only by the isolated Agentic Lab workflow. Existing Genesis issue solvers and production workflows must not process it.',
+              '',
+              '## Test task',
+              'Create one new file:',
+              '',
+              '`' + target + '`',
+              '',
+              'with exactly this content:',
+              '',
+              '`' + required + '`',
+              '',
+              '## Safety / scope',
+              '- Do not modify any existing file.',
+              '- Do not modify any existing Genesis workflow.',
+              '- Do not change production Genesis behavior.',
+              '- Do not touch other open issues.',
+              '- Only the new isolated test file may be created.',
+              '',
+              '## Acceptance criteria',
+              '1. The authorized file exists.',
+              '2. Its content exactly matches the required text.',
+              '3. The solving commit changes exactly one file and adds it.',
+              '4. Live `main` is independently verified.',
+              '5. Close this issue only after successful verification.',
+              '',
+              'Agentic Lab workflow run: `' + runId + '`'
+            ].join('\n');
+
+            const { data: issue } = await github.rest.issues.create({
+              owner,
+              repo,
+              title: '[Agentic Lab Auto Test] Autonomous closed-loop run ' + runId,
+              body
+            });
+
+            core.info('Automatically created Agentic Lab issue #' + issue.number);
+            core.setOutput('issue_number', String(issue.number));
+
+      - name: Plan and enforce Agentic-only boundary
+        id: plan
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.create_issue.outputs.issue_number }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = Number(process.env.ISSUE_NUMBER);
+            const target = process.env.TARGET_FILE;
+            const required = process.env.REQUIRED_CONTENT;
+
+            const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number });
+            if (issue.state !== 'open') core.setFailed('Automatically created issue is not open.');
+            if (!issue.title.startsWith('[Agentic Lab Auto Test]')) core.setFailed('Issue is outside Agentic Lab scope.');
+            const body = issue.body || '';
+            if (!body.includes('## AGENTIC LAB ONLY')) core.setFailed('Agentic-only isolation marker is missing.');
+            if (!body.includes('`' + target + '`')) core.setFailed('Authorized target path is missing from issue.');
+            if (!body.includes('`' + required + '`')) core.setFailed('Required content is missing from issue.');
+
+            try {
+              await github.rest.repos.getContent({ owner, repo, path: target, ref: 'main' });
+              core.setFailed('Target already exists; test requires creation of a new isolated file.');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            const plan = {
+              goal: 'Solve automatically created Agentic Lab issue #' + issue_number,
+              action: 'create_new_file',
+              target,
+              expected_content: required,
+              allowed_repository_changes: [target],
+              verification: ['commit_changes_only_target', 'live_file_exact_match'],
+              close_only_after_verification: true
+            };
+            core.info('Agentic plan: ' + JSON.stringify(plan));
+
+      - name: Act within bounded Agentic Lab scope
+        id: act
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.create_issue.outputs.issue_number }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = Number(process.env.ISSUE_NUMBER);
+            const target = process.env.TARGET_FILE;
+            const required = process.env.REQUIRED_CONTENT;
+            const content = Buffer.from(required, 'utf8').toString('base64');
+
+            const { data } = await github.rest.repos.createOrUpdateFileContents({
+              owner,
+              repo,
+              path: target,
+              message: 'Agentic Lab auto solve #' + issue_number,
+              content,
+              branch: 'main'
+            });
+
+            if (!data.commit || !data.commit.sha) core.setFailed('No commit SHA returned by Agentic action.');
+            core.setOutput('commit_sha', data.commit.sha);
+            core.info('Action commit: ' + data.commit.sha);
+
+      - name: Observe autonomous action
+        id: observe
+        uses: actions/github-script@v7
+        env:
+          COMMIT_SHA: ${{ steps.act.outputs.commit_sha }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const target = process.env.TARGET_FILE;
+            const ref = process.env.COMMIT_SHA;
+
+            const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref });
+            const files = commit.files || [];
+            const names = files.map(file => file.filename);
+            core.info('Observed changed files: ' + JSON.stringify(names));
+
+            if (files.length !== 1 || names[0] !== target) {
+              core.setFailed('Isolation violation: autonomous action changed files outside the one authorized target.');
+            }
+            if (files[0].status !== 'added') {
+              core.setFailed('Isolation violation: authorized target was not newly added.');
+            }
+
+      - name: Independently verify result
+        id: verify
+        uses: actions/github-script@v7
+        env:
+          COMMIT_SHA: ${{ steps.act.outputs.commit_sha }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const target = process.env.TARGET_FILE;
+            const required = process.env.REQUIRED_CONTENT;
+            const commitSha = process.env.COMMIT_SHA;
+
+            const { data: atCommit } = await github.rest.repos.getContent({ owner, repo, path: target, ref: commitSha });
+            if (Array.isArray(atCommit) || atCommit.type !== 'file') core.setFailed('Verifier did not receive a file at commit.');
+            const committedText = Buffer.from(atCommit.content || '', 'base64').toString('utf8');
+            if (committedText !== required) core.setFailed('Committed content does not exactly match acceptance criteria.');
+
+            const { data: live } = await github.rest.repos.getContent({ owner, repo, path: target, ref: 'main' });
+            if (Array.isArray(live) || live.type !== 'file') core.setFailed('Live main verifier did not receive a file.');
+            const liveText = Buffer.from(live.content || '', 'base64').toString('utf8');
+            if (liveText !== required) core.setFailed('Live main content does not exactly match acceptance criteria.');
+
+            core.info('Independent verification passed.');
+            core.setOutput('verified', 'true');
+
+      - name: Close automatically created issue after verified success
+        if: steps.verify.outputs.verified == 'true'
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.create_issue.outputs.issue_number }}
+          COMMIT_SHA: ${{ steps.act.outputs.commit_sha }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = Number(process.env.ISSUE_NUMBER);
+            const target = process.env.TARGET_FILE;
+            const commitSha = process.env.COMMIT_SHA;
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body: [
+                'Agentic Lab automatic closed-loop test passed.',
+                '',
+                '- Issue creation: automatic',
+                '- Solver: isolated Agentic Lab only',
+                '- Plan: bounded to this automatically created issue',
+                '- Action: created `' + target + '`',
+                '- Observation: exactly one new file changed',
+                '- Independent verification: exact content confirmed at commit and live `main`',
+                '- Commit: `' + commitSha + '`',
+                '',
+                'Closing as completed.'
+              ].join('\n')
+            });
+
+            await github.rest.issues.update({
+              owner,
+              repo,
+              issue_number,
+              state: 'closed',
+              state_reason: 'completed'
+            });
+
+      - name: Keep issue open if Agentic test fails
+        if: failure() && steps.create_issue.outputs.issue_number != ''
+        uses: actions/github-script@v7
+        env:
+          ISSUE_NUMBER: ${{ steps.create_issue.outputs.issue_number }}
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.ISSUE_NUMBER),
+              body: 'Agentic Lab automatic attempt failed before verified closure. This Agentic-only test issue remains open for diagnosis.'
+            });
