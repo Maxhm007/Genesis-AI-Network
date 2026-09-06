@@ -1,0 +1,193 @@
+name: Agentic Lab Manual Issue Solver
+
+on:
+  issue_comment:
+    types: [created]
+
+permissions:
+  contents: write
+  issues: write
+
+concurrency:
+  group: agentic-lab-issue-751
+  cancel-in-progress: false
+
+jobs:
+  solve-isolated-test:
+    if: >-
+      github.event.issue.number == 751 &&
+      github.event.comment.body == '/agentic-lab-run' &&
+      github.event.comment.user.login == 'Maxhm007'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    env:
+      ISSUE_NUMBER: '751'
+      TARGET_FILE: agentic_lab/manual_test_001.txt
+      REQUIRED_CONTENT: Genesis Agentic Lab test passed.
+
+    steps:
+      - name: Plan and enforce isolation boundary
+        id: plan
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = Number(process.env.ISSUE_NUMBER);
+            const target = process.env.TARGET_FILE;
+            const required = process.env.REQUIRED_CONTENT;
+
+            const { data: issue } = await github.rest.issues.get({ owner, repo, issue_number });
+            if (issue.state !== 'open') core.setFailed('Issue #751 is not open.');
+            if (!issue.title.startsWith('[Agentic Lab Test]')) core.setFailed('Issue is outside Agentic Lab scope.');
+            const body = issue.body || '';
+            if (!body.includes('WAITING FOR ISOLATED AGENTIC LAB SOLVER')) core.setFailed('Isolation hold marker is missing.');
+            if (!body.includes('`' + target + '`')) core.setFailed('Expected target path is not authorized by the issue.');
+            if (!body.includes('`' + required + '`')) core.setFailed('Expected content is not authorized by the issue.');
+
+            try {
+              await github.rest.repos.getContent({ owner, repo, path: target, ref: 'main' });
+              core.setFailed('Target already exists; Agentic Lab is creation-only for this test.');
+            } catch (error) {
+              if (error.status !== 404) throw error;
+            }
+
+            const plan = {
+              goal: 'Solve issue #751 without touching existing Genesis work',
+              action: 'create_new_file',
+              target,
+              expected_content: required,
+              allowed_repository_changes: [target],
+              verification: ['commit_changes_only_target', 'live_file_exact_match'],
+              close_only_after_verification: true
+            };
+            core.info('Agentic plan: ' + JSON.stringify(plan));
+            core.setOutput('plan', JSON.stringify(plan));
+
+      - name: Act within bounded scope
+        id: act
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const target = process.env.TARGET_FILE;
+            const required = process.env.REQUIRED_CONTENT;
+            const content = Buffer.from(required, 'utf8').toString('base64');
+
+            const { data } = await github.rest.repos.createOrUpdateFileContents({
+              owner,
+              repo,
+              path: target,
+              message: 'Agentic Lab solve #751: create isolated heartbeat file',
+              content,
+              branch: 'main'
+            });
+
+            if (!data.commit || !data.commit.sha) core.setFailed('No commit SHA returned by bounded action.');
+            core.setOutput('commit_sha', data.commit.sha);
+            core.info('Action commit: ' + data.commit.sha);
+
+      - name: Observe action result
+        id: observe
+        uses: actions/github-script@v7
+        env:
+          COMMIT_SHA: ${{ steps.act.outputs.commit_sha }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const target = process.env.TARGET_FILE;
+            const ref = process.env.COMMIT_SHA;
+
+            const { data: commit } = await github.rest.repos.getCommit({ owner, repo, ref });
+            const files = commit.files || [];
+            const names = files.map(file => file.filename);
+            core.info('Observed changed files: ' + JSON.stringify(names));
+
+            if (files.length !== 1 || names[0] !== target) {
+              core.setFailed('Isolation violation: action changed files outside the single authorized target.');
+            }
+            if (files[0].status !== 'added') {
+              core.setFailed('Isolation violation: target was not created as a new file.');
+            }
+            core.setOutput('observation', 'single-authorized-file-added');
+
+      - name: Independently verify live repository state
+        id: verify
+        uses: actions/github-script@v7
+        env:
+          COMMIT_SHA: ${{ steps.act.outputs.commit_sha }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const target = process.env.TARGET_FILE;
+            const required = process.env.REQUIRED_CONTENT;
+            const commitSha = process.env.COMMIT_SHA;
+
+            const { data: atCommit } = await github.rest.repos.getContent({
+              owner, repo, path: target, ref: commitSha
+            });
+            if (Array.isArray(atCommit) || atCommit.type !== 'file') core.setFailed('Verifier did not receive a file.');
+            const committedText = Buffer.from(atCommit.content || '', 'base64').toString('utf8');
+            if (committedText !== required) core.setFailed('Committed content does not exactly match acceptance criteria.');
+
+            const { data: live } = await github.rest.repos.getContent({
+              owner, repo, path: target, ref: 'main'
+            });
+            if (Array.isArray(live) || live.type !== 'file') core.setFailed('Live main verifier did not receive a file.');
+            const liveText = Buffer.from(live.content || '', 'base64').toString('utf8');
+            if (liveText !== required) core.setFailed('Live main content does not exactly match acceptance criteria.');
+
+            core.info('Independent verification passed.');
+            core.setOutput('verified', 'true');
+
+      - name: Close issue only after verified success
+        if: steps.verify.outputs.verified == 'true'
+        uses: actions/github-script@v7
+        env:
+          COMMIT_SHA: ${{ steps.act.outputs.commit_sha }}
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const issue_number = Number(process.env.ISSUE_NUMBER);
+            const target = process.env.TARGET_FILE;
+            const commitSha = process.env.COMMIT_SHA;
+
+            await github.rest.issues.createComment({
+              owner,
+              repo,
+              issue_number,
+              body: [
+                'Agentic Lab closed-loop test passed.',
+                '',
+                '- Plan: bounded to issue #751 only',
+                '- Action: created `' + target + '`',
+                '- Observation: commit changed exactly one file and it was newly added',
+                '- Independent verification: exact content confirmed from committed SHA and live `main`',
+                '- Commit: `' + commitSha + '`',
+                '',
+                'Closing as completed.'
+              ].join('\n')
+            });
+            await github.rest.issues.update({
+              owner,
+              repo,
+              issue_number,
+              state: 'closed',
+              state_reason: 'completed'
+            });
+
+      - name: Record failed Agentic Lab attempt
+        if: failure()
+        uses: actions/github-script@v7
+        with:
+          script: |
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: Number(process.env.ISSUE_NUMBER),
+              body: 'Agentic Lab attempt failed before verified closure. Issue remains open; existing Genesis workflows were not modified.'
+            });
