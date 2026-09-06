@@ -149,7 +149,7 @@ def learned_d00770f16537d2ca(self):
     pass
 
 def learned_8b7a22c14b8a383e(self):
-    # Your implementation here
+    choices = tuple(str(item).strip() for item in available if str(item).strip())
     pass
 
 pass
