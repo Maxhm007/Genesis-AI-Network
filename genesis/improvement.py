@@ -5,7 +5,7 @@ from typing import Any
 
 
 IMPROVEMENT_MODULE_ID = "genesis.improvement"
-LEARNED_CAPABILITY_TARGET = "genesis/learned_capabilities.py"
+LEARNED_CAPABILITY_TARGET = 'genesis/learned_capabilities.py'
 
 
 class ImprovementModule:
