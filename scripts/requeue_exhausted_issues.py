@@ -432,6 +432,7 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
         "released": [],
         "agentic_handoffs": [],
         "agentic_handoff_failed": [],
+        "awaiting_agentic_handoff": [],
         "successor_handoffs": [],
         "successor_handoff_failed": [],
         "successor_generation_holds": [],
@@ -445,18 +446,20 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
 
     # Terminal exhaustion is an escalation boundary, not a closure boundary.
     # Keep the same authoritative Issue open and hand it to the existing
-    # Agentic Lab recovery loop. Superseded historical parents remain closed so
-    # there is never more than one authoritative work item for the same problem.
+    # Agentic Lab recovery loop. Batching may delay a handoff, but terminal
+    # exhaustion must never fall back into the normal solver generation loop.
     handoff_count = 0
     for issue in issues:
-        if handoff_count >= max(1, limit):
-            break
         number = int(issue.get("number") or 0)
         labels = issue_labels(issue)
         if not (labels & EXHAUSTED_LABELS and "genesis-deferred" in labels):
             continue
         if "genesis-superseded" in labels:
             terminal_hold.add(number)
+            continue
+        if handoff_count >= max(1, limit):
+            terminal_hold.add(number)
+            result["awaiting_agentic_handoff"].append(number)
             continue
 
         comments = _request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
