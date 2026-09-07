@@ -3,7 +3,7 @@ name: Genesis Recent AI Capability Discovery
 on:
   workflow_dispatch:
   schedule:
-    - cron: '7 */6 * * *'
+    - cron: '7,37 * * * *'
   push:
     branches: [main]
     paths:
@@ -15,16 +15,15 @@ on:
 permissions:
   contents: read
   issues: write
-  actions: write
 
 concurrency:
   group: genesis-recent-ai-capability-discovery
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   discover-and-create-one-issue:
     runs-on: ubuntu-latest
-    timeout-minutes: 340
+    timeout-minutes: 20
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -59,45 +58,17 @@ jobs:
             --description 'Created by the independent recent AI capability discovery task' \
             --force
 
-      - name: Discover recent required AI capability every 30 minutes
+      - name: Discover one recent required AI capability
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
 
-          # A native six-hour schedule is the recovery anchor. Manual/successor
-          # runs retain the proven bounded 30-minute discovery loop.
-          if [[ "$GITHUB_EVENT_NAME" == "push" || "$GITHUB_EVENT_NAME" == "schedule" ]]; then
-            max_cycles=1
-          else
-            max_cycles=9
-          fi
-
-          for cycle in $(seq 1 "$max_cycles"); do
-            echo "=== Genesis recent AI capability discovery cycle ${cycle}/${max_cycles} ==="
-            git fetch origin main
-            git reset --hard origin/main
-
-            # This script can create zero or one issue. It never edits Genesis,
-            # never repairs an issue, and checks both the capability registry
-            # and all prior issues before creating anything.
-            python scripts/discover_recent_ai_capability.py
-
-            if [[ "$cycle" -lt "$max_cycles" ]]; then
-              echo "30-minute capability-discovery interval"
-              sleep 1800
-            fi
-          done
-
-      - name: Start successor discovery run
-        if: ${{ success() && !cancelled() }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh workflow run genesis-recent-ai-capability-discovery.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main
+          # One bounded discovery cycle per workflow run. GitHub's native
+          # schedule starts the next cycle 30 minutes later, so this runner
+          # never sleeps or recursively starts another workflow run.
+          python scripts/discover_recent_ai_capability.py
