@@ -2,11 +2,13 @@ from pathlib import Path
 
 import scripts.requeue_exhausted_issues as module
 from scripts.requeue_exhausted_issues import (
+    AGENTIC_LAB_LABEL,
     ENGINE_PATHS,
     build_successor_body,
     eligible_exhausted_issue,
     engine_generation,
     find_existing_successor,
+    handoff_exhausted_to_agentic_lab,
     pre_repair_failure_after_marker,
     reset_attempt_status,
     rollback_attempt_status,
@@ -57,6 +59,9 @@ def test_only_exhausted_safe_target_issue_is_requeue_eligible(tmp_path: Path):
     assert eligible_exhausted_issue(
         _issue(body, ["genesis-solver-exhausted", "genesis-superseded"]), tmp_path
     ) == (False, "superseded")
+    assert eligible_exhausted_issue(
+        _issue(body, ["genesis-solver-exhausted", AGENTIC_LAB_LABEL]), tmp_path
+    ) == (False, "agentic_lab")
 
 
 def test_pre_repair_failure_rolls_back_only_the_dispatched_attempt():
@@ -187,4 +192,76 @@ def test_create_successor_handoff_reuses_existing_successor(monkeypatch):
 
     assert result["successor"] == 43
     assert result["created"] is False
+    assert not any(method == "POST" and path == "/issues" for method, path, _ in calls)
+
+
+def test_agentic_handoff_requires_terminal_exhaustion_and_reopens_same_issue(monkeypatch):
+    parent = _issue(
+        "- **Target:** `genesis/example.py`",
+        ["genesis-solver-exhausted", "genesis-deferred"],
+    )
+    parent["state"] = "closed"
+    calls: list[tuple[str, str, dict | None]] = []
+
+    def fake_request(repository: str, token: str, method: str, path: str, payload: dict | None = None):
+        calls.append((method, path, payload))
+        if method == "PATCH" and path == "/issues/42":
+            return {"number": 42, "state": "open"}
+        return {}
+
+    monkeypatch.setattr(module, "_request", fake_request)
+    monkeypatch.setattr(module, "_ensure_label", lambda *args, **kwargs: None)
+
+    result = handoff_exhausted_to_agentic_lab("owner/repo", "token", parent, [])
+
+    assert result == {"issue": 42, "label": AGENTIC_LAB_LABEL, "state": "open"}
+    added = [payload for method, path, payload in calls if method == "POST" and path == "/issues/42/labels"]
+    assert added and AGENTIC_LAB_LABEL in added[0]["labels"]
+    assert any(method == "PATCH" and path == "/issues/42" for method, path, _ in calls)
+    assert any(method == "POST" and path == "/issues/42/comments" for method, path, _ in calls)
+    assert not any(method == "POST" and path == "/issues" for method, path, _ in calls)
+
+
+def test_agentic_handoff_rejects_non_exhausted_issue(monkeypatch):
+    issue = _issue("- **Target:** `genesis/example.py`", ["genesis-deferred"])
+    monkeypatch.setattr(module, "_request", lambda *args, **kwargs: {})
+    monkeypatch.setattr(module, "_ensure_label", lambda *args, **kwargs: None)
+
+    try:
+        handoff_exhausted_to_agentic_lab("owner/repo", "token", issue, [])
+    except RuntimeError as exc:
+        assert "verified exhausted state" in str(exc)
+    else:
+        raise AssertionError("non-exhausted Issue must never enter Agentic Lab handoff")
+
+
+def test_run_routes_terminal_exhaustion_to_agentic_lab_without_successor(monkeypatch, tmp_path: Path):
+    for relative in ENGINE_PATHS:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(relative, encoding="utf-8")
+
+    exhausted = _issue(
+        "- **Target:** `genesis/example.py`",
+        ["genesis-solver-exhausted", "genesis-deferred"],
+    )
+    exhausted["state"] = "closed"
+    calls: list[tuple[str, str, dict | None]] = []
+
+    monkeypatch.setattr(module, "_open_issues", lambda repository, token: [exhausted])
+    monkeypatch.setattr(module, "_ensure_label", lambda *args, **kwargs: None)
+
+    def fake_request(repository: str, token: str, method: str, path: str, payload: dict | None = None):
+        calls.append((method, path, payload))
+        if method == "GET" and path.startswith("/issues/42/comments"):
+            return []
+        if method == "PATCH" and path == "/issues/42":
+            return {"number": 42, "state": "open"}
+        return {}
+
+    monkeypatch.setattr(module, "_request", fake_request)
+    result = module.run("owner/repo", "token", root=tmp_path, limit=5)
+
+    assert result["agentic_handoffs"] == [{"issue": 42, "label": AGENTIC_LAB_LABEL, "state": "open"}]
+    assert result["successor_handoffs"] == []
     assert not any(method == "POST" and path == "/issues" for method, path, _ in calls)
