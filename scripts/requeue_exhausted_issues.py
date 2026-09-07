@@ -33,6 +33,7 @@ ACTIVE_LABELS = {
     "genesis-priority-claim",
 }
 EXHAUSTED_LABELS = {"genesis-solver-exhausted", "genesis-priority-exhausted"}
+AGENTIC_LAB_LABEL = "agentic-lab"
 PROTECTED_TARGETS = {
     "genesis/autonomy_guard.py",
     "genesis/autonomy_proof.py",
@@ -59,6 +60,7 @@ ATTEMPT_DISPLAY_RE = re.compile(r"Attempt: \*\*(\d+)/(\d+)\*\*")
 SUCCESSOR_PARENT_RE = re.compile(r"<!-- genesis-unsolved-successor-of:(\d+) -->")
 PRE_REPAIR_FAILURE_PHRASE = "repair status: `worker_failed_before_evidence`"
 HANDOFF_COMMENT_MARKER = "<!-- genesis-unsolved-handoff -->"
+AGENTIC_HANDOFF_COMMENT_MARKER = "<!-- genesis-agentic-lab-handoff -->"
 REQUEUE_MARKER_PREFIX = "<!-- genesis-requeue-engine:"
 
 
@@ -89,6 +91,8 @@ def _eligible_retry_target(issue: dict, root: Path) -> tuple[bool, str]:
     labels = issue_labels(issue)
     if labels & ACTIVE_LABELS:
         return False, "active"
+    if AGENTIC_LAB_LABEL in labels:
+        return False, "agentic_lab"
     if "genesis-superseded" in labels:
         return False, "superseded"
 
@@ -355,6 +359,69 @@ def create_successor_handoff(
     return {"parent": number, "successor": successor_number, "successor_url": successor_url, "created": existing is None}
 
 
+def handoff_exhausted_to_agentic_lab(
+    repository: str,
+    token: str,
+    issue: dict,
+    comments: list[dict],
+) -> dict:
+    number = int(issue.get("number") or 0)
+    if number <= 0:
+        raise RuntimeError("Agentic Lab handoff requires a valid issue number")
+
+    labels = issue_labels(issue)
+    if not labels & EXHAUSTED_LABELS:
+        raise RuntimeError("Agentic Lab handoff requires verified exhausted state")
+    if "genesis-deferred" not in labels:
+        raise RuntimeError("Agentic Lab handoff requires terminal deferred state")
+    if "genesis-superseded" in labels:
+        raise RuntimeError("superseded parent must not be reactivated for Agentic Lab")
+
+    _ensure_label(
+        repository,
+        token,
+        AGENTIC_LAB_LABEL,
+        "8250df",
+        "Normal bounded solver exhausted; existing Agentic Lab recovery owns this Issue",
+    )
+    _request(
+        repository,
+        token,
+        "POST",
+        f"/issues/{number}/labels",
+        {"labels": ["genesis-blocked", "genesis-solver-exhausted", AGENTIC_LAB_LABEL]},
+    )
+    for label in ("genesis-autonomous", "genesis-deferred"):
+        encoded = urllib.parse.quote(label, safe="")
+        _request(repository, token, "DELETE", f"/issues/{number}/labels/{encoded}")
+
+    if str(issue.get("state") or "open") == "closed":
+        reopened = _request(repository, token, "PATCH", f"/issues/{number}", {"state": "open"})
+        if not isinstance(reopened, dict) or str(reopened.get("state") or "") != "open":
+            raise RuntimeError("Agentic Lab handoff could not reopen exhausted Issue")
+
+    if not any(
+        AGENTIC_HANDOFF_COMMENT_MARKER in str(row.get("body") or "")
+        for row in comments
+        if isinstance(row, dict)
+    ):
+        _request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/comments",
+            {
+                "body": (
+                    f"{AGENTIC_HANDOFF_COMMENT_MARKER}\n"
+                    "Genesis normal bounded repair is exhausted. The same authoritative Issue is now handed to the existing Agentic Lab recovery loop. "
+                    "No successor Issue was created. Normal solver retries remain disabled by the exhausted state, and all existing Security, validation, protected-file, signing, secret, promotion, and owner-control boundaries remain mandatory."
+                )
+            },
+        )
+
+    return {"issue": number, "label": AGENTIC_LAB_LABEL, "state": "open"}
+
+
 def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
     generation = engine_generation(root)
     marker = f"<!-- genesis-requeue-engine:{generation} -->"
@@ -363,6 +430,8 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
         "status": "ok",
         "engine_generation": generation,
         "released": [],
+        "agentic_handoffs": [],
+        "agentic_handoff_failed": [],
         "successor_handoffs": [],
         "successor_handoff_failed": [],
         "successor_generation_holds": [],
@@ -374,11 +443,10 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
     handed_off: set[int] = set()
     terminal_hold: set[int] = set()
 
-    # Terminally deferred parents must not disappear as dead backlog. Create one
-    # linked successor that carries the failure evidence and becomes the new
-    # authoritative work item. Successors themselves do not form an unbounded
-    # chain: after they exhaust, hold them for the current engine generation and
-    # release that same successor only when the repair engine materially changes.
+    # Terminal exhaustion is an escalation boundary, not a closure boundary.
+    # Keep the same authoritative Issue open and hand it to the existing
+    # Agentic Lab recovery loop. Superseded historical parents remain closed so
+    # there is never more than one authoritative work item for the same problem.
     handoff_count = 0
     for issue in issues:
         if handoff_count >= max(1, limit):
@@ -392,45 +460,15 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
             continue
 
         comments = _request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
-        if is_successor_issue(issue):
-            engine_markers = [
-                str(row.get("body") or "")
-                for row in comments
-                if isinstance(row, dict) and str(row.get("body") or "").startswith(REQUEUE_MARKER_PREFIX)
-            ]
-            if any(text.startswith(marker) for text in engine_markers):
-                terminal_hold.add(number)
-                result["successor_generation_holds"].append({"issue": number, "generation": generation})
-                continue
-            if not engine_markers:
-                _request(
-                    repository,
-                    token,
-                    "POST",
-                    f"/issues/{number}/comments",
-                    {
-                        "body": (
-                            marker
-                            + "\nThis repair-follow-up Issue also exhausted the current bounded repair generation. "
-                            + "Genesis will not create an unbounded chain of duplicate successor Issues. "
-                            + "This same successor remains deferred until the repair-engine generation changes, when it may be released for one fresh bounded attempt set."
-                        )
-                    },
-                )
-                terminal_hold.add(number)
-                result["successor_generation_holds"].append({"issue": number, "generation": generation})
-                continue
-            continue
-
         try:
-            handoff = create_successor_handoff(repository, token, issue, issues, generation, comments)
+            handoff = handoff_exhausted_to_agentic_lab(repository, token, issue, comments)
         except Exception as exc:
             terminal_hold.add(number)
-            result["successor_handoff_failed"].append({"issue": number, "error": str(exc)[:500]})
+            result["agentic_handoff_failed"].append({"issue": number, "error": str(exc)[:500]})
             continue
         handed_off.add(number)
         handoff_count += 1
-        result["successor_handoffs"].append(handoff)
+        result["agentic_handoffs"].append(handoff)
 
     for issue in issues:
         number = int(issue.get("number") or 0)
