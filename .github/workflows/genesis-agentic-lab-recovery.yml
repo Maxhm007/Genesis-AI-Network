@@ -51,6 +51,8 @@ jobs:
             [[ -n "$row" ]] || continue
             number=$(jq -r '.number' <<<"$row")
             state=$(jq -r '.state' <<<"$row")
+            verified=$(jq -r '([.labels[]] | index("genesis-verified")) != null' <<<"$row")
+            [[ "$verified" == 'false' ]] || continue
             active=$(jq -r '([.labels[]] | any(. == "genesis-repair-in-progress" or . == "genesis-validating" or . == "genesis-working" or . == "genesis-verifying"))' <<<"$row")
             [[ "$active" == 'false' ]] || continue
 
