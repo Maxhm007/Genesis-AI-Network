@@ -212,13 +212,7 @@ def _ensure_issue(
 
 
 def _issue_execution_tasks(queue: PersistentTaskQueue, source_task_id: str) -> list[GenesisTask]:
-    rows = [
-        task
-        for task in queue.list(limit=5000)
-        if str(task.payload.get("source_capability_task_id") or "") == source_task_id
-        and int(task.payload.get("github_issue_number") or 0) > 0
-        and task.payload.get("task_type") == "capability_growth"
-    ]
+    rows = [task for task in queue.list(limit=5000) if str(task.payload.get('source_capability_task_id') or '') == source_task_id and int(task.payload.get('github_issue_number') or 0) > 0 and task.payload.get('task_type') == 'capability_growth']
     rows.sort(key=lambda task: (task.created_at, task.task_id))
     return rows
 
