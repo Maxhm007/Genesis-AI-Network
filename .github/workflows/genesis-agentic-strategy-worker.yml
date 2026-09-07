@@ -91,9 +91,7 @@ jobs:
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress >/dev/null 2>&1 || true
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-autonomous >/dev/null 2>&1 || true
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
-            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-              --body "<!-- genesis-agentic-strategy-result:${{ inputs.strategy }} -->
-Agentic Lab strategy worker declined this reservation because the Issue is not open/owned, the target is unsafe, or the reservation is stale. The Issue remains open. repair status: \`blocked_protected_or_unsupported_target\`. Worker run: ${GITHUB_RUN_ID}."
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "<!-- genesis-agentic-strategy-result:${{ inputs.strategy }} --> Agentic Lab strategy worker declined this reservation because the Issue is not open/owned, the target is unsafe, or the reservation is stale. The Issue remains open. repair status: \`blocked_protected_or_unsupported_target\`. Worker run: ${GITHUB_RUN_ID}."
           fi
 
       - name: Install repository dependencies
@@ -273,9 +271,7 @@ Agentic Lab strategy worker declined this reservation because the Issue is not o
           fi
           python -m pytest -q
 
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body "<!-- genesis-agentic-strategy-result:${{ inputs.strategy }} -->
-Agentic Lab strategy \`${{ inputs.strategy }}\` produced a verified repair. Candidate: \`${CANDIDATE_SHA}\`. Promoted main SHA: \`${promoted_sha}\`. repair status: \`completed\`. Full repository validation passed after promotion."
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "<!-- genesis-agentic-strategy-result:${{ inputs.strategy }} --> Agentic Lab strategy \`${{ inputs.strategy }}\` produced a verified repair. Candidate: \`${CANDIDATE_SHA}\`. Promoted main SHA: \`${promoted_sha}\`. repair status: \`completed\`. Full repository validation passed after promotion."
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-verified >/dev/null
           for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-claimed genesis-working genesis-verifying genesis-blocked genesis-solver-exhausted genesis-deferred genesis-waiting-capability genesis-needs-human agentic-lab; do
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
@@ -303,9 +299,7 @@ Agentic Lab strategy \`${{ inputs.strategy }}\` produced a verified repair. Cand
           done
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label agentic-lab --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deferred >/dev/null 2>&1 || true
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --body "<!-- genesis-agentic-strategy-result:${STRATEGY} -->
-Agentic Lab strategy \`${STRATEGY}\` did not produce a verified promotion. repair status: \`${repair_status}\`. The Issue remains open. The next Agentic Lab pass must use a different strategy or create a linked capability dependency; it must not repeat this method unchanged. Worker run: ${GITHUB_RUN_ID}."
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "<!-- genesis-agentic-strategy-result:${STRATEGY} --> Agentic Lab strategy \`${STRATEGY}\` did not produce a verified promotion. repair status: \`${repair_status}\`. The Issue remains open. The next Agentic Lab pass must use a different strategy or create a linked capability dependency; it must not repeat this method unchanged. Worker run: ${GITHUB_RUN_ID}."
 
       - name: Preserve Agentic repair evidence
         if: always()
