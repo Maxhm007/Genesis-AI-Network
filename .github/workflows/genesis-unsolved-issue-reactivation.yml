@@ -1,0 +1,46 @@
+name: Genesis Unsolved Issue Reactivation
+
+on:
+  issues:
+    types: [closed]
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Closed Genesis-unsolved Issue to re-evaluate
+        required: true
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+concurrency:
+  group: genesis-unsolved-reactivation-${{ inputs.issue_number || github.event.issue.number }}
+  cancel-in-progress: false
+
+jobs:
+  keep-unsolved-open:
+    if: github.event_name == 'workflow_dispatch' || github.actor == 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Reactivate only verified Genesis solver exhaustion
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number || github.event.issue.number }}
+        run: |
+          set -euo pipefail
+          python scripts/unsolved_issue_reactivation.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --issue-number "$ISSUE_NUMBER"
