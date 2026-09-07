@@ -6,11 +6,13 @@ DISPATCHER = Path("scripts/agentic_lab_recovery_dispatch.py")
 
 def test_capability_gap_keeps_parent_open_and_paused() -> None:
     text = DISPATCHER.read_text(encoding="utf-8")
+    pause_section = text.split("def pause_for_capability(", 1)[1].split("\ndef _release_waiting_issue(", 1)[0]
 
-    assert "genesis-waiting-capability" in text
-    assert "Parent Issue" in text
-    assert "stays open but is paused" in text
-    assert "state_reason" not in text
+    assert "genesis-waiting-capability" in pause_section
+    assert "Parent Issue" in pause_section
+    assert "stays open but is paused" in pause_section
+    assert "state_reason" not in pause_section
+    assert '"state": "closed"' not in pause_section
 
 
 def test_capability_work_does_not_create_unbounded_dependency_chain() -> None:
