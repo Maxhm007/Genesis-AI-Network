@@ -28,17 +28,22 @@ def test_general_issue_discovery_has_native_schedule_and_solver_handoff() -> Non
     assert "git push origin HEAD:main" not in text
 
 
-def test_recent_capability_discovery_has_native_recovery_schedule() -> None:
+def test_recent_capability_discovery_is_native_and_bounded() -> None:
     text = _text(CAPABILITY)
 
     assert "workflow_dispatch:" in text
     assert "schedule:" in text
-    assert "cron: '7 */6 * * *'" in text
+    assert "cron: '7,37 * * * *'" in text
     assert "group: genesis-recent-ai-capability-discovery" in text
-    assert "cancel-in-progress: false" in text
-    assert '"$GITHUB_EVENT_NAME" == "schedule"' in text
+    assert "cancel-in-progress: true" in text
+    assert "timeout-minutes: 20" in text
     assert "python scripts/discover_recent_ai_capability.py" in text
-    assert "gh workflow run genesis-recent-ai-capability-discovery.yml" in text
+
+    # One workflow invocation performs one bounded discovery cycle. It must
+    # never sleep for another cycle or recursively dispatch a successor run.
+    assert "sleep 1800" not in text
+    assert "gh workflow run genesis-recent-ai-capability-discovery.yml" not in text
+    assert "max_cycles" not in text
 
     # The discovery task creates work only; it never implements or closes it.
     assert "github_issue_autorepair.py" not in text
