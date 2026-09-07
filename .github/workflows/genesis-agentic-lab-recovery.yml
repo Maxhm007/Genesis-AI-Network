@@ -1,11 +1,13 @@
 name: Genesis Agentic Lab Recovery
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-agentic-lab-recovery.yml
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
-  issues:
-    types: [labeled, reopened]
 
 permissions:
   actions: write
@@ -18,9 +20,6 @@ concurrency:
 
 jobs:
   dispatch-oldest-agentic-issue:
-    if: >-
-      github.event_name != 'issues' ||
-      github.event.label.name == 'agentic-lab'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
