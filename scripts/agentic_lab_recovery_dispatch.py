@@ -92,7 +92,12 @@ def safe_lane(target: str) -> str:
     return ""
 
 
-def all_agentic_issues(repository: str, token: str) -> list[dict]:
+def open_agentic_issues(repository: str, token: str) -> list[dict]:
+    """Return only currently open Agentic Lab recovery issues.
+
+    Terminally closed/deferred issues are authoritative history and must never be
+    reopened by this scheduled recovery dispatcher.
+    """
     encoded = urllib.parse.quote(AGENTIC_LABEL)
     rows: list[dict] = []
     for page in range(1, 101):
@@ -100,7 +105,7 @@ def all_agentic_issues(repository: str, token: str) -> list[dict]:
             repository,
             token,
             "GET",
-            f"/issues?state=all&labels={encoded}&sort=created&direction=asc&per_page=100&page={page}",
+            f"/issues?state=open&labels={encoded}&sort=created&direction=asc&per_page=100&page={page}",
         )
         if not isinstance(batch, list):
             raise RuntimeError("Agentic Lab issue response was not a list")
@@ -115,7 +120,12 @@ def remove_label(repository: str, token: str, number: int, label: str) -> None:
 
 
 def reserve_and_dispatch(repository: str, token: str) -> dict:
-    for issue in all_agentic_issues(repository, token):
+    for issue in open_agentic_issues(repository, token):
+        # Defense in depth: even if a mocked or inconsistent API response leaks a
+        # closed row into the open-only query, terminal closure remains final.
+        if str(issue.get("state") or "").lower() == "closed":
+            continue
+
         issue_labels = labels(issue)
         if "genesis-verified" in issue_labels or issue_labels & ACTIVE_LABELS:
             continue
@@ -127,8 +137,6 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         number = int(issue.get("number") or 0)
         if number <= 0:
             continue
-        if str(issue.get("state") or "").lower() == "closed":
-            request(repository, token, "PATCH", f"/issues/{number}", {"state": "open"})
 
         for label in ("genesis-deferred", "genesis-blocked"):
             remove_label(repository, token, number, label)
