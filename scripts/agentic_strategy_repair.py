@@ -26,6 +26,12 @@ STRATEGY_GUIDANCE = {
     ),
 }
 
+CAPABILITY_LIKE_REASONS = {
+    "retry_pending_capability",
+    "blocked_no_safe_context",
+    "blocked_protected_or_unsupported_target",
+}
+
 
 def run(issue_number: int, repository: str, strategy: str) -> dict:
     if strategy not in STRATEGY_GUIDANCE:
@@ -46,6 +52,12 @@ def run(issue_number: int, repository: str, strategy: str) -> dict:
         base.load_maintainer_repair_guidance = original_loader
 
     evidence["agentic_strategy"] = strategy
+    reason = str(evidence.get("reason") or evidence.get("repair_status") or "").strip()
+    if strategy != "dependency_diagnosis" and reason in CAPABILITY_LIKE_REASONS:
+        evidence["prior_capability_signal"] = reason
+        evidence["reason"] = "strategy_requires_more_methods"
+        evidence["status"] = "retry_pending"
+
     base.EVIDENCE_PATH.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return evidence
 
