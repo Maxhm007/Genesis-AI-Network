@@ -1,1 +1,0 @@
-This file intentionally documents no runtime behavior. The live migration of already-released exhausted Issues is performed through GitHub Issue state/label correction after the overflow guard is merged. No code path, protected-file rule, validation rule, signing rule, secret boundary, or owner control is changed by that migration.
