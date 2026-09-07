@@ -1,0 +1,23 @@
+name: Genesis Dashboard Successor Identity
+
+on:
+  issues:
+    types: [opened]
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  inherit-dashboard-identity:
+    if: ${{ github.event.issue.body != null && contains(github.event.issue.body, 'genesis-unsolved-successor-of:') }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Check out repository
+        uses: actions/checkout@v4
+
+      - name: Inherit dashboard problem identity
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/dashboard_successor_identity.py
