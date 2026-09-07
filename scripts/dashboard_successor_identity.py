@@ -50,7 +50,8 @@ def inherit_dashboard_identity(successor_body: str, parent_body: str) -> str:
 
     base = successor_body.rstrip()
     separator = "\n\n" if base else ""
-    return f"{base}{separator}{'\n'.join(inherited)}\n"
+    inherited_text = "\n".join(inherited)
+    return f"{base}{separator}{inherited_text}\n"
 
 
 def _request_json(url: str, token: str, *, method: str = "GET", payload: dict | None = None) -> object:
