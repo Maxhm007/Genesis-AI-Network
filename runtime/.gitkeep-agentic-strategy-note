@@ -1,1 +1,0 @@
-Agentic strategy workers write bounded repair evidence to runtime/github_issue_autorepair.json during GitHub Actions runs. This marker is documentation-only and contains no runtime state.
