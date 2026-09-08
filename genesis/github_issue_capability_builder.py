@@ -1,11 +1,111 @@
 from __future__ import annotations
 
+import os
 import re
+import subprocess
 from pathlib import Path
 from types import SimpleNamespace
 
 from .coding import CodingModule
 from .deterministic_capability_builder import DeterministicLearnedCapabilityProvider
+from .providers import GenesisHTTPProvider, IntelligenceProvider
+
+
+class EvidenceFirstRepairFollowupProvider:
+    """Decorate the existing repair provider with bounded read-only failure evidence."""
+
+    MAX_TEST_BYTES = 3_500
+    MAX_HISTORY_BYTES = 1_200
+    MAX_HISTORY_COMMITS = 6
+
+    def __init__(self, root: Path, target_path: str, delegate: IntelligenceProvider) -> None:
+        self.root = Path(root).resolve()
+        self.target_path = str(target_path).replace("\\", "/").lstrip("./")
+        self.delegate = delegate
+        self.name = f"evidence-first:{delegate.name}"
+
+    def available(self) -> bool:
+        return self.delegate.available()
+
+    def _focused_test_evidence(self) -> str:
+        tests = self.root / "tests"
+        if not tests.is_dir():
+            return ""
+        stem = Path(self.target_path).stem
+        candidates: list[Path] = []
+        direct = tests / f"test_{stem}.py"
+        if direct.is_file():
+            candidates.append(direct)
+        for path in sorted(tests.glob(f"test_*{stem}*.py")):
+            if path.is_file() and path not in candidates:
+                candidates.append(path)
+            if len(candidates) >= 3:
+                break
+
+        chunks: list[str] = []
+        remaining = self.MAX_TEST_BYTES
+        for path in candidates:
+            if remaining <= 0:
+                break
+            try:
+                text = path.read_text(encoding="utf-8", errors="replace")
+            except OSError:
+                continue
+            relative = path.relative_to(self.root).as_posix()
+            header = f"FILE {relative}:\n"
+            payload = (header + text)[:remaining]
+            if payload:
+                chunks.append(payload)
+                remaining -= len(payload)
+        return "\n".join(chunks)[: self.MAX_TEST_BYTES]
+
+    def _recent_target_history(self) -> str:
+        if not (self.root / ".git").exists():
+            return ""
+        try:
+            result = subprocess.run(
+                [
+                    "git",
+                    "log",
+                    f"-{self.MAX_HISTORY_COMMITS}",
+                    "--format=%h %s",
+                    "--",
+                    self.target_path,
+                ],
+                cwd=self.root,
+                text=True,
+                capture_output=True,
+                check=False,
+                timeout=5,
+            )
+        except (OSError, subprocess.SubprocessError):
+            return ""
+        if result.returncode != 0:
+            return ""
+        return str(result.stdout or "").strip()[: self.MAX_HISTORY_BYTES]
+
+    def reason(self, prompt: str) -> str:
+        tests = self._focused_test_evidence()
+        history = self._recent_target_history()
+        if not tests and not history:
+            return self.delegate.reason(prompt)
+
+        evidence = (
+            "\nREPAIR_FOLLOWUP_EVIDENCE_READ_ONLY:\n"
+            f"TARGET: {self.target_path}\n"
+            "The parent repair already exhausted bounded attempts. Use the evidence below only to diagnose the defect. "
+            "Choose a materially different implementation strategy from rejected/parent attempts. "
+            "Do not widen VALID_PATHS, add files, change tests to make them pass, weaken security/validation, or alter the requested JSON output contract.\n"
+        )
+        if tests:
+            evidence += "FOCUSED_TEST_EXPECTATIONS_READ_ONLY:\n" + tests + "\n"
+        if history:
+            evidence += "RECENT_TARGET_HISTORY_READ_ONLY:\n" + history + "\n"
+        evidence += (
+            "DELEGATE_OUTPUT_CONTRACT: Return exactly the JSON shape requested by the original bounded coding prompt; "
+            "this evidence adds diagnosis only and grants no write authority.\n"
+        )
+        return self.delegate.reason(prompt + evidence)
 
 
 class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvider):
@@ -14,6 +114,7 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
     MACHINE_AUTHOR = "github-actions[bot]"
     TASK_MARKER = "<!-- genesis-task-id:task-"
     TASK_TYPE_LINE = "- **Task type:** `new_capability`"
+    REPAIR_FOLLOWUP_TASK_LINE = "- **Task type:** `repair_followup`"
     SOURCE_LINE = "- **Source:** `genesis.evolution_learning`"
     TARGET_LINE = "- **Target:** `genesis/learned_capabilities.py`"
     MAX_GENERIC_TERMS = 16
@@ -241,15 +342,65 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
         return cls(proposal)
 
     @classmethod
+    def _repair_followup_provider(
+        cls,
+        root: Path,
+        issue: dict,
+        coding: CodingModule,
+    ) -> IntelligenceProvider | None:
+        author = str(dict(issue.get("user") or {}).get("login") or "")
+        title = str(issue.get("title") or "").strip()
+        body = str(issue.get("body") or "")
+        if (
+            author != cls.MACHINE_AUTHOR
+            or not title.startswith("[Genesis Repair Follow-up]")
+            or cls.REPAIR_FOLLOWUP_TASK_LINE not in body
+        ):
+            return None
+
+        target_match = re.search(r"^- \*\*Target:\*\* `([^`]+)`", body, re.M)
+        if target_match is None:
+            return None
+        target_path = target_match.group(1).replace("\\", "/").lstrip("./")
+        if (
+            not target_path.startswith("genesis/")
+            or not target_path.endswith(".py")
+            or ".." in Path(target_path).parts
+            or target_path in cls.PROTECTED_DETECTED_TARGETS
+        ):
+            return None
+        coding.executor._validate_paths([target_path])
+        if not (Path(root).resolve() / target_path).is_file():
+            return None
+
+        provider_url = os.environ.get("GENESIS_REPAIR_PROVIDER_URL", "").strip()
+        if not provider_url:
+            return None
+        try:
+            timeout = max(5.0, min(float(os.environ.get("GENESIS_PROVIDER_TIMEOUT_SECONDS", "240")), 360.0))
+        except (TypeError, ValueError):
+            timeout = 240.0
+        delegate = GenesisHTTPProvider(
+            provider_url,
+            name=os.environ.get("GENESIS_PROVIDER_NAME", "genesis-github-issue-repair"),
+            timeout=timeout,
+        )
+        return EvidenceFirstRepairFollowupProvider(Path(root).resolve(), target_path, delegate)
+
+    @classmethod
     def for_issue(
         cls,
         root: Path,
         issue: dict,
         coding: CodingModule,
-    ) -> GitHubIssueLearnedCapabilityProvider | None:
+    ) -> IntelligenceProvider | None:
         detected = cls._detected_exact_expression_provider(Path(root).resolve(), issue, coding)
         if detected is not None:
             return detected
+
+        repair_followup = cls._repair_followup_provider(Path(root).resolve(), issue, coding)
+        if repair_followup is not None:
+            return repair_followup
 
         author = str(dict(issue.get("user") or {}).get("login") or "")
         title = str(issue.get("title") or "").strip()
