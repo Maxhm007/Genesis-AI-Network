@@ -129,3 +129,12 @@ from .review_materiality import install_review_materiality_gate as _install_revi
 
 _install_review_materiality_gate()
 del _install_review_materiality_gate
+
+# Treat the exact NUMBERED_CONTEXT/VALID_PATHS set as an execution boundary for
+# bounded coding. A provider may not spend retries editing a safe-but-unrelated
+# repository file that was never supplied as context; all existing global path,
+# syntax, test, review, validation, and promotion gates remain in force afterward.
+from .coding_valid_paths import install_coding_valid_paths as _install_coding_valid_paths
+
+_install_coding_valid_paths()
+del _install_coding_valid_paths
