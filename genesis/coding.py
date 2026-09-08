@@ -390,8 +390,17 @@ class CodingModule:
                     ast.parse(content, filename=str(path))
                 except SyntaxError as exc:
                     location = f"{exc.lineno}:{exc.offset}" if exc.lineno else "unknown"
+                    lines = content.splitlines()
+                    center = max(1, exc.lineno or 1)
+                    excerpt = "\n".join(
+                        f"{index + 1}|{lines[index][:240]}"
+                        for index in range(max(0, center - 4), min(len(lines), center + 3))
+                    )[:2000]
                     raise ValueError(
-                        f"coding proposal creates invalid Python syntax in {path} at {location}: {exc.msg}"
+                        f"coding proposal creates invalid Python syntax in {path} at {location}: {exc.msg}\n"
+                        f"REJECTED_CANDIDATE_CONTEXT (diagnosis only):\n{excerpt}\n"
+                        "Candidate line numbers may differ from repository lines. Apply corrections using "
+                        "original NUMBERED_CONTEXT coordinates; preserve complete multiline expressions."
                     ) from exc
         return CodingProposal(
             title=str(proposal.get("title", "Genesis bounded coding candidate"))[:200],
@@ -428,7 +437,7 @@ class CodingModule:
         return (
             original_prompt
             + "\nRETRY: previous JSON was invalid. Change strategy using ERROR and repository evidence; do not repeat the rejected edit.\n"
-            + f"ERROR: {type(error).__name__}: {str(error)[:500]}\n"
+            + f"ERROR: {type(error).__name__}: {str(error)[:3000]}\n"
             + f"PREVIOUS: {previous}\n"
             + f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
             + f"GROUNDED_LINE_HINT: {preferred_path}:{preferred_line}\n"

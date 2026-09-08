@@ -54,7 +54,7 @@ class RepairCodingProvider:
         self.prompts.append(prompt)
         if "CANDIDATE_TEST_REPAIR" not in prompt:
             return ('{"title":"Bad first candidate","rationale":"force a real test failure",'
-                    '"files":{"tests/test_generated_bad.py":"from missing_genesis_module import VALUE\\n"}}')
+                    '"files":{"genesis/repaired.py":"from missing_genesis_module import VALUE\\n"}}')
         return ('{"title":"Repair from test evidence","rationale":"use repository evidence",'
                 '"files":{"genesis/repaired.py":"VALUE = 7\\n",'
                 '"tests/test_repaired.py":"from genesis.repaired import VALUE\\n\\ndef test_repaired():\\n    assert VALUE == 7\\n"}}')
@@ -72,6 +72,9 @@ def make_repo(tmp_path: Path) -> None:
     (tmp_path / "GENESIS_BLOCK.json").write_text("{}\n")
     (tmp_path / "scripts" / "secret_guard.py").write_text("# guard\n")
     (tmp_path / "tests" / "test_baseline.py").write_text("def test_baseline():\n    assert True\n")
+    for name in ("auto_helper", "recovered_helper", "repaired"):
+        (tmp_path / "genesis" / f"{name}.py").write_text("VALUE = 0\n")
+    (tmp_path / "tests/test_repaired.py").write_text("def test_repaired():\n    from genesis.repaired import VALUE\n    assert VALUE >= 0\n")
     git(tmp_path, "init", "-b", "main")
     git(tmp_path, "config", "user.name", "Test")
     git(tmp_path, "config", "user.email", "test@example.com")
@@ -91,7 +94,7 @@ def test_clean_security_scan_can_idle(tmp_path: Path):
 def test_priority_engineering_task_creates_security_reviewed_candidate(tmp_path: Path):
     make_repo(tmp_path)
     queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
-    queue.create("Add a tiny tested helper", module_id="genesis.coding", priority=90)
+    queue.create("Update a tiny tested helper", module_id="genesis.coding", priority=90, payload={"context_paths": ["genesis/auto_helper.py"]})
     registry = ProviderRegistry(include_bootstrap=False)
     registry.register(FakeCodingProvider())
     loop = AutonomousEngineeringLoop(tmp_path, registry)
@@ -107,7 +110,7 @@ def test_failed_high_priority_task_does_not_block_next_task(tmp_path: Path):
     make_repo(tmp_path)
     queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
     first = queue.create("First task must fail", module_id="genesis.coding", priority=100)
-    second = queue.create("Second task should recover", module_id="genesis.coding", priority=90)
+    second = queue.create("Second task should recover", module_id="genesis.coding", priority=90, payload={"context_paths": ["genesis/recovered_helper.py"]})
     registry = ProviderRegistry(include_bootstrap=False)
     registry.register(SelectiveCodingProvider())
     loop = AutonomousEngineeringLoop(tmp_path, registry)
@@ -156,7 +159,7 @@ def test_module_task_gets_existing_repository_context(tmp_path: Path):
 def test_failed_candidate_is_revised_from_test_feedback_on_same_issue(tmp_path: Path):
     make_repo(tmp_path)
     queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
-    task = queue.create("Repair same issue until tests pass", module_id="genesis.coding", priority=100)
+    task = queue.create("Repair same issue until tests pass", module_id="genesis.coding", priority=100, payload={"context_paths": ["genesis/repaired.py", "tests/test_repaired.py"]})
     provider = RepairCodingProvider()
     registry = ProviderRegistry(include_bootstrap=False)
     registry.register(provider)

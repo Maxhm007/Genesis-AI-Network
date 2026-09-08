@@ -95,18 +95,22 @@ def _load_local_provider_module():
 
 
 def test_coding_module_prefers_non_bootstrap_provider(tmp_path: Path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "genesis/helper.py").write_text("VALUE = 0\n", encoding="utf-8")
     registry = ProviderRegistry(include_bootstrap=True)
     registry.register(FakeCodingProvider())
     module = CodingModule(tmp_path, registry)
-    proposal = module.propose("Add a bounded helper")
+    proposal = module.propose("Update a bounded helper", ["genesis/helper.py"])
     assert proposal.provider == "fake-coder"
     assert proposal.files["genesis/helper.py"] == "VALUE = 1\n"
 
 
 def test_coding_module_extracts_balanced_json_from_wrapped_output(tmp_path: Path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "genesis/wrapped.py").write_text("VALUE = 0\n", encoding="utf-8")
     provider = WrappedCodingProvider()
     module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
-    proposal = module.propose("Add wrapped helper", provider=provider)
+    proposal = module.propose("Update wrapped helper", ["genesis/wrapped.py"], provider=provider)
     assert proposal.title == "Wrapped"
     assert proposal.files["genesis/wrapped.py"] == "VALUE = 2\n"
 
