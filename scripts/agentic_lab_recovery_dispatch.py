@@ -219,8 +219,24 @@ def _all_issues(repository: str, token: str) -> list[dict]:
     return rows
 
 
-def _capability_fingerprint(issue_number: int, target: str) -> str:
-    raw = f"agentic-capability:{int(issue_number)}:{target}".encode("utf-8")
+def _capability_class(reason: str) -> str:
+    normalized = str(reason or "strategy_set_exhausted").strip().lower().replace(" ", "_")
+    return normalized or "strategy_set_exhausted"
+
+
+def _capability_identity(body: str) -> tuple[str, str]:
+    blocked_target = ""
+    blocker = ""
+    for line in str(body or "").splitlines():
+        if line.startswith("- **Blocked target:** `"):
+            blocked_target = line.split("`", 2)[1].strip()
+        elif line.startswith("- **Observed blocker:** `"):
+            blocker = line.split("`", 2)[1].strip()
+    return blocked_target, _capability_class(blocker)
+
+
+def _capability_fingerprint(target: str, reason: str) -> str:
+    raw = f"agentic-capability:v2:{target}:{_capability_class(reason)}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
@@ -232,11 +248,15 @@ def ensure_capability_issue(
     reason: str,
 ) -> dict:
     parent_number = int(issue.get("number") or 0)
-    fingerprint = _capability_fingerprint(parent_number, target)
+    capability_class = _capability_class(reason)
+    fingerprint = _capability_fingerprint(target, capability_class)
     marker = f"{CAPABILITY_WORK_PREFIX}{fingerprint} -->"
 
     for row in _all_issues(repository, token):
-        if marker in str(row.get("body") or ""):
+        row_body = str(row.get("body") or "")
+        if marker in row_body:
+            return row
+        if CAPABILITY_WORK_PREFIX in row_body and _capability_identity(row_body) == (target, capability_class):
             return row
 
     ensure_label(
@@ -247,25 +267,26 @@ def ensure_capability_issue(
         "Genesis capability work required before a blocked parent Issue can resume",
     )
 
-    title = f"[Genesis Capability] Add repair capability required by #{parent_number}"
+    title = f"[Genesis Capability] Repair {target} blocker: {capability_class}"
     body = (
         f"{marker}\n"
         f"<!-- genesis-capability-parent:{parent_number} -->\n"
-        "This capability Issue was created automatically because materially different Agentic Lab repair strategies could not safely complete the parent Issue with current Genesis capabilities.\n\n"
+        "This capability Issue was created automatically because materially different Agentic Lab repair strategies could not safely complete one or more parent Issues with current Genesis capabilities.\n\n"
         f"- **Parent issue:** #{parent_number}\n"
         f"- **Blocked target:** `{target}`\n"
-        f"- **Observed blocker:** `{reason or 'strategy_set_exhausted'}`\n"
+        f"- **Observed blocker:** `{capability_class}`\n"
         "- **Task type:** `capability_growth`\n"
         "- **Target:** `genesis/github_issue_capability_builder.py`\n\n"
         "### Objective\n"
-        "Add the smallest reusable Genesis repair capability that addresses this blocker class without hard-coding the parent Issue. The capability may improve evidence interpretation, repair-plan generation, provider/tool routing, or safe context selection as justified by repository evidence.\n\n"
+        "Add the smallest reusable Genesis repair capability that addresses this blocker class without hard-coding any parent Issue. The capability may improve evidence interpretation, repair-plan generation, provider/tool routing, or safe context selection as justified by repository evidence.\n\n"
         "### Acceptance\n"
         "- Capability is reusable for the blocker class, not specific to one Issue number.\n"
+        "- Parents with the same blocked target and blocker class reuse this capability Issue instead of creating another one.\n"
         "- Existing tests, Security, protected-file boundaries, signing, validation, exact promotion, secret boundaries, and owner control remain unchanged or stronger.\n"
         "- Add focused regression coverage for the new repair capability.\n"
         "- Close this Issue only after the capability is verified and promoted.\n\n"
         "### Dependency rule\n"
-        f"Parent Issue #{parent_number} remains open but paused. Once this capability Issue is verified/completed, Agentic Lab may automatically resume the parent with a fresh strategy cycle.\n"
+        "Each linked parent remains open but paused. Once this shared capability Issue is verified/completed, Agentic Lab may independently resume every linked parent with a fresh strategy cycle.\n"
     )
     created = request(
         repository,
@@ -363,6 +384,20 @@ def pause_for_capability(
             f"{marker}\n"
             f"Genesis identified a repair-capability dependency after trying materially different methods. Parent Issue #{number} stays open but is paused. "
             f"Capability Issue #{capability_number} must be verified before this Issue resumes. Blocker: `{reason or 'strategy_set_exhausted'}`."
+        ),
+    )
+
+    capability_comments = issue_comments(repository, token, capability_number)
+    parent_marker = f"<!-- genesis-capability-parent:{number} -->"
+    _post_once(
+        repository,
+        token,
+        capability_number,
+        capability_comments,
+        parent_marker,
+        (
+            f"{parent_marker}\n"
+            f"Shared capability dependency also blocks parent Issue #{number}. The parent remains independently paused and will be released when this capability is verified/completed."
         ),
     )
 
