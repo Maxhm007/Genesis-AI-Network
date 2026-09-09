@@ -1947,4 +1947,39 @@ register_capability(
 )
 
 
+def _learned_062bdea26624(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('lora', 'deepseek', 'qwen3-omni', 'multimodal', 'tower', 'connector', 'llava-next', 'vllm-project', 'vllm', 'v0.29.0', 'published', 'lfm2-vl', 'plus', 'fixes', 'muse-glimmer', 'qwen3.5')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_062bdea26624',
+    'Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: **LoRA**: DeepSeek V4 (#53361), Qwen3-Omni multimodal LoRA (#52786, #53557), tower/connector LoRA for LLaVA-NeXT (#49....',
+    "vllm-project/vllm release 'v0.29.0', published 2026-09-09T08:54:49Z: **LoRA**: DeepSeek V4 (#53361), Qwen3-Omni multimodal LoRA (#52786, #53557), tower/connector LoRA for LLaVA-NeXT (#49788) and LFM2-VL (#51498), plus fixes for Muse-Glimmer (#53513), Qwen3.5 embedding modules (#48850), partial LoRA on Qwen3.5/3.6 GatedDeltaNet (#47640), int32 overflow in punica kernels at long context (#53034), false target matches on unsupported module types (#52313), and base-layer/routed-expert prefix ordering (#52552). Source: https://github.com/vllm-project/vllm/releases/tag/v0.29.0",
+    _learned_062bdea26624,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
