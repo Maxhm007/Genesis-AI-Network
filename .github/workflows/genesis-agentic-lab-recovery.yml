@@ -46,9 +46,8 @@ jobs:
         run: |
           set -euo pipefail
 
-          issue_number=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \
-            --jq '.[] | select(.pull_request == null) | select((.body // "") | contains("<!-- genesis-capability-work:")) | select([.labels[].name] | index("genesis-solver-exhausted")) | select(([.labels[].name] | index("genesis-repair-in-progress")) == null) | select(([.labels[].name] | index("genesis-validating")) == null) | .number' \
-            | head -n 1)
+          issue_number=$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \
+            --jq '[.[] | select(.pull_request == null) | select((.body // "") | contains("<!-- genesis-capability-work:")) | select([.labels[].name] | index("genesis-solver-exhausted")) | select(([.labels[].name] | index("genesis-repair-in-progress")) == null) | select(([.labels[].name] | index("genesis-validating")) == null) | .number][0] // empty')
 
           if [ -z "$issue_number" ]; then
             echo 'No stranded exhausted capability-building issue found.'
