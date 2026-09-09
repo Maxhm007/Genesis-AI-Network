@@ -1,0 +1,39 @@
+name: Genesis Capability Priority
+
+on:
+  schedule:
+    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-capability-priority.yml
+      - scripts/capability_issue_priority_dispatch.py
+      - scripts/agentic_lab_recovery_dispatch.py
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-capability-priority
+  cancel-in-progress: false
+
+jobs:
+  prioritize-capability-issues:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+
+      - name: Run actions/setup-python@v5
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Prioritize unresolved capability issues
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+        run: python scripts/capability_issue_priority_dispatch.py
