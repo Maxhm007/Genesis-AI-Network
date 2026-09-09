@@ -23,7 +23,7 @@ permissions:
 
 concurrency:
   group: gene-pulse-${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   pulse:
