@@ -1,0 +1,40 @@
+name: Genesis Recovery Solver
+
+on:
+  schedule:
+    - cron: '5,15,25,35,45,55 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-recovery-solver.yml
+      - scripts/recovery_solver_dispatch.py
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-recovery-solver
+  cancel-in-progress: false
+
+jobs:
+  dispatch-exhausted-issue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Dispatch one exhausted issue through Recovery Solver
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/recovery_solver_dispatch.py
