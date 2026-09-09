@@ -1,0 +1,77 @@
+name: Genesis Gene Pulse Reconcile
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-gene-pulse-reconcile.yml
+  workflow_dispatch: {}
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Disable Gene Pulse, retry stale run cancellation, re-enable
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const workflow_id = 336313783;
+            const run_id = 32215089776;
+
+            async function getRun() {
+              try {
+                const r = await github.request('GET /repos/{owner}/{repo}/actions/runs/{run_id}', {owner, repo, run_id});
+                return {exists:true, status:r.data.status, conclusion:r.data.conclusion};
+              } catch (e) {
+                return {exists:false, status:`http-${e.status || 'error'}`, conclusion:null};
+              }
+            }
+
+            core.info(`Before: ${JSON.stringify(await getRun())}`);
+
+            let disabled = false;
+            try {
+              const r = await github.request('PUT /repos/{owner}/{repo}/actions/workflows/{workflow_id}/disable', {owner, repo, workflow_id});
+              core.info(`Disable accepted: HTTP ${r.status}`);
+              disabled = true;
+            } catch (e) {
+              core.warning(`Disable rejected: ${e.status || ''} ${e.message}`);
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            core.info(`After disable: ${JSON.stringify(await getRun())}`);
+
+            for (const method of ['cancel', 'force-cancel']) {
+              try {
+                const r = await github.request(`POST /repos/{owner}/{repo}/actions/runs/{run_id}/${method}`, {owner, repo, run_id});
+                core.info(`${method} accepted: HTTP ${r.status}`);
+              } catch (e) {
+                core.warning(`${method} rejected: ${e.status || ''} ${e.message}`);
+              }
+            }
+
+            await new Promise(resolve => setTimeout(resolve, 3000));
+            core.info(`After cancel attempts: ${JSON.stringify(await getRun())}`);
+
+            try {
+              const r = await github.request('DELETE /repos/{owner}/{repo}/actions/runs/{run_id}', {owner, repo, run_id});
+              core.info(`Delete accepted: HTTP ${r.status}`);
+            } catch (e) {
+              core.warning(`Delete rejected: ${e.status || ''} ${e.message}`);
+            }
+
+            try {
+              const r = await github.request('PUT /repos/{owner}/{repo}/actions/workflows/{workflow_id}/enable', {owner, repo, workflow_id});
+              core.info(`Enable accepted: HTTP ${r.status}`);
+            } catch (e) {
+              core.warning(`Enable rejected: ${e.status || ''} ${e.message}`);
+              if (disabled) core.setFailed('Gene Pulse was disabled but could not be re-enabled.');
+            }
+
+            core.info(`Final: ${JSON.stringify(await getRun())}`);
