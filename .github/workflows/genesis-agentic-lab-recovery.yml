@@ -6,6 +6,9 @@ on:
     paths:
       - .github/workflows/genesis-agentic-lab-recovery.yml
       - scripts/agentic_lab_recovery_dispatch.py
+      - scripts/agentic_lab_capability_first_dispatch.py
+      - scripts/capability_issue_priority_dispatch.py
+      - scripts/requeue_exhausted_issues.py
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
@@ -37,4 +40,4 @@ jobs:
       - name: Dispatch one Agentic Lab recovery issue
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/agentic_lab_recovery_dispatch.py
+        run: python scripts/agentic_lab_capability_first_dispatch.py
