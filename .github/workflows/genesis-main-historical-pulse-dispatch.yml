@@ -1,0 +1,23 @@
+name: Genesis Main Historical Pulse Dispatch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-main-historical-pulse-dispatch.yml
+  workflow_dispatch: {}
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Dispatch historical Gene Pulse on main
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh workflow run gene-pulse.yml --repo "$GITHUB_REPOSITORY" --ref main -f gene=gene-node-1 -f continue_chain=false
