@@ -2,6 +2,10 @@ name: Genesis Legacy Run Recovery
 
 on:
   workflow_dispatch: {}
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-legacy-run-recovery.yml
 
 permissions:
   actions: write
