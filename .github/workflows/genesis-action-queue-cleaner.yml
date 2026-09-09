@@ -57,7 +57,12 @@ jobs:
                 }
 
                 try {
-                  await github.rest.actions.forceCancelWorkflowRun({ owner, repo, run_id: run.id });
+                  await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel', {
+                    owner,
+                    repo,
+                    run_id: run.id,
+                    headers: { 'X-GitHub-Api-Version': '2022-11-28' }
+                  });
                   forceCancelled += 1;
                   core.info(`Force-cancelled zombie run ${run.id}: ${run.name}`);
                 } catch (forceError) {
