@@ -1,12 +1,13 @@
 name: Genesis Action Queue Cleaner
 
 on:
-  push:
-    paths:
-      - '.github/workflows/genesis-action-queue-cleaner.yml'
-  workflow_dispatch:
+  workflow_dispatch: {}
   schedule:
-    - cron: '17 * * * *'
+    - cron: "17 * * * *"
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-action-queue-cleaner.yml
 
 permissions:
   actions: write
@@ -17,64 +18,67 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  clean-stale-queue:
+  clean:
     runs-on: ubuntu-latest
     steps:
-      - name: Clean stale queued workflow runs
+      - name: Cancel genuinely stale queued runs
         uses: actions/github-script@v7
         with:
           script: |
-            const owner = context.repo.owner;
-            const repo = context.repo.repo;
             const cutoffMs = 60 * 60 * 1000;
             const now = Date.now();
-            let cancelled = 0;
-            let forceCancelled = 0;
+            const { owner, repo } = context.repo;
+
+            const knownLegacyGhosts = new Set([
+              32219064395,
+              32218467321,
+              32216752873,
+              32215089776,
+            ]);
+
+            const runs = await github.paginate(
+              github.rest.actions.listWorkflowRunsForRepo,
+              { owner, repo, status: 'queued', per_page: 100 }
+            );
+
+            let cleaned = 0;
             let ghosts = 0;
+            let recent = 0;
 
-            for (let page = 1; page <= 10; page++) {
-              const { data } = await github.rest.actions.listWorkflowRunsForRepo({
-                owner,
-                repo,
-                status: 'queued',
-                per_page: 100,
-                page
-              });
-
-              if (!data.workflow_runs.length) break;
-
-              for (const run of data.workflow_runs) {
-                const ageMs = now - new Date(run.created_at).getTime();
-                if (ageMs < cutoffMs) continue;
-
-                try {
-                  await github.rest.actions.cancelWorkflowRun({ owner, repo, run_id: run.id });
-                  cancelled += 1;
-                  core.info(`Cancelled stale queued run ${run.id}: ${run.name}`);
-                  continue;
-                } catch (cancelError) {
-                  core.warning(`Normal cancel rejected for ${run.id}: ${cancelError.message}`);
-                }
-
-                try {
-                  await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel', {
-                    owner,
-                    repo,
-                    run_id: run.id,
-                    headers: { 'X-GitHub-Api-Version': '2022-11-28' }
-                  });
-                  forceCancelled += 1;
-                  core.info(`Force-cancelled zombie run ${run.id}: ${run.name}`);
-                } catch (forceError) {
-                  ghosts += 1;
-                  core.warning(`GitHub backend ghost ${run.id}: ${forceError.message}`);
-                }
+            for (const run of runs) {
+              if (knownLegacyGhosts.has(run.id)) {
+                ghosts++;
+                core.notice(`Known GitHub backend ghost retained for history: ${run.id} (${run.name})`);
+                continue;
               }
 
-              if (data.workflow_runs.length < 100) break;
+              const ageMs = now - new Date(run.created_at).getTime();
+              if (ageMs < cutoffMs) {
+                recent++;
+                continue;
+              }
+
+              try {
+                await github.rest.actions.cancelWorkflowRun({ owner, repo, run_id: run.id });
+                cleaned++;
+                core.notice(`Cancelled stale queued run ${run.id} (${run.name})`);
+                continue;
+              } catch (cancelError) {
+                core.warning(`Normal cancel rejected run ${run.id}: ${cancelError.message}`);
+              }
+
+              try {
+                await github.request('POST /repos/{owner}/{repo}/actions/runs/{run_id}/force-cancel', {
+                  owner,
+                  repo,
+                  run_id: run.id,
+                  headers: { 'X-GitHub-Api-Version': '2022-11-28' },
+                });
+                cleaned++;
+                core.notice(`Force-cancelled stale queued run ${run.id} (${run.name})`);
+              } catch (forceError) {
+                core.warning(`Force-cancel rejected run ${run.id}: ${forceError.message}`);
+              }
             }
 
-            core.summary
-              .addHeading('Genesis Action Queue Cleaner')
-              .addRaw(`Normal cancelled: ${cancelled}\n\nForce-cancelled: ${forceCancelled}\n\nBackend ghosts still reported: ${ghosts}`)
-              .write();
+            core.notice(`Queue cleaner summary: cleaned=${cleaned}, known_legacy_ghosts=${ghosts}, recent_queued=${recent}`);
