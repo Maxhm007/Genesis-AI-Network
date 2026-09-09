@@ -40,31 +40,11 @@ def issue_comments(repository: str, token: str, number: int) -> list[dict]:
 
 
 def recovery_cycle_count(comments: list[dict]) -> int:
-    count = 0
-    for row in comments:
-        body = str(row.get("body") or "")
-        if body.startswith(RECOVERY_MARKER):
-            count += 1
-    return count
-
-
-def recovery_strategies_used(comments: list[dict], cycle: int) -> set[str]:
-    marker = f"{RECOVERY_MARKER}{cycle} -->"
-    start = -1
-    for index, row in enumerate(comments):
-        if str(row.get("body") or "").startswith(marker):
-            start = index
-    used: set[str] = set()
-    if start < 0:
-        return used
-    for row in comments[start + 1 :]:
-        body = str(row.get("body") or "")
-        if not body.startswith("<!-- genesis-agentic-strategy:"):
-            continue
-        strategy = body.split("<!-- genesis-agentic-strategy:", 1)[1].split("-->", 1)[0].strip()
-        if strategy:
-            used.add(strategy)
-    return used
+    return sum(
+        1
+        for row in comments
+        if str(row.get("body") or "").startswith(RECOVERY_MARKER)
+    )
 
 
 def ensure_label(repository: str, token: str, name: str = RECOVERY_LABEL, color: str = "1d76db", description: str = "Dedicated second solver lane for exhausted or blocked Genesis Issues") -> None:
@@ -79,6 +59,13 @@ def ensure_label(repository: str, token: str, name: str = RECOVERY_LABEL, color:
     except RuntimeError as exc:
         if "HTTP 422" not in str(exc):
             raise
+
+
+def _remove_label(repository: str, token: str, number: int, label: str) -> None:
+    try:
+        request(repository, token, "DELETE", f"/issues/{number}/labels/{label}")
+    except RuntimeError:
+        pass
 
 
 def _terminalize_successor(repository: str, token: str, issue: dict, comments: list[dict]) -> dict:
@@ -105,10 +92,7 @@ def _terminalize_successor(repository: str, token: str, issue: dict, comments: l
         "genesis-verifying",
         RECOVERY_LABEL,
     ):
-        try:
-            request(repository, token, "DELETE", f"/issues/{number}/labels/{label}")
-        except RuntimeError:
-            pass
+        _remove_label(repository, token, number, label)
 
     if not any(RECOVERY_TERMINAL_MARKER in str(row.get("body") or "") for row in comments):
         request(
@@ -133,8 +117,6 @@ def finalize_exhausted_issue(repository: str, token: str, issue: dict, comments:
     body = str(issue.get("body") or "")
     number = int(issue.get("number") or 0)
 
-    # Capability work is a dependency, not a replacement for the parent objective.
-    # Leave it in the capability lifecycle rather than creating/closing successors here.
     if CAPABILITY_WORK_PREFIX in body:
         return {"status": "capability_dependency_exempt", "issue_number": number}
 
@@ -161,7 +143,16 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
     ensure_label(repository, token)
     for issue in open_agentic_issues(repository, token):
         number = int(issue.get("number") or 0)
+        body = str(issue.get("body") or "")
         issue_labels = labels(issue)
+
+        # Capability work has one authoritative lane: Agentic Lab capability-first.
+        # Recovery Solver must never compete with it.
+        if CAPABILITY_WORK_PREFIX in body:
+            if RECOVERY_LABEL in issue_labels and not (issue_labels & ACTIVE_LABELS):
+                _remove_label(repository, token, number, RECOVERY_LABEL)
+            continue
+
         if EXHAUSTED_LABEL not in issue_labels:
             continue
         if issue_labels & ACTIVE_LABELS:
@@ -169,7 +160,12 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         if "genesis-waiting-capability" in issue_labels:
             continue
 
-        target = explicit_target(str(issue.get("body") or ""))
+        # A finished/failed shared worker may leave the ownership marker behind.
+        # It is advisory only when no active reservation exists, so clear it before reuse.
+        if RECOVERY_LABEL in issue_labels:
+            _remove_label(repository, token, number, RECOVERY_LABEL)
+
+        target = explicit_target(body)
         lane = safe_lane(target)
         if not lane:
             continue
@@ -183,10 +179,8 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             return outcome
 
         cycle = cycles + 1
-        used = recovery_strategies_used(comments, cycle)
-        strategy = next((item for item in RECOVERY_STRATEGIES if item not in used), RECOVERY_STRATEGIES[0])
+        strategy = RECOVERY_STRATEGIES[cycles % len(RECOVERY_STRATEGIES)]
 
-        # Claim first; the shared worker also has per-Issue concurrency protection.
         request(
             repository,
             token,
@@ -213,13 +207,18 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
                 )
             },
         )
-        request(
-            repository,
-            token,
-            "POST",
-            "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches",
-            {"ref": "main", "inputs": {"issue_number": str(number), "strategy": strategy}},
-        )
+        try:
+            request(
+                repository,
+                token,
+                "POST",
+                "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches",
+                {"ref": "main", "inputs": {"issue_number": str(number), "strategy": strategy}},
+            )
+        except Exception:
+            _remove_label(repository, token, number, "genesis-repair-in-progress")
+            _remove_label(repository, token, number, RECOVERY_LABEL)
+            raise
         return {
             "status": "dispatched",
             "issue_number": number,
