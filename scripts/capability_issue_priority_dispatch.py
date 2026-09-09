@@ -2,11 +2,14 @@ from __future__ import annotations
 
 import json
 import os
+import re
 import urllib.error
-import urllib.parse
 import urllib.request
 
+from requeue_exhausted_issues import engine_generation
+
 CAPABILITY_WORK_PREFIX = "<!-- genesis-capability-work:"
+REQUEUE_MARKER_PREFIX = "<!-- genesis-requeue-engine:"
 AGENTIC_LABEL = "agentic-lab"
 ACTIVE_LABELS = {
     "genesis-repair-in-progress",
@@ -65,6 +68,35 @@ def open_issues(repository: str, token: str) -> list[dict]:
     return rows
 
 
+def issue_comments(repository: str, token: str, number: int) -> list[dict]:
+    rows = request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
+    return [row for row in rows if isinstance(row, dict)]
+
+
+def latest_requeue_marker(comments: list[dict]) -> tuple[str, str]:
+    generation = ""
+    body = ""
+    pattern = re.compile(re.escape(REQUEUE_MARKER_PREFIX) + r"([^\s]+)\s*-->")
+    for row in comments:
+        text = str(row.get("body") or "")
+        match = pattern.search(text)
+        if match:
+            generation = match.group(1).strip()
+            body = text
+    return generation, body
+
+
+def quarantined_for_current_generation(comments: list[dict], current_generation: str) -> bool:
+    marker_generation, marker_body = latest_requeue_marker(comments)
+    if not marker_generation or marker_generation != current_generation:
+        return False
+    text = marker_body.lower()
+    return (
+        "quarantined for this repair-engine generation" in text
+        or "terminally deferred" in text
+    )
+
+
 def capability_issues(repository: str, token: str) -> list[dict]:
     return [
         issue
@@ -79,10 +111,33 @@ def prioritize(repository: str, token: str) -> dict:
     if not issues:
         return {"status": "idle", "reason": "no_open_capability_issue"}
 
-    # Oldest unresolved capability issue is the head-of-line blocker.  Make all
-    # capability work visible to Agentic Lab, but wake the recovery dispatcher
-    # specifically to consume the oldest one first.
+    current_generation = engine_generation()
+    eligible: list[dict] = []
+    quarantined: list[int] = []
+
+    # Never reactivate capability work quarantined for the current repair-engine
+    # generation.  It becomes eligible only after engine_generation() changes,
+    # which prevents the priority scheduler from recycling the same exhausted
+    # Issue indefinitely.
     for issue in issues:
+        number = int(issue.get("number") or 0)
+        comments = issue_comments(repository, token, number)
+        if quarantined_for_current_generation(comments, current_generation):
+            quarantined.append(number)
+            continue
+        eligible.append(issue)
+
+    if not eligible:
+        return {
+            "status": "idle",
+            "reason": "all_capability_issues_quarantined_for_current_generation",
+            "repair_engine_generation": current_generation,
+            "quarantined": quarantined,
+        }
+
+    # Only eligible capability work is made visible to Agentic Lab. Oldest
+    # eligible issue wins; quarantined issues are skipped so the queue advances.
+    for issue in eligible:
         number = int(issue.get("number") or 0)
         issue_labels = labels(issue)
         missing = [
@@ -93,7 +148,7 @@ def prioritize(repository: str, token: str) -> dict:
         if missing:
             request(repository, token, "POST", f"/issues/{number}/labels", {"labels": missing})
 
-    oldest = issues[0]
+    oldest = eligible[0]
     oldest_number = int(oldest.get("number") or 0)
     oldest_labels = labels(oldest)
     if not (oldest_labels & ACTIVE_LABELS):
@@ -109,6 +164,9 @@ def prioritize(repository: str, token: str) -> dict:
         "status": "prioritized",
         "oldest_capability_issue": oldest_number,
         "open_capability_issues": len(issues),
+        "eligible_capability_issues": len(eligible),
+        "quarantined_capability_issues": quarantined,
+        "repair_engine_generation": current_generation,
     }
 
 
