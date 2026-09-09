@@ -38,37 +38,3 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/agentic_lab_recovery_dispatch.py
-
-      - name: Requeue one stranded exhausted capability issue
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-
-          issue_number=$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" \
-            --jq '[.[] | select(.pull_request == null) | select((.body // "") | contains("<!-- genesis-capability-work:")) | select([.labels[].name] | index("genesis-solver-exhausted")) | select(([.labels[].name] | index("genesis-repair-in-progress")) == null) | select(([.labels[].name] | index("genesis-validating")) == null) | .number][0] // empty')
-
-          if [ -z "$issue_number" ]; then
-            echo 'No stranded exhausted capability-building issue found.'
-            exit 0
-          fi
-
-          for label in genesis-needs-human genesis-solver-exhausted genesis-deferred genesis-blocked genesis-repair-in-progress genesis-validating; do
-            gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
-          done
-
-          gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous >/dev/null
-          gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --add-label agentic-lab >/dev/null
-
-          gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "<!-- genesis-agentic-capability-release:0 -->
-          Genesis autonomous recovery released this exhausted capability-building Issue for a fresh bounded strategy cycle. The same Issue remains authoritative; no successor capability Issue is created. Existing tests, security boundaries, protected-file rules, validation, exact promotion, and owner controls remain mandatory." >/dev/null
-
-          running=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-sequential-issue-controller.yml --status in_progress --limit 1 --json databaseId --jq 'length')
-          queued=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-sequential-issue-controller.yml --status queued --limit 1 --json databaseId --jq 'length')
-          if [ "$running" -eq 0 ] && [ "$queued" -eq 0 ]; then
-            gh workflow run genesis-sequential-issue-controller.yml --repo "$GITHUB_REPOSITORY" --ref main
-            echo "Requeued capability issue #${issue_number} and woke the Sequential Issue Controller."
-          else
-            echo "Requeued capability issue #${issue_number}; controller already active or queued."
-          fi
