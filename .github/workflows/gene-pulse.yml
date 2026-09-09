@@ -7,6 +7,10 @@ on:
         description: Internal Gene logical id
         required: false
         default: gene-node-1
+      continue_chain:
+        description: Legacy compatibility input; ignored by the bounded pulse
+        required: false
+        default: "false"
   repository_dispatch:
     types: [gene-pulse]
   push:
