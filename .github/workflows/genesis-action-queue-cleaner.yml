@@ -1,0 +1,67 @@
+name: Genesis Action Queue Cleaner
+
+on:
+  push:
+    paths:
+      - '.github/workflows/genesis-action-queue-cleaner.yml'
+  workflow_dispatch:
+  schedule:
+    - cron: '17 * * * *'
+
+permissions:
+  actions: write
+  contents: read
+
+concurrency:
+  group: genesis-action-queue-cleaner
+  cancel-in-progress: true
+
+jobs:
+  clean-stale-queue:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Cancel stale queued workflow runs
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const owner = context.repo.owner;
+            const repo = context.repo.repo;
+            const cutoffMs = 60 * 60 * 1000; // 1 hour
+            const now = Date.now();
+            let cancelled = 0;
+
+            for (let page = 1; page <= 10; page++) {
+              const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+                owner,
+                repo,
+                status: 'queued',
+                per_page: 100,
+                page
+              });
+
+              if (!data.workflow_runs.length) break;
+
+              for (const run of data.workflow_runs) {
+                const ageMs = now - new Date(run.created_at).getTime();
+                if (ageMs < cutoffMs) continue;
+
+                try {
+                  await github.rest.actions.cancelWorkflowRun({
+                    owner,
+                    repo,
+                    run_id: run.id
+                  });
+                  cancelled += 1;
+                  core.info(`Cancelled stale queued run ${run.id}: ${run.name}, age=${Math.round(ageMs / 60000)}m`);
+                } catch (error) {
+                  core.warning(`Could not cancel run ${run.id}: ${error.message}`);
+                }
+              }
+
+              if (data.workflow_runs.length < 100) break;
+            }
+
+            core.summary
+              .addHeading('Genesis Action Queue Cleaner')
+              .addRaw(`Cancelled ${cancelled} queued run(s) older than 60 minutes.`)
+              .write();
