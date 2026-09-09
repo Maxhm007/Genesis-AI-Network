@@ -1,0 +1,23 @@
+name: Genesis Replay Parent Pulse
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-replay-parent-pulse.yml
+
+permissions:
+  actions: write
+  contents: read
+
+jobs:
+  replay:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Replay parent run 5314 once
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          gh api --method POST "/repos/${GITHUB_REPOSITORY}/actions/runs/32215068547/rerun"
+          echo "Parent rerun requested"
