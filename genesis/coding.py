@@ -217,7 +217,7 @@ class CodingModule:
     def _removes_only_python_suite_statement(source: str, start_line: int, end_line: int) -> bool:
         """Detect a line edit that removes the sole statement beneath a retained compound block.
 
-        The check is structural and intentionally narrow. If the edit also replaces the parent
+        replacement text
         header, normal AST validation decides whether the new structure is valid. This guard only
         catches edits such as replacing the sole ``pass`` inside an ``except`` with comments or
         whitespace, which can never form a syntactically valid suite.
