@@ -1,0 +1,42 @@
+name: Genesis Idle Repair Watchdog
+
+on:
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+  issues: read
+
+concurrency:
+  group: genesis-idle-repair-watchdog
+  cancel-in-progress: false
+
+jobs:
+  wake-if-idle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Wake Agentic Lab when autonomous backlog is idle
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REPO: ${{ github.repository }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          open_count=$(gh api --paginate "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-autonomous&per_page=1" --jq '.total_count')
+          active_count=$(gh api --paginate "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-repair-in-progress&per_page=1" --jq '.total_count')
+          validating_count=$(gh api --paginate "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-validating&per_page=1" --jq '.total_count')
+
+          echo "autonomous_open=${open_count} repair_in_progress=${active_count} validating=${validating_count}"
+
+          if [[ "${open_count}" -gt 0 && "${active_count}" -eq 0 && "${validating_count}" -eq 0 ]]; then
+            echo "Autonomous backlog is idle; waking Agentic Lab Recovery and Sequential Issue Controller."
+            gh workflow run genesis-agentic-lab-recovery.yml --repo "${REPO}"
+            gh workflow run genesis-sequential-issue-controller.yml --repo "${REPO}"
+          else
+            echo "No wake required."
+          fi
