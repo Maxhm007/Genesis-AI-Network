@@ -9,6 +9,8 @@ on:
       - scripts/agentic_lab_capability_first_dispatch.py
       - scripts/capability_issue_priority_dispatch.py
       - scripts/requeue_exhausted_issues.py
+      - scripts/pulse_coding_provider.py
+      - genesis/github_issue_capability_builder.py
   schedule:
     - cron: '*/15 * * * *'
   workflow_dispatch:
