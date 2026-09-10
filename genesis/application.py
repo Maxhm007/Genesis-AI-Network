@@ -50,6 +50,7 @@ class ApplicationModule:
             source = self.root / target.source_root
             present = source.exists()
             results.append({**asdict(target), "source_present": present, "status": "present" if present else "missing"})
+        return {"module": "genesis.application", "targets": results}
 
     @staticmethod
     def _objective(target: ApplicationTarget, present: bool) -> str:
