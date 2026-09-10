@@ -389,11 +389,10 @@ def handoff_exhausted_to_agentic_lab(
         token,
         "POST",
         f"/issues/{number}/labels",
-        {"labels": ["genesis-blocked", "genesis-solver-exhausted", AGENTIC_LAB_LABEL]},
+        {"labels": ["genesis-blocked", "genesis-solver-exhausted", AGENTIC_LAB_LABEL, "genesis-autonomous"]},
     )
-    for label in ("genesis-autonomous", "genesis-deferred"):
-        encoded = urllib.parse.quote(label, safe="")
-        _request(repository, token, "DELETE", f"/issues/{number}/labels/{encoded}")
+    encoded = urllib.parse.quote("genesis-deferred", safe="")
+    _request(repository, token, "DELETE", f"/issues/{number}/labels/{encoded}")
 
     if str(issue.get("state") or "open") == "closed":
         reopened = _request(repository, token, "PATCH", f"/issues/{number}", {"state": "open"})
@@ -414,7 +413,7 @@ def handoff_exhausted_to_agentic_lab(
                 "body": (
                     f"{AGENTIC_HANDOFF_COMMENT_MARKER}\n"
                     "Genesis normal bounded repair is exhausted. The same authoritative Issue is now handed to the existing Agentic Lab recovery loop. "
-                    "No successor Issue was created. Normal solver retries remain disabled by the exhausted state, and all existing Security, validation, protected-file, signing, secret, promotion, and owner-control boundaries remain mandatory."
+                    "No successor Issue was created. The issue remains autonomous and visible to strict FIFO; all existing Security, validation, protected-file, signing, secret, promotion, and owner-control boundaries remain mandatory."
                 )
             },
         )
@@ -444,10 +443,6 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
     handed_off: set[int] = set()
     terminal_hold: set[int] = set()
 
-    # Terminal exhaustion is an escalation boundary, not a closure boundary.
-    # Keep the same authoritative Issue open and hand it to the existing
-    # Agentic Lab recovery loop. Batching may delay a handoff, but terminal
-    # exhaustion must never fall back into the normal solver generation loop.
     handoff_count = 0
     for issue in issues:
         number = int(issue.get("number") or 0)
@@ -473,129 +468,19 @@ def run(repository: str, token: str, root: Path = ROOT, limit: int = 5) -> dict:
         handoff_count += 1
         result["agentic_handoffs"].append(handoff)
 
-    for issue in issues:
-        number = int(issue.get("number") or 0)
-        labels = issue_labels(issue)
-        if str(issue.get("state") or "open") != "open":
-            continue
-        if labels & (ACTIVE_LABELS | EXHAUSTED_LABELS):
-            continue
-        if "genesis-autonomous" not in labels:
-            continue
-        eligible, target = _eligible_retry_target(issue, root)
-        if not eligible:
-            continue
-        comments = _request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
-        if not pre_repair_failure_after_marker(comments, marker):
-            continue
-
-        for row in comments:
-            if not isinstance(row, dict):
-                continue
-            body = str(row.get("body") or "")
-            if body.startswith("<!-- genesis-oldest-real-issue-solver -->") or body.startswith("<!-- genesis-priority-issue-solver -->"):
-                rolled_back = rollback_attempt_status(body)
-                if rolled_back != body:
-                    _request(repository, token, "PATCH", f"/issues/comments/{row['id']}", {"body": rolled_back})
-
-        _request(
-            repository,
-            token,
-            "POST",
-            f"/issues/{number}/labels",
-            {"labels": ["genesis-blocked", "genesis-solver-exhausted"]},
-        )
-        encoded = urllib.parse.quote("genesis-autonomous", safe="")
-        _request(repository, token, "DELETE", f"/issues/{number}/labels/{encoded}")
-        _request(
-            repository,
-            token,
-            "POST",
-            f"/issues/{number}/comments",
-            {
-                "body": (
-                    marker
-                    + "\nGenesis worker failed before repair evidence existed, so this dispatch did not consume a coding attempt. "
-                    + "The issue is quarantined for this repair-engine generation to prevent successor wakeups from repeatedly spending infrastructure runs. "
-                    + f"It can be released automatically after a repair capability change. Engine generation: `{generation}`. Target: `{target}`."
-                )
-            },
-        )
-        quarantined.add(number)
-        result["infrastructure_quarantined"].append({"issue": number, "target": target})
-
-    for issue in issues:
-        if len(result["released"]) >= max(1, limit):
-            break
-        number = int(issue.get("number") or 0)
-        if number in quarantined or number in handed_off or number in terminal_hold:
-            continue
-        labels = issue_labels(issue)
-        eligible, reason = eligible_exhausted_issue(issue, root)
-        if not eligible:
-            if labels & EXHAUSTED_LABELS:
-                result["skipped"].append({"issue": number, "reason": reason})
-            continue
-
-        comments = _request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
-        if any(str(row.get("body") or "").startswith(marker) for row in comments if isinstance(row, dict)):
-            result["skipped_same_generation"].append(number)
-            continue
-
-        for row in comments:
-            if not isinstance(row, dict):
-                continue
-            body = str(row.get("body") or "")
-            if body.startswith("<!-- genesis-oldest-real-issue-solver -->") or body.startswith("<!-- genesis-priority-issue-solver -->"):
-                reset = reset_attempt_status(body)
-                if reset != body:
-                    _request(repository, token, "PATCH", f"/issues/comments/{row['id']}", {"body": reset})
-
-        if str(issue.get("state") or "open") == "closed":
-            reopened = _request(repository, token, "PATCH", f"/issues/{number}", {"state": "open"})
-            if not isinstance(reopened, dict) or str(reopened.get("state") or "") != "open":
-                result["skipped"].append({"issue": number, "reason": "reopen_failed"})
-                continue
-
-        for label in ("genesis-solver-exhausted", "genesis-priority-exhausted", "genesis-blocked", "genesis-deferred"):
-            encoded = urllib.parse.quote(label, safe="")
-            _request(repository, token, "DELETE", f"/issues/{number}/labels/{encoded}")
-
-        _request(
-            repository,
-            token,
-            "POST",
-            f"/issues/{number}/comments",
-            {
-                "body": (
-                    marker
-                    + "\nGenesis repair capability changed. This previously exhausted Issue is released for one new bounded solver generation. "
-                    + f"Engine generation: `{generation}`. Existing safety, target, validation and attempt limits remain unchanged."
-                )
-            },
-        )
-        result["released"].append({"issue": number, "target": reason})
-
-    RUNTIME.mkdir(parents=True, exist_ok=True)
+    EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
     EVIDENCE_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result
 
 
-def main() -> None:
+def main() -> int:
     repository = os.environ.get("GITHUB_REPOSITORY", "").strip()
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     if not repository or not token:
-        raise SystemExit("GITHUB_REPOSITORY and GITHUB_TOKEN are required")
-    limit = int(os.environ.get("GENESIS_EXHAUSTED_REQUEUE_LIMIT", "5"))
-    print(json.dumps(run(repository, token, limit=limit), indent=2, sort_keys=True))
-
-    if os.environ.get("GITHUB_WORKFLOW", "").strip() == "Genesis Sequential Issue Controller":
-        from genesis.github_issue_detected_reconciler import reconcile_satisfied_detected_issues
-
-        detected = reconcile_satisfied_detected_issues(ROOT)
-        print("Satisfied detected regression controller preflight:")
-        print(json.dumps(detected, indent=2, sort_keys=True))
+        raise RuntimeError("GITHUB_REPOSITORY and GITHUB_TOKEN are required")
+    print(json.dumps(run(repository, token), sort_keys=True))
+    return 0
 
 
 if __name__ == "__main__":
-    main()
+    raise SystemExit(main())
