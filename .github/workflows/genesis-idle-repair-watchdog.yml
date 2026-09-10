@@ -31,9 +31,9 @@ jobs:
         run: |
           set -euo pipefail
 
-          open_count=$(gh api --paginate "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-autonomous&per_page=1" --jq '.total_count')
-          active_count=$(gh api --paginate "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-repair-in-progress&per_page=1" --jq '.total_count')
-          validating_count=$(gh api --paginate "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-validating&per_page=1" --jq '.total_count')
+          open_count=$(gh api "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-autonomous&per_page=1" --jq '.total_count')
+          active_count=$(gh api "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-repair-in-progress&per_page=1" --jq '.total_count')
+          validating_count=$(gh api "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-validating&per_page=1" --jq '.total_count')
 
           echo "autonomous_open=${open_count} repair_in_progress=${active_count} validating=${validating_count}"
 
