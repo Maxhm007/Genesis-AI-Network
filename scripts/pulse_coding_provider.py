@@ -31,11 +31,11 @@ REVISION_MARKERS = (
 class AdaptiveCodingModel:
     """Use stronger bounded reasoning when prior evidence says a coding revision is needed.
 
-    First-pass coding remains on the small replaceable model. Revision/retry prompts escalate to
-    a stronger replaceable model. The stronger model has its own compact generation budget so a
-    bounded one-edit correction does not consume the whole provider request deadline. The provider
-    also detects compact edits that would reproduce the exact repository text from NUMBERED_CONTEXT
-    and self-corrects them inside the same pulse.
+    First-pass coding remains on the small replaceable model unless the prompt is too large for
+    reliable bounded generation. Long first-pass prompts escalate to the stronger replaceable model
+    and are compacted before inference. Revision/retry prompts continue to escalate as before.
+    The provider also detects compact edits that would reproduce the exact repository text from
+    NUMBERED_CONTEXT and self-corrects them inside the same pulse.
     """
 
     def __init__(
@@ -54,7 +54,10 @@ class AdaptiveCodingModel:
         self._models: dict[str, LocalReasoningModel] = {}
 
     def _selected_model_id(self, prompt: str) -> str:
-        if self.escalation_model_id and any(marker in prompt for marker in REVISION_MARKERS):
+        if self.escalation_model_id and (
+            len(prompt) > ESCALATION_MAX_PROMPT_CHARS
+            or any(marker in prompt for marker in REVISION_MARKERS)
+        ):
             return self.escalation_model_id
         return self.primary_model_id
 
