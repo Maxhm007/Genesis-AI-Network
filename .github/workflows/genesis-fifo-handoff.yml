@@ -1,0 +1,45 @@
+name: Genesis FIFO Handoff
+
+on:
+  workflow_dispatch:
+  workflow_run:
+    workflows:
+      - Genesis Bounded Repair Worker
+    types:
+      - completed
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-fifo-handoff.yml
+
+permissions:
+  contents: read
+  issues: read
+  actions: write
+
+concurrency:
+  group: genesis-fifo-handoff
+  cancel-in-progress: false
+
+jobs:
+  wake-next-fifo-issue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Wake authoritative FIFO controller
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "FIFO handoff event: ${GITHUB_EVENT_NAME}"
+          gh workflow run genesis-sequential-issue-controller.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
+          echo 'Sequential FIFO controller dispatched.'
+
+# This workflow does not select, repair, validate, promote, or close issues.
+# It only removes idle gaps by waking the existing authoritative controller
+# after each bounded worker finishes. The controller still enforces the
+# one-active-repair lock, FIFO selection, protected targets, validation,
+# and issue-backed authority.
