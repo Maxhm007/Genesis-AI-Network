@@ -5,6 +5,7 @@ on:
   workflow_run:
     workflows:
       - Genesis Bounded Repair Worker
+      - Genesis Sequential Issue Controller
     types:
       - completed
   push:
@@ -26,20 +27,29 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Wake authoritative FIFO controller
+      - name: Wake authoritative FIFO lane
         env:
           GH_TOKEN: ${{ github.token }}
+          SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
         shell: bash
         run: |
           set -euo pipefail
-          echo "FIFO handoff event: ${GITHUB_EVENT_NAME}"
-          gh workflow run genesis-sequential-issue-controller.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main
-          echo 'Sequential FIFO controller dispatched.'
+          echo "FIFO handoff event: ${GITHUB_EVENT_NAME}; source: ${SOURCE_WORKFLOW:-manual_or_push}"
 
-# This workflow does not select, repair, validate, promote, or close issues.
-# It only removes idle gaps by waking the existing authoritative controller
-# after each bounded worker finishes. The controller still enforces the
-# one-active-repair lock, FIFO selection, protected targets, validation,
-# and issue-backed authority.
+          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" && "${SOURCE_WORKFLOW}" == "Genesis Sequential Issue Controller" ]]; then
+            gh workflow run genesis-agentic-lab-recovery.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref main
+            echo 'Agentic Lab recovery dispatched after Sequential Controller completion.'
+          else
+            gh workflow run genesis-sequential-issue-controller.yml \
+              --repo "$GITHUB_REPOSITORY" \
+              --ref main
+            echo 'Sequential FIFO controller dispatched.'
+          fi
+
+# This workflow only removes idle gaps between the existing authoritative lanes.
+# Bounded Repair Worker completion wakes the Sequential Controller.
+# Sequential Controller completion wakes Agentic Lab so handed-off issues do not sit idle.
+# Existing controllers still enforce one-active-repair locking, FIFO selection,
+# protected targets, validation, promotion, and issue-backed authority.
