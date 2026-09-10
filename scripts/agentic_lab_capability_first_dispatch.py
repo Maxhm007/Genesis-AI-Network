@@ -42,7 +42,8 @@ def _all_open_issues_fifo(repository: str, token: str) -> list[dict]:
 
 def _actionable(issue: dict) -> bool:
     issue_labels = agentic.labels(issue)
-    if "genesis-autonomous" not in issue_labels or "genesis-verified" in issue_labels:
+    autonomous_or_agentic = "genesis-autonomous" in issue_labels or agentic.AGENTIC_LABEL in issue_labels
+    if not autonomous_or_agentic or "genesis-verified" in issue_labels:
         return False
     if issue_labels & {"genesis-persistent", "duplicate", "invalid", "wontfix", "genesis-superseded"}:
         return False
@@ -56,6 +57,29 @@ def _actionable(issue: dict) -> bool:
     if "persistent github-native reporting channel" in body.lower():
         return False
     return True
+
+
+def _restore_agentic_visibility(repository: str, token: str, issues: list[dict]) -> list[int]:
+    restored: list[int] = []
+    for issue in issues:
+        labels = agentic.labels(issue)
+        if agentic.AGENTIC_LABEL not in labels or "genesis-autonomous" in labels:
+            continue
+        if "genesis-verified" in labels or "genesis-superseded" in labels:
+            continue
+        number = int(issue.get("number") or 0)
+        if number <= 1:
+            continue
+        title = str(issue.get("title") or "").strip().lower()
+        body = str(issue.get("body") or "").lower()
+        if title.startswith(("[genesis gene chat]", "genesis chat:", "[genesis hourly report]", "[genesis ops]")):
+            continue
+        if "persistent github-native reporting channel" in body:
+            continue
+        agentic.request(repository, token, "POST", f"/issues/{number}/labels", {"labels": ["genesis-autonomous"]})
+        agentic.remove_label(repository, token, number, "genesis-deferred")
+        restored.append(number)
+    return restored
 
 
 def _derived_safe_target(body: str) -> str:
@@ -244,10 +268,12 @@ def main() -> int:
     agentic.pause_for_capability = _same_issue_pause
 
     all_open = _all_open_issues_fifo(repository, token)
+    restored = _restore_agentic_visibility(repository, token, all_open)
+    all_open = _all_open_issues_fifo(repository, token)
     released = _release_legacy_waiting_dependencies(repository, token, all_open)
     decomposition = _decompose_oldest_issue(repository, token, _all_open_issues_fifo(repository, token))
     if decomposition.get("status") == "fifo_blocked":
-        print(json.dumps({"status": "fifo_blocked", "decomposition": decomposition, "legacy_dependencies_released": released}, sort_keys=True))
+        print(json.dumps({"status": "fifo_blocked", "decomposition": decomposition, "legacy_dependencies_released": released, "agentic_visibility_restored": restored}, sort_keys=True))
         return 0
 
     fifo = _fifo_autonomous_issues(repository, token)
@@ -257,13 +283,14 @@ def main() -> int:
 
     active = [int(issue.get("number") or 0) for issue in _all_open_issues_fifo(repository, token) if agentic.labels(issue) & agentic.ACTIVE_LABELS]
     if active:
-        print(json.dumps({"status": "busy", "reason": "global_fifo_repair_lock", "active_issues": active, "decomposition": decomposition}, sort_keys=True))
+        print(json.dumps({"status": "busy", "reason": "global_fifo_repair_lock", "active_issues": active, "decomposition": decomposition, "agentic_visibility_restored": restored}, sort_keys=True))
         return 0
 
     result = agentic.reserve_and_dispatch(repository, token)
     if isinstance(result, dict):
         result["policy"] = "strict_fifo_same_issue_decomposition"
         result["decomposition"] = decomposition
+        result["agentic_visibility_restored"] = restored
     return 0
 
 
