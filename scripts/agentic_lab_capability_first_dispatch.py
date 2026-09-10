@@ -16,6 +16,24 @@ def _is_capability(issue: dict) -> bool:
     return agentic.CAPABILITY_WORK_PREFIX in str(issue.get("body") or "")
 
 
+def _all_issue_comments(repository: str, token: str, number: int) -> list[dict]:
+    """Read the complete issue history so strategy rotation never forgets later attempts."""
+    rows: list[dict] = []
+    for page in range(1, 101):
+        batch = agentic.request(
+            repository,
+            token,
+            "GET",
+            f"/issues/{number}/comments?per_page=100&page={page}",
+        ) or []
+        if not isinstance(batch, list):
+            raise RuntimeError("GitHub issue comments response was not a list")
+        rows.extend(row for row in batch if isinstance(row, dict))
+        if len(batch) < 100:
+            break
+    return rows
+
+
 def _latest_strategy_time(comments: list[dict]) -> datetime | None:
     for row in reversed(comments):
         body = str(row.get("body") or "")
@@ -103,6 +121,12 @@ def main() -> int:
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     if not repository or not token:
         raise RuntimeError("GITHUB_REPOSITORY and GITHUB_TOKEN are required")
+
+    # The base dispatcher historically read only the first 100 comments. Capability
+    # issues can exceed that quickly, causing next_strategy() to forget recent
+    # attempts and repeatedly choose evidence_first. Use complete pagination for
+    # every comment lookup in this capability-first process.
+    agentic.issue_comments = _all_issue_comments
 
     original_selector = agentic.open_agentic_issues
     original_pause = agentic.pause_for_capability
