@@ -5,8 +5,11 @@ on:
     branches: [main]
     paths:
       - .github/workflows/genesis-agentic-lab-recovery.yml
+      - .github/workflows/genesis-android-issue-worker.yml
       - scripts/agentic_lab_recovery_dispatch.py
       - scripts/agentic_lab_capability_first_dispatch.py
+      - scripts/agentic_lab_fifo_router.py
+      - scripts/android_issue_repair.py
       - scripts/capability_issue_priority_dispatch.py
       - scripts/requeue_exhausted_issues.py
       - scripts/pulse_coding_provider.py
@@ -39,7 +42,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Dispatch one Agentic Lab recovery issue
+      - name: Dispatch oldest FIFO issue to the correct repair lane
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/agentic_lab_capability_first_dispatch.py
+        run: python scripts/agentic_lab_fifo_router.py
