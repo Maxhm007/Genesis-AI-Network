@@ -4,8 +4,7 @@ import json
 import os
 import urllib.request
 
-import scripts.agentic_lab_capability_first_dispatch as legacy
-import scripts.agentic_lab_recovery_dispatch as agentic
+import agentic_lab_capability_first_dispatch as legacy
 
 
 ACTIVE_LABELS = {
