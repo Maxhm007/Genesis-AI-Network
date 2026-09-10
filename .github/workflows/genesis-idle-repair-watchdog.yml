@@ -1,6 +1,10 @@
 name: Genesis Idle Repair Watchdog
 
 on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-idle-repair-watchdog.yml
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
