@@ -5,7 +5,7 @@ on:
   workflow_run:
     workflows:
       - Genesis Bounded Repair Worker
-      - Genesis Sequential Issue Controller
+      - Genesis Agentic Strategy Worker
     types:
       - completed
   push:
@@ -23,33 +23,30 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  wake-next-fifo-issue:
+  wake-genesis-repair-lanes:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - name: Wake authoritative FIFO lane
+      - name: Wake Sequential Controller and Agentic Lab
         env:
           GH_TOKEN: ${{ github.token }}
-          SOURCE_WORKFLOW: ${{ github.event.workflow_run.name }}
         shell: bash
         run: |
           set -euo pipefail
-          echo "FIFO handoff event: ${GITHUB_EVENT_NAME}; source: ${SOURCE_WORKFLOW:-manual_or_push}"
+          echo "Genesis handoff event: ${GITHUB_EVENT_NAME}"
 
-          if [[ "${GITHUB_EVENT_NAME}" == "workflow_run" && "${SOURCE_WORKFLOW}" == "Genesis Sequential Issue Controller" ]]; then
-            gh workflow run genesis-agentic-lab-recovery.yml \
-              --repo "$GITHUB_REPOSITORY" \
-              --ref main
-            echo 'Agentic Lab recovery dispatched after Sequential Controller completion.'
-          else
-            gh workflow run genesis-sequential-issue-controller.yml \
-              --repo "$GITHUB_REPOSITORY" \
-              --ref main
-            echo 'Sequential FIFO controller dispatched.'
-          fi
+          gh workflow run genesis-sequential-issue-controller.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
+          echo 'Sequential FIFO controller dispatched.'
 
-# This workflow only removes idle gaps between the existing authoritative lanes.
-# Bounded Repair Worker completion wakes the Sequential Controller.
-# Sequential Controller completion wakes Agentic Lab so handed-off issues do not sit idle.
-# Existing controllers still enforce one-active-repair locking, FIFO selection,
-# protected targets, validation, promotion, and issue-backed authority.
+          gh workflow run genesis-agentic-lab-recovery.yml \
+            --repo "$GITHUB_REPOSITORY" \
+            --ref main
+          echo 'Agentic Lab recovery dispatched.'
+
+# This workflow does not select, repair, validate, promote, or close issues.
+# It only keeps the two authoritative repair lanes awake after bounded or
+# Agentic workers finish. The existing controllers still enforce FIFO,
+# one-active-repair locking, safe-target rules, validation, promotion,
+# protected-file boundaries, and issue-backed authority.
