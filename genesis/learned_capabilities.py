@@ -1982,4 +1982,39 @@ register_capability(
 )
 
 
+def _learned_3abd0a92554a(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('neucodec', 'model', 'proposed', 'finite', 'scalar', 'quantization', 'enables', 'redundant', 'transmission-robust', 'neural', 'audio', 'huggingface', 'transformers', 'published', 'compression', 'bit-rates')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_3abd0a92554a',
+    'Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: The NeuCodec model was proposed in [Finite Scalar Quantization Enables Redundant and Transmission-Robust Neural Audio....',
+    "huggingface/transformers release 'Release 5.17.0', published 2026-09-09T15:42:45Z: The NeuCodec model was proposed in [Finite Scalar Quantization Enables Redundant and Transmission-Robust Neural Audio Compression at Low Bit-rates](. Source: https://github.com/huggingface/transformers/releases/tag/v5.17.0",
+    _learned_3abd0a92554a,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
