@@ -5,19 +5,15 @@ import json
 import os
 
 import agentic_lab_recovery_dispatch as agentic
-from capability_issue_priority_dispatch import quarantined_for_current_generation
-from requeue_exhausted_issues import engine_generation
 
 
 STALE_RESERVATION_MINUTES = 100
-
-
-def _is_capability(issue: dict) -> bool:
-    return agentic.CAPABILITY_WORK_PREFIX in str(issue.get("body") or "")
+SAME_ISSUE_MEMORY_PREFIX = "<!-- genesis-same-issue-recovery-memory:"
+LEGACY_DEPENDENCY_RELEASE = "<!-- genesis-legacy-capability-dependency-released -->"
 
 
 def _all_issue_comments(repository: str, token: str, number: int) -> list[dict]:
-    """Read the complete issue history so strategy rotation never forgets later attempts."""
+    """Read the complete issue history so retries use all earlier failure evidence."""
     rows: list[dict] = []
     for page in range(1, 101):
         batch = agentic.request(
@@ -49,12 +45,24 @@ def _latest_strategy_time(comments: list[dict]) -> datetime | None:
     return None
 
 
-def _clear_stale_capability_reservations(repository: str, token: str, issues: list[dict]) -> list[int]:
+def _least_recently_used_strategy(comments: list[dict]) -> str:
+    """Always return a strategy, preferring one not recently tried on this issue."""
+    last_seen = {strategy: -1 for strategy in agentic.STRATEGIES}
+    release_index = agentic._latest_release_index(comments)
+    for index, row in enumerate(comments[release_index + 1 :], start=release_index + 1):
+        body = str(row.get("body") or "")
+        if not body.startswith(agentic.STRATEGY_MARKER_PREFIX):
+            continue
+        strategy = body[len(agentic.STRATEGY_MARKER_PREFIX) :].split("-->", 1)[0].strip()
+        if strategy in last_seen:
+            last_seen[strategy] = index
+    return min(agentic.STRATEGIES, key=lambda strategy: (last_seen[strategy], agentic.STRATEGIES.index(strategy)))
+
+
+def _clear_stale_reservations(repository: str, token: str, issues: list[dict]) -> list[int]:
     stale: list[int] = []
     cutoff = datetime.now(timezone.utc) - timedelta(minutes=STALE_RESERVATION_MINUTES)
     for issue in issues:
-        if not _is_capability(issue):
-            continue
         issue_labels = agentic.labels(issue)
         if not (issue_labels & agentic.ACTIVE_LABELS):
             continue
@@ -63,14 +71,14 @@ def _clear_stale_capability_reservations(repository: str, token: str, issues: li
         last_strategy = _latest_strategy_time(comments)
         if last_strategy is None or last_strategy > cutoff:
             continue
-        for label in agentic.ACTIVE_LABELS | {"genesis-autonomous", "genesis-recovery-solver"}:
+        for label in agentic.ACTIVE_LABELS | {"genesis-recovery-solver"}:
             agentic.remove_label(repository, token, number, label)
         agentic.request(
             repository,
             token,
             "POST",
             f"/issues/{number}/labels",
-            {"labels": [agentic.AGENTIC_LABEL, agentic.EXHAUSTED_LABEL]},
+            {"labels": [agentic.AGENTIC_LABEL, "genesis-autonomous"]},
         )
         agentic.request(
             repository,
@@ -79,9 +87,9 @@ def _clear_stale_capability_reservations(repository: str, token: str, issues: li
             f"/issues/{number}/comments",
             {
                 "body": (
-                    "<!-- genesis-stale-capability-reservation-released -->\n"
-                    f"Genesis released a stale capability repair reservation older than {STALE_RESERVATION_MINUTES} minutes. "
-                    "The same Issue remains authoritative and will be retried through the bounded capability-first lifecycle."
+                    "<!-- genesis-stale-agentic-reservation-released -->\n"
+                    f"Genesis released a stale repair reservation older than {STALE_RESERVATION_MINUTES} minutes. "
+                    "The same Issue remains authoritative; its existing failure comments remain repair memory for the next attempt."
                 )
             },
         )
@@ -89,31 +97,97 @@ def _clear_stale_capability_reservations(repository: str, token: str, issues: li
     return stale
 
 
-def prioritized_agentic_issues(repository: str, token: str) -> list[dict]:
-    current_generation = engine_generation()
-    capability: list[dict] = []
-    ordinary: list[dict] = []
-    quarantined: list[int] = []
-
-    for issue in agentic.open_agentic_issues(repository, token):
-        if not _is_capability(issue):
-            ordinary.append(issue)
+def _release_legacy_waiting_dependencies(repository: str, token: str, issues: list[dict]) -> list[int]:
+    """Retire the old parent->capability blocking rule without creating or deleting issues."""
+    released: list[int] = []
+    for issue in issues:
+        issue_labels = agentic.labels(issue)
+        if agentic.WAITING_CAPABILITY_LABEL not in issue_labels:
             continue
         number = int(issue.get("number") or 0)
         comments = agentic.issue_comments(repository, token, number)
-        if quarantined_for_current_generation(comments, current_generation):
-            quarantined.append(number)
-            continue
-        capability.append(issue)
+        for label in (
+            agentic.WAITING_CAPABILITY_LABEL,
+            "genesis-blocked",
+            "genesis-deferred",
+            agentic.EXHAUSTED_LABEL,
+            agentic.NEEDS_HUMAN_LABEL,
+        ):
+            agentic.remove_label(repository, token, number, label)
+        agentic.request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/labels",
+            {"labels": [agentic.AGENTIC_LABEL, "genesis-autonomous"]},
+        )
+        if not any(LEGACY_DEPENDENCY_RELEASE in str(row.get("body") or "") for row in comments):
+            agentic.request(
+                repository,
+                token,
+                "POST",
+                f"/issues/{number}/comments",
+                {
+                    "body": (
+                        f"{LEGACY_DEPENDENCY_RELEASE}\n"
+                        "Genesis no longer creates or waits on a secondary capability Issue merely because this Issue was not solved. "
+                        "This original Issue is authoritative again. Previous failure comments are retained as repair memory, and the next attempt must use that evidence with a different or least-recently-used strategy."
+                    )
+                },
+            )
+        released.append(number)
+    return released
 
-    print(json.dumps({
-        "selector": "capability_first",
-        "repair_engine_generation": current_generation,
-        "eligible_capability_issues": [int(row.get("number") or 0) for row in capability],
-        "quarantined_capability_issues": quarantined,
-        "ordinary_agentic_issues": len(ordinary),
-    }, sort_keys=True))
-    return capability + ordinary
+
+def _same_issue_pause(
+    repository: str,
+    token: str,
+    issue: dict,
+    comments: list[dict],
+    target: str,
+    reason: str,
+) -> dict:
+    """Safety fallback: record failure on the same issue; never create another issue."""
+    number = int(issue.get("number") or 0)
+    count = sum(
+        1
+        for row in comments
+        if str(row.get("body") or "").startswith(SAME_ISSUE_MEMORY_PREFIX)
+    ) + 1
+    marker = f"{SAME_ISSUE_MEMORY_PREFIX}{count} -->"
+    agentic.request(
+        repository,
+        token,
+        "POST",
+        f"/issues/{number}/comments",
+        {
+            "body": (
+                f"{marker}\n"
+                "**Genesis same-issue recovery memory**\n\n"
+                f"- Target: `{target}`\n"
+                f"- Latest blocker: `{reason or 'strategy_set_exhausted'}`\n"
+                "- Decision: keep this Issue open and authoritative; do not create a successor or capability Issue.\n"
+                "- Next attempt: read the full comment history and use the least-recently-used safe strategy, incorporating the recorded failure evidence."
+            )
+        },
+    )
+    for label in agentic.ACTIVE_LABELS | {
+        agentic.WAITING_CAPABILITY_LABEL,
+        agentic.NEEDS_HUMAN_LABEL,
+        "genesis-blocked",
+        "genesis-deferred",
+        "genesis-recovery-solver",
+        agentic.EXHAUSTED_LABEL,
+    }:
+        agentic.remove_label(repository, token, number, label)
+    agentic.request(
+        repository,
+        token,
+        "POST",
+        f"/issues/{number}/labels",
+        {"labels": [agentic.AGENTIC_LABEL, "genesis-autonomous"]},
+    )
+    return {"status": "same_issue_retry", "issue_number": number, "reason": reason}
 
 
 def main() -> int:
@@ -122,93 +196,40 @@ def main() -> int:
     if not repository or not token:
         raise RuntimeError("GITHUB_REPOSITORY and GITHUB_TOKEN are required")
 
-    # The base dispatcher historically read only the first 100 comments. Capability
-    # issues can exceed that quickly, causing next_strategy() to forget recent
-    # attempts and repeatedly choose evidence_first. Use complete pagination for
-    # every comment lookup in this capability-first process.
+    # Same-issue recovery policy:
+    # 1. always read complete comments;
+    # 2. never convert a repair failure into a new capability issue;
+    # 3. choose the least-recently-used strategy from the accumulated issue history;
+    # 4. retain one authoritative issue until a verified promotion closes it.
     agentic.issue_comments = _all_issue_comments
+    agentic.next_strategy = _least_recently_used_strategy
+    agentic.capability_gap_status = lambda _status: False
+    agentic.pause_for_capability = _same_issue_pause
 
-    original_selector = agentic.open_agentic_issues
-    original_pause = agentic.pause_for_capability
+    all_agentic = agentic.open_agentic_issues(repository, token)
+    stale = _clear_stale_reservations(repository, token, all_agentic)
+    released = _release_legacy_waiting_dependencies(repository, token, all_agentic)
+    if stale or released:
+        all_agentic = agentic.open_agentic_issues(repository, token)
 
-    all_agentic = original_selector(repository, token)
-    stale = _clear_stale_capability_reservations(repository, token, all_agentic)
-    if stale:
-        all_agentic = original_selector(repository, token)
-
-    active_capabilities = [
+    active = [
         int(issue.get("number") or 0)
         for issue in all_agentic
-        if _is_capability(issue) and (agentic.labels(issue) & agentic.ACTIVE_LABELS)
+        if agentic.labels(issue) & agentic.ACTIVE_LABELS
     ]
-    if active_capabilities:
+    if active:
         print(json.dumps({
             "status": "busy",
-            "reason": "global_capability_lock",
-            "active_capability_issues": active_capabilities,
+            "reason": "global_same_issue_repair_lock",
+            "active_issues": active,
+            "legacy_dependencies_released": released,
         }, sort_keys=True))
         return 0
 
-    def _selector(repo: str, tok: str) -> list[dict]:
-        current_generation = engine_generation()
-        capability: list[dict] = []
-        ordinary: list[dict] = []
-        quarantined: list[int] = []
-        for issue in original_selector(repo, tok):
-            if not _is_capability(issue):
-                ordinary.append(issue)
-                continue
-            number = int(issue.get("number") or 0)
-            comments = agentic.issue_comments(repo, tok, number)
-            if quarantined_for_current_generation(comments, current_generation):
-                quarantined.append(number)
-                continue
-            capability.append(issue)
-        print(json.dumps({
-            "selector": "capability_first",
-            "repair_engine_generation": current_generation,
-            "eligible_capability_issues": [int(row.get("number") or 0) for row in capability],
-            "quarantined_capability_issues": quarantined,
-            "ordinary_agentic_issues": len(ordinary),
-        }, sort_keys=True))
-        return capability + ordinary
-
-    def _bounded_capability_pause(repo: str, tok: str, issue: dict, comments: list[dict], target: str, reason: str) -> dict:
-        if not _is_capability(issue):
-            return original_pause(repo, tok, issue, comments, target, reason)
-        number = int(issue.get("number") or 0)
-        release_count = sum(
-            1 for row in comments
-            if str(row.get("body") or "").startswith(agentic.CAPABILITY_RELEASE_PREFIX)
-        )
-        marker = f"{agentic.CAPABILITY_RELEASE_PREFIX}{release_count + 1} -->"
-        agentic.request(
-            repo,
-            tok,
-            "POST",
-            f"/issues/{number}/comments",
-            {
-                "body": (
-                    f"{marker}\n"
-                    "Genesis exhausted the current materially different capability-repair strategy set. "
-                    "Instead of terminalizing as needs-human or creating a duplicate capability Issue, the same authoritative capability Issue is recycled for a fresh bounded strategy generation."
-                )
-            },
-        )
-        for label in agentic.ACTIVE_LABELS | {agentic.NEEDS_HUMAN_LABEL, "genesis-deferred", "genesis-recovery-solver"}:
-            agentic.remove_label(repo, tok, number, label)
-        agentic.request(
-            repo,
-            tok,
-            "POST",
-            f"/issues/{number}/labels",
-            {"labels": [agentic.AGENTIC_LABEL, agentic.EXHAUSTED_LABEL, "genesis-autonomous"]},
-        )
-        return {"status": "capability_recycled", "issue_number": number, "reason": reason}
-
-    agentic.open_agentic_issues = _selector
-    agentic.pause_for_capability = _bounded_capability_pause
-    agentic.reserve_and_dispatch(repository, token)
+    result = agentic.reserve_and_dispatch(repository, token)
+    if isinstance(result, dict):
+        result["policy"] = "same_issue_comment_memory"
+        result["legacy_dependencies_released"] = released
     return 0
 
 
