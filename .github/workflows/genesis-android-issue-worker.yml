@@ -50,7 +50,7 @@ jobs:
 
       - uses: gradle/actions/setup-gradle@v4
         with:
-          gradle-version: '9.2.0'
+          gradle-version: '9.4.1'
 
       - name: Verify Android issue ownership
         id: eligibility
@@ -82,18 +82,34 @@ jobs:
         run: python -m pytest -q
 
       - name: Verify Android baseline
+        id: android_baseline
         if: steps.eligibility.outputs.eligible == 'true'
+        continue-on-error: true
         run: gradle -p mobile :app:assembleDebug --no-daemon
 
+      - name: Record Android baseline infrastructure failure
+        if: steps.eligibility.outputs.eligible == 'true' && steps.android_baseline.outcome == 'failure'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          printf '%s\n%s\n' \
+            '<!-- genesis-android-baseline-blocked -->' \
+            'Android repair paused because the repository Android baseline failed before any repair attempt. This is infrastructure/build evidence, not a consumed coding attempt. The same Issue remains authoritative; automatic immediate redispatch is suppressed until a later recovery cycle.' \
+            > /tmp/genesis-android-baseline.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-android-baseline.md
+
       - name: Install local repair intelligence
-        if: steps.eligibility.outputs.eligible == 'true'
+        if: steps.eligibility.outputs.eligible == 'true' && steps.android_baseline.outcome == 'success'
         run: |
           python -m pip install --upgrade pip
           pip install torch --index-url https://download.pytorch.org/whl/cpu
           pip install 'transformers>=4.51,<5' safetensors
 
       - name: Start local coding provider
-        if: steps.eligibility.outputs.eligible == 'true'
+        if: steps.eligibility.outputs.eligible == 'true' && steps.android_baseline.outcome == 'success'
         shell: bash
         run: |
           set -euo pipefail
@@ -121,13 +137,13 @@ jobs:
           exit 1
 
       - name: Configure Genesis Git identity
-        if: steps.eligibility.outputs.eligible == 'true'
+        if: steps.eligibility.outputs.eligible == 'true' && steps.android_baseline.outcome == 'success'
         run: |
           git config user.name "Genesis AI"
           git config user.email "genesis-ai@users.noreply.github.com"
 
       - name: Run bounded Android repair
-        if: steps.eligibility.outputs.eligible == 'true'
+        if: steps.eligibility.outputs.eligible == 'true' && steps.android_baseline.outcome == 'success'
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
@@ -135,7 +151,7 @@ jobs:
         run: python scripts/android_issue_repair.py --issue-number "$ISSUE_NUMBER" --repository "$GITHUB_REPOSITORY"
 
       - name: Read repair evidence
-        if: steps.eligibility.outputs.eligible == 'true'
+        if: steps.eligibility.outputs.eligible == 'true' && steps.android_baseline.outcome == 'success'
         id: evidence
         shell: bash
         run: |
@@ -204,12 +220,13 @@ jobs:
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           STATUS: ${{ steps.evidence.outputs.status }}
           REASON: ${{ steps.evidence.outputs.reason }}
+          BASELINE: ${{ steps.android_baseline.outcome }}
         shell: bash
         run: |
           set -euo pipefail
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress >/dev/null 2>&1 || true
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --add-label agentic-lab >/dev/null 2>&1 || true
-          if [[ "${STATUS:-}" != "candidate_created" ]]; then
+          if [[ "$BASELINE" == "success" && "${STATUS:-}" != "candidate_created" ]]; then
             printf '%s\n%s\n' \
               '<!-- genesis-android-repair-retry -->' \
               "Android repair produced no promoted candidate (status: \`${REASON:-${STATUS:-worker_failed_before_evidence}}\`). The same Issue remains authoritative and autonomous for the next materially different bounded attempt." \
@@ -218,7 +235,7 @@ jobs:
           fi
 
       - name: Continue FIFO lifecycle
-        if: always()
+        if: always() && steps.android_baseline.outcome != 'failure'
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
