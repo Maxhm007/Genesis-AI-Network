@@ -5,7 +5,7 @@ import json
 import os
 from pathlib import Path
 
-import scripts.github_issue_autorepair as base
+import github_issue_autorepair as base
 
 
 ROOT = Path(__file__).resolve().parents[1]
