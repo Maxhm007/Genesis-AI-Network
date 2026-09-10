@@ -1,0 +1,224 @@
+name: Genesis Android Issue Worker
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Oldest authoritative Android issue
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: genesis-android-issue-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_NAME: genesis-android-issue-repair
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '300'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '640'
+  GENESIS_REPAIR_FALLBACK_MODEL: Qwen/Qwen2.5-Coder-0.5B-Instruct
+  GENESIS_REPAIR_ESCALATION_MODEL: Qwen/Qwen2.5-Coder-1.5B-Instruct
+  GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS: '192'
+
+jobs:
+  repair-android:
+    runs-on: ubuntu-latest
+    timeout-minutes: 90
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: '17'
+
+      - uses: gradle/actions/setup-gradle@v4
+        with:
+          gradle-version: '9.2.0'
+
+      - name: Verify Android issue ownership
+        id: eligibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_json=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels,body,title)
+          state=$(jq -r '.state' <<<"$issue_json")
+          reserved=$(jq -r '([.labels[].name] | index("genesis-repair-in-progress")) != null' <<<"$issue_json")
+          autonomous=$(jq -r '([.labels[].name] | index("genesis-autonomous")) != null' <<<"$issue_json")
+          text=$(jq -r '(.title // "") + "\n" + (.body // "")' <<<"$issue_json" | tr '[:upper:]' '[:lower:]')
+          eligible=true
+          if [[ "$state" != "OPEN" || "$reserved" != "true" || "$autonomous" != "true" ]]; then eligible=false; fi
+          if [[ "$text" != *"application_development"* || "$text" != *"android"* ]]; then eligible=false; fi
+          echo "eligible=$eligible" >> "$GITHUB_OUTPUT"
+          if [[ "$eligible" != "true" ]]; then
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress >/dev/null 2>&1 || true
+          fi
+
+      - name: Install Python dependencies
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Verify clean repository baseline
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: python -m pytest -q
+
+      - name: Verify Android baseline
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: gradle -p mobile :app:assembleDebug --no-daemon
+
+      - name: Install local repair intelligence
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors
+
+      - name: Start local coding provider
+        if: steps.eligibility.outputs.eligible == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python scripts/pulse_coding_provider.py \
+            --model "$GENESIS_REPAIR_FALLBACK_MODEL" \
+            --escalation-model "$GENESIS_REPAIR_ESCALATION_MODEL" \
+            --host 127.0.0.1 \
+            --port 8766 \
+            --max-new-tokens "$GENESIS_PROVIDER_MAX_NEW_TOKENS" \
+            --escalation-max-new-tokens "$GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS" \
+            > /tmp/genesis-android-provider.log 2>&1 &
+          for i in {1..120}; do
+            if python - <<'PY'
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=2) as response:
+                  raise SystemExit(0 if response.status == 200 else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then exit 0; fi
+            sleep 2
+          done
+          cat /tmp/genesis-android-provider.log || true
+          exit 1
+
+      - name: Configure Genesis Git identity
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: |
+          git config user.name "Genesis AI"
+          git config user.email "genesis-ai@users.noreply.github.com"
+
+      - name: Run bounded Android repair
+        if: steps.eligibility.outputs.eligible == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: python scripts/android_issue_repair.py --issue-number "$ISSUE_NUMBER" --repository "$GITHUB_REPOSITORY"
+
+      - name: Read repair evidence
+        if: steps.eligibility.outputs.eligible == 'true'
+        id: evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f runtime/github_issue_autorepair.json
+          echo "status=$(jq -r '.status // ""' runtime/github_issue_autorepair.json)" >> "$GITHUB_OUTPUT"
+          echo "candidate_branch=$(jq -r '.candidate_branch // ""' runtime/github_issue_autorepair.json)" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$(jq -r '.candidate_sha // ""' runtime/github_issue_autorepair.json)" >> "$GITHUB_OUTPUT"
+          echo "reason=$(jq -r '.reason // .repair_status // .status // ""' runtime/github_issue_autorepair.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Independently validate and promote Android candidate
+        if: steps.evidence.outputs.status == 'candidate_created'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          CANDIDATE_BRANCH: ${{ steps.evidence.outputs.candidate_branch }}
+          CANDIDATE_SHA: ${{ steps.evidence.outputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CANDIDATE_BRANCH"
+          test -n "$CANDIDATE_SHA"
+          git fetch origin main "$CANDIDATE_BRANCH"
+          git cat-file -e "${CANDIDATE_SHA}^{commit}"
+          mapfile -t changed_files < <(git diff-tree --no-commit-id --name-only -r "$CANDIDATE_SHA")
+          if (( ${#changed_files[@]} == 0 )); then exit 1; fi
+          for path in "${changed_files[@]}"; do
+            case "$path" in
+              mobile/app/src/main/java/org/genesisai/mobile/*.java|mobile/app/src/main/AndroidManifest.xml) ;;
+              *) echo "Rejected out-of-scope Android candidate path: $path" >&2; exit 1 ;;
+            esac
+          done
+
+          git fetch origin main
+          git checkout -B "genesis/android-integration-${ISSUE_NUMBER}-${GITHUB_RUN_ID}" origin/main
+          git cherry-pick "$CANDIDATE_SHA"
+          python -m pytest -q
+          gradle -p mobile :app:assembleDebug --no-daemon
+          latest_main=$(git rev-parse origin/main)
+          integrated_base=$(git rev-parse HEAD^)
+          if [[ "$integrated_base" != "$latest_main" ]]; then
+            echo "main moved during Android validation" >&2
+            exit 1
+          fi
+          git push origin HEAD:main
+          promoted_sha=$(git rev-parse HEAD)
+          git fetch origin main
+          git reset --hard origin/main
+          python -m pytest -q
+          gradle -p mobile :app:assembleDebug --no-daemon
+
+          printf '%s\n%s\n' \
+            '<!-- genesis-android-bounded-success -->' \
+            "Genesis Android lane promoted one bounded mobile change at \`${promoted_sha}\` after Python regression tests and Android assembleDebug validation. This is a verified bounded step only; #${ISSUE_NUMBER} remains open until the original Android acceptance criteria are independently satisfied." \
+            > /tmp/genesis-android-success.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-android-success.md
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --add-label agentic-lab >/dev/null 2>&1 || true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress >/dev/null 2>&1 || true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-solver-exhausted >/dev/null 2>&1 || true
+          git push origin --delete "$CANDIDATE_BRANCH" >/dev/null 2>&1 || true
+
+      - name: Release unsuccessful Android reservation
+        if: always() && steps.eligibility.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          STATUS: ${{ steps.evidence.outputs.status }}
+          REASON: ${{ steps.evidence.outputs.reason }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress >/dev/null 2>&1 || true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --add-label agentic-lab >/dev/null 2>&1 || true
+          if [[ "${STATUS:-}" != "candidate_created" ]]; then
+            printf '%s\n%s\n' \
+              '<!-- genesis-android-repair-retry -->' \
+              "Android repair produced no promoted candidate (status: \`${REASON:-${STATUS:-worker_failed_before_evidence}}\`). The same Issue remains authoritative and autonomous for the next materially different bounded attempt." \
+              > /tmp/genesis-android-retry.md
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-android-retry.md
+          fi
+
+      - name: Continue FIFO lifecycle
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
