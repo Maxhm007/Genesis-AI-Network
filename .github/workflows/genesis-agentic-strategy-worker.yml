@@ -90,11 +90,10 @@ jobs:
           echo "eligible=$safe" >> "$GITHUB_OUTPUT"
           if [[ "$safe" != "true" ]]; then
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress >/dev/null 2>&1 || true
-            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-autonomous >/dev/null 2>&1 || true
-            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --add-label agentic-lab --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
             printf '%s\n%s\n' \
               "<!-- genesis-agentic-strategy-result:${STRATEGY} -->" \
-              "Agentic Lab strategy worker declined this reservation because the Issue is not open/owned, the target is unsafe, or the reservation is stale. The Issue remains open. repair status: \`blocked_protected_or_unsupported_target\`. Worker run: ${GITHUB_RUN_ID}." \
+              "Agentic Lab strategy worker declined this reservation because the Issue is not open/owned, the target is unsafe, or the reservation is stale. The Issue remains open and authoritative. repair status: \`blocked_protected_or_unsupported_target\`. No child/successor/capability Issue is created; the next Agentic Lab pass must continue on this same Issue with a materially different safe strategy. Worker run: ${GITHUB_RUN_ID}." \
               > /tmp/genesis-agentic-declined.md
             gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-declined.md
           fi
@@ -304,14 +303,14 @@ jobs:
           if [[ "$state" == "CLOSED" ]]; then exit 0; fi
 
           repair_status="${REASON:-${STATUS:-worker_failed_before_evidence}}"
-          for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-claimed genesis-working genesis-verifying; do
+          for label in genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying; do
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
           done
-          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label agentic-lab --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label agentic-lab --add-label genesis-solver-exhausted --add-label genesis-autonomous >/dev/null 2>&1 || true
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deferred >/dev/null 2>&1 || true
           printf '%s\n%s\n' \
             "<!-- genesis-agentic-strategy-result:${STRATEGY} -->" \
-            "Agentic Lab strategy \`${STRATEGY}\` did not produce a verified promotion. repair status: \`${repair_status}\`. The Issue remains open. The next Agentic Lab pass must use a different strategy or create a linked capability dependency; it must not repeat this method unchanged. Worker run: ${GITHUB_RUN_ID}." \
+            "Agentic Lab strategy \`${STRATEGY}\` did not produce a verified promotion. repair status: \`${repair_status}\`. The Issue remains open and authoritative. The next Agentic Lab pass must use a materially different strategy on this same Issue; no child/successor/capability Issue is created. Worker run: ${GITHUB_RUN_ID}." \
             > /tmp/genesis-agentic-failure.md
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-failure.md
 
