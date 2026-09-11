@@ -31,7 +31,7 @@ env:
 
 concurrency:
   group: genesis-github-issue-discovery
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   discover:
@@ -101,7 +101,7 @@ jobs:
             exit 1
           fi
 
-      - name: Let Genesis scan all eligible candidates and publish at most one fresh grounded issue
+      - name: Let Genesis discover and publish at most one fresh grounded issue
         run: python scripts/github_issue_discovery_resilient.py
 
       - name: Wake authoritative issue solver when new work was opened
