@@ -36,7 +36,7 @@ concurrency:
 jobs:
   discover:
     runs-on: ubuntu-latest
-    timeout-minutes: 45
+    timeout-minutes: 120
     steps:
       - name: Checkout current main
         uses: actions/checkout@v4
@@ -101,7 +101,7 @@ jobs:
             exit 1
           fi
 
-      - name: Let Genesis discover and publish at most one fresh grounded issue
+      - name: Let Genesis scan all eligible candidates and publish at most one fresh grounded issue
         run: python scripts/github_issue_discovery_resilient.py
 
       - name: Wake authoritative issue solver when new work was opened
