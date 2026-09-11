@@ -26,6 +26,13 @@ class CapabilityGap:
 
 BASELINE: tuple[CapabilityGap, ...] = (
     CapabilityGap(
+        "computer_use",
+        "Computer-use interaction",
+        "Observe and act on graphical interfaces through a bounded, verifiable computer-use loop.",
+        (("computer use",), ("gui automation",), ("screen", "click", "verify")),
+        "https://github.com/microsoft/autogen",
+    ),
+    CapabilityGap(
         "structured_output_schema",
         "Schema-constrained structured output",
         "Generate and validate machine-readable output against an explicit schema instead of relying on free-form text.",
@@ -68,13 +75,6 @@ BASELINE: tuple[CapabilityGap, ...] = (
         "https://github.com/huggingface/transformers",
     ),
     CapabilityGap(
-        "computer_use",
-        "Computer-use interaction",
-        "Observe and act on graphical interfaces through a bounded, verifiable computer-use loop.",
-        (("computer use",), ("gui", "automation"), ("screen", "click", "verify")),
-        "https://github.com/microsoft/autogen",
-    ),
-    CapabilityGap(
         "self_verification",
         "Self-verification before completion",
         "Require an independent verification pass that checks evidence and acceptance criteria before work is considered complete.",
@@ -102,7 +102,7 @@ def _normalize(text: str) -> str:
     return re.sub(r"\s+", " ", text.lower()).strip()
 
 
-def repository_text(root: Path = ROOT) -> str:
+def repository_chunks(root: Path = ROOT) -> tuple[str, ...]:
     chunks: list[str] = []
     for folder in (root / "genesis", root / "scripts"):
         if not folder.exists():
@@ -111,16 +111,17 @@ def repository_text(root: Path = ROOT) -> str:
             if path.name == Path(__file__).name:
                 continue
             try:
-                chunks.append(path.read_text(encoding="utf-8", errors="ignore"))
+                chunks.append(_normalize(path.read_text(encoding="utf-8", errors="ignore")))
             except OSError:
                 continue
-    return _normalize("\n".join(chunks))
+    return tuple(chunks)
 
 
-def capability_present(gap: CapabilityGap, corpus: str) -> bool:
-    for alternative in gap.detector_terms:
-        if all(_normalize(term) in corpus for term in alternative):
-            return True
+def capability_present(gap: CapabilityGap, chunks: Iterable[str]) -> bool:
+    for chunk in chunks:
+        for alternative in gap.detector_terms:
+            if all(_normalize(term) in chunk for term in alternative):
+                return True
     return False
 
 
@@ -128,13 +129,14 @@ def fingerprint(capability_id: str) -> str:
     return hashlib.sha256(capability_id.encode("utf-8")).hexdigest()[:16]
 
 
-def choose_missing(corpus: str, issue_texts: Iterable[str]) -> CapabilityGap | None:
+def choose_missing(chunks: Iterable[str], issue_texts: Iterable[str]) -> CapabilityGap | None:
+    source_chunks = tuple(chunks)
     issues = "\n".join(issue_texts).lower()
     for gap in BASELINE:
         marker = f"genesis-missing-capability:{fingerprint(gap.capability_id)}"
         if marker in issues:
             continue
-        if capability_present(gap, corpus):
+        if capability_present(gap, source_chunks):
             continue
         return gap
     return None
@@ -209,7 +211,7 @@ Genesis-Problem-Fingerprint: missing-qwen-capability:{fp}
 {gap.description}
 
 ### Why this issue exists
-The independent Missing Capability Discovery task compared the current Genesis source tree against its maintained modern capability baseline and found no implementation evidence for `{gap.capability_id}`.
+The independent Missing Capability Discovery task compared the current Genesis source tree against its maintained modern capability baseline and found no same-file implementation evidence for `{gap.capability_id}`.
 Reference capability evidence: {gap.reference}
 
 ### Objective
@@ -253,9 +255,9 @@ def main() -> int:
         print(json.dumps({"status": "no_token"}, sort_keys=True))
         return 0
 
-    corpus = repository_text(ROOT)
+    chunks = repository_chunks(ROOT)
     issues = all_issue_texts(repo, token) if token else []
-    gap = choose_missing(corpus, issues)
+    gap = choose_missing(chunks, issues)
     if gap is None:
         print(json.dumps({"status": "no_missing_capability"}, sort_keys=True))
         return 0
