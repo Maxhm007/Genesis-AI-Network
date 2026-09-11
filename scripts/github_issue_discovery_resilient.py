@@ -16,18 +16,16 @@ from scripts.github_issue_discovery import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
-MAX_DISCOVERY_PASSES = 6
 
 
 def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> dict:
-    """Publish at most one fresh grounded issue without starvation.
+    """Publish at most one fresh grounded issue without candidate starvation.
 
-    A discovery pass can stop without fresh work because a valid finding already
-    has an Issue, a provider request times out, or the current highest-ranked
-    candidate batch contains no publishable issue. Those scanned targets are
-    excluded for the remainder of the current run so discovery can continue to
-    lower-ranked candidates. Strict validation and all-state deduplication remain
-    unchanged, and at most one fresh Issue is opened per workflow invocation.
+    Discovery keeps moving through eligible ranked candidates until it either
+    opens one fresh Issue or exhausts the complete eligible candidate set for
+    the current repository snapshot. Duplicate findings, provider timeouts, and
+    clean batches are excluded only for the remainder of this invocation.
+    Strict validation and all-state deduplication remain unchanged.
     """
 
     root = Path(root).resolve()
@@ -39,13 +37,15 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
     repository = repository or os.environ.get("GITHUB_REPOSITORY", "").strip()
 
     original_rank_candidates = engine.rank_candidates
+    eligible_candidates = original_rank_candidates(include_protected=False)
+    eligible_targets = {candidate.path for candidate in eligible_candidates}
     excluded_targets: set[str] = set()
     duplicate_publications: list[dict] = []
     timeout_skips: list[dict] = []
     clean_batch_skips: list[str] = []
     last_discovery: dict | None = None
 
-    for _ in range(MAX_DISCOVERY_PASSES):
+    while eligible_targets - excluded_targets:
         def rank_without_blockers(*, include_protected: bool = False):
             return [
                 candidate
@@ -61,6 +61,8 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
             "status": "discovery_complete",
             "discovery": discovery_result,
             "publication": {"status": "not_publishable"},
+            "eligible_candidate_count": len(eligible_targets),
+            "scanned_or_excluded_count": len(excluded_targets),
             "skipped_duplicate_publications": duplicate_publications,
             "skipped_provider_timeouts": timeout_skips,
             "skipped_clean_targets": clean_batch_skips,
@@ -74,7 +76,7 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
                 if not isinstance(scan, dict):
                     continue
                 target = str(scan.get("target") or "").strip()
-                if target and target not in excluded_targets:
+                if target and target in eligible_targets and target not in excluded_targets:
                     scanned_targets.append(target)
 
                 if scan.get("status") != "provider_error":
@@ -82,7 +84,7 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
                 error = str(scan.get("error") or "").lower()
                 if "timeout" not in error and "timed out" not in error:
                     continue
-                if target and target not in excluded_targets:
+                if target and target in eligible_targets and target not in excluded_targets:
                     timed_out_targets.append(target)
                     timeout_skips.append({
                         "target": target,
@@ -93,9 +95,9 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
                 excluded_targets.update(timed_out_targets)
                 continue
 
-            # A clean top-ranked batch is not evidence that the repository has no
-            # discoverable work. Move past every target already inspected in this
-            # invocation and let the next pass inspect the following ranked batch.
+            # A clean batch is not evidence that the repository has no work.
+            # Exclude every target inspected in this invocation and continue to
+            # the next ranked candidates until the complete eligible set is done.
             if discovery_status == "no_issue_found" and scanned_targets:
                 fresh_scanned_targets = [
                     target for target in scanned_targets if target not in excluded_targets
@@ -105,6 +107,7 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
                     clean_batch_skips.extend(fresh_scanned_targets)
                     continue
 
+            # No progress means there is no safe candidate left to advance.
             result["status"] = discovery_status or "no_issue_found"
             EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
             EVIDENCE_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -142,7 +145,9 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
     result = {
         "status": "candidates_exhausted",
         "discovery": last_discovery or {"status": "no_issue_found"},
-        "publication": {"status": "no_fresh_issue_after_resilient_scan"},
+        "publication": {"status": "no_fresh_issue_after_full_scan"},
+        "eligible_candidate_count": len(eligible_targets),
+        "scanned_or_excluded_count": len(excluded_targets),
         "skipped_duplicate_publications": duplicate_publications,
         "skipped_provider_timeouts": timeout_skips,
         "skipped_clean_targets": clean_batch_skips,
