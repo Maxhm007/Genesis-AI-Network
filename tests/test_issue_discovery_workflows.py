@@ -17,8 +17,8 @@ def test_general_issue_discovery_has_native_schedule_and_solver_handoff() -> Non
     assert "workflow_dispatch:" in text
     assert "schedule:" in text
     assert "cron: '19 * * * *'" in text
-    assert "group: genesis-github-issue-discovery" in text
-    assert "cancel-in-progress: false" in text
+    assert "group: genesis-github-issue-discovery-v2" in text
+    assert "cancel-in-progress: true" in text
     assert "python scripts/github_issue_discovery_resilient.py" in text
     assert "gh workflow run genesis-sequential-issue-controller.yml" in text
 
