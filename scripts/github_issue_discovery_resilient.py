@@ -22,12 +22,12 @@ MAX_DISCOVERY_PASSES = 6
 def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> dict:
     """Publish at most one fresh grounded issue without starvation.
 
-    A discovery pass can stop without fresh work for two recoverable reasons:
-    a valid finding already has an Issue, or a high-ranked provider request
-    times out. In both cases this runner excludes the blocking target for the
-    remainder of the current run and continues to lower-ranked candidates.
-    Strict validation and all-state deduplication remain unchanged, and at most
-    one fresh Issue is opened per workflow invocation.
+    A discovery pass can stop without fresh work because a valid finding already
+    has an Issue, a provider request times out, or the current highest-ranked
+    candidate batch contains no publishable issue. Those scanned targets are
+    excluded for the remainder of the current run so discovery can continue to
+    lower-ranked candidates. Strict validation and all-state deduplication remain
+    unchanged, and at most one fresh Issue is opened per workflow invocation.
     """
 
     root = Path(root).resolve()
@@ -42,6 +42,7 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
     excluded_targets: set[str] = set()
     duplicate_publications: list[dict] = []
     timeout_skips: list[dict] = []
+    clean_batch_skips: list[str] = []
     last_discovery: dict | None = None
 
     for _ in range(MAX_DISCOVERY_PASSES):
@@ -62,18 +63,25 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
             "publication": {"status": "not_publishable"},
             "skipped_duplicate_publications": duplicate_publications,
             "skipped_provider_timeouts": timeout_skips,
+            "skipped_clean_targets": clean_batch_skips,
         }
 
         discovery_status = str(discovery_result.get("status") or "")
         if discovery_status not in ELIGIBLE_DISCOVERY_STATUSES:
             timed_out_targets: list[str] = []
+            scanned_targets: list[str] = []
             for scan in discovery_result.get("scanned") or []:
-                if not isinstance(scan, dict) or scan.get("status") != "provider_error":
+                if not isinstance(scan, dict):
+                    continue
+                target = str(scan.get("target") or "").strip()
+                if target and target not in excluded_targets:
+                    scanned_targets.append(target)
+
+                if scan.get("status") != "provider_error":
                     continue
                 error = str(scan.get("error") or "").lower()
                 if "timeout" not in error and "timed out" not in error:
                     continue
-                target = str(scan.get("target") or "").strip()
                 if target and target not in excluded_targets:
                     timed_out_targets.append(target)
                     timeout_skips.append({
@@ -84,6 +92,18 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
             if timed_out_targets:
                 excluded_targets.update(timed_out_targets)
                 continue
+
+            # A clean top-ranked batch is not evidence that the repository has no
+            # discoverable work. Move past every target already inspected in this
+            # invocation and let the next pass inspect the following ranked batch.
+            if discovery_status == "no_issue_found" and scanned_targets:
+                fresh_scanned_targets = [
+                    target for target in scanned_targets if target not in excluded_targets
+                ]
+                if fresh_scanned_targets:
+                    excluded_targets.update(fresh_scanned_targets)
+                    clean_batch_skips.extend(fresh_scanned_targets)
+                    continue
 
             result["status"] = discovery_status or "no_issue_found"
             EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
@@ -125,6 +145,7 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
         "publication": {"status": "no_fresh_issue_after_resilient_scan"},
         "skipped_duplicate_publications": duplicate_publications,
         "skipped_provider_timeouts": timeout_skips,
+        "skipped_clean_targets": clean_batch_skips,
     }
     EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
     EVIDENCE_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
