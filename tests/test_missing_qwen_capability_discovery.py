@@ -13,23 +13,28 @@ spec.loader.exec_module(module)
 
 
 def test_present_capability_is_not_reported_missing() -> None:
-    corpus = "This module provides JSON Schema constrained structured output with schema validation."
     gap = module.BASELINE[0]
-    assert module.capability_present(gap, corpus.lower()) is True
+    chunks = ("bounded computer use loop",)
+    assert module.capability_present(gap, chunks) is True
+
+
+def test_terms_split_across_files_do_not_count_as_implementation() -> None:
+    gap = module.BASELINE[0]
+    chunks = ("screen observer", "click action", "verify result")
+    assert module.capability_present(gap, chunks) is False
 
 
 def test_choose_missing_skips_existing_marker_and_moves_to_next_gap() -> None:
     first = module.BASELINE[0]
     marker = f"genesis-missing-capability:{module.fingerprint(first.capability_id)}"
-    gap = module.choose_missing("", [marker])
+    gap = module.choose_missing((), [marker])
     assert gap is not None
     assert gap.capability_id != first.capability_id
 
 
 def test_choose_missing_skips_repository_capability() -> None:
     first = module.BASELINE[0]
-    corpus = "json schema structured output"
-    gap = module.choose_missing(corpus, [])
+    gap = module.choose_missing(("bounded computer use loop",), [])
     assert gap is not None
     assert gap.capability_id != first.capability_id
 
@@ -41,6 +46,12 @@ def test_issue_body_uses_existing_solver_lane_and_distinct_subtype() -> None:
     assert "Capability subtype:** `missing_capability`" in body
     assert "Source:** `genesis.qwen_gap_audit`" in body
     assert "Missing Capability Discovery task only opens the issue" in body
+
+
+def test_title_remains_compatible_with_existing_capability_builder() -> None:
+    gap = module.BASELINE[0]
+    title = f"[Genesis Task] new capability — missing baseline: {gap.title}"
+    assert title.startswith("[Genesis Task] new capability")
 
 
 def test_fingerprint_is_stable() -> None:
