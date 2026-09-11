@@ -215,24 +215,34 @@ Reference capability evidence: {gap.reference}
 Add the smallest bounded executable capability that closes this gap for the Qwen-based Genesis system. Qwen remains the base model; this task upgrades what Genesis can do around that base model.
 
 ### Acceptance
+- Agentic Lab owns implementation strategy selection for this missing-capability Issue from the first solve attempt.
 - Add an executable capability or integration that demonstrably closes the named gap.
 - Add focused tests proving the capability works and fails safely.
 - Preserve Security, validation, provenance, protected-file boundaries, signing boundaries, secret boundaries, and owner control.
 - Do not self-award benchmark or capability score.
-- Existing Issue Solver and bounded repair process remain the only implementation lane.
+- The same Issue remains authoritative until Agentic Lab produces a verified solution; do not create a successor merely because one strategy fails.
 
 ### Discovery rule
-This Missing Capability Discovery task only opens the issue. It does not implement, promote, repair, or close it.
+This Missing Capability Discovery task only opens and routes the issue to Agentic Lab. It does not implement, promote, repair, or close it.
 """
 
 
-def create_issue(repo: str, token: str, gap: CapabilityGap) -> str:
-    payload = {
+def issue_payload(gap: CapabilityGap) -> dict:
+    return {
         "title": f"[Genesis Task] new capability — missing baseline: {gap.title}",
         "body": issue_body(gap),
-        "labels": ["genesis-task", "genesis-capability-discovery", "genesis-missing-capability"],
+        "labels": [
+            "genesis-task",
+            "genesis-capability-discovery",
+            "genesis-missing-capability",
+            "genesis-autonomous",
+            "agentic-lab",
+        ],
     }
-    result = _post_json(f"https://api.github.com/repos/{repo}/issues", token, payload)
+
+
+def create_issue(repo: str, token: str, gap: CapabilityGap) -> str:
+    result = _post_json(f"https://api.github.com/repos/{repo}/issues", token, issue_payload(gap))
     if not isinstance(result, dict):
         raise RuntimeError("invalid GitHub issue response")
     return str(result.get("html_url") or result.get("url") or "")
@@ -266,6 +276,7 @@ def main() -> int:
     }
     if args.dry_run:
         payload["issue_body"] = issue_body(gap)
+        payload["issue_labels"] = issue_payload(gap)["labels"]
         print(json.dumps(payload, sort_keys=True))
         return 0
 
