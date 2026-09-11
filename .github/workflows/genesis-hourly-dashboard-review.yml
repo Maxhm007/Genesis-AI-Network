@@ -71,4 +71,4 @@ jobs:
         env:
           GITHUB_TOKEN: ${{ github.token }}
           GH_TOKEN: ${{ github.token }}
-        run: python scripts/dashboard_continuous_improvement.py
+        run: python -m scripts.dashboard_continuous_improvement
