@@ -14,6 +14,7 @@ DEFERRED_LABEL = "genesis-deferred"
 VERIFIED_LABEL = "genesis-verified"
 SUPERSEDED_LABEL = "genesis-superseded"
 TERMINAL_LABEL = "genesis-terminal"
+RECOVERY_TERMINAL_LABEL = "genesis-recovery-terminal"
 TERMINAL_MARKER = "<!-- genesis-agentic-terminal-reconcile -->"
 MARKER = "<!-- genesis-unsolved-strategy-reactivation -->"
 ACTIVE_LABELS = (
@@ -117,7 +118,7 @@ def reactivate(repository: str, token: str, issue_number: int) -> dict:
         return {"status": "ignored", "issue_number": number, "reason": "verified_closure"}
     if SUPERSEDED_LABEL in issue_labels:
         return {"status": "ignored", "issue_number": number, "reason": "superseded_closure"}
-    if TERMINAL_LABEL in issue_labels:
+    if TERMINAL_LABEL in issue_labels or RECOVERY_TERMINAL_LABEL in issue_labels:
         return {"status": "ignored", "issue_number": number, "reason": "terminal_closure"}
 
     comments = request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
