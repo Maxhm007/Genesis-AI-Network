@@ -1,0 +1,85 @@
+name: Genesis Missing Qwen Capability Discovery
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '22 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-missing-qwen-capability-discovery.yml
+      - scripts/discover_missing_qwen_capability.py
+      - tests/test_missing_qwen_capability_discovery.py
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-missing-qwen-capability-discovery
+  cancel-in-progress: true
+
+jobs:
+  audit-and-create-one-issue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependency
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Verify missing-capability discovery contract
+        run: python -m pytest -q tests/test_missing_qwen_capability_discovery.py
+
+      - name: Ensure labels idempotently
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh label create genesis-task \
+            --repo "$GITHUB_REPOSITORY" \
+            --color 0e8a16 \
+            --description 'Authoritative GitHub Issue backing for Genesis autonomous tasks' \
+            --force
+          gh label create genesis-capability-discovery \
+            --repo "$GITHUB_REPOSITORY" \
+            --color 5319e7 \
+            --description 'Created by an independent Genesis capability discovery task' \
+            --force
+          gh label create genesis-missing-capability \
+            --repo "$GITHUB_REPOSITORY" \
+            --color b60205 \
+            --description 'Capability missing from the current Qwen-based Genesis baseline' \
+            --force
+
+      - name: Audit Qwen-based Genesis and create at most one missing-capability issue
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          git reset --hard origin/main
+          python scripts/discover_missing_qwen_capability.py
+
+      - name: Label newly created missing-capability issue
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label genesis-task --search '"[Genesis Task] missing capability" in:title' --limit 1 --json number --jq '.[0].number // empty')"
+          if [ -n "$issue_number" ]; then
+            gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --add-label genesis-missing-capability
+          fi
