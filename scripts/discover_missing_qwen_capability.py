@@ -1,10 +1,10 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import hashlib
 import json
 import os
-import re
 import urllib.parse
 import urllib.request
 from dataclasses import dataclass
@@ -12,6 +12,7 @@ from pathlib import Path
 from typing import Iterable
 
 ROOT = Path(__file__).resolve().parents[1]
+LEARNED = ROOT / "genesis" / "learned_capabilities.py"
 
 
 @dataclass(frozen=True)
@@ -19,7 +20,8 @@ class CapabilityGap:
     capability_id: str
     title: str
     description: str
-    detector_terms: tuple[tuple[str, ...], ...]
+    evidence_paths: tuple[str, ...]
+    registry_terms: tuple[str, ...]
     reference: str
     priority: int = 72
 
@@ -29,121 +31,116 @@ BASELINE: tuple[CapabilityGap, ...] = (
         "computer_use",
         "Computer-use interaction",
         "Observe and act on graphical interfaces through a bounded, verifiable computer-use loop.",
-        (("computer use",), ("gui automation",), ("screen", "click", "verify")),
+        ("genesis/computer_use.py", "genesis/gui_automation.py", "genesis/desktop_control.py"),
+        ("computer_use", "gui_automation", "desktop_control"),
         "https://github.com/microsoft/autogen",
     ),
     CapabilityGap(
         "structured_output_schema",
         "Schema-constrained structured output",
-        "Generate and validate machine-readable output against an explicit schema instead of relying on free-form text.",
-        (("json schema",), ("structured output",), ("schema validation", "model output")),
+        "Generate and validate machine-readable model output against an explicit schema.",
+        ("genesis/structured_output.py", "genesis/schema_output.py"),
+        ("structured_output", "json_schema", "schema_constrained_output"),
         "https://platform.openai.com/docs/guides/structured-outputs",
     ),
     CapabilityGap(
         "tool_call_planning",
         "Multi-step tool-call planning",
-        "Plan, execute, verify, and revise bounded sequences of tool calls instead of treating each tool call as an isolated action.",
-        (("tool planning",), ("tool-call planning",), ("function calling", "plan"), ("tool use", "planner")),
+        "Plan, execute, verify, and revise bounded sequences of tool calls.",
+        ("genesis/tool_planner.py", "genesis/tool_execution.py"),
+        ("tool_call_planning", "tool_planner", "multi_step_tool_use"),
         "https://github.com/langchain-ai/langgraph",
     ),
     CapabilityGap(
         "retrieval_grounding",
-        "Retrieval-grounded answer generation",
-        "Ground model output in retrieved evidence with provenance and reject unsupported claims when evidence is absent.",
-        (("retrieval", "ground"), ("rag",), ("provenance", "retrieval")),
+        "Retrieval-grounded generation",
+        "Ground model output in retrieved evidence with provenance and reject unsupported claims.",
+        ("genesis/retrieval.py", "genesis/rag.py", "genesis/retrieval_grounding.py"),
+        ("retrieval_grounding", "grounded_retrieval", "rag"),
         "https://github.com/huggingface/transformers",
     ),
     CapabilityGap(
         "context_compaction",
         "Long-context compaction",
-        "Compress or summarize older context while preserving task-critical state so long-running agents can continue reliably.",
-        (("context compaction",), ("context compression",), ("long context", "summary")),
+        "Compact older context while preserving task-critical state for long-running agents.",
+        ("genesis/context_compaction.py", "genesis/context_memory.py"),
+        ("context_compaction", "context_compression", "long_context_compaction"),
         "https://github.com/vllm-project/vllm",
     ),
     CapabilityGap(
         "multimodal_vision",
         "Image understanding",
-        "Accept image inputs and derive grounded visual observations that can be used by Genesis reasoning and tools.",
-        (("vision", "image"), ("multimodal", "image"), ("image understanding",)),
+        "Accept image inputs and expose grounded visual observations to Genesis reasoning and tools.",
+        ("genesis/vision.py", "genesis/multimodal.py", "genesis/image_understanding.py"),
+        ("multimodal_vision", "image_understanding", "vision_input"),
         "https://github.com/huggingface/transformers",
     ),
     CapabilityGap(
         "audio_understanding",
         "Audio and speech understanding",
         "Process bounded audio or speech inputs into structured evidence usable by Genesis.",
-        (("audio", "speech"), ("speech recognition",), ("audio understanding",)),
+        ("genesis/audio.py", "genesis/speech.py", "genesis/audio_understanding.py"),
+        ("audio_understanding", "speech_recognition", "audio_input"),
         "https://github.com/huggingface/transformers",
-    ),
-    CapabilityGap(
-        "self_verification",
-        "Self-verification before completion",
-        "Require an independent verification pass that checks evidence and acceptance criteria before work is considered complete.",
-        (("self verification",), ("self-verification",), ("independent validation",), ("verify", "acceptance")),
-        "https://github.com/microsoft/autogen",
     ),
     CapabilityGap(
         "persistent_memory",
         "Persistent agent memory",
-        "Store and retrieve bounded long-lived task knowledge across runs with explicit provenance and lifecycle controls.",
-        (("persistent memory",), ("long-term memory",), ("memory store",), ("sqlite", "memory")),
+        "Store and retrieve bounded long-lived task knowledge across runs with provenance and lifecycle controls.",
+        ("genesis/persistent_memory.py", "genesis/memory_store.py"),
+        ("persistent_memory", "long_term_memory", "memory_store"),
         "https://github.com/microsoft/autogen",
-    ),
-    CapabilityGap(
-        "model_routing",
-        "Capability-aware model routing",
-        "Route a task to the best available model/provider based on required capability, reliability, cost, and fallback evidence.",
-        (("model routing",), ("provider fallback",), ("capability routing",), ("route", "provider", "capability")),
-        "https://github.com/vllm-project/vllm",
     ),
 )
 
 
-def _normalize(text: str) -> str:
-    return re.sub(r"\s+", " ", text.lower()).strip()
-
-
-def repository_chunks(root: Path = ROOT) -> tuple[str, ...]:
-    chunks: list[str] = []
-    for folder in (root / "genesis", root / "scripts"):
-        if not folder.exists():
+def registered_capability_names(path: Path = LEARNED) -> tuple[str, ...]:
+    if not path.is_file():
+        return ()
+    try:
+        tree = ast.parse(path.read_text(encoding="utf-8"))
+    except (OSError, SyntaxError):
+        return ()
+    names: list[str] = []
+    for node in ast.walk(tree):
+        if not isinstance(node, ast.Call):
             continue
-        for path in folder.rglob("*.py"):
-            if path.name == Path(__file__).name:
-                continue
-            try:
-                chunks.append(_normalize(path.read_text(encoding="utf-8", errors="ignore")))
-            except OSError:
-                continue
-    return tuple(chunks)
+        func = node.func
+        if not isinstance(func, ast.Name) or func.id != "register_capability" or not node.args:
+            continue
+        first = node.args[0]
+        if isinstance(first, ast.Constant) and isinstance(first.value, str):
+            names.append(first.value.strip().lower())
+    return tuple(names)
 
 
-def capability_present(gap: CapabilityGap, chunks: Iterable[str]) -> bool:
-    for chunk in chunks:
-        for alternative in gap.detector_terms:
-            if all(_normalize(term) in chunk for term in alternative):
-                return True
-    return False
+def capability_present(gap: CapabilityGap, root: Path = ROOT, registry_names: Iterable[str] | None = None) -> bool:
+    for relative in gap.evidence_paths:
+        if (root / relative).is_file():
+            return True
+    names = tuple(name.lower() for name in (registry_names if registry_names is not None else registered_capability_names()))
+    return any(any(term in name for term in gap.registry_terms) for name in names)
 
 
 def fingerprint(capability_id: str) -> str:
     return hashlib.sha256(capability_id.encode("utf-8")).hexdigest()[:16]
 
 
-def choose_missing(chunks: Iterable[str], issue_texts: Iterable[str]) -> CapabilityGap | None:
-    source_chunks = tuple(chunks)
+def choose_missing(root: Path, registry_names: Iterable[str], issue_texts: Iterable[str]) -> CapabilityGap | None:
     issues = "\n".join(issue_texts).lower()
+    names = tuple(registry_names)
     for gap in BASELINE:
         marker = f"genesis-missing-capability:{fingerprint(gap.capability_id)}"
         if marker in issues:
             continue
-        if capability_present(gap, source_chunks):
+        if capability_present(gap, root, names):
             continue
         return gap
     return None
 
 
 def _request_json(url: str, token: str) -> object:
-    req = urllib.request.Request(
+    request = urllib.request.Request(
         url,
         headers={
             "Authorization": f"Bearer {token}",
@@ -152,12 +149,12 @@ def _request_json(url: str, token: str) -> object:
             "User-Agent": "Genesis-AI-Network/missing-capability-discovery",
         },
     )
-    with urllib.request.urlopen(req, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
 def _post_json(url: str, token: str, payload: dict) -> object:
-    req = urllib.request.Request(
+    request = urllib.request.Request(
         url,
         data=json.dumps(payload).encode("utf-8"),
         method="POST",
@@ -169,7 +166,7 @@ def _post_json(url: str, token: str, payload: dict) -> object:
             "User-Agent": "Genesis-AI-Network/missing-capability-discovery",
         },
     )
-    with urllib.request.urlopen(req, timeout=30) as response:
+    with urllib.request.urlopen(request, timeout=30) as response:
         return json.loads(response.read().decode("utf-8"))
 
 
@@ -211,7 +208,7 @@ Genesis-Problem-Fingerprint: missing-qwen-capability:{fp}
 {gap.description}
 
 ### Why this issue exists
-The independent Missing Capability Discovery task compared the current Genesis source tree against its maintained modern capability baseline and found no same-file implementation evidence for `{gap.capability_id}`.
+The independent Missing Capability Discovery task found neither an accepted implementation module nor a registered learned capability for `{gap.capability_id}`.
 Reference capability evidence: {gap.reference}
 
 ### Objective
@@ -255,9 +252,8 @@ def main() -> int:
         print(json.dumps({"status": "no_token"}, sort_keys=True))
         return 0
 
-    chunks = repository_chunks(ROOT)
     issues = all_issue_texts(repo, token) if token else []
-    gap = choose_missing(chunks, issues)
+    gap = choose_missing(ROOT, registered_capability_names(), issues)
     if gap is None:
         print(json.dumps({"status": "no_missing_capability"}, sort_keys=True))
         return 0
