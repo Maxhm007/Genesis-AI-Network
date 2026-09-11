@@ -20,14 +20,14 @@ MAX_DISCOVERY_PASSES = 6
 
 
 def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> dict:
-    """Publish at most one fresh grounded issue without duplicate starvation.
+    """Publish at most one fresh grounded issue without starvation.
 
-    A discovery pass can repeatedly find the same valid problem for a source
-    version that already has a GitHub Issue (including a closed Issue). The
-    original runner stopped at that duplicate, so one high-ranked finding could
-    starve every lower-ranked candidate forever. This runner keeps the strict
-    validation and all-state deduplication boundary, but excludes a duplicate
-    target for the remainder of the current run and continues discovery.
+    A discovery pass can stop without fresh work for two recoverable reasons:
+    a valid finding already has an Issue, or a high-ranked provider request
+    times out. In both cases this runner excludes the blocking target for the
+    remainder of the current run and continues to lower-ranked candidates.
+    Strict validation and all-state deduplication remain unchanged, and at most
+    one fresh Issue is opened per workflow invocation.
     """
 
     root = Path(root).resolve()
@@ -41,17 +41,18 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
     original_rank_candidates = engine.rank_candidates
     excluded_targets: set[str] = set()
     duplicate_publications: list[dict] = []
+    timeout_skips: list[dict] = []
     last_discovery: dict | None = None
 
     for _ in range(MAX_DISCOVERY_PASSES):
-        def rank_without_duplicates(*, include_protected: bool = False):
+        def rank_without_blockers(*, include_protected: bool = False):
             return [
                 candidate
                 for candidate in original_rank_candidates(include_protected=include_protected)
                 if candidate.path not in excluded_targets
             ]
 
-        engine.rank_candidates = rank_without_duplicates  # type: ignore[method-assign]
+        engine.rank_candidates = rank_without_blockers  # type: ignore[method-assign]
         discovery_result = engine.discover_and_enqueue(queue, provider)
         last_discovery = discovery_result
 
@@ -60,10 +61,31 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
             "discovery": discovery_result,
             "publication": {"status": "not_publishable"},
             "skipped_duplicate_publications": duplicate_publications,
+            "skipped_provider_timeouts": timeout_skips,
         }
 
-        if str(discovery_result.get("status") or "") not in ELIGIBLE_DISCOVERY_STATUSES:
-            result["status"] = str(discovery_result.get("status") or "no_issue_found")
+        discovery_status = str(discovery_result.get("status") or "")
+        if discovery_status not in ELIGIBLE_DISCOVERY_STATUSES:
+            timed_out_targets: list[str] = []
+            for scan in discovery_result.get("scanned") or []:
+                if not isinstance(scan, dict) or scan.get("status") != "provider_error":
+                    continue
+                error = str(scan.get("error") or "").lower()
+                if "timeout" not in error and "timed out" not in error:
+                    continue
+                target = str(scan.get("target") or "").strip()
+                if target and target not in excluded_targets:
+                    timed_out_targets.append(target)
+                    timeout_skips.append({
+                        "target": target,
+                        "error": str(scan.get("error") or "")[:1000],
+                    })
+
+            if timed_out_targets:
+                excluded_targets.update(timed_out_targets)
+                continue
+
+            result["status"] = discovery_status or "no_issue_found"
             EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
             EVIDENCE_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             return result
@@ -98,10 +120,11 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
         excluded_targets.add(validated["target"])
 
     result = {
-        "status": "duplicates_exhausted",
+        "status": "candidates_exhausted",
         "discovery": last_discovery or {"status": "no_issue_found"},
-        "publication": {"status": "no_fresh_issue_after_duplicate_scan"},
+        "publication": {"status": "no_fresh_issue_after_resilient_scan"},
         "skipped_duplicate_publications": duplicate_publications,
+        "skipped_provider_timeouts": timeout_skips,
     }
     EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
     EVIDENCE_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
