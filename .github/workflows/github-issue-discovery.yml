@@ -29,10 +29,11 @@ env:
   PIP_CACHE_DIR: ~/.cache/pip
   GH_TOKEN: ${{ github.token }}
 
-# Only the newest discovery invocation matters. Cancel any stale queued/running
-# predecessor so an old scan cannot indefinitely block fresh autonomous work.
+# Legacy discovery run #82 can remain alive under the old concurrency key.
+# Use a fresh key so it cannot block current autonomous discovery. Within this
+# key, only the newest invocation is allowed to continue.
 concurrency:
-  group: genesis-github-issue-discovery
+  group: genesis-github-issue-discovery-v2
   cancel-in-progress: true
 
 jobs:
