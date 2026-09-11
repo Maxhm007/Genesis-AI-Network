@@ -95,7 +95,7 @@ def _terminalize_successor(repository: str, token: str, issue: dict, comments: l
         token,
         "POST",
         f"/issues/{number}/labels",
-        {"labels": [RECOVERY_TERMINAL_LABEL, "genesis-solver-exhausted", "genesis-deferred"]},
+        {"labels": [RECOVERY_TERMINAL_LABEL]},
     )
     for label in (
         "genesis-autonomous",
@@ -103,6 +103,11 @@ def _terminalize_successor(repository: str, token: str, issue: dict, comments: l
         "genesis-validating",
         "genesis-working",
         "genesis-verifying",
+        "genesis-solver-exhausted",
+        "genesis-deferred",
+        "genesis-blocked",
+        "genesis-repair",
+        AGENTIC_LABEL,
         RECOVERY_LABEL,
     ):
         _remove_label(repository, token, number, label)
@@ -133,13 +138,19 @@ def finalize_exhausted_issue(repository: str, token: str, issue: dict, comments:
     if CAPABILITY_WORK_PREFIX in body:
         return {"status": "capability_dependency_exempt", "issue_number": number}
 
-    if is_successor_issue(issue):
-        return _terminalize_successor(repository, token, issue, comments)
+    fresh = request(repository, token, "GET", f"/issues/{number}")
+    fresh_issue = fresh if isinstance(fresh, dict) else issue
+    fresh_labels = labels(fresh_issue)
+    if str(fresh_issue.get("state") or "open") == "closed" or RECOVERY_TERMINAL_LABEL in fresh_labels:
+        return {"status": "terminal_parent_no_successor", "issue_number": number}
+
+    if is_successor_issue(fresh_issue):
+        return _terminalize_successor(repository, token, fresh_issue, comments)
 
     handoff = create_successor_handoff(
         repository,
         token,
-        issue,
+        fresh_issue,
         _open_issues(repository, token),
         engine_generation(),
         comments,
@@ -158,6 +169,9 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         number = int(issue.get("number") or 0)
         body = str(issue.get("body") or "")
         issue_labels = labels(issue)
+
+        if RECOVERY_TERMINAL_LABEL in issue_labels:
+            continue
 
         # Capability work has one authoritative lane: Agentic Lab capability-first.
         # Recovery Solver must never compete with it.
