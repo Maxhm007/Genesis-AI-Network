@@ -19,7 +19,7 @@ def test_general_issue_discovery_has_native_schedule_and_solver_handoff() -> Non
     assert "cron: '19 * * * *'" in text
     assert "group: genesis-github-issue-discovery" in text
     assert "cancel-in-progress: false" in text
-    assert "python scripts/github_issue_discovery.py" in text
+    assert "python scripts/github_issue_discovery_resilient.py" in text
     assert "gh workflow run genesis-sequential-issue-controller.yml" in text
 
     # Discovery is an admission lane, never a second repair/promotion lane.
