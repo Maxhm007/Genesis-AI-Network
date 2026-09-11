@@ -48,18 +48,26 @@ def test_choose_missing_skips_implemented_capability(tmp_path: Path) -> None:
     assert gap.capability_id != first.capability_id
 
 
-def test_issue_body_uses_existing_solver_lane_and_distinct_subtype() -> None:
+def test_issue_body_marks_agentic_lab_as_first_solver() -> None:
     gap = module.BASELINE[0]
     body = module.issue_body(gap)
     assert "Task type:** `new_capability`" in body
     assert "Capability subtype:** `missing_capability`" in body
     assert "Source:** `genesis.qwen_gap_audit`" in body
-    assert "Missing Capability Discovery task only opens the issue" in body
+    assert "Agentic Lab owns implementation strategy selection" in body
+    assert "same Issue remains authoritative" in body
+    assert "only opens and routes the issue to Agentic Lab" in body
 
 
-def test_title_remains_compatible_with_existing_capability_builder() -> None:
-    gap = module.BASELINE[0]
-    title = f"[Genesis Task] new capability — missing baseline: {gap.title}"
+def test_issue_payload_routes_directly_to_agentic_lab() -> None:
+    labels = set(module.issue_payload(module.BASELINE[0])["labels"])
+    assert "genesis-missing-capability" in labels
+    assert "genesis-autonomous" in labels
+    assert "agentic-lab" in labels
+
+
+def test_title_remains_compatible_with_capability_workers() -> None:
+    title = module.issue_payload(module.BASELINE[0])["title"]
     assert title.startswith("[Genesis Task] new capability")
 
 
