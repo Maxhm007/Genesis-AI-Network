@@ -42,6 +42,9 @@ jobs:
       - name: Verify whole-dashboard review contracts
         run: python -m pytest -q tests/test_dashboard_hourly_review.py tests/test_dashboard_continuous_improvement.py
 
+      - name: Preserve structural reviewer as a dry-run precheck
+        run: python scripts/dashboard_hourly_review.py --dry-run
+
       - name: Ensure dashboard review labels idempotently
         env:
           GH_TOKEN: ${{ github.token }}
