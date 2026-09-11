@@ -229,9 +229,9 @@ This Missing Capability Discovery task only opens the issue. It does not impleme
 
 def create_issue(repo: str, token: str, gap: CapabilityGap) -> str:
     payload = {
-        "title": f"[Genesis Task] missing capability — {gap.title}",
+        "title": f"[Genesis Task] new capability — missing baseline: {gap.title}",
         "body": issue_body(gap),
-        "labels": ["genesis-task", "genesis-capability-discovery"],
+        "labels": ["genesis-task", "genesis-capability-discovery", "genesis-missing-capability"],
     }
     result = _post_json(f"https://api.github.com/repos/{repo}/issues", token, payload)
     if not isinstance(result, dict):
