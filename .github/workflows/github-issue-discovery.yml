@@ -29,6 +29,8 @@ env:
   PIP_CACHE_DIR: ~/.cache/pip
   GH_TOKEN: ${{ github.token }}
 
+# Only the newest discovery invocation matters. Cancel any stale queued/running
+# predecessor so an old scan cannot indefinitely block fresh autonomous work.
 concurrency:
   group: genesis-github-issue-discovery
   cancel-in-progress: true
