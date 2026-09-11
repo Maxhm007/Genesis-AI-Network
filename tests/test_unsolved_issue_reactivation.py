@@ -43,6 +43,22 @@ def test_verified_or_superseded_closures_remain_authoritative(monkeypatch) -> No
         assert result == {"status": "ignored", "issue_number": 42, "reason": expected}
 
 
+def test_terminal_closures_remain_authoritative(monkeypatch) -> None:
+    for label in ("genesis-terminal", "genesis-recovery-terminal"):
+        calls: list[tuple[str, str]] = []
+
+        def fake_request(repository, token, method, path, payload=None, label=label):
+            calls.append((method, path))
+            if method == "GET" and path == "/issues/42":
+                return _issue("genesis-solver-exhausted", label)
+            raise AssertionError(f"terminal issue must not be mutated: {method} {path}")
+
+        monkeypatch.setattr(module, "request", fake_request)
+        result = module.reactivate("owner/repo", "token", 42)
+        assert result == {"status": "ignored", "issue_number": 42, "reason": "terminal_closure"}
+        assert calls == [("GET", "/issues/42")]
+
+
 def test_closed_issue_without_genesis_failure_evidence_is_not_reopened(monkeypatch) -> None:
     def fake_request(repository, token, method, path, payload=None):
         if method == "GET" and path == "/issues/42":
