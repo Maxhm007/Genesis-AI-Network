@@ -34,12 +34,10 @@ jobs:
           closed=0
 
           gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=agentic-lab&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/agentic-open.json
-
           mapfile -t issues < <(jq -r '.[] | select(.pull_request == null) | .number' /tmp/agentic-open.json)
 
           for issue_number in "${issues[@]}"; do
             [ "$closed" -ge 10 ] && break
-
             issue_json=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json state,labels,title)
             state=$(jq -r '.state' <<<"$issue_json")
             [ "$state" != "OPEN" ] && continue
@@ -48,30 +46,13 @@ jobs:
             [ "$active" == "true" ] && continue
 
             gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments?per_page=100" --jq '.[]' | jq -s '.' > /tmp/comments.json
-
-            attempted=$(jq -c '
-              [ .[]
-                | (.body // "")
-                | select(startswith("<!-- genesis-agentic-strategy:"))
-                | capture("^<!-- genesis-agentic-strategy:(?<s>[^ ]+) -->").s
-              ] | unique
-            ' /tmp/comments.json)
-
+            attempted=$(jq -c '[.[] | (.body // "") | select(startswith("<!-- genesis-agentic-strategy:")) | capture("^<!-- genesis-agentic-strategy:(?<s>[^ ]+) -->").s] | unique' /tmp/comments.json)
             complete=$(jq -n --argjson required "$strategies" --argjson attempted "$attempted" '$required - $attempted | length == 0')
             [ "$complete" != "true" ] && continue
 
             title=$(jq -r '.title' <<<"$issue_json")
-            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "<!-- genesis-agentic-terminal-reconcile -->
-**Genesis Agentic Lab — bounded strategy set exhausted**
-
-All four materially different bounded Agentic strategies have already been attempted without a verified promotion, and no repair/validation worker currently owns this Issue. Genesis is therefore terminating this repair generation instead of cycling the same strategy set indefinitely.
-
-- Issue: #${issue_number} — ${title}
-- Terminal state: closed as not planned / deferred
-- Safety: no verification, Security, protected-file, or promotion rule was bypassed
-- Reopen policy: a future materially changed repair engine may explicitly reopen/requeue this Issue if warranted.
-
-Reconciler run: ${GITHUB_RUN_ID}." >/dev/null
+            comment=$(printf '%s\n%s\n\n%s\n\n%s\n%s\n%s\n%s\n\n%s' '<!-- genesis-agentic-terminal-reconcile -->' '**Genesis Agentic Lab — bounded strategy set exhausted**' 'All four materially different bounded Agentic strategies have already been attempted without a verified promotion, and no repair/validation worker currently owns this Issue. Genesis is therefore terminating this repair generation instead of cycling the same strategy set indefinitely.' "- Issue: #${issue_number} — ${title}" '- Terminal state: closed as not planned / deferred' '- Safety: no verification, Security, protected-file, or promotion rule was bypassed' '- Reopen policy: a future materially changed repair engine may explicitly reopen/requeue this Issue if warranted.' "Reconciler run: ${GITHUB_RUN_ID}.")
+            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "$comment" >/dev/null
 
             for label in genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying genesis-autonomous agentic-lab genesis-needs-human; do
               gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
