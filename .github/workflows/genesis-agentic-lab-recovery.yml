@@ -6,6 +6,8 @@ on:
     paths:
       - .github/workflows/genesis-agentic-lab-recovery.yml
       - .github/workflows/genesis-android-issue-worker.yml
+      - .github/workflows/genesis-missing-qwen-capability-discovery.yml
+      - scripts/discover_missing_qwen_capability.py
       - scripts/agentic_lab_recovery_dispatch.py
       - scripts/agentic_lab_capability_first_dispatch.py
       - scripts/agentic_lab_fifo_router.py
