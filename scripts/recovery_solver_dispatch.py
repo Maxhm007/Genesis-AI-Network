@@ -35,8 +35,21 @@ MAX_RECOVERY_CYCLES = 3
 
 
 def issue_comments(repository: str, token: str, number: int) -> list[dict]:
-    rows = request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
-    return [row for row in rows if isinstance(row, dict)]
+    comments: list[dict] = []
+    page = 1
+    while True:
+        rows = request(
+            repository,
+            token,
+            "GET",
+            f"/issues/{number}/comments?per_page=100&page={page}",
+        ) or []
+        page_rows = [row for row in rows if isinstance(row, dict)]
+        comments.extend(page_rows)
+        if len(rows) < 100:
+            break
+        page += 1
+    return comments
 
 
 def recovery_cycle_count(comments: list[dict]) -> int:
