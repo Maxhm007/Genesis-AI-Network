@@ -47,31 +47,11 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          gh label create genesis-task \
-            --repo "$GITHUB_REPOSITORY" \
-            --color 0e8a16 \
-            --description 'Authoritative GitHub Issue backing for Genesis autonomous tasks' \
-            --force
-          gh label create genesis-capability-discovery \
-            --repo "$GITHUB_REPOSITORY" \
-            --color 5319e7 \
-            --description 'Created by an independent Genesis capability discovery task' \
-            --force
-          gh label create genesis-missing-capability \
-            --repo "$GITHUB_REPOSITORY" \
-            --color b60205 \
-            --description 'Capability missing from the current Qwen-based Genesis baseline' \
-            --force
-          gh label create genesis-autonomous \
-            --repo "$GITHUB_REPOSITORY" \
-            --color 1d76db \
-            --description 'Autonomous Genesis work item' \
-            --force
-          gh label create agentic-lab \
-            --repo "$GITHUB_REPOSITORY" \
-            --color 8250df \
-            --description 'Agentic Lab owns strategy selection for this open Issue' \
-            --force
+          gh label create genesis-task --repo "$GITHUB_REPOSITORY" --color 0e8a16 --description 'Authoritative GitHub Issue backing for Genesis autonomous tasks' --force
+          gh label create genesis-capability-discovery --repo "$GITHUB_REPOSITORY" --color 5319e7 --description 'Created by an independent Genesis capability discovery task' --force
+          gh label create genesis-missing-capability --repo "$GITHUB_REPOSITORY" --color b60205 --description 'Capability missing from the current Qwen-based Genesis baseline' --force
+          gh label create genesis-autonomous --repo "$GITHUB_REPOSITORY" --color 1d76db --description 'Autonomous Genesis work item' --force
+          gh label create agentic-lab --repo "$GITHUB_REPOSITORY" --color 8250df --description 'Agentic Lab owns strategy selection for this open Issue' --force
 
       - name: Audit Qwen-based Genesis and create at most one missing-capability issue
         env:
@@ -90,14 +70,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          issue_number="$(gh issue list \
-            --repo "$GITHUB_REPOSITORY" \
-            --state open \
-            --label genesis-missing-capability \
-            --label agentic-lab \
-            --limit 1 \
-            --json number \
-            --jq '.[0].number // empty')"
+          issue_number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label genesis-missing-capability --label agentic-lab --limit 1 --json number --jq '.[0].number // empty')"
           if [ -n "$issue_number" ]; then
             gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
           fi
