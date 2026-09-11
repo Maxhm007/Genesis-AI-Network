@@ -1,0 +1,87 @@
+name: Genesis Agentic Terminal Reconciler
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '7,17,27,37,47,57 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-agentic-terminal-reconciler.yml
+
+permissions:
+  issues: write
+  actions: write
+  contents: read
+
+concurrency:
+  group: genesis-agentic-terminal-reconciler
+  cancel-in-progress: false
+
+jobs:
+  close-exhausted-agentic-issues:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Reconcile terminal Agentic Lab issues
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          strategies='["evidence_first","alternative_implementation","diagnostic_reframe","dependency_diagnosis"]'
+          closed=0
+
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=agentic-lab&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/agentic-open.json
+
+          mapfile -t issues < <(jq -r '.[] | select(.pull_request == null) | .number' /tmp/agentic-open.json)
+
+          for issue_number in "${issues[@]}"; do
+            [ "$closed" -ge 10 ] && break
+
+            issue_json=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json state,labels,title)
+            state=$(jq -r '.state' <<<"$issue_json")
+            [ "$state" != "OPEN" ] && continue
+
+            active=$(jq -r '([.labels[].name] | any(. == "genesis-repair-in-progress" or . == "genesis-validating" or . == "genesis-working" or . == "genesis-verifying"))' <<<"$issue_json")
+            [ "$active" == "true" ] && continue
+
+            gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments?per_page=100" --jq '.[]' | jq -s '.' > /tmp/comments.json
+
+            attempted=$(jq -c '
+              [ .[]
+                | (.body // "")
+                | select(startswith("<!-- genesis-agentic-strategy:"))
+                | capture("^<!-- genesis-agentic-strategy:(?<s>[^ ]+) -->").s
+              ] | unique
+            ' /tmp/comments.json)
+
+            complete=$(jq -n --argjson required "$strategies" --argjson attempted "$attempted" '$required - $attempted | length == 0')
+            [ "$complete" != "true" ] && continue
+
+            title=$(jq -r '.title' <<<"$issue_json")
+            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "<!-- genesis-agentic-terminal-reconcile -->
+**Genesis Agentic Lab — bounded strategy set exhausted**
+
+All four materially different bounded Agentic strategies have already been attempted without a verified promotion, and no repair/validation worker currently owns this Issue. Genesis is therefore terminating this repair generation instead of cycling the same strategy set indefinitely.
+
+- Issue: #${issue_number} — ${title}
+- Terminal state: closed as not planned / deferred
+- Safety: no verification, Security, protected-file, or promotion rule was bypassed
+- Reopen policy: a future materially changed repair engine may explicitly reopen/requeue this Issue if warranted.
+
+Reconciler run: ${GITHUB_RUN_ID}." >/dev/null
+
+            for label in genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying genesis-autonomous agentic-lab genesis-needs-human; do
+              gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+            done
+            gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --add-label genesis-solver-exhausted --add-label genesis-deferred >/dev/null 2>&1 || true
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --method PATCH -f state=closed -f state_reason=not_planned >/dev/null
+            echo "Closed terminally exhausted Agentic Lab issue #${issue_number}."
+            closed=$((closed + 1))
+          done
+
+          echo "Terminal Agentic issues closed: ${closed}."
+          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+          gh workflow run genesis-sequential-issue-controller.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
