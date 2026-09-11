@@ -12,6 +12,7 @@ on:
       - tests/test_missing_qwen_capability_discovery.py
 
 permissions:
+  actions: write
   contents: read
   issues: write
 
@@ -61,6 +62,16 @@ jobs:
             --color b60205 \
             --description 'Capability missing from the current Qwen-based Genesis baseline' \
             --force
+          gh label create genesis-autonomous \
+            --repo "$GITHUB_REPOSITORY" \
+            --color 1d76db \
+            --description 'Autonomous Genesis work item' \
+            --force
+          gh label create agentic-lab \
+            --repo "$GITHUB_REPOSITORY" \
+            --color 8250df \
+            --description 'Agentic Lab owns strategy selection for this open Issue' \
+            --force
 
       - name: Audit Qwen-based Genesis and create at most one missing-capability issue
         env:
@@ -73,13 +84,20 @@ jobs:
           git reset --hard origin/main
           python scripts/discover_missing_qwen_capability.py
 
-      - name: Label newly created missing-capability issue
+      - name: Wake Agentic Lab for missing-capability work
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          issue_number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label genesis-task --search '"[Genesis Task] missing capability" in:title' --limit 1 --json number --jq '.[0].number // empty')"
+          issue_number="$(gh issue list \
+            --repo "$GITHUB_REPOSITORY" \
+            --state open \
+            --label genesis-missing-capability \
+            --label agentic-lab \
+            --limit 1 \
+            --json number \
+            --jq '.[0].number // empty')"
           if [ -n "$issue_number" ]; then
-            gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --add-label genesis-missing-capability
+            gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
           fi
