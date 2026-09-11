@@ -9,6 +9,7 @@ on:
     paths:
       - '.github/workflows/github-issue-discovery.yml'
       - 'scripts/github_issue_discovery.py'
+      - 'scripts/github_issue_discovery_resilient.py'
       - 'tests/test_github_issue_discovery.py'
       - 'tests/test_issue_discovery_engine.py'
       - 'tests/test_issue_discovery_workflows.py'
@@ -100,8 +101,8 @@ jobs:
             exit 1
           fi
 
-      - name: Let Genesis discover and publish at most one grounded issue
-        run: python scripts/github_issue_discovery.py
+      - name: Let Genesis discover and publish at most one fresh grounded issue
+        run: python scripts/github_issue_discovery_resilient.py
 
       - name: Wake authoritative issue solver when new work was opened
         if: success()
