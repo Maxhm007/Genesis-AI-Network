@@ -12,29 +12,38 @@ sys.modules[spec.name] = module
 spec.loader.exec_module(module)
 
 
-def test_present_capability_is_not_reported_missing() -> None:
+def test_present_when_expected_module_exists(tmp_path: Path) -> None:
     gap = module.BASELINE[0]
-    chunks = ("bounded computer use loop",)
-    assert module.capability_present(gap, chunks) is True
+    target = tmp_path / gap.evidence_paths[0]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# bounded implementation\n", encoding="utf-8")
+    assert module.capability_present(gap, tmp_path, ()) is True
 
 
-def test_terms_split_across_files_do_not_count_as_implementation() -> None:
+def test_present_when_registered_learned_capability_matches() -> None:
     gap = module.BASELINE[0]
-    chunks = ("screen observer", "click action", "verify result")
-    assert module.capability_present(gap, chunks) is False
+    assert module.capability_present(gap, Path("/definitely/missing"), ("computer_use_v1",)) is True
 
 
-def test_choose_missing_skips_existing_marker_and_moves_to_next_gap() -> None:
+def test_missing_without_module_or_registry_evidence(tmp_path: Path) -> None:
+    gap = module.BASELINE[0]
+    assert module.capability_present(gap, tmp_path, ()) is False
+
+
+def test_choose_missing_skips_existing_marker(tmp_path: Path) -> None:
     first = module.BASELINE[0]
     marker = f"genesis-missing-capability:{module.fingerprint(first.capability_id)}"
-    gap = module.choose_missing((), [marker])
+    gap = module.choose_missing(tmp_path, (), [marker])
     assert gap is not None
     assert gap.capability_id != first.capability_id
 
 
-def test_choose_missing_skips_repository_capability() -> None:
+def test_choose_missing_skips_implemented_capability(tmp_path: Path) -> None:
     first = module.BASELINE[0]
-    gap = module.choose_missing(("bounded computer use loop",), [])
+    target = tmp_path / first.evidence_paths[0]
+    target.parent.mkdir(parents=True, exist_ok=True)
+    target.write_text("# implementation\n", encoding="utf-8")
+    gap = module.choose_missing(tmp_path, (), [])
     assert gap is not None
     assert gap.capability_id != first.capability_id
 
