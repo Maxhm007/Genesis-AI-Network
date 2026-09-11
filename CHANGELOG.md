@@ -2,6 +2,13 @@
 
 All notable Genesis AI Network milestones are documented here.
 
+## v0.1.6 - 12-Sep-2026 - 02:21 AM - Preserve issue discovery completion
+
+### Fixed
+
+- Serialized GitHub Issue discovery invocations so push or schedule bursts no longer cancel an active evidence scan before it can publish a grounded issue or record a no-fresh-issue result.
+- Added workflow regression coverage for the non-cancelling concurrency policy and bounded job timeout.
+
 ## v0.1.5 - 29-Aug-2026 - 05:57 PM - Verify live automatic Issue closure
 
 ### Verified

@@ -50,6 +50,10 @@ The already-satisfied reconciliation path is live-verified: Issue `#426`
 closed automatically as completed with `genesis-solved` after its exact
 grounding pytest node passed on `main`.
 
+GitHub Issue discovery serializes scheduled and push-triggered invocations.
+An active full-repository evidence scan is allowed to reach its bounded
+publication decision; later invocations wait rather than cancelling it.
+
 ## Application status
 
 ### Windows desktop

@@ -31,10 +31,11 @@ env:
 
 # Legacy discovery run #82 can remain alive under the old concurrency key.
 # Use a fresh key so it cannot block current autonomous discovery. Within this
-# key, only the newest invocation is allowed to continue.
+# key, discovery invocations are serialized so a long evidence scan reaches a
+# publication decision instead of being cancelled by the next push or schedule.
 concurrency:
   group: genesis-github-issue-discovery-v2
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   discover:

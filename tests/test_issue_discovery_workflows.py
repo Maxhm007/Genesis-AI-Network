@@ -18,9 +18,13 @@ def test_general_issue_discovery_has_native_schedule_and_solver_handoff() -> Non
     assert "schedule:" in text
     assert "cron: '19 * * * *'" in text
     assert "group: genesis-github-issue-discovery-v2" in text
-    assert "cancel-in-progress: true" in text
+    assert "cancel-in-progress: false" in text
     assert "python scripts/github_issue_discovery_resilient.py" in text
     assert "gh workflow run genesis-sequential-issue-controller.yml" in text
+
+    # A full evidence scan can outlive a push burst. New invocations must wait
+    # instead of repeatedly cancelling discovery before publication.
+    assert "timeout-minutes: 120" in text
 
     # Discovery is an admission lane, never a second repair/promotion lane.
     assert "github_issue_autorepair.py" not in text

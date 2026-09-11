@@ -6,6 +6,7 @@ This file is a **human-readable near-term backlog**. It is not the authority for
 
 ## Immediate priorities
 
+- [x] Prevent push and schedule bursts from cancelling GitHub Issue discovery before its publication decision.
 - [x] Verify live automatic Issue closure after the autorepair recovery release; issue `#426` closed as completed with `genesis-solved` after its exact grounding test passed on `main`.
 - [ ] Complete the current proactive validation cycle for the capability-growth integration on `main`.
 - [x] Bootstrap the Android mobile application under `mobile/` and produce the first test APK.
