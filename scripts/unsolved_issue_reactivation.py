@@ -13,6 +13,8 @@ EXHAUSTED_LABEL = "genesis-solver-exhausted"
 DEFERRED_LABEL = "genesis-deferred"
 VERIFIED_LABEL = "genesis-verified"
 SUPERSEDED_LABEL = "genesis-superseded"
+TERMINAL_LABEL = "genesis-terminal"
+TERMINAL_MARKER = "<!-- genesis-agentic-terminal-reconcile -->"
 MARKER = "<!-- genesis-unsolved-strategy-reactivation -->"
 ACTIVE_LABELS = (
     "genesis-repair-in-progress",
@@ -97,6 +99,10 @@ def has_solver_failure_evidence(comments: list[dict]) -> bool:
     return False
 
 
+def has_terminal_reconcile_evidence(comments: list[dict]) -> bool:
+    return any(TERMINAL_MARKER in str(row.get("body") or "") for row in comments)
+
+
 def reactivate(repository: str, token: str, issue_number: int) -> dict:
     number = int(issue_number)
     issue = request(repository, token, "GET", f"/issues/{number}")
@@ -111,11 +117,16 @@ def reactivate(repository: str, token: str, issue_number: int) -> dict:
         return {"status": "ignored", "issue_number": number, "reason": "verified_closure"}
     if SUPERSEDED_LABEL in issue_labels:
         return {"status": "ignored", "issue_number": number, "reason": "superseded_closure"}
-    if not ({EXHAUSTED_LABEL, DEFERRED_LABEL} & issue_labels):
-        return {"status": "ignored", "issue_number": number, "reason": "not_solver_exhaustion"}
+    if TERMINAL_LABEL in issue_labels:
+        return {"status": "ignored", "issue_number": number, "reason": "terminal_closure"}
 
     comments = request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
     comments = [row for row in comments if isinstance(row, dict)]
+    if has_terminal_reconcile_evidence(comments):
+        return {"status": "ignored", "issue_number": number, "reason": "terminal_reconcile_evidence"}
+
+    if not ({EXHAUSTED_LABEL, DEFERRED_LABEL} & issue_labels):
+        return {"status": "ignored", "issue_number": number, "reason": "not_solver_exhaustion"}
     if not has_solver_failure_evidence(comments):
         return {"status": "ignored", "issue_number": number, "reason": "no_solver_failure_evidence"}
 
