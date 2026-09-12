@@ -8,7 +8,10 @@ All notable Genesis AI Network milestones are documented here.
 
 - Shared a dashboard-only script exception between strategy routing, path validation and the installed system-repair policy; it no longer requires the missing privileged workflow anchor.
 - Added regression coverage for real proposal validation and rejection of arbitrary scripts, protected controls, traversal and symlink escape.
-- Focused validation: 38 passed, 2 Windows symlink tests skipped. Live deployment and issue closure are not yet verified.
+- Focused validation: 38 passed, 2 Windows symlink tests skipped.
+- Deployed through PR `#830`, merged as `f513512`; refreshed the authoritative sequential controller after canceling the confirmed pre-fix worker for `#730`.
+- Safety/specialist regression: 31 passed. Broad local run: 1,079 passed, 44 skipped, two baseline Windows failures; two separately confirmed baseline formatting failures and the expensive live-history scan were excluded. All four observed failures reproduce on unchanged `main`.
+- Live-verified worker `34711820249`: candidate `9eeff5a` promoted as `5207049`, with 1,087 passed and 41 skipped before and after promotion. The bot automatically closed `#730` as completed at 12:41 AM Dhaka on 13-Sep-2026. Queue snapshot afterward: 23 open, 8 blocked, 9 solver-exhausted; these are not claimed solved.
 
 ## v0.1.6 - 12-Sep-2026 - 02:21 AM - Preserve issue discovery completion
 
