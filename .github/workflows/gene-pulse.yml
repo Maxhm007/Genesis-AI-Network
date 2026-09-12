@@ -31,7 +31,6 @@ jobs:
     env:
       GENE_ID: ${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
       PYTHONPATH: ${{ github.workspace }}
-      GENESIS_PROVIDER_ENDPOINTS: '[{"url":"http://127.0.0.1:8766","name":"deepseek-gene0","timeout_seconds":180}]'
     steps:
       - uses: actions/checkout@v4
 
@@ -42,10 +41,21 @@ jobs:
       - name: Install dependencies
         run: |
           pip install -r requirements.txt
-          pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install 'transformers>=4.51,<5' safetensors accelerate
+          if [ "$GENE_ID" = "gene-node-1" ]; then
+            pip install torch --index-url https://download.pytorch.org/whl/cpu
+            pip install 'transformers>=4.51,<5' safetensors accelerate
+          fi
+
+      - name: Restore Gene persistent pulse state
+        uses: actions/cache/restore@v4
+        with:
+          path: runtime
+          key: gene-runtime-${{ env.GENE_ID }}-${{ github.run_id }}
+          restore-keys: |
+            gene-runtime-${{ env.GENE_ID }}-
 
       - name: Cache DeepSeek model
+        if: env.GENE_ID == 'gene-node-1'
         uses: actions/cache@v4
         with:
           path: ~/.cache/huggingface
@@ -56,6 +66,7 @@ jobs:
       - name: Start Gene 0 DeepSeek provider
         if: env.GENE_ID == 'gene-node-1'
         run: |
+          mkdir -p runtime
           nohup python scripts/local_reasoning_provider.py \
             --model deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B \
             --host 127.0.0.1 \
@@ -66,20 +77,13 @@ jobs:
           for i in $(seq 1 120); do
             if curl --fail --silent http://127.0.0.1:8766/health > runtime/deepseek-health.json; then
               cat runtime/deepseek-health.json
+              echo 'GENESIS_PROVIDER_ENDPOINTS=[{"url":"http://127.0.0.1:8766","name":"deepseek-gene0","timeout_seconds":180}]' >> "$GITHUB_ENV"
               exit 0
             fi
             sleep 5
           done
           cat runtime/deepseek-provider.log || true
           exit 1
-
-      - name: Restore Gene persistent pulse state
-        uses: actions/cache/restore@v4
-        with:
-          path: runtime
-          key: gene-runtime-${{ env.GENE_ID }}-${{ github.run_id }}
-          restore-keys: |
-            gene-runtime-${{ env.GENE_ID }}-
 
       - name: Execute one pulse
         run: python scripts/gene_pulse.py --gene "$GENE_ID" --output runtime/pulse_result.json
