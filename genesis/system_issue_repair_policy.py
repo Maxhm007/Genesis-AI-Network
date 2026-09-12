@@ -85,6 +85,13 @@ def _ground_requested_issue_context(
     defects often live in bounded ``scripts/*.py`` control-plane helpers, so a
     historical application-file mention must not trap repair there forever. Safe
     script targets remain privileged-only at execution time.
+
+    Specialist/follow-up Issues frequently put their explicit ``**Target:**`` line
+    before a later ``Required next strategy`` heading. The ordinary request-focus
+    parser intentionally trims historical evidence before ranking, but that also
+    used to discard the verified script target. Preserve safe explicit script paths
+    from the full Issue evidence while continuing to rank ordinary Genesis paths
+    from the requested-outcome section only.
     """
     current = [str(path).replace("\\", "/").lstrip("./") for path in (context_paths or [])]
     if coding_policy.ISSUE_EVIDENCE_MARKER not in objective:
@@ -94,6 +101,14 @@ def _ground_requested_issue_context(
     focus = coding_policy._request_focus_text(issue_evidence)
     focus_tokens = coding_policy._grounding_tokens(focus)
     explicit_focus = _explicit_focus_paths(focus)
+
+    # Keep a safe, explicit script target even when a later Requirements/Strategy
+    # heading narrows ``focus`` and would otherwise hide the target line. Do not do
+    # this for ordinary ``genesis/*.py`` mentions because those may be historical
+    # examples that the request-focus policy deliberately excludes.
+    for explicit in _explicit_focus_paths(issue_evidence):
+        if explicit.startswith("scripts/") and explicit not in explicit_focus:
+            explicit_focus.insert(0, explicit)
 
     scored: list[tuple[int, int, str]] = []
     for directory in (module.root / "genesis", module.root / "scripts"):
