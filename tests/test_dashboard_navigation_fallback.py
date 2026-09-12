@@ -16,7 +16,7 @@ def test_navigation_fallback_converts_buttons_to_hash_links(tmp_path: Path):
     page.write_text(_page(), encoding="utf-8")
     nav.patch_navigation(page)
     html = page.read_text(encoding="utf-8")
-    assert '<a class="active" data-view="overview" href="#view-overview">Overview</a>' in html
+    assert '<a class="active" data-view="overview" href="#view-overview" aria-current="page">Overview</a>' in html
     assert 'data-view="issues" href="#view-issues"' in html
     assert 'data-view="tasks" href="#view-tasks"' in html
     assert 'genesis-no-js-navigation' in html
@@ -36,6 +36,19 @@ def test_navigation_fallback_selected_state_follows_hash_target(tmp_path: Path):
     assert 'body:has(#view-tasks:target) .nav a[data-view="tasks"]' in html
 
 
+def test_navigation_fallback_exposes_current_item_to_assistive_technology(tmp_path: Path):
+    page = tmp_path / "index.html"
+    page.write_text(_page(), encoding="utf-8")
+    nav.patch_navigation(page)
+    html = page.read_text(encoding="utf-8")
+    assert html.count('aria-current="page"') == 1
+    assert 'genesis-aria-current-navigation' in html
+    assert "item.setAttribute('aria-current', 'page')" in html
+    assert "item.removeAttribute('aria-current')" in html
+    assert "window.addEventListener('hashchange'" in html
+    assert "item.addEventListener('click'" in html
+
+
 def test_navigation_fallback_is_idempotent(tmp_path: Path):
     page = tmp_path / "index.html"
     page.write_text(_page(), encoding="utf-8")
@@ -46,6 +59,7 @@ def test_navigation_fallback_is_idempotent(tmp_path: Path):
     assert first == second
     assert second.count('genesis-no-js-navigation') == 1
     assert second.count('genesis-target-aware-navigation') == 1
+    assert second.count('genesis-aria-current-navigation') == 1
 
 
 def test_navigation_fallback_rejects_missing_target(tmp_path: Path):
