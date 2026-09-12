@@ -19,11 +19,14 @@ RECOVERY_LABEL = "genesis-recovery-solver"
 RECOVERY_ESCALATED_LABEL = "genesis-agentic-escalated"
 RECOVERY_MARKER = "<!-- genesis-recovery-solver-cycle:"
 RECOVERY_ESCALATED_MARKER = "<!-- genesis-recovery-same-issue-escalation -->"
+# Every bounded recovery generation must start by checking current main. This
+# prevents Genesis from blindly repairing stale Issues whose objective is already
+# satisfied and makes the remaining strategies operate on fresh evidence.
 RECOVERY_STRATEGIES = (
-    "diagnostic_reframe",
-    "dependency_diagnosis",
-    "alternative_implementation",
     "evidence_first",
+    "diagnostic_reframe",
+    "alternative_implementation",
+    "dependency_diagnosis",
 )
 MAX_RECOVERY_CYCLES = 3
 
@@ -159,13 +162,9 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         body = str(issue.get("body") or "")
         issue_labels = labels(issue)
 
-        # Once the dedicated Recovery Solver has exhausted, the same Issue stays
-        # with Agentic Lab. Do not reclaim it here and never create a successor.
         if RECOVERY_ESCALATED_LABEL in issue_labels:
             continue
 
-        # Capability work has one authoritative lane: Agentic Lab capability-first.
-        # Recovery Solver must never compete with it.
         if CAPABILITY_WORK_PREFIX in body:
             if RECOVERY_LABEL in issue_labels and not (issue_labels & ACTIVE_LABELS):
                 _remove_label(repository, token, number, RECOVERY_LABEL)
@@ -178,8 +177,6 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         if "genesis-waiting-capability" in issue_labels:
             continue
 
-        # A finished/failed shared worker may leave the ownership marker behind.
-        # It is advisory only when no active reservation exists, so clear it before reuse.
         if RECOVERY_LABEL in issue_labels:
             _remove_label(repository, token, number, RECOVERY_LABEL)
 
@@ -199,16 +196,30 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         cycle = cycles + 1
         strategy = RECOVERY_STRATEGIES[cycles % len(RECOVERY_STRATEGIES)]
 
+        # The downstream repair engine requires genesis-autonomous. Recovery used
+        # to reserve only the Agentic/repair labels, which could make an otherwise
+        # eligible worker fail with authorization_label_missing.
         request(
             repository,
             token,
             "POST",
             f"/issues/{number}/labels",
-            {"labels": [RECOVERY_LABEL, "genesis-repair-in-progress", AGENTIC_LABEL]},
+            {
+                "labels": [
+                    RECOVERY_LABEL,
+                    "genesis-repair-in-progress",
+                    "genesis-autonomous",
+                    AGENTIC_LABEL,
+                ]
+            },
         )
         fresh = request(repository, token, "GET", f"/issues/{number}")
         fresh_labels = labels(fresh if isinstance(fresh, dict) else {})
-        if "genesis-repair-in-progress" not in fresh_labels or RECOVERY_LABEL not in fresh_labels:
+        if (
+            "genesis-repair-in-progress" not in fresh_labels
+            or RECOVERY_LABEL not in fresh_labels
+            or "genesis-autonomous" not in fresh_labels
+        ):
             continue
 
         marker = f"{RECOVERY_MARKER}{cycle} -->"
@@ -221,7 +232,8 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
                 "body": (
                     f"{marker}\n"
                     f"Dedicated Recovery Solver claimed exhausted Issue #{number} for bounded recovery cycle {cycle}/{MAX_RECOVERY_CYCLES}. "
-                    f"It will use a different recovery-first strategy (`{strategy}`) while preserving the same Issue authority, validation, security, and exact-promotion gates."
+                    f"It will use recovery strategy (`{strategy}`) while preserving the same Issue authority, validation, security, and exact-promotion gates. "
+                    "Cycle 1 is always evidence-first so current main is checked before any new repair is attempted."
                 )
             },
         )
