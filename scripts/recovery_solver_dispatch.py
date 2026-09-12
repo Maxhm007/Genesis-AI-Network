@@ -14,17 +14,11 @@ from agentic_lab_recovery_dispatch import (
     safe_lane,
     explicit_target,
 )
-from requeue_exhausted_issues import (
-    _open_issues,
-    create_successor_handoff,
-    engine_generation,
-    is_successor_issue,
-)
 
 RECOVERY_LABEL = "genesis-recovery-solver"
-RECOVERY_TERMINAL_LABEL = "genesis-recovery-terminal"
+RECOVERY_ESCALATED_LABEL = "genesis-agentic-escalated"
 RECOVERY_MARKER = "<!-- genesis-recovery-solver-cycle:"
-RECOVERY_TERMINAL_MARKER = "<!-- genesis-recovery-terminal -->"
+RECOVERY_ESCALATED_MARKER = "<!-- genesis-recovery-same-issue-escalation -->"
 RECOVERY_STRATEGIES = (
     "diagnostic_reframe",
     "dependency_diagnosis",
@@ -60,7 +54,13 @@ def recovery_cycle_count(comments: list[dict]) -> int:
     )
 
 
-def ensure_label(repository: str, token: str, name: str = RECOVERY_LABEL, color: str = "1d76db", description: str = "Dedicated second solver lane for exhausted or blocked Genesis Issues") -> None:
+def ensure_label(
+    repository: str,
+    token: str,
+    name: str = RECOVERY_LABEL,
+    color: str = "1d76db",
+    description: str = "Dedicated second solver lane for exhausted or blocked Genesis Issues",
+) -> None:
     try:
         request(
             repository,
@@ -81,57 +81,13 @@ def _remove_label(repository: str, token: str, number: int, label: str) -> None:
         pass
 
 
-def _terminalize_successor(repository: str, token: str, issue: dict, comments: list[dict]) -> dict:
-    number = int(issue.get("number") or 0)
-    ensure_label(
-        repository,
-        token,
-        RECOVERY_TERMINAL_LABEL,
-        "6e7781",
-        "Closed after bounded independent recovery exhausted without verified promotion",
-    )
-    request(
-        repository,
-        token,
-        "POST",
-        f"/issues/{number}/labels",
-        {"labels": [RECOVERY_TERMINAL_LABEL]},
-    )
-    for label in (
-        "genesis-autonomous",
-        "genesis-repair-in-progress",
-        "genesis-validating",
-        "genesis-working",
-        "genesis-verifying",
-        "genesis-solver-exhausted",
-        "genesis-deferred",
-        "genesis-blocked",
-        "genesis-repair",
-        AGENTIC_LABEL,
-        RECOVERY_LABEL,
-    ):
-        _remove_label(repository, token, number, label)
-
-    if not any(RECOVERY_TERMINAL_MARKER in str(row.get("body") or "") for row in comments):
-        request(
-            repository,
-            token,
-            "POST",
-            f"/issues/{number}/comments",
-            {
-                "body": (
-                    f"{RECOVERY_TERMINAL_MARKER}\n"
-                    f"Genesis exhausted {MAX_RECOVERY_CYCLES} independent Recovery Solver cycles without a verified promotion. "
-                    "This Issue is already a repair successor, so Genesis will not create an unbounded successor chain. "
-                    "It is closed as not planned with its evidence preserved. A materially new future issue may be created only from new evidence or a changed repair capability, not as an automatic duplicate retry."
-                )
-            },
-        )
-    request(repository, token, "PATCH", f"/issues/{number}", {"state": "closed", "state_reason": "not_planned"})
-    return {"status": "closed_terminal_successor", "issue_number": number}
-
-
 def finalize_exhausted_issue(repository: str, token: str, issue: dict, comments: list[dict]) -> dict:
+    """Escalate recovery exhaustion without creating or closing a successor Issue.
+
+    The same GitHub Issue remains authoritative. Recovery Solver stops claiming it,
+    while Agentic Lab keeps ownership and may choose a materially different strategy
+    or capability-growth path. This prevents duplicate repair-follow-up chains.
+    """
     body = str(issue.get("body") or "")
     number = int(issue.get("number") or 0)
 
@@ -141,26 +97,59 @@ def finalize_exhausted_issue(repository: str, token: str, issue: dict, comments:
     fresh = request(repository, token, "GET", f"/issues/{number}")
     fresh_issue = fresh if isinstance(fresh, dict) else issue
     fresh_labels = labels(fresh_issue)
-    if str(fresh_issue.get("state") or "open") == "closed" or RECOVERY_TERMINAL_LABEL in fresh_labels:
-        return {"status": "terminal_parent_no_successor", "issue_number": number}
+    if str(fresh_issue.get("state") or "open") == "closed":
+        return {"status": "closed_issue_ignored", "issue_number": number}
+    if RECOVERY_ESCALATED_LABEL in fresh_labels:
+        return {"status": "already_escalated_same_issue", "issue_number": number}
 
-    if is_successor_issue(fresh_issue):
-        return _terminalize_successor(repository, token, fresh_issue, comments)
-
-    handoff = create_successor_handoff(
+    ensure_label(
         repository,
         token,
-        fresh_issue,
-        _open_issues(repository, token),
-        engine_generation(),
-        comments,
+        RECOVERY_ESCALATED_LABEL,
+        "8250df",
+        "Recovery Solver exhausted; same authoritative Issue remains with Agentic Lab",
     )
-    return {
-        "status": "successor_created_and_parent_closed",
-        "issue_number": number,
-        "successor": int(handoff.get("successor") or 0),
-        "created": bool(handoff.get("created")),
-    }
+    request(
+        repository,
+        token,
+        "POST",
+        f"/issues/{number}/labels",
+        {
+            "labels": [
+                RECOVERY_ESCALATED_LABEL,
+                AGENTIC_LABEL,
+                EXHAUSTED_LABEL,
+                "genesis-blocked",
+            ]
+        },
+    )
+
+    for label in (
+        RECOVERY_LABEL,
+        "genesis-repair-in-progress",
+        "genesis-validating",
+        "genesis-working",
+        "genesis-verifying",
+    ):
+        _remove_label(repository, token, number, label)
+
+    if not any(RECOVERY_ESCALATED_MARKER in str(row.get("body") or "") for row in comments):
+        request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/comments",
+            {
+                "body": (
+                    f"{RECOVERY_ESCALATED_MARKER}\n"
+                    f"Genesis exhausted {MAX_RECOVERY_CYCLES} bounded Recovery Solver cycles without verified promotion. "
+                    "This same Issue remains open and authoritative under Agentic Lab. No repair follow-up/successor Issue is created. "
+                    "Agentic Lab must continue only with a materially different strategy or a reusable capability-growth path, while preserving all existing security, validation, protected-file, signing, secret, promotion, and owner-control boundaries."
+                )
+            },
+        )
+
+    return {"status": "same_issue_agentic_lab_escalation", "issue_number": number}
 
 
 def reserve_and_dispatch(repository: str, token: str) -> dict:
@@ -170,7 +159,9 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         body = str(issue.get("body") or "")
         issue_labels = labels(issue)
 
-        if RECOVERY_TERMINAL_LABEL in issue_labels:
+        # Once the dedicated Recovery Solver has exhausted, the same Issue stays
+        # with Agentic Lab. Do not reclaim it here and never create a successor.
+        if RECOVERY_ESCALATED_LABEL in issue_labels:
             continue
 
         # Capability work has one authoritative lane: Agentic Lab capability-first.
