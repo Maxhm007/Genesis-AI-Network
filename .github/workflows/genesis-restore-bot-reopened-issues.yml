@@ -1,0 +1,55 @@
+name: Genesis Restore Bot-Reopened Issues
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-restore-bot-reopened-issues.yml
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  restore-bot-reopened:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-close issues reopened only by github-actions
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          gh label create genesis-closed-sealed-not-planned --repo "$GITHUB_REPOSITORY" \
+            --color 6e7781 --description 'Closed as not planned; Genesis must not reopen automatically' --force >/dev/null
+
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" --jq '.[] | select(.pull_request == null) | select(.state_reason == "reopened") | .number' \
+            | while read -r number; do
+                [ -z "$number" ] && continue
+
+                actor=$(gh api -H 'Accept: application/vnd.github+json' \
+                  "repos/${GITHUB_REPOSITORY}/issues/${number}/timeline?per_page=100" \
+                  --jq '[.[] | select(.event == "reopened")][-1].actor.login // ""')
+
+                if [ "$actor" != 'github-actions[bot]' ]; then
+                  echo "Leaving human-reopened issue #${number} open (actor=${actor:-unknown})."
+                  continue
+                fi
+
+                gh issue edit "$number" --repo "$GITHUB_REPOSITORY" \
+                  --add-label genesis-closed-sealed-not-planned >/dev/null
+
+                for label in \
+                  genesis-solver-exhausted genesis-priority-exhausted genesis-deferred \
+                  agentic-lab genesis-agentic-escalated genesis-autonomous \
+                  genesis-repair-in-progress genesis-validating genesis-claimed \
+                  genesis-working genesis-verifying genesis-priority-claim; do
+                  gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+                done
+
+                gh api "repos/${GITHUB_REPOSITORY}/issues/${number}" \
+                  --method PATCH -f state=closed -f state_reason=not_planned >/dev/null
+                echo "Restored bot-reopened issue #${number} to closed/not_planned."
+              done
