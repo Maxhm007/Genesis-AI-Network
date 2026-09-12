@@ -6,6 +6,8 @@ This file is a **human-readable near-term backlog**. It is not the authority for
 
 ## Immediate priorities
 
+- [ ] Benchmark optional Qwen3-4B-Instruct-2507 for compatibility, memory/latency and accepted repairs; retain existing active providers and routing until normal validation/trust evidence and explicit activation approval.
+
 - [ ] Resolve remaining dashboard-script targets through an appropriately safeguarded repair lane; the verified ordinary exception covers only `scripts/self_evaluation_dashboard.py`, not arbitrary or control scripts.
 
 - [x] Prevent push and schedule bursts from cancelling GitHub Issue discovery before its publication decision.

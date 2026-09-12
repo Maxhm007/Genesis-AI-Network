@@ -31,6 +31,16 @@
       "resource_cost": 3.8,
       "capabilities": ["reasoning", "coding", "instruction_following", "multilingual"],
       "notes": "Alternative small-model candidate. Keep quarantined until Genesis verifies runtime requirements, custom-code/trust settings, benchmarks and security."
+    },
+    {
+      "name": "Qwen/Qwen3-4B-Instruct-2507",
+      "source": "https://huggingface.co/Qwen/Qwen3-4B-Instruct-2507",
+      "license": "apache-2.0",
+      "state": "discovered",
+      "benchmark_score": null,
+      "resource_cost": 4.0,
+      "capabilities": ["reasoning", "coding", "instruction_following", "tool_use", "multilingual"],
+      "notes": "Owner-requested additional, text-only non-thinking model. Existing models and routing remain unchanged. Registration only; require hardware/runtime checks and independent benchmarks before activation."
     }
   ]
 }
