@@ -1,5 +1,8 @@
 # Genesis AI Network — TODO
 
+- [ ] Verify repeated Qwen3 qualification after the initial JSON-format rejection; do not activate on failed checks.
+
+
 - [ ] Run and review both GitHub Qwen3 qualification jobs before activating the additional provider; then separately evaluate real-issue repair and sequential new-task routing.
 
 
