@@ -104,8 +104,8 @@ jobs:
             done
             gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" \
               --add-label genesis-autonomous --add-label genesis-repair --add-label genesis-specialist >/dev/null
-            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "$marker
-Genesis specialist repair capability changed, so this still-open unresolved Issue has been automatically reactivated for a fresh bounded attempt on the same authoritative Issue. No closed Issue was reopened and no successor was created. Engine generation: \`${generation}\`." >/dev/null
+            body=$(printf '%s\n%s\n' "$marker" "Genesis specialist repair capability changed, so this still-open unresolved Issue has been automatically reactivated for a fresh bounded attempt on the same authoritative Issue. No closed Issue was reopened and no successor was created. Engine generation: ${generation}.")
+            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "$body" >/dev/null
             released=$((released + 1))
           done < /tmp/reactivate-specialists.txt
 
