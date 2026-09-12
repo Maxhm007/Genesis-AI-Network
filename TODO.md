@@ -1,5 +1,8 @@
 # Genesis AI Network — TODO
 
+- [ ] Run and review both GitHub Qwen3 qualification jobs before activating the additional provider; then separately evaluate real-issue repair and sequential new-task routing.
+
+
 This file is a **human-readable near-term backlog**. It is not the authority for autonomous execution.
 
 > **Runtime source of truth:** Genesis autonomous work is controlled by the persistent task queue in `runtime/genesis_tasks.sqlite3`, together with validation and promotion rules. A Markdown checkbox must never directly authorize code promotion, release, model activation, or scientific validation.

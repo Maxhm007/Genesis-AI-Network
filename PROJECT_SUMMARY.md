@@ -1,5 +1,10 @@
 # Genesis AI Network — Project Summary
 
+## GitHub-only additional Qwen3 qualification
+
+A manual read-only workflow runs pinned Qwen3-4B-Instruct-2507 weights on two isolated GitHub runners. Activation remains pending actual inference and evidence review. Existing providers, repair workers and routing stay unchanged. No local synchronization or model download is required.
+
+
 ## Optional additional Qwen3 model
 
 `Qwen/Qwen3-4B-Instruct-2507` is registered as an additional discovered model
