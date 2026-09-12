@@ -41,6 +41,16 @@
       "resource_cost": 4.0,
       "capabilities": ["reasoning", "coding", "instruction_following", "tool_use", "multilingual"],
       "notes": "Owner-requested additional, text-only non-thinking model. Existing models and routing remain unchanged. Registration only; require hardware/runtime checks and independent benchmarks before activation."
+    },
+    {
+      "name": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+      "source": "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+      "license": "mit",
+      "state": "discovered",
+      "benchmark_score": null,
+      "resource_cost": 1.5,
+      "capabilities": ["reasoning", "coding", "planning", "review"],
+      "notes": "Owner-requested DeepSeek provider candidate for Genesis/Gene 0. Independent of Gene 002/003 assignments. Registration only; keep Qwen active and require normal quarantine, benchmark, validation and trust gates before activation."
     }
   ]
 }
