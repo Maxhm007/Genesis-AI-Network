@@ -1,0 +1,242 @@
+name: Genesis Qwen3 Agentic Fallback
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Existing open GitHub Issue escalated after Agentic Lab strategy exhaustion
+        required: true
+        type: string
+
+permissions:
+  contents: write
+  issues: write
+  actions: write
+
+concurrency:
+  group: genesis-qwen3-agentic-${{ inputs.issue_number }}
+  cancel-in-progress: false
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_NAME: genesis-qwen3-agentic-fallback
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '420'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '640'
+  GENESIS_REPAIR_FALLBACK_MODEL: Qwen/Qwen3-4B-Instruct-2507
+  GENESIS_REPAIR_ESCALATION_MODEL: Qwen/Qwen3-4B-Instruct-2507
+  GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS: '192'
+  HF_HOME: ~/.cache/huggingface
+  PIP_CACHE_DIR: ~/.cache/pip
+
+jobs:
+  qwen3-agentic-repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Verify Qwen3 Agentic reservation and safe target
+        id: eligibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_json=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels,body)
+          state=$(jq -r '.state' <<<"$issue_json")
+          reserved=$(jq -r '([.labels[].name] | index("genesis-repair-in-progress")) != null' <<<"$issue_json")
+          qwen3=$(jq -r '([.labels[].name] | index("genesis-qwen3-agentic")) != null' <<<"$issue_json")
+          agentic=$(jq -r '([.labels[].name] | index("agentic-lab")) != null' <<<"$issue_json")
+          body=$(jq -r '.body // ""' <<<"$issue_json")
+          target=$(printf '%s\n' "$body" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
+          safe=true
+          if [[ "$state" != "OPEN" || "$reserved" != "true" || "$qwen3" != "true" || "$agentic" != "true" ]]; then safe=false; fi
+          if [[ -z "$target" || "$target" == *".."* || ! -f "$target" ]]; then safe=false; fi
+          if [[ "$target" != genesis/*.py && "$target" != scripts/*.py ]]; then safe=false; fi
+          case "$target" in
+            genesis/autonomy_guard.py|genesis/autonomy_proof.py|genesis/blockchain.py|genesis/ephemeral_validator.py|genesis/security.py|genesis/selfdev.py|genesis/issue_solver.py|genesis/file_self_review.py|genesis/file_self_review_policy.py|scripts/secret_guard.py|scripts/privileged_change_gate.py|scripts/verify_validator_votes.py|scripts/action_repair_guard.py|scripts/issue_acceptance_guard.py)
+              safe=false ;;
+          esac
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "eligible=$safe" >> "$GITHUB_OUTPUT"
+          if [[ "$safe" != "true" ]]; then
+            for label in genesis-repair-in-progress genesis-qwen3-agentic; do gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true; done
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label agentic-lab --add-label genesis-autonomous --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "<!-- genesis-qwen3-agentic-result:failed -->
+Qwen3 Agentic fallback declined this reservation because the Issue/target was not safely eligible. No solution was claimed. The SAME Issue remains OPEN and returns to Agentic Lab for another strategy cycle. Worker run: ${GITHUB_RUN_ID}."
+          fi
+
+      - name: Install repository and Qwen3 dependencies
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install 'transformers>=4.51,<5' safetensors accelerate
+
+      - name: Verify clean repository baseline
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: python -m pytest -q
+
+      - name: Restore Qwen3 cache
+        if: steps.eligibility.outputs.eligible == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/pip
+          key: genesis-qwen3-agentic-${{ runner.os }}-py312-v1
+          restore-keys: |
+            genesis-qwen3-agentic-${{ runner.os }}-py312-
+
+      - name: Start isolated Qwen3 coding provider
+        if: steps.eligibility.outputs.eligible == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python scripts/pulse_coding_provider.py \
+            --model "$GENESIS_REPAIR_FALLBACK_MODEL" \
+            --escalation-model "$GENESIS_REPAIR_ESCALATION_MODEL" \
+            --host 127.0.0.1 --port 8766 \
+            --max-new-tokens "$GENESIS_PROVIDER_MAX_NEW_TOKENS" \
+            --escalation-max-new-tokens "$GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS" \
+            > /tmp/genesis-qwen3-agentic-provider.log 2>&1 &
+          ready=false
+          for i in {1..180}; do
+            if python - <<'PY'
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=2) as response:
+                  raise SystemExit(0 if response.status == 200 else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then ready=true; break; fi
+            sleep 2
+          done
+          if [[ "$ready" != true ]]; then cat /tmp/genesis-qwen3-agentic-provider.log || true; exit 1; fi
+
+      - name: Configure Genesis Git identity
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: |
+          git config user.name "Genesis AI"
+          git config user.email "genesis-ai@users.noreply.github.com"
+
+      - name: Run Qwen3 Agentic diagnostic reframe
+        if: steps.eligibility.outputs.eligible == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          python scripts/agentic_strategy_repair.py --issue-number "$ISSUE_NUMBER" --repository "$GITHUB_REPOSITORY" --strategy diagnostic_reframe
+
+      - name: Read Qwen3 repair evidence
+        if: steps.eligibility.outputs.eligible == 'true'
+        id: evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f runtime/github_issue_autorepair.json
+          echo "status=$(jq -r '.status // ""' runtime/github_issue_autorepair.json)" >> "$GITHUB_OUTPUT"
+          echo "reason=$(jq -r '.reason // .repair_status // .status // ""' runtime/github_issue_autorepair.json)" >> "$GITHUB_OUTPUT"
+          echo "candidate_branch=$(jq -r '.candidate_branch // ""' runtime/github_issue_autorepair.json)" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$(jq -r '.candidate_sha // ""' runtime/github_issue_autorepair.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Independently validate and promote exact Qwen3 candidate
+        if: steps.evidence.outputs.status == 'candidate_created'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          TARGET: ${{ steps.eligibility.outputs.target }}
+          CANDIDATE_BRANCH: ${{ steps.evidence.outputs.candidate_branch }}
+          CANDIDATE_SHA: ${{ steps.evidence.outputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CANDIDATE_BRANCH"; test -n "$CANDIDATE_SHA"
+          git fetch origin main "$CANDIDATE_BRANCH"
+          git cat-file -e "${CANDIDATE_SHA}^{commit}"
+          target_test="tests/test_$(basename "$TARGET" .py).py"
+          mapfile -t changed_files < <(git diff-tree --no-commit-id --name-only -r "$CANDIDATE_SHA")
+          (( ${#changed_files[@]} > 0 ))
+          for path in "${changed_files[@]}"; do
+            if [[ "$path" != "$TARGET" && "$path" != "$target_test" ]]; then echo "Rejected out-of-scope Qwen3 candidate path: $path" >&2; exit 1; fi
+          done
+          gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""' > /tmp/genesis-qwen3-issue-body.md
+          promoted_sha=''
+          for integration_attempt in 1 2 3; do
+            git fetch origin main
+            git checkout -B "genesis/qwen3-integration-${ISSUE_NUMBER}-${GITHUB_RUN_ID}" origin/main
+            if ! git cherry-pick "$CANDIDATE_SHA"; then git cherry-pick --abort || true; continue; fi
+            if [[ "$TARGET" == genesis/*.py ]]; then
+              integrated_base=$(git rev-parse HEAD^)
+              git show "${integrated_base}:${TARGET}" > /tmp/genesis-qwen3-semantic-base.py
+              python -m genesis.learned_capability_acceptance --issue-body-file /tmp/genesis-qwen3-issue-body.md --target "$TARGET" --base-file /tmp/genesis-qwen3-semantic-base.py --candidate-file "$TARGET"
+            fi
+            python -m py_compile "$TARGET"
+            if [[ -f "$target_test" ]]; then python -m pytest -q "$target_test"; fi
+            python -m pytest -q
+            git fetch origin main
+            [[ "$(git rev-parse HEAD^)" == "$(git rev-parse origin/main)" ]] || continue
+            if git push origin HEAD:main; then promoted_sha=$(git rev-parse HEAD); break; fi
+          done
+          [[ -n "$promoted_sha" ]] || { echo "Qwen3 candidate could not be promoted safely" >&2; exit 1; }
+          git fetch origin main; git reset --hard origin/main
+          python -m py_compile "$TARGET"
+          if [[ -f "$target_test" ]]; then python -m pytest -q "$target_test"; fi
+          python -m pytest -q
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "<!-- genesis-qwen3-agentic-result:success -->
+Qwen3 Agentic fallback produced and independently verified a repair. Candidate: \`${CANDIDATE_SHA}\`. Promoted main SHA: \`${promoted_sha}\`. Full repository validation passed after promotion."
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-verified >/dev/null
+          for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-claimed genesis-working genesis-verifying genesis-blocked genesis-solver-exhausted genesis-deferred genesis-waiting-capability genesis-needs-human agentic-lab genesis-qwen3-agentic; do gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true; done
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --method PATCH -f state=closed -f state_reason=completed >/dev/null
+          git push origin --delete "$CANDIDATE_BRANCH" >/dev/null 2>&1 || true
+
+      - name: Release unsuccessful Qwen3 reservation without closing Issue
+        if: always() && steps.eligibility.outputs.eligible == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          STATUS: ${{ steps.evidence.outputs.status }}
+          REASON: ${{ steps.evidence.outputs.reason }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          state=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state')
+          if [[ "$state" == "CLOSED" ]]; then exit 0; fi
+          repair_status="${REASON:-${STATUS:-worker_failed_before_evidence}}"
+          for label in genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying genesis-qwen3-agentic; do gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true; done
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label agentic-lab --add-label genesis-autonomous --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deferred >/dev/null 2>&1 || true
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "<!-- genesis-qwen3-agentic-result:failed -->
+Qwen3 Agentic fallback did not produce a verified promotion (repair status: \`${repair_status}\`). The SAME Issue remains OPEN and authoritative. Failure evidence is preserved and control returns to Agentic Lab for another materially different strategy cycle. Worker run: ${GITHUB_RUN_ID}."
+
+      - name: Preserve Qwen3 Agentic evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-qwen3-agentic-${{ inputs.issue_number }}-${{ github.run_id }}
+          path: |
+            runtime/github_issue_autorepair.json
+            /tmp/genesis-qwen3-agentic-provider.log
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Continue same-Issue recovery lifecycle
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+          gh workflow run genesis-sequential-issue-controller.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
