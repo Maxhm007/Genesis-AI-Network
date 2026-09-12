@@ -32,7 +32,7 @@ STRATEGY_GUIDANCE = {
         "Agentic Lab strategy: dependency diagnosis. Re-check current main before assuming a dependency. Determine whether the "
         "remaining blocker is lack of a Genesis repair capability, provider/tooling limitation, unavailable dependency, insufficient "
         "safe context, or an Issue whose objective is already satisfied. If a safe target-local repair is still necessary, implement "
-        "it. Otherwise return without inventing a change."
+        "it. Otherwise return without inventing a change; when a real capability gap remains, the orchestration layer will open a capability-building dependency issue."
     ),
 }
 
