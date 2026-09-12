@@ -16,6 +16,7 @@ on:
           - alternative_implementation
           - diagnostic_reframe
           - dependency_diagnosis
+          - qwen3_fallback
 
 permissions:
   contents: write
@@ -31,10 +32,11 @@ env:
   GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_NAME: genesis-agentic-strategy-repair
-  GENESIS_PROVIDER_TIMEOUT_SECONDS: '300'
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '420'
   GENESIS_PROVIDER_MAX_NEW_TOKENS: '640'
   GENESIS_REPAIR_FALLBACK_MODEL: Qwen/Qwen2.5-Coder-0.5B-Instruct
   GENESIS_REPAIR_ESCALATION_MODEL: Qwen/Qwen2.5-Coder-1.5B-Instruct
+  GENESIS_QWEN3_FALLBACK_MODEL: Qwen/Qwen3-4B-Instruct-2507
   GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS: '192'
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
@@ -42,7 +44,7 @@ env:
 jobs:
   repair-and-promote:
     runs-on: ubuntu-latest
-    timeout-minutes: 90
+    timeout-minutes: 120
     steps:
       - name: Checkout current main
         uses: actions/checkout@v4
@@ -71,19 +73,12 @@ jobs:
           target=$(printf '%s\n' "$body" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
 
           safe=true
-          if [[ "$state" != "OPEN" || "$reserved" != "true" || "$agentic" != "true" ]]; then
-            safe=false
-          fi
-          if [[ -z "$target" || "$target" == *".."* || ! -f "$target" ]]; then
-            safe=false
-          fi
-          if [[ "$target" != genesis/*.py && "$target" != scripts/*.py ]]; then
-            safe=false
-          fi
+          if [[ "$state" != "OPEN" || "$reserved" != "true" || "$agentic" != "true" ]]; then safe=false; fi
+          if [[ -z "$target" || "$target" == *".."* || ! -f "$target" ]]; then safe=false; fi
+          if [[ "$target" != genesis/*.py && "$target" != scripts/*.py ]]; then safe=false; fi
           case "$target" in
             genesis/autonomy_guard.py|genesis/autonomy_proof.py|genesis/blockchain.py|genesis/ephemeral_validator.py|genesis/security.py|genesis/selfdev.py|genesis/issue_solver.py|genesis/file_self_review.py|genesis/file_self_review_policy.py|scripts/secret_guard.py|scripts/privileged_change_gate.py|scripts/verify_validator_votes.py|scripts/action_repair_guard.py|scripts/issue_acceptance_guard.py)
-              safe=false
-              ;;
+              safe=false ;;
           esac
 
           echo "target=$target" >> "$GITHUB_OUTPUT"
@@ -93,7 +88,7 @@ jobs:
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --add-label agentic-lab --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
             printf '%s\n%s\n' \
               "<!-- genesis-agentic-strategy-result:${STRATEGY} -->" \
-              "Agentic Lab strategy worker declined this reservation because the Issue is not open/owned, the target is unsafe, or the reservation is stale. The Issue remains open and authoritative. repair status: \`blocked_protected_or_unsupported_target\`. No child/successor/capability Issue is created; the next Agentic Lab pass must continue on this same Issue with a materially different safe strategy. Worker run: ${GITHUB_RUN_ID}." \
+              "Agentic Lab strategy worker declined this reservation because the Issue is not open/owned, the target is unsafe, or the reservation is stale. The Issue remains open and authoritative. repair status: \`blocked_protected_or_unsupported_target\`. No child/successor/capability Issue is created. Worker run: ${GITHUB_RUN_ID}." \
               > /tmp/genesis-agentic-declined.md
             gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-declined.md
           fi
@@ -113,32 +108,41 @@ jobs:
           path: |
             ~/.cache/huggingface
             ~/.cache/pip
-          key: genesis-agentic-qwen-coder-${{ runner.os }}-py312-v1
+          key: genesis-agentic-open-model-${{ runner.os }}-py312-v2
           restore-keys: |
-            genesis-agentic-qwen-coder-${{ runner.os }}-py312-
+            genesis-agentic-open-model-${{ runner.os }}-py312-
 
       - name: Install free local repair intelligence
         if: steps.eligibility.outputs.eligible == 'true'
         run: |
           python -m pip install --upgrade pip
           pip install torch --index-url https://download.pytorch.org/whl/cpu
-          pip install 'transformers>=4.51,<5' safetensors
+          pip install 'transformers>=4.51,<5' safetensors accelerate
 
       - name: Start adaptive local coding provider
         if: steps.eligibility.outputs.eligible == 'true'
+        env:
+          STRATEGY: ${{ inputs.strategy }}
         shell: bash
         run: |
           set -euo pipefail
+          primary_model="$GENESIS_REPAIR_FALLBACK_MODEL"
+          escalation_model="$GENESIS_REPAIR_ESCALATION_MODEL"
+          if [[ "$STRATEGY" == "qwen3_fallback" ]]; then
+            primary_model="$GENESIS_QWEN3_FALLBACK_MODEL"
+            escalation_model="$GENESIS_QWEN3_FALLBACK_MODEL"
+            echo "Using isolated Qwen3 model for final Agentic fallback: $primary_model"
+          fi
           nohup python scripts/pulse_coding_provider.py \
-            --model "$GENESIS_REPAIR_FALLBACK_MODEL" \
-            --escalation-model "$GENESIS_REPAIR_ESCALATION_MODEL" \
+            --model "$primary_model" \
+            --escalation-model "$escalation_model" \
             --host 127.0.0.1 \
             --port 8766 \
             --max-new-tokens "$GENESIS_PROVIDER_MAX_NEW_TOKENS" \
             --escalation-max-new-tokens "$GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS" \
             > /tmp/genesis-agentic-strategy-provider.log 2>&1 &
           ready=false
-          for i in {1..120}; do
+          for i in {1..180}; do
             if python - <<'PY'
           import urllib.request
           try:
@@ -212,28 +216,17 @@ jobs:
 
           target_test="tests/test_$(basename "$TARGET" .py).py"
           mapfile -t changed_files < <(git diff-tree --no-commit-id --name-only -r "$CANDIDATE_SHA")
-          if (( ${#changed_files[@]} == 0 )); then
-            echo "Candidate contains no changed files" >&2
-            exit 1
-          fi
+          if (( ${#changed_files[@]} == 0 )); then echo "Candidate contains no changed files" >&2; exit 1; fi
           for path in "${changed_files[@]}"; do
-            if [[ "$path" != "$TARGET" && "$path" != "$target_test" ]]; then
-              echo "Rejected out-of-scope Agentic candidate path: $path" >&2
-              exit 1
-            fi
+            if [[ "$path" != "$TARGET" && "$path" != "$target_test" ]]; then echo "Rejected out-of-scope Agentic candidate path: $path" >&2; exit 1; fi
           done
 
           gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""' > /tmp/genesis-agentic-issue-body.md
-
           promoted_sha=''
           for integration_attempt in 1 2 3; do
             git fetch origin main
             git checkout -B "genesis/agentic-integration-${ISSUE_NUMBER}-${GITHUB_RUN_ID}" origin/main
-            if ! git cherry-pick "$CANDIDATE_SHA"; then
-              git cherry-pick --abort || true
-              continue
-            fi
-
+            if ! git cherry-pick "$CANDIDATE_SHA"; then git cherry-pick --abort || true; continue; fi
             if [[ "$TARGET" == genesis/*.py ]]; then
               integrated_base=$(git rev-parse HEAD^)
               git show "${integrated_base}:${TARGET}" > /tmp/genesis-agentic-semantic-base.py
@@ -243,37 +236,21 @@ jobs:
                 --base-file /tmp/genesis-agentic-semantic-base.py \
                 --candidate-file "$TARGET"
             fi
-
             python -m py_compile "$TARGET"
-            if [[ -f "$target_test" ]]; then
-              python -m pytest -q "$target_test"
-            fi
+            if [[ -f "$target_test" ]]; then python -m pytest -q "$target_test"; fi
             python -m pytest -q
-
             git fetch origin main
             integrated_base=$(git rev-parse HEAD^)
             latest_main=$(git rev-parse origin/main)
-            if [[ "$integrated_base" != "$latest_main" ]]; then
-              echo "main moved during Agentic validation; rebuilding on latest main"
-              continue
-            fi
-            if git push origin HEAD:main; then
-              promoted_sha=$(git rev-parse HEAD)
-              break
-            fi
+            if [[ "$integrated_base" != "$latest_main" ]]; then continue; fi
+            if git push origin HEAD:main; then promoted_sha=$(git rev-parse HEAD); break; fi
           done
 
-          if [[ -z "$promoted_sha" ]]; then
-            echo "Agentic candidate could not be promoted safely" >&2
-            exit 1
-          fi
-
+          if [[ -z "$promoted_sha" ]]; then echo "Agentic candidate could not be promoted safely" >&2; exit 1; fi
           git fetch origin main
           git reset --hard origin/main
           python -m py_compile "$TARGET"
-          if [[ -f "$target_test" ]]; then
-            python -m pytest -q "$target_test"
-          fi
+          if [[ -f "$target_test" ]]; then python -m pytest -q "$target_test"; fi
           python -m pytest -q
 
           printf '%s\n%s\n' \
@@ -282,7 +259,7 @@ jobs:
             > /tmp/genesis-agentic-success.md
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-success.md
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-verified >/dev/null
-          for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-claimed genesis-working genesis-verifying genesis-blocked genesis-solver-exhausted genesis-deferred genesis-waiting-capability genesis-needs-human agentic-lab; do
+          for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-claimed genesis-working genesis-verifying genesis-blocked genesis-solver-exhausted genesis-deferred genesis-waiting-capability genesis-needs-human agentic-lab genesis-qwen3-agentic; do
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
           done
           gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --method PATCH -f state=closed -f state_reason=completed >/dev/null
@@ -301,16 +278,15 @@ jobs:
           set -euo pipefail
           state=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state')
           if [[ "$state" == "CLOSED" ]]; then exit 0; fi
-
           repair_status="${REASON:-${STATUS:-worker_failed_before_evidence}}"
-          for label in genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying; do
+          for label in genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying genesis-qwen3-agentic; do
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
           done
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label agentic-lab --add-label genesis-solver-exhausted --add-label genesis-autonomous >/dev/null 2>&1 || true
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deferred >/dev/null 2>&1 || true
           printf '%s\n%s\n' \
             "<!-- genesis-agentic-strategy-result:${STRATEGY} -->" \
-            "Agentic Lab strategy \`${STRATEGY}\` did not produce a verified promotion. repair status: \`${repair_status}\`. The Issue remains open and authoritative. The next Agentic Lab pass must use a materially different strategy on this same Issue; no child/successor/capability Issue is created. Worker run: ${GITHUB_RUN_ID}." \
+            "Agentic Lab strategy \`${STRATEGY}\` did not produce a verified promotion. repair status: \`${repair_status}\`. The Issue remains open and authoritative. The next Agentic Lab pass continues on this same Issue; no child/successor/capability Issue is created. Worker run: ${GITHUB_RUN_ID}." \
             > /tmp/genesis-agentic-failure.md
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-failure.md
 
