@@ -1,0 +1,33 @@
+name: Genesis Gene Peer Issue Sync
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '7,37 * * * *'
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-gene-peer-issue-sync
+  cancel-in-progress: false
+
+jobs:
+  sync:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate peer issue sync policy
+        run: python -m pytest tests/test_gene_peer_issue_sync.py -q
+
+      - name: Sync one actionable peer issue into Gene 0
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/gene_peer_issue_sync.py
