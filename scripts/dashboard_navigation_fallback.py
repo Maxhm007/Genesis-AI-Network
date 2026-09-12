@@ -15,6 +15,7 @@ body:has(.view:target) .view.active:not(:target){display:none}
 '''
 
 TARGET_AWARE_MARKER = "genesis-target-aware-navigation"
+ARIA_CURRENT_MARKER = "genesis-aria-current-navigation"
 
 
 def _target_aware_css(views: list[str]) -> str:
@@ -30,6 +31,31 @@ body:has(.view:target) .nav a.active{{background:transparent;color:#9eb2c8;box-s
 '''
 
 
+def _aria_current_script() -> str:
+    return rf'''<script>
+/* {ARIA_CURRENT_MARKER} */
+(function(){{
+  const navItems = Array.from(document.querySelectorAll('.nav [data-view]'));
+  if (!navItems.length) return;
+  function setCurrent(view) {{
+    navItems.forEach((item) => {{
+      if (item.dataset.view === view) item.setAttribute('aria-current', 'page');
+      else item.removeAttribute('aria-current');
+    }});
+  }}
+  function currentView() {{
+    const hash = window.location.hash || '';
+    if (hash.startsWith('#view-')) return hash.slice(6);
+    const active = document.querySelector('.nav [data-view].active');
+    return active ? active.dataset.view : navItems[0].dataset.view;
+  }}
+  navItems.forEach((item) => item.addEventListener('click', () => setCurrent(item.dataset.view)));
+  window.addEventListener('hashchange', () => setCurrent(currentView()));
+  setCurrent(currentView());
+}})();
+</script>'''
+
+
 def patch_navigation(path: Path = DASHBOARD) -> None:
     if not path.is_file():
         raise RuntimeError(f"Dashboard not found: {path}")
@@ -43,7 +69,9 @@ def patch_navigation(path: Path = DASHBOARD) -> None:
     def repl(match: re.Match[str]) -> str:
         attrs = (match.group("attrs") + match.group("tail")).strip()
         attrs = re.sub(r'\s*onclick="[^"]*"', '', attrs)
-        return f'<a {attrs} data-view="{match.group("view")}" href="#view-{match.group("view")}">{match.group("label")}</a>'
+        attrs = re.sub(r'\s*aria-current="[^"]*"', '', attrs)
+        current = ' aria-current="page"' if re.search(r'\bclass="[^"]*\bactive\b[^"]*"', attrs) else ''
+        return f'<a {attrs} data-view="{match.group("view")}" href="#view-{match.group("view")}"{current}>{match.group("label")}</a>'
 
     html, count = pattern.subn(repl, html)
     if count < 1 and 'genesis-no-js-navigation' not in html:
@@ -77,6 +105,15 @@ def patch_navigation(path: Path = DASHBOARD) -> None:
         if "</style>" not in html:
             raise RuntimeError("Dashboard style marker not found")
         html = html.replace("</style>", _target_aware_css(views) + "\n</style>", 1)
+
+    # Expose the current navigation item to assistive technology. The first
+    # generated active link gets an initial aria-current value above; this
+    # runtime synchronizer keeps exactly one item current after hash navigation
+    # or JavaScript-enhanced clicks and removes stale values from inactive items.
+    if ARIA_CURRENT_MARKER not in html:
+        if "</body>" not in html:
+            raise RuntimeError("Dashboard body marker not found")
+        html = html.replace("</body>", _aria_current_script() + "\n</body>", 1)
 
     path.write_text(html, encoding="utf-8")
 
