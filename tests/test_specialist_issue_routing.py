@@ -56,7 +56,9 @@ def test_specialist_classification_does_not_break_active_repair_serialization() 
     reservation_index = specialist.index("active_count=$(jq")
     dispatch_index = specialist.index("gh workflow run genesis-specialist-repair-worker-v2.yml")
     assert classification_index < reservation_index < dispatch_index
-    assert "metadata-only" in specialist
+    assert "genesis-specialist-engine:" in specialist
+    assert "genesis-solver-exhausted" in specialist
+    assert "genesis-deferred" in specialist
 
 
 def test_specialist_worker_uses_grounded_guarded_repair_engine_and_exact_scope() -> None:
