@@ -219,7 +219,6 @@ class BenchmarkExecutionPlanner:
                 "engineering_assistance_required": True,
                 "owner_action_required": False,
             }
-        if benchmark_id == "terminal_bench_2_1" and input_path.is_file():
             job = json.loads(input_path.read_text(encoding="utf-8"))
             staged = TerminalBench21EvidenceAdapter(self.root).stage(job)
             return {"status": "evidence_staged", "benchmark_id": benchmark_id, "candidate_path": str(staged)}
