@@ -27,8 +27,6 @@ jobs:
       - name: Reopen unsolved automatic closures
         env:
           GH_TOKEN: ${{ github.token }}
-          EVENT_NAME: ${{ github.event_name }}
-          EVENT_ISSUE_NUMBER: ${{ github.event.issue.number || '' }}
         shell: bash
         run: |
           set -euo pipefail
@@ -72,11 +70,13 @@ Genesis reopened this Issue because it was closed without a verified solution. P
             echo "Reopened unsolved Genesis Issue #${issue_number}."
           }
 
-          if [[ "$EVENT_NAME" == "issues" && -n "$EVENT_ISSUE_NUMBER" ]]; then
-            reopen_if_unsolved "$EVENT_ISSUE_NUMBER"
+          if [[ "$GITHUB_EVENT_NAME" == "issues" ]]; then
+            issue_number=$(jq -r '.issue.number // empty' "$GITHUB_EVENT_PATH")
+            if [[ -n "$issue_number" ]]; then
+              reopen_if_unsolved "$issue_number"
+            fi
           fi
 
-          # Reconcile recent bad closures so a missed event cannot leave an unsolved task closed.
           gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=closed&labels=genesis-task&sort=updated&direction=desc&per_page=100" --jq '.[] | select(.pull_request == null) | .number' \
             | head -n 100 \
             | while read -r issue_number; do
