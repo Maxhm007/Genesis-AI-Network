@@ -57,6 +57,39 @@ def test_requested_system_issue_can_ground_in_privileged_script_and_test(tmp_pat
     assert context == grounded
 
 
+def test_successor_keeps_explicit_script_target_before_required_strategy(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "scripts/dashboard_navigation_fallback.py",
+        "def render_navigation():\n    return 'dashboard tabs aria current'\n",
+    )
+    _write(
+        tmp_path,
+        "tests/test_dashboard_navigation_fallback.py",
+        "def test_active_tab_aria_current():\n    assert True\n",
+    )
+    _write(tmp_path, "genesis/improvement.py", "def improve():\n    return 'strategy capability'\n")
+    module = CodingModule(tmp_path)
+    context = ["genesis/improvement.py"]
+    objective = (
+        "Resolve exactly the described software defect.\n"
+        "ISSUE_EVIDENCE:\n"
+        "TITLE: Dashboard improvement follow-up\n"
+        "BODY:\n"
+        "- **Target:** `scripts/dashboard_navigation_fallback.py`\n\n"
+        "### Why the parent was not solved\n"
+        "The previous bounded implementation failed.\n\n"
+        "### Required next strategy\n"
+        "Use a materially different repair strategy and diagnose the blocker.\n"
+    )
+
+    grounded = _ground_requested_issue_context(module, objective, context)
+
+    assert grounded[0] == "scripts/dashboard_navigation_fallback.py"
+    assert grounded[1] == "tests/test_dashboard_navigation_fallback.py"
+    assert context == grounded
+
+
 def test_script_path_requires_privileged_normalization(tmp_path: Path) -> None:
     with pytest.raises(RuntimeError, match="privileged autonomy lane"):
         _normalize_with_privileged_scripts(tmp_path, "scripts/helper.py", allow_privileged=False)
