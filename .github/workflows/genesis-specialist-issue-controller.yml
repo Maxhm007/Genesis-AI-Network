@@ -8,7 +8,8 @@ on:
     branches: [main]
     paths:
       - .github/workflows/genesis-specialist-issue-controller.yml
-      - .github/workflows/genesis-specialist-repair-worker.yml
+      - .github/workflows/genesis-specialist-repair-worker-v2.yml
+      - scripts/specialist_issue_autorepair.py
       - genesis/github_issue_capability_builder.py
       - scripts/requeue_exhausted_issues.py
 
@@ -54,9 +55,6 @@ jobs:
 
           gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/genesis-specialist-open.json
 
-          # Actionable work without a deterministic single-file target must never
-          # disappear silently from queue inspection. Classify it once, without
-          # pretending that the ordinary package-code lane can safely solve it.
           python - <<'PY' > /tmp/genesis-needs-routing.txt
           import json
           import re
@@ -120,9 +118,6 @@ jobs:
             echo "Classified Issue #${issue_number} for specialist routing: ${reason}."
           done < /tmp/genesis-needs-routing.txt
 
-          # A reservation from either lane owns the whole queue. Strictly preserve
-          # one active repair/validation operation at a time. Classification above
-          # is metadata-only and may still run while another repair is active.
           active_count=$(jq '[.[] | select(.pull_request == null) | select([.labels[].name] | any(. == "genesis-repair-in-progress" or . == "genesis-validating"))] | length' /tmp/genesis-specialist-open.json)
           if [[ "$active_count" -gt 0 ]]; then
             echo "Another Genesis repair/validation reservation is active (${active_count}); specialist repair lane will not start additional work."
@@ -183,21 +178,20 @@ jobs:
             exit 0
           fi
 
-          # Claim using the same shared reservation label observed by the generic controller.
           gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" \
             --add-label genesis-repair-in-progress \
             --add-label genesis-autonomous \
             --add-label genesis-specialist >/dev/null
 
-          if gh workflow run genesis-specialist-repair-worker.yml \
+          if gh workflow run genesis-specialist-repair-worker-v2.yml \
             --repo "$GITHUB_REPOSITORY" --ref main -f issue_number="$issue_number"; then
             gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
-              --body "Genesis Specialist Issue Controller reserved this bounded system-script repair and dispatched the privileged specialist worker. Controller run: ${GITHUB_RUN_ID}. Normal sandbox permissions were not widened."
-            echo "Dispatched specialist worker for Issue #${issue_number}."
+              --body "Genesis Specialist Issue Controller reserved this bounded system-script repair and dispatched the grounded privileged specialist worker v2. Controller run: ${GITHUB_RUN_ID}. Normal sandbox permissions were not widened."
+            echo "Dispatched grounded specialist worker v2 for Issue #${issue_number}."
           else
             gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress >/dev/null 2>&1 || true
             gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --add-label genesis-blocked >/dev/null 2>&1 || true
             gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
-              --body "Genesis Specialist Issue Controller could not dispatch the bounded specialist worker. The reservation was released without changing code. Controller run: ${GITHUB_RUN_ID}."
+              --body "Genesis Specialist Issue Controller could not dispatch the grounded specialist worker v2. The reservation was released without changing code. Controller run: ${GITHUB_RUN_ID}."
             exit 1
           fi
