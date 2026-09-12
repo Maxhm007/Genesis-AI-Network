@@ -1,5 +1,8 @@
 # Genesis AI Network — TODO
 
+- [ ] Confirm Qwen3 single-line qualification and one-task advisory inference before completing activation.
+
+
 - [ ] Verify repeated Qwen3 qualification after the initial JSON-format rejection; do not activate on failed checks.
 
 

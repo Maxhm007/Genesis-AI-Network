@@ -1,6 +1,12 @@
 name: Genesis Additional Qwen3 Activation
 on:
   workflow_dispatch:
+    inputs:
+      task:
+        description: 'Optional single new task; advisory response only, existing workers unchanged'
+        required: false
+        type: string
+        default: ''
 permissions:
   contents: read
 concurrency:
@@ -28,6 +34,7 @@ jobs:
         run: python -m pytest tests/test_additional_qwen3_candidate.py tests/test_provider_lifecycle.py -q
       - name: Real model inference and bounded qualification
         env:
+          GENESIS_TASK: ${{ inputs.task }}
           BENCHMARK_RUNNER: ${{ matrix.runner }}
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/github_qwen3_activation_probe.py

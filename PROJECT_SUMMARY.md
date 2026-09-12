@@ -1,5 +1,10 @@
 # Genesis AI Network — Project Summary
 
+## Manual additional-model task mode
+
+The GitHub-only Qwen3 workflow accepts one optional advisory task, executed once on benchmark_a only after qualification passes. Concurrency serializes these runs. It does not mutate issues, code, or existing worker routing. After activation, inference pins the approved model revision. Initial runs rejected coding JSON scope/newline formatting; a one-line coding probe retains strict functional and safety checks. Activation remains pending passing evidence.
+
+
 ## Qwen3 qualification retry
 
 First GitHub qualification loaded pinned model weights and passed policy tests, but rejected the coding response format. Provider stays DISCOVERED. The isolated probe now specifies the exact JSON schema and retains diagnostic output; safety and functional checks are unchanged.

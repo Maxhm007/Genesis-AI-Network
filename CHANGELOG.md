@@ -1,5 +1,11 @@
 # Changelog
 
+## qwen3-github-v1.0.2 - 13-Sep-2026 - 01:47 AM - Bound one-at-a-time GitHub inference
+
+- Request a valid single-line function to avoid newline over-escaping, retaining strict AST/scope/functional validation.
+- Added optional one-task advisory inference, serialized execution and approved-revision pinning after activation; existing workers unchanged.
+
+
 ## qwen3-github-v1.0.1 - 13-Sep-2026 - 01:40 AM - Clarify qualification JSON contract
 
 - Retained strict scope, syntax and functional checks; clarified the requested proposal schema after run 34714640583 failed format validation.

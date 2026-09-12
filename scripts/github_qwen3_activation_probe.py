@@ -69,7 +69,11 @@ def main():
         metadata = json.load(response)
     if metadata.get("cardData", {}).get("license") != "apache-2.0":
         raise RuntimeError("Model license mismatch")
-    revision = metadata["sha"]
+    registry_path = Path(__file__).resolve().parents[1] / "config/provider_candidates.json"
+    registered = next(p for p in json.loads(registry_path.read_text(encoding="utf-8"))["providers"]
+                      if p["provider_id"] == "qwen3-4b-instruct-2507-optional")
+    revision = (registered["metadata"]["model_revision"] if registered["state"] == "ACTIVE"
+                else metadata["sha"])
     if len(revision) != 40:
         raise RuntimeError("Model revision not pinned")
     begin = time.monotonic()
@@ -93,9 +97,9 @@ def main():
     prompt = ('Write a minimal Python addition function as a JSON proposal. '
               'Required exact JSON schema: {"files":{"genesis/probe.py":"PYTHON_SOURCE_STRING"}}. '
               'The files value is an object, not a list. The only key is genesis/probe.py. '
-              'Replace PYTHON_SOURCE_STRING with source defining def add(a, b): and returning a + b. '
+              'Replace PYTHON_SOURCE_STRING with a SINGLE LINE defining def add(a, b): and returning a + b. '
               'No imports, annotations, defaults, decorators, helper functions or calls. '
-              'Return the JSON object only, with source newlines escaped inside the JSON string.')
+              'Return the JSON object only. Keep Python source on one line; no newline characters or escape sequences.')
     response = timed_reason(model, prompt, 256)
     print("structured_coding_response=" + repr(response), flush=True)
     try:
@@ -114,6 +118,12 @@ def main():
               "scope": "Basic inference, identity/safety and bounded coding smoke qualification; not a full repair benchmark"}
     if report["max_rss_kib"] > 14 * 1024 * 1024 or report["elapsed_seconds"] > 1200:
         report["passed"] = False
+    task = os.environ.get("GENESIS_TASK", "").strip()
+    if task and report["passed"] and report["runner"] == "benchmark_a":
+        if len(task) > 8000:
+            raise ValueError("Manual task exceeds 8000 characters")
+        report["manual_task"] = {"prompt": task, "response": timed_reason(model, task, 512),
+                                 "mode": "advisory_only_no_repository_or_issue_mutation"}
     path = Path("qwen3-benchmark-" + os.environ["BENCHMARK_RUNNER"] + ".json")
     path.write_text(json.dumps(report, indent=2) + "\n", encoding="utf-8")
     print(json.dumps(report, indent=2))
