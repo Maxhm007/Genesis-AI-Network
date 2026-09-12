@@ -121,7 +121,74 @@ class AdaptiveCodingModel:
             return self._model(self.primary_model_id).reason(prompt, max_new_tokens=max_new_tokens)
 
     @staticmethod
-    def _proposal_object(raw: str) -> dict | None:
+    def _complete_truncated_json(raw: str) -> str | None:
+        """Close only missing JSON containers after a complete generated value.
+
+        Small CPU-hosted models can hit their token boundary after emitting a complete one-edit
+        payload but before the final ``]``/``}`` delimiters. Recover that narrow case without
+        inventing any path, line number, replacement text, key, or value. Unterminated strings,
+        mismatched delimiters, and payloads ending where a value is still required are rejected.
+        """
+        text = raw.strip()
+        if text.startswith("```"):
+            lines = text.splitlines()
+            if lines and lines[0].startswith("```"):
+                lines = lines[1:]
+            if lines and lines[-1].strip() == "```":
+                lines = lines[:-1]
+            text = "\n".join(lines).strip()
+
+        start = text.find("{")
+        if start < 0:
+            return None
+        candidate = text[start:].strip()
+        if candidate.endswith("```"):
+            candidate = candidate[:-3].rstrip()
+
+        try:
+            value = json.loads(candidate)
+        except json.JSONDecodeError:
+            value = None
+        if isinstance(value, dict):
+            return candidate
+
+        stack: list[str] = []
+        in_string = False
+        escaped = False
+        for char in candidate:
+            if in_string:
+                if escaped:
+                    escaped = False
+                elif char == "\\":
+                    escaped = True
+                elif char == '"':
+                    in_string = False
+                continue
+            if char == '"':
+                in_string = True
+            elif char in "{[":
+                stack.append(char)
+            elif char in "}]":
+                expected = "{" if char == "}" else "["
+                if not stack or stack[-1] != expected:
+                    return None
+                stack.pop()
+
+        if in_string or escaped or not stack:
+            return None
+        significant = candidate.rstrip()
+        if not significant or significant[-1] in "{[:,":
+            return None
+
+        completed = candidate + "".join("}" if opener == "{" else "]" for opener in reversed(stack))
+        try:
+            value = json.loads(completed)
+        except json.JSONDecodeError:
+            return None
+        return completed if isinstance(value, dict) else None
+
+    @classmethod
+    def _proposal_object(cls, raw: str) -> dict | None:
         text = raw.strip()
         if text.startswith("```"):
             lines = text.splitlines()
@@ -135,12 +202,21 @@ class AdaptiveCodingModel:
         except json.JSONDecodeError:
             start = text.find("{")
             end = text.rfind("}")
-            if start < 0 or end <= start:
-                return None
-            try:
-                value = json.loads(text[start : end + 1])
-            except json.JSONDecodeError:
-                return None
+            if start >= 0 and end > start:
+                try:
+                    value = json.loads(text[start : end + 1])
+                except json.JSONDecodeError:
+                    value = None
+            else:
+                value = None
+            if not isinstance(value, dict):
+                completed = cls._complete_truncated_json(text)
+                if completed is None:
+                    return None
+                try:
+                    value = json.loads(completed)
+                except json.JSONDecodeError:
+                    return None
         return value if isinstance(value, dict) else None
 
     @staticmethod
@@ -272,6 +348,18 @@ class AdaptiveCodingModel:
         raw = ""
         for correction in range(MAX_NOOP_CORRECTIONS + 1):
             raw = self._reason_once(current_prompt, max_new_tokens)
+            completed = self._complete_truncated_json(raw)
+            if completed is not None and completed != raw.strip():
+                print(
+                    json.dumps(
+                        {
+                            "event": "coding_json_structurally_completed",
+                            "added_chars": len(completed) - len(raw.strip()),
+                        }
+                    ),
+                    flush=True,
+                )
+                raw = completed
             if not self._is_noop_edit(base_prompt, raw):
                 return raw
             if correction >= MAX_NOOP_CORRECTIONS:
@@ -330,6 +418,7 @@ def main() -> None:
                 "replaceable": True,
                 "adaptive_retry_escalation": True,
                 "noop_self_correction": True,
+                "structural_json_recovery": True,
             }
         ),
         flush=True,
