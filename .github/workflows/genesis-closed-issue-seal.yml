@@ -14,65 +14,62 @@ permissions:
   contents: read
 
 jobs:
-  seal-closed-issue:
+  enforce-verified-close:
     if: github.event_name == 'issues' && github.event.action == 'closed'
     runs-on: ubuntu-latest
     steps:
-      - name: Seal a verified or intentional closure
+      - name: Enforce solve -> verify -> comment -> close
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
-          STATE_REASON: ${{ github.event.issue.state_reason }}
+          ACTOR: ${{ github.actor }}
         shell: bash
         run: |
           set -euo pipefail
 
-          for spec in \
-            'genesis-closed-sealed-completed:0e8a16:Closed with verified completion evidence; Genesis must not reopen automatically' \
-            'genesis-closed-sealed-not-planned:6e7781:Intentional not-planned closure; unsolved automated false closures may be reconciled open' \
-            'genesis-closed-sealed-duplicate:8250df:Closed as duplicate; Genesis must not reopen automatically'; do
-            IFS=: read -r name color description <<<"$spec"
-            gh label create "$name" --repo "$GITHUB_REPOSITORY" --color "$color" --description "$description" --force >/dev/null
-          done
-
-          for label in genesis-closed-sealed-completed genesis-closed-sealed-not-planned genesis-closed-sealed-duplicate; do
-            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
-          done
-
           labels=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name]')
           verified=$(jq -r 'index("genesis-verified") != null' <<<"$labels")
 
-          case "${STATE_REASON:-completed}" in
-            duplicate)
-              seal='genesis-closed-sealed-duplicate'
-              ;;
-            not_planned)
-              seal='genesis-closed-sealed-not-planned'
-              ;;
-            *)
-              seal='genesis-closed-sealed-completed'
-              ;;
-          esac
-          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "$seal" >/dev/null
-
-          # Only a verified completion/intentional terminal closure should lose recovery labels.
-          # An unsolved automated not_planned closure keeps enough state for the reconciler to
-          # recognize and reopen it instead of disguising exhaustion as completion.
-          if [ "$verified" = 'true' ] || [ "${STATE_REASON:-completed}" = 'duplicate' ]; then
-            for label in \
-              genesis-solver-exhausted genesis-priority-exhausted genesis-deferred \
-              agentic-lab genesis-agentic-escalated genesis-autonomous \
-              genesis-repair-in-progress genesis-validating genesis-claimed \
-              genesis-working genesis-verifying genesis-priority-claim; do
-              gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
-            done
+          # Human closures are owner decisions. This guard only controls Genesis automation.
+          if [ "$ACTOR" != 'github-actions[bot]' ]; then
+            echo "Human closure detected for #${ISSUE_NUMBER}; leaving it unchanged."
+            exit 0
           fi
 
-  reject-bot-reopen:
+          # Genesis automation may close only after verified resolution evidence exists.
+          if [ "$verified" != 'true' ]; then
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
+              --body "Genesis closure guard rejected this automatic close because no \`genesis-verified\` evidence exists. The Issue remains authoritative and must stay open: add failure evidence/comments, retry with another bounded strategy, verify again, and close only after a verified solution. Guard run: ${GITHUB_RUN_ID}." >/dev/null
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+              --method PATCH -f state=open >/dev/null
+            for label in genesis-closed-sealed-completed genesis-closed-sealed-not-planned genesis-closed-sealed-duplicate; do
+              gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+            done
+            echo "Reopened unverified automatic closure #${ISSUE_NUMBER}."
+            exit 0
+          fi
+
+          gh label create genesis-closed-sealed-completed --repo "$GITHUB_REPOSITORY" \
+            --color 0e8a16 --description 'Closed after verified Genesis completion evidence' --force >/dev/null
+          for label in genesis-closed-sealed-not-planned genesis-closed-sealed-duplicate; do
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+          done
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-closed-sealed-completed >/dev/null
+
+          for label in \
+            genesis-solver-exhausted genesis-priority-exhausted genesis-deferred \
+            agentic-lab genesis-agentic-escalated genesis-autonomous \
+            genesis-repair-in-progress genesis-validating genesis-claimed \
+            genesis-working genesis-verifying genesis-priority-claim; do
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+          done
+          echo "Accepted verified automatic closure #${ISSUE_NUMBER}."
+
+  protect-verified-close:
     if: github.event_name == 'issues' && github.event.action == 'reopened' && github.actor == 'github-actions[bot]'
     runs-on: ubuntu-latest
     steps:
-      - name: Re-close only verified or duplicate sealed issues
+      - name: Reject automatic reopen only after verified closure
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ github.event.issue.number }}
@@ -81,62 +78,34 @@ jobs:
           set -euo pipefail
           labels=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name]')
           verified=$(jq -r 'index("genesis-verified") != null' <<<"$labels")
+          sealed=$(jq -r 'index("genesis-closed-sealed-completed") != null' <<<"$labels")
 
-          if jq -e 'index("genesis-closed-sealed-duplicate") != null' <<<"$labels" >/dev/null; then
-            gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
-              --method PATCH -f state=closed -f state_reason=duplicate >/dev/null
-            echo "Rejected automatic reopen of duplicate issue #${ISSUE_NUMBER}."
-            exit 0
-          fi
-
-          if [ "$verified" = 'true' ] && jq -e 'index("genesis-closed-sealed-completed") != null or index("genesis-closed-sealed-not-planned") != null' <<<"$labels" >/dev/null; then
+          if [ "$verified" = 'true' ] && [ "$sealed" = 'true' ]; then
             gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
               --method PATCH -f state=closed -f state_reason=completed >/dev/null
             echo "Rejected automatic reopen of verified issue #${ISSUE_NUMBER}."
-            exit 0
+          else
+            echo "Issue #${ISSUE_NUMBER} is not verified+sealed; leaving it open for retry."
           fi
 
-          # No verified solution: this was a false/premature closure. Permit the terminal
-          # reconciler to restore the Issue to the active recovery lane and clear the stale seal.
-          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --remove-label genesis-closed-sealed-not-planned >/dev/null 2>&1 || true
-          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-            --remove-label genesis-closed-sealed-completed >/dev/null 2>&1 || true
-          echo "Allowed bot reopen of unsolved issue #${ISSUE_NUMBER}; no verified completion evidence exists."
-
-  backfill-existing-closed:
+  backfill-verified-closed:
     if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     steps:
-      - name: Seal existing closed issues without destroying unsolved recovery evidence
+      - name: Seal only verified existing closed Genesis issues
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
+          gh label create genesis-closed-sealed-completed --repo "$GITHUB_REPOSITORY" \
+            --color 0e8a16 --description 'Closed after verified Genesis completion evidence' --force >/dev/null
 
-          for spec in \
-            'genesis-closed-sealed-completed:0e8a16:Closed with verified completion evidence; Genesis must not reopen automatically' \
-            'genesis-closed-sealed-not-planned:6e7781:Intentional not-planned closure; unsolved automated false closures may be reconciled open' \
-            'genesis-closed-sealed-duplicate:8250df:Closed as duplicate; Genesis must not reopen automatically'; do
-            IFS=: read -r name color description <<<"$spec"
-            gh label create "$name" --repo "$GITHUB_REPOSITORY" --color "$color" --description "$description" --force >/dev/null
-          done
-
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=closed&per_page=100" --jq '.[] | select(.pull_request == null) | [.number, (.state_reason // "completed")] | @tsv' \
-            | while IFS=$'\t' read -r number state_reason; do
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=closed&per_page=100" --jq '.[] | select(.pull_request == null) | .number' \
+            | while read -r number; do
+                [ -z "$number" ] && continue
                 labels=$(gh issue view "$number" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name]')
-                verified=$(jq -r 'index("genesis-verified") != null' <<<"$labels")
-                case "$state_reason" in
-                  duplicate) seal='genesis-closed-sealed-duplicate' ;;
-                  not_planned) seal='genesis-closed-sealed-not-planned' ;;
-                  *) seal='genesis-closed-sealed-completed' ;;
-                esac
-                gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --add-label "$seal" >/dev/null
-
-                if [ "$verified" = 'true' ] || [ "$state_reason" = 'duplicate' ]; then
-                  for label in genesis-solver-exhausted genesis-priority-exhausted genesis-deferred agentic-lab genesis-agentic-escalated genesis-autonomous genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying genesis-priority-claim; do
-                    gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
-                  done
+                if jq -e 'index("genesis-verified") != null' <<<"$labels" >/dev/null; then
+                  gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --add-label genesis-closed-sealed-completed >/dev/null
                 fi
               done
