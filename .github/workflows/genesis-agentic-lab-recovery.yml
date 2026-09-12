@@ -11,6 +11,7 @@ on:
       - scripts/agentic_lab_recovery_dispatch.py
       - scripts/agentic_lab_capability_first_dispatch.py
       - scripts/agentic_lab_fifo_router.py
+      - scripts/park_exhausted_agentic_issues.py
       - scripts/android_issue_repair.py
       - scripts/capability_issue_priority_dispatch.py
       - scripts/requeue_exhausted_issues.py
@@ -43,6 +44,11 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Park exhausted unsolved issues without closing them
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/park_exhausted_agentic_issues.py
 
       - name: Dispatch oldest FIFO issue to the correct repair lane
         env:
