@@ -83,6 +83,58 @@ def _script_aware_allowed_paths(original, context_paths: list[str]) -> set[str]:
     return allowed
 
 
+def _navigation_landmark_micro_repair(issue: dict, context_paths: list[str], root: Path):
+    """Return one deterministic, target-local accessibility repair when evidence is exact.
+
+    This deliberately handles only an unambiguous micro defect: one explicit safe Python
+    target owns generated dashboard HTML, the issue says the navigation landmark lacks an
+    aria-label, and the source contains the known dashboard-read insertion point. The normal
+    autorepair validation, test, protected-path and exact-promotion gates still decide whether
+    this candidate may be promoted.
+    """
+    issue_text = base.build_issue_text(issue)
+    lowered = issue_text.lower()
+    if "navigation landmark" not in lowered or "aria-label" not in lowered:
+        return None
+    if len(context_paths) != 1:
+        return None
+
+    target = context_paths[0]
+    if target in PROTECTED_SCRIPT_TARGETS or not target.startswith("scripts/") or not target.endswith(".py"):
+        return None
+    path = root / target
+    if not path.is_file():
+        return None
+
+    current = path.read_text(encoding="utf-8")
+    desired = '<nav class="nav" aria-label="Dashboard navigation">'
+    if desired in current:
+        return None
+
+    insertion = '    html = DASHBOARD.read_text(encoding="utf-8")\n'
+    if current.count(insertion) != 1:
+        return None
+
+    repair = (
+        insertion
+        + '    html = html.replace(\'<nav class="nav">\', \'<nav class="nav" aria-label="Dashboard navigation">\', 1)\n'
+    )
+    proposed = current.replace(insertion, repair, 1)
+    return base.CodingProposal(
+        title="Label dashboard navigation landmark",
+        rationale="Deterministic micro-repair for an explicitly evidenced missing navigation aria-label.",
+        files={target: proposed},
+        provider="genesis-agentic-micro-repair",
+    )
+
+
+def _micro_repair_or_original(original, issue: dict, context_paths: list[str], root: Path = base.ROOT, **kwargs):
+    micro = _navigation_landmark_micro_repair(issue, context_paths, root)
+    if micro is not None:
+        return micro
+    return original(issue, context_paths, root, **kwargs)
+
+
 def run(issue_number: int, repository: str, strategy: str) -> dict:
     if strategy not in STRATEGY_GUIDANCE:
         raise ValueError(f"unsupported Agentic Lab strategy: {strategy}")
@@ -90,6 +142,7 @@ def run(issue_number: int, repository: str, strategy: str) -> dict:
     original_loader = base.load_maintainer_repair_guidance
     original_context_paths = base.candidate_context_paths
     original_allowed_paths = base.allowed_issue_repair_paths
+    original_propose = base.propose_issue_repair
     existing_guidance = original_loader(repository, issue_number)
     strategy_guidance = STRATEGY_GUIDANCE[strategy]
 
@@ -103,15 +156,20 @@ def run(issue_number: int, repository: str, strategy: str) -> dict:
     def allowed_paths(paths: list[str]) -> set[str]:
         return _script_aware_allowed_paths(original_allowed_paths, paths)
 
+    def propose(issue: dict, paths: list[str], root: Path = base.ROOT, **kwargs):
+        return _micro_repair_or_original(original_propose, issue, paths, root, **kwargs)
+
     base.load_maintainer_repair_guidance = load_guidance
     base.candidate_context_paths = context_paths
     base.allowed_issue_repair_paths = allowed_paths
+    base.propose_issue_repair = propose
     try:
         evidence = base.run(issue_number, repository)
     finally:
         base.load_maintainer_repair_guidance = original_loader
         base.candidate_context_paths = original_context_paths
         base.allowed_issue_repair_paths = original_allowed_paths
+        base.propose_issue_repair = original_propose
 
     evidence["agentic_strategy"] = strategy
     evidence["current_state_checked_first"] = True
