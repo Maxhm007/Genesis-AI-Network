@@ -37,7 +37,7 @@ def test_failed_workers_keep_issue_open_for_retry() -> None:
     assert "state=closed -f state_reason=not_planned" not in controller_retry
     assert "Issue remains OPEN" in bounded_release
     assert "Issue remains open" in specialist_release
-    assert "State: **open; escalated" in controller_retry
+    assert "State: **OPEN; escalated" in controller_retry
 
 
 def test_successful_workers_verify_then_close() -> None:
