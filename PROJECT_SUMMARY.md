@@ -31,8 +31,16 @@ Genesis currently combines:
 The dashboard repair router and executor share an exact exception for
 `scripts/self_evaluation_dashboard.py`. Its candidates still require normal
 tests and promotion validation; other script repairs remain privileged-only.
-Focused policy tests pass locally. Live deployment and automatic closure of
-Issue `#730` remain to be verified.
+Recovery PR `#830` is merged into `main` (`f513512`). Focused repair tests pass
+(38 passed, two Windows symlink skips); safety/specialist tests also pass (31).
+The broad local run passed 1,079 tests with two failures also reproduced on
+unchanged `main`; two other baseline formatting failures and the expensive
+live-history scan were excluded. Live worker `34711820249` created candidate
+`9eeff5a`, integrated it into `main` as `5207049`, and passed the full Linux suite
+before and after promotion (1,087 passed, 41 skipped each). The GitHub Actions
+bot automatically closed Issue `#730` as completed at 12:41 AM Dhaka time on
+13-Sep-2026. Other script targets remain outside this ordinary dashboard-only
+exception; the remaining queue is not claimed solved.
 
 The software-evolution path is:
 
