@@ -45,7 +45,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      # Operational no-op: immediate retry trigger after deterministic micro-repair support was added.
+      # Operational no-op: retry after explicit maintainer reactivation and deterministic micro-repair support.
       - name: Park exhausted unsolved issues without closing them
         env:
           GITHUB_TOKEN: ${{ github.token }}
