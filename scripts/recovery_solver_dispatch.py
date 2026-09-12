@@ -28,7 +28,10 @@ RECOVERY_STRATEGIES = (
     "alternative_implementation",
     "dependency_diagnosis",
 )
-MAX_RECOVERY_CYCLES = 3
+# Every declared recovery strategy must be reachable before same-Issue escalation.
+# Keep the cycle budget derived from the strategy set so adding a strategy cannot
+# silently make the final recovery method unreachable again.
+MAX_RECOVERY_CYCLES = len(RECOVERY_STRATEGIES)
 
 
 def issue_comments(repository: str, token: str, number: int) -> list[dict]:
@@ -194,7 +197,7 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             return outcome
 
         cycle = cycles + 1
-        strategy = RECOVERY_STRATEGIES[cycles % len(RECOVERY_STRATEGIES)]
+        strategy = RECOVERY_STRATEGIES[cycles]
 
         # The downstream repair engine requires genesis-autonomous. Recovery used
         # to reserve only the Agentic/repair labels, which could make an otherwise
