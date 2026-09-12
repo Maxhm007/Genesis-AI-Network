@@ -1,5 +1,11 @@
 # Changelog
 
+## qwen3-github-v1.0.1 - 13-Sep-2026 - 01:40 AM - Clarify qualification JSON contract
+
+- Retained strict scope, syntax and functional checks; clarified the requested proposal schema after run 34714640583 failed format validation.
+- Preserve failed response diagnostics and artifact reports. Existing production workers remain untouched.
+
+
 ## qwen3-github-v1.0.0 - 13-Sep-2026 - 01:40 AM - Prepare GitHub-only Qwen3 activation
 
 - Added isolated manual two-runner inference and bounded smoke qualification, with artifact evidence and no repository write permission.

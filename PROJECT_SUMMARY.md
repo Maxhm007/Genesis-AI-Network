@@ -1,5 +1,10 @@
 # Genesis AI Network — Project Summary
 
+## Qwen3 qualification retry
+
+First GitHub qualification loaded pinned model weights and passed policy tests, but rejected the coding response format. Provider stays DISCOVERED. The isolated probe now specifies the exact JSON schema and retains diagnostic output; safety and functional checks are unchanged.
+
+
 ## GitHub-only additional Qwen3 qualification
 
 A manual read-only workflow runs pinned Qwen3-4B-Instruct-2507 weights on two isolated GitHub runners. Activation remains pending actual inference and evidence review. Existing providers, repair workers and routing stay unchanged. No local synchronization or model download is required.

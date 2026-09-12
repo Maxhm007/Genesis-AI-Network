@@ -90,14 +90,21 @@ def main():
         response = timed_reason(model, case["prompt"], 96)
         passed, evidence = evaluate(response, case)
         results.append({"id": case["id"], "passed": passed, **evidence})
-    prompt = ('Return JSON only, no markdown, exactly one files mapping with key genesis/probe.py. '
-              'Its Python source must define only def add(a, b): returning a + b. '
+    prompt = ('Write a minimal Python addition function as a JSON proposal. '
+              'Required exact JSON schema: {"files":{"genesis/probe.py":"PYTHON_SOURCE_STRING"}}. '
+              'The files value is an object, not a list. The only key is genesis/probe.py. '
+              'Replace PYTHON_SOURCE_STRING with source defining def add(a, b): and returning a + b. '
               'No imports, annotations, defaults, decorators, helper functions or calls. '
-              'Escape source newlines correctly inside JSON.')
+              'Return the JSON object only, with source newlines escaped inside the JSON string.')
     response = timed_reason(model, prompt, 256)
-    validate_code_response(response)
-    results.append({"id": "structured_coding_and_functional_checks", "passed": True,
-                    "response": response[:2000]})
+    print("structured_coding_response=" + repr(response), flush=True)
+    try:
+        validate_code_response(response)
+        coding_passed, coding_error = True, None
+    except (ValueError, SyntaxError, TypeError, KeyError) as error:
+        coding_passed, coding_error = False, str(error)
+    results.append({"id": "structured_coding_and_functional_checks", "passed": coding_passed,
+                    "response": response[:2000], "error": coding_error})
     report = {"model_id": MODEL, "model_revision": revision, "license": "apache-2.0",
               "runner": os.environ["BENCHMARK_RUNNER"], "workflow_run": int(os.environ["GITHUB_RUN_ID"]),
               "source_sha": os.environ["GITHUB_SHA"], "trust_remote_code": False,
