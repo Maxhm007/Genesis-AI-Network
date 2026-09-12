@@ -14,6 +14,7 @@ from .autonomy_proof import AutonomyProofLedger
 
 PROTECTED_PATHS = {"GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"}
 ALLOWED_PREFIXES = ("genesis/", "tests/", "docs/", "config/", "desktop/", "mobile/", ".github/")
+ALLOWED_SCRIPT_PATHS = frozenset({"scripts/self_evaluation_dashboard.py"})
 CANDIDATE_TEST_PROVIDER_ENV = (
     "GENESIS_PROVIDER_URL",
     "GENESIS_PROVIDER_NAME",
@@ -40,7 +41,7 @@ def normalize_selfdev_path(root: Path, path: str, *, allow_privileged: bool = Fa
         raise RuntimeError("self-development may not modify Git metadata")
     if normalized.startswith(".github/") and not allow_privileged:
         raise RuntimeError("workflow changes require the privileged autonomy lane")
-    if not normalized.startswith(ALLOWED_PREFIXES):
+    if not normalized.startswith(ALLOWED_PREFIXES) and normalized not in ALLOWED_SCRIPT_PATHS:
         raise RuntimeError(f"path outside self-development sandbox: {normalized}")
     target = root.joinpath(*candidate.parts).resolve()
     try:

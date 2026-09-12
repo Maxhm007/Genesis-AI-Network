@@ -7,6 +7,7 @@ import re
 from pathlib import Path
 
 import scripts.github_issue_autorepair as base
+from genesis.selfdev import ALLOWED_SCRIPT_PATHS, normalize_selfdev_path
 
 
 STRATEGY_GUIDANCE = {
@@ -60,7 +61,11 @@ def _explicit_safe_script_paths(issue_text: str, root: Path) -> list[str]:
     rows: list[str] = []
     for raw in _SCRIPT_TARGET_RE.findall(issue_text):
         normalized = raw.replace("\\", "/").removeprefix("./")
-        if ".." in Path(normalized).parts or normalized in PROTECTED_SCRIPT_TARGETS:
+        if normalized not in ALLOWED_SCRIPT_PATHS or normalized in PROTECTED_SCRIPT_TARGETS:
+            continue
+        try:
+            normalize_selfdev_path(root, normalized)
+        except RuntimeError:
             continue
         if (root / normalized).is_file() and normalized not in rows:
             rows.append(normalized)
@@ -78,7 +83,7 @@ def _script_aware_allowed_paths(original, context_paths: list[str]) -> set[str]:
     allowed = set(original(context_paths))
     for relative in context_paths:
         path = Path(relative)
-        if relative.startswith("scripts/") and path.suffix == ".py" and relative not in PROTECTED_SCRIPT_TARGETS:
+        if relative in ALLOWED_SCRIPT_PATHS and relative not in PROTECTED_SCRIPT_TARGETS:
             allowed.add(f"tests/test_{path.stem}.py")
     return allowed
 
@@ -100,7 +105,11 @@ def _navigation_landmark_micro_repair(issue: dict, context_paths: list[str], roo
         return None
 
     target = context_paths[0]
-    if target in PROTECTED_SCRIPT_TARGETS or not target.startswith("scripts/") or not target.endswith(".py"):
+    if target not in ALLOWED_SCRIPT_PATHS or target in PROTECTED_SCRIPT_TARGETS:
+        return None
+    try:
+        normalize_selfdev_path(root, target)
+    except RuntimeError:
         return None
     path = root / target
     if not path.is_file():
