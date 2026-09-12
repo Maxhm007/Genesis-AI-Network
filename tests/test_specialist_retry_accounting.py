@@ -13,7 +13,10 @@ def test_specialist_retry_state_is_durable_and_bounded() -> None:
     assert 'effective_attempt="${ATTEMPT:-}"' in worker
     assert 'status="${status}:attempt_recording_failed"' in worker
     assert 'if [[ "$effective_attempt" -ge 3' in worker
-    assert "state=closed -f state_reason=not_planned" in worker
+    assert "--add-label agentic-lab" in worker
+    assert "same authoritative Issue remains OPEN under Agentic Lab" in worker
+    release_at = worker.index("Release unsuccessful reservation with bounded terminal policy")
+    assert "state=closed -f state_reason=not_planned" not in worker[release_at:]
     assert "${ATTEMPT:-1}" not in worker
 
 
