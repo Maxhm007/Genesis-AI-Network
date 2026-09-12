@@ -37,7 +37,7 @@ PROTECTED_TARGETS = {
     "scripts/issue_acceptance_guard.py",
 }
 
-TARGET_RE = re.compile(r"(?:Target:\*\*|Target:|`)((?:genesis|scripts)/[A-Za-z0-9_./-]+\.py)")
+TARGET_RE = re.compile(r"\b((?:genesis|scripts)/[A-Za-z0-9_./-]+\.py)\b")
 
 
 def _labels(issue: dict) -> set[str]:
@@ -108,9 +108,6 @@ def score(issue: dict) -> tuple[int, dict]:
         value -= 80
         reasons.append("sensitive_boundary_penalty")
 
-    number = int(issue.get("number") or issue.get("issue_number") or 0)
-    # Older issues receive a small deterministic tie-break preference.
-    value += max(0, min(12, 1000 - number)) // 100
     return value, {"target": target, "reasons": reasons}
 
 
