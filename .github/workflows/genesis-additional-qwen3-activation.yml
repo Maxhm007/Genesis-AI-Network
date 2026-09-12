@@ -1,0 +1,38 @@
+name: Genesis Additional Qwen3 Activation
+on:
+  workflow_dispatch:
+permissions:
+  contents: read
+concurrency:
+  group: genesis-additional-qwen3-activation
+  cancel-in-progress: false
+jobs:
+  benchmark:
+    strategy:
+      fail-fast: false
+      matrix:
+        runner: [benchmark_a, benchmark_b]
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install isolated inference dependencies
+        run: |
+          python -m pip install -r requirements.txt
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install 'transformers>=4.51,<5' safetensors accelerate
+      - name: Validate registration and activation policy
+        run: python -m pytest tests/test_additional_qwen3_candidate.py tests/test_provider_lifecycle.py -q
+      - name: Real model inference and bounded qualification
+        env:
+          BENCHMARK_RUNNER: ${{ matrix.runner }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/github_qwen3_activation_probe.py
+      - uses: actions/upload-artifact@v4
+        with:
+          name: qwen3-${{ matrix.runner }}
+          path: qwen3-benchmark-${{ matrix.runner }}.json
+          if-no-files-found: error

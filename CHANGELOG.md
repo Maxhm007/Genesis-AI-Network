@@ -1,5 +1,11 @@
 # Changelog
 
+## qwen3-github-v1.0.0 - 13-Sep-2026 - 01:40 AM - Prepare GitHub-only Qwen3 activation
+
+- Added isolated manual two-runner inference and bounded smoke qualification, with artifact evidence and no repository write permission.
+- Kept existing workers and provider defaults unchanged; activation requires passing live checks and review.
+
+
 ## qwen3-additional-v1.0.0 - 13-Sep-2026 - 01:21 AM - Register optional Qwen3 4B candidate
 
 - Added Qwen3-4B-Instruct-2507 to Model Scout discovery and provider trust registries without replacing existing entries or active providers.
