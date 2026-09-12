@@ -43,7 +43,6 @@ class ImprovementModule:
             return False
         if task_type == "capability_growth":
             return True
-        return source == "genesis.evolution_learning" and bool(target)
 
     @classmethod
     def prepare_task(cls, task: Any, record: Any | None = None):
