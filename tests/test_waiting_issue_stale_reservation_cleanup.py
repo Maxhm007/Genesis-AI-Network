@@ -22,7 +22,6 @@ def test_legacy_waiting_issue_is_reactivated_into_agentic_lab(monkeypatch):
         return {}
 
     monkeypatch.setattr(module, "request", fake_request)
-
     issue = {
         "number": 707,
         "labels": [
@@ -41,15 +40,10 @@ def test_legacy_waiting_issue_is_reactivated_into_agentic_lab(monkeypatch):
         and payload == {"labels": ["agentic-lab", "genesis-autonomous", "genesis-solver-exhausted"]}
         for method, path, payload in calls
     )
-    assert any(
-        method == "POST"
-        and path.endswith("/issues/707/comments")
-        and "stays OPEN" in str(payload)
-        for method, path, payload in calls
-    )
+    assert any(method == "POST" and path.endswith("/issues/707/comments") and "stays OPEN" in str(payload) for method, path, payload in calls)
 
 
-def test_full_agentic_strategy_rotation_retries_instead_of_parking(monkeypatch):
+def test_full_agentic_strategy_rotation_escalates_same_issue_to_qwen3(monkeypatch):
     module = _load_module()
     calls: list[tuple[str, str, object]] = []
 
@@ -72,7 +66,6 @@ def test_full_agentic_strategy_rotation_retries_instead_of_parking(monkeypatch):
             {"body": "<!-- genesis-agentic-strategy-result:dependency_diagnosis --> failed"},
         ],
     )
-
     issue = {
         "number": 708,
         "labels": [
@@ -84,22 +77,39 @@ def test_full_agentic_strategy_rotation_retries_instead_of_parking(monkeypatch):
 
     assert module.park_issue("owner/repo", "token", issue) is True
     assert not any(
+        method == "POST" and path.endswith("/issues/708/labels") and payload and "genesis-waiting-user" in payload.get("labels", [])
+        for method, path, payload in calls
+    )
+    assert any(
         method == "POST"
         and path.endswith("/issues/708/labels")
         and payload
-        and "genesis-waiting-user" in payload.get("labels", [])
+        and "genesis-qwen3-agentic" in payload.get("labels", [])
+        and "genesis-repair-in-progress" in payload.get("labels", [])
         for method, path, payload in calls
     )
     assert any(
         method == "POST"
-        and path.endswith("/issues/708/labels")
-        and payload == {"labels": ["agentic-lab", "genesis-autonomous", "genesis-solver-exhausted"]}
+        and path == "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches"
+        and payload == {"ref": "main", "inputs": {"issue_number": "708", "strategy": "qwen3_fallback"}}
         for method, path, payload in calls
     )
-    assert any(
-        method == "POST"
-        and path.endswith("/issues/708/comments")
-        and "remains OPEN" in str(payload)
-        and "does not close or park" in str(payload)
-        for method, path, payload in calls
-    )
+    assert any(method == "POST" and path.endswith("/issues/708/comments") and "SAME open Issue" in str(payload) for method, path, payload in calls)
+
+
+def test_qwen3_result_starts_fresh_standard_agentic_cycle():
+    module = _load_module()
+    rows = [
+        {"body": "<!-- genesis-agentic-strategy:evidence_first -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first --> failed"},
+        {"body": "<!-- genesis-agentic-strategy:alternative_implementation -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:alternative_implementation --> failed"},
+        {"body": "<!-- genesis-agentic-strategy:diagnostic_reframe -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:diagnostic_reframe --> failed"},
+        {"body": "<!-- genesis-agentic-strategy:dependency_diagnosis -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:dependency_diagnosis --> failed"},
+        {"body": "<!-- genesis-agentic-strategy-result:qwen3_fallback --> failed"},
+        {"body": "<!-- genesis-agentic-strategy:evidence_first -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first --> failed again"},
+    ]
+    assert module.attempted_strategies(rows) == {"evidence_first"}
