@@ -12,7 +12,7 @@ RESULT_PREFIX = "<!-- genesis-agentic-strategy-result:"
 REACTIVATE_PREFIX = "<!-- genesis-agentic-reactivate -->"
 RETRY_PREFIX = "<!-- genesis-agentic-retry-cycle -->"
 QWEN3_ATTEMPT_PREFIX = "<!-- genesis-qwen3-agentic-attempt -->"
-QWEN3_RESULT_PREFIX = "<!-- genesis-qwen3-agentic-result:"
+QWEN3_RESULT_PREFIX = "<!-- genesis-agentic-strategy-result:qwen3_fallback -->"
 WAITING_LABEL = "genesis-waiting-user"
 AGENTIC_LABEL = "agentic-lab"
 AUTONOMOUS_LABEL = "genesis-autonomous"
@@ -144,11 +144,13 @@ def _dispatch_qwen3(repository: str, token: str, number: int) -> bool:
     ]})
     request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
         f"{QWEN3_ATTEMPT_PREFIX}\nThe existing Agentic Lab strategy set completed without a verified solution. "
-        "Genesis is escalating the SAME open Issue to the isolated Qwen3 Agentic fallback. Qwen3 must still pass exact-scope, validation, promotion, and verify-before-close gates."
+        "Genesis is escalating the SAME open Issue to the Qwen3 Agentic fallback through the standard Agentic Strategy Worker. "
+        "Qwen3 must still pass exact-scope, validation, promotion, and verify-before-close gates."
     )})
     try:
-        request(repository, token, "POST", "/actions/workflows/genesis-qwen3-agentic-fallback.yml/dispatches", {
-            "ref": "main", "inputs": {"issue_number": str(number)}
+        request(repository, token, "POST", "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches", {
+            "ref": "main",
+            "inputs": {"issue_number": str(number), "strategy": "qwen3_fallback"},
         })
     except Exception:
         remove_label(repository, token, number, "genesis-repair-in-progress")
