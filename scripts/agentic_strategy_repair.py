@@ -38,6 +38,12 @@ STRATEGY_GUIDANCE = {
         "orchestration layer will open a capability-building dependency issue. If a safe target-local repair is still necessary, implement "
         "it. Otherwise return without inventing a change."
     ),
+    "qwen3_fallback": (
+        "Agentic Lab final fallback strategy using the isolated Qwen3 provider. All earlier Agentic strategies already failed on this "
+        "same Issue. Read their comments as repair memory, re-check current main and acceptance criteria, and attempt a genuinely new "
+        "bounded solution. Do not bypass scope, protected-file, validation, security, promotion, or verify-before-close gates. If no "
+        "verified solution can be produced, return failure evidence only; the Issue must remain open and authoritative."
+    ),
 }
 
 CAPABILITY_LIKE_REASONS = {
@@ -89,21 +95,12 @@ def _script_aware_allowed_paths(original, context_paths: list[str]) -> set[str]:
 
 
 def _navigation_landmark_micro_repair(issue: dict, context_paths: list[str], root: Path):
-    """Return one deterministic, target-local accessibility repair when evidence is exact.
-
-    This deliberately handles only an unambiguous micro defect: one explicit safe Python
-    target owns generated dashboard HTML, the issue says the navigation landmark lacks an
-    aria-label, and the source contains the known dashboard-read insertion point. The normal
-    autorepair validation, test, protected-path and exact-promotion gates still decide whether
-    this candidate may be promoted.
-    """
     issue_text = base.build_issue_text(issue)
     lowered = issue_text.lower()
     if "navigation landmark" not in lowered or "aria-label" not in lowered:
         return None
     if len(context_paths) != 1:
         return None
-
     target = context_paths[0]
     if target not in ALLOWED_SCRIPT_PATHS or target in PROTECTED_SCRIPT_TARGETS:
         return None
@@ -114,20 +111,14 @@ def _navigation_landmark_micro_repair(issue: dict, context_paths: list[str], roo
     path = root / target
     if not path.is_file():
         return None
-
     current = path.read_text(encoding="utf-8")
     desired = '<nav class="nav" aria-label="Dashboard navigation">'
     if desired in current:
         return None
-
     insertion = '    html = DASHBOARD.read_text(encoding="utf-8")\n'
     if current.count(insertion) != 1:
         return None
-
-    repair = (
-        insertion
-        + '    html = html.replace(\'<nav class="nav">\', \'<nav class="nav" aria-label="Dashboard navigation">\', 1)\n'
-    )
+    repair = insertion + '    html = html.replace(\'<nav class="nav">\', \'<nav class="nav" aria-label="Dashboard navigation">\', 1)\n'
     proposed = current.replace(insertion, repair, 1)
     return base.CodingProposal(
         title="Label dashboard navigation landmark",
@@ -147,7 +138,6 @@ def _micro_repair_or_original(original, issue: dict, context_paths: list[str], r
 def run(issue_number: int, repository: str, strategy: str) -> dict:
     if strategy not in STRATEGY_GUIDANCE:
         raise ValueError(f"unsupported Agentic Lab strategy: {strategy}")
-
     original_loader = base.load_maintainer_repair_guidance
     original_context_paths = base.candidate_context_paths
     original_allowed_paths = base.allowed_issue_repair_paths
@@ -183,11 +173,10 @@ def run(issue_number: int, repository: str, strategy: str) -> dict:
     evidence["agentic_strategy"] = strategy
     evidence["current_state_checked_first"] = True
     reason = str(evidence.get("reason") or evidence.get("repair_status") or "").strip()
-    if strategy != "dependency_diagnosis" and reason in CAPABILITY_LIKE_REASONS:
+    if strategy not in {"dependency_diagnosis", "qwen3_fallback"} and reason in CAPABILITY_LIKE_REASONS:
         evidence["prior_capability_signal"] = reason
         evidence["reason"] = "strategy_requires_more_methods"
         evidence["status"] = "retry_pending"
-
     base.EVIDENCE_PATH.write_text(json.dumps(evidence, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return evidence
 
