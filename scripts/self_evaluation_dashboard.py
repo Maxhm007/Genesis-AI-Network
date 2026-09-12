@@ -215,6 +215,7 @@ def patch_dashboard() -> None:
     if not DASHBOARD.is_file():
         return
     html = DASHBOARD.read_text(encoding="utf-8")
+    html = html.replace('<nav class="nav">', '<nav class="nav" aria-label="Dashboard navigation">', 1)
 
     nav_anchor = '<button data-view="evolution">Capability Evolution</button>'
     if 'data-view="autonomy"' not in html:
