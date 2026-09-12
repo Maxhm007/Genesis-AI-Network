@@ -1,0 +1,30 @@
+name: Verify Issue 500 Gene Lifecycle
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/verify-issue-500-gene-lifecycle.yml
+      - genesis/gene_lifecycle.py
+      - tests/test_gene_lifecycle.py
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install -r requirements.txt
+      - name: Focused lifecycle tests
+        run: python -m pytest -q tests/test_gene_lifecycle.py
+      - name: Full repository tests
+        run: python -m pytest -q
