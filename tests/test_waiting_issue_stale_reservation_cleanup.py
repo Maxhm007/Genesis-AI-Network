@@ -90,17 +90,14 @@ def test_full_agentic_strategy_rotation_escalates_same_issue_to_qwen3(monkeypatc
     )
     assert any(
         method == "POST"
-        and path == "/actions/workflows/genesis-qwen3-agentic-fallback.yml/dispatches"
-        and payload == {"ref": "main", "inputs": {"issue_number": "708"}}
+        and path == "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches"
+        and payload == {"ref": "main", "inputs": {"issue_number": "708", "strategy": "qwen3_fallback"}}
         for method, path, payload in calls
     )
-    assert any(
-        method == "POST" and path.endswith("/issues/708/comments") and "SAME open Issue" in str(payload)
-        for method, path, payload in calls
-    )
+    assert any(method == "POST" and path.endswith("/issues/708/comments") and "SAME open Issue" in str(payload) for method, path, payload in calls)
 
 
-def test_qwen3_failure_starts_fresh_agentic_cycle(monkeypatch):
+def test_qwen3_result_starts_fresh_standard_agentic_cycle():
     module = _load_module()
     rows = [
         {"body": "<!-- genesis-agentic-strategy:evidence_first -->"},
@@ -111,7 +108,7 @@ def test_qwen3_failure_starts_fresh_agentic_cycle(monkeypatch):
         {"body": "<!-- genesis-agentic-strategy-result:diagnostic_reframe --> failed"},
         {"body": "<!-- genesis-agentic-strategy:dependency_diagnosis -->"},
         {"body": "<!-- genesis-agentic-strategy-result:dependency_diagnosis --> failed"},
-        {"body": "<!-- genesis-qwen3-agentic-result:failed --> failed"},
+        {"body": "<!-- genesis-agentic-strategy-result:qwen3_fallback --> failed"},
         {"body": "<!-- genesis-agentic-strategy:evidence_first -->"},
         {"body": "<!-- genesis-agentic-strategy-result:evidence_first --> failed again"},
     ]
