@@ -1,0 +1,301 @@
+name: Genesis DeepSeek Agentic Solver
+
+on:
+  workflow_dispatch:
+    inputs:
+      issue_number:
+        description: Optional explicit open Issue; blank lets DeepSeek select its best fit
+        required: false
+        type: string
+        default: ''
+  schedule:
+    - cron: '17,47 * * * *'
+
+permissions:
+  contents: write
+  issues: write
+  actions: read
+
+concurrency:
+  group: genesis-deepseek-agentic-solver
+  cancel-in-progress: false
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_NAME: genesis-deepseek-agentic
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '420'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '640'
+  GENESIS_DEEPSEEK_MODEL: deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B
+  GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS: '256'
+  HF_HOME: ~/.cache/huggingface
+  PIP_CACHE_DIR: ~/.cache/pip
+
+jobs:
+  solve:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Select and reserve one ideal Issue
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+          REQUESTED_ISSUE: ${{ inputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          gh label create genesis-deepseek-agentic --repo "$GITHUB_REPOSITORY" --color 1d76db --description 'DeepSeek autonomous agentic solver lane' --force >/dev/null
+          gh label create genesis-deepseek-working --repo "$GITHUB_REPOSITORY" --color 0052cc --description 'DeepSeek currently owns one solve attempt' --force >/dev/null
+          gh label create genesis-autonomous --repo "$GITHUB_REPOSITORY" --color 5319e7 --description 'Genesis autonomous work' --force >/dev/null
+
+          if [[ -n "$REQUESTED_ISSUE" ]]; then
+            gh issue view "$REQUESTED_ISSUE" --repo "$GITHUB_REPOSITORY" --json number,title,body,labels,state | jq '[.]' > /tmp/deepseek-open.json
+          else
+            gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title,body,labels > /tmp/deepseek-open.json
+          fi
+
+          selection=$(python scripts/deepseek_agentic_selector.py --issues-json /tmp/deepseek-open.json)
+          number=$(jq -r '.number // empty' <<<"$selection")
+          target=$(jq -r '.target // empty' <<<"$selection")
+          score=$(jq -r '.score // empty' <<<"$selection")
+          if [[ -z "$number" ]]; then
+            echo 'selected=false' >> "$GITHUB_OUTPUT"
+            echo 'No suitable unclaimed bounded Python issue found for DeepSeek.'
+            exit 0
+          fi
+
+          current=$(gh issue view "$number" --repo "$GITHUB_REPOSITORY" --json state,labels)
+          state=$(jq -r '.state' <<<"$current")
+          conflict=$(jq -r '[.labels[].name] | any(. == "genesis-repair-in-progress" or . == "genesis-claimed" or . == "genesis-working" or . == "genesis-validating" or . == "genesis-verifying" or . == "genesis-deepseek-working")' <<<"$current")
+          if [[ "$state" != OPEN || "$conflict" == true ]]; then
+            echo 'selected=false' >> "$GITHUB_OUTPUT"
+            echo 'Candidate became unavailable before reservation.'
+            exit 0
+          fi
+
+          gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --add-label genesis-deepseek-agentic --add-label genesis-deepseek-working --add-label genesis-autonomous >/dev/null
+          comments=$(gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${number}/comments?per_page=100" --jq '.[].body' || true)
+          previous=$(grep -c '<!-- genesis-deepseek-attempt:' <<<"$comments" || true)
+          attempt=$((previous + 1))
+          case $(((attempt - 1) % 3)) in
+            0) strategy=evidence_first ;;
+            1) strategy=alternative_implementation ;;
+            2) strategy=diagnostic_reframe ;;
+          esac
+
+          printf '%s\n%s\n' \
+            "<!-- genesis-deepseek-attempt:${attempt} -->" \
+            "DeepSeek Agentic Solver claimed this Issue as its current best-fit task (selection score: ${score}; target: \`${target}\`). Attempt ${attempt} uses materially distinct strategy \`${strategy}\`. The same Issue remains authoritative until independently verified solved." \
+            > /tmp/deepseek-claim.md
+          gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body-file /tmp/deepseek-claim.md
+
+          echo 'selected=true' >> "$GITHUB_OUTPUT"
+          echo "issue_number=$number" >> "$GITHUB_OUTPUT"
+          echo "target=$target" >> "$GITHUB_OUTPUT"
+          echo "attempt=$attempt" >> "$GITHUB_OUTPUT"
+          echo "strategy=$strategy" >> "$GITHUB_OUTPUT"
+
+      - name: Install repository dependencies
+        if: steps.select.outputs.selected == 'true'
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Verify clean repository baseline
+        if: steps.select.outputs.selected == 'true'
+        run: python -m pytest -q
+
+      - name: Restore DeepSeek model cache
+        if: steps.select.outputs.selected == 'true'
+        uses: actions/cache@v4
+        with:
+          path: |
+            ~/.cache/huggingface
+            ~/.cache/pip
+          key: genesis-deepseek-agentic-${{ runner.os }}-py312-v1
+          restore-keys: |
+            genesis-deepseek-agentic-${{ runner.os }}-py312-
+
+      - name: Install local DeepSeek runtime
+        if: steps.select.outputs.selected == 'true'
+        run: |
+          python -m pip install --upgrade pip
+          pip install torch --index-url https://download.pytorch.org/whl/cpu
+          pip install 'transformers>=4.51,<5' safetensors accelerate
+
+      - name: Start DeepSeek coding provider
+        if: steps.select.outputs.selected == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python scripts/pulse_coding_provider.py \
+            --model "$GENESIS_DEEPSEEK_MODEL" \
+            --escalation-model "$GENESIS_DEEPSEEK_MODEL" \
+            --host 127.0.0.1 \
+            --port 8766 \
+            --max-new-tokens "$GENESIS_PROVIDER_MAX_NEW_TOKENS" \
+            --escalation-max-new-tokens "$GENESIS_REPAIR_ESCALATION_MAX_NEW_TOKENS" \
+            > /tmp/genesis-deepseek-provider.log 2>&1 &
+          ready=false
+          for i in {1..180}; do
+            if python - <<'PY'
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=2) as response:
+                  raise SystemExit(0 if response.status == 200 else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then ready=true; break; fi
+            sleep 2
+          done
+          if [[ "$ready" != true ]]; then
+            cat /tmp/genesis-deepseek-provider.log || true
+            exit 1
+          fi
+
+      - name: Configure Genesis Git identity
+        if: steps.select.outputs.selected == 'true'
+        run: |
+          git config user.name "Genesis AI"
+          git config user.email "genesis-ai@users.noreply.github.com"
+
+      - name: Let DeepSeek solve agentically
+        if: steps.select.outputs.selected == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.select.outputs.issue_number }}
+          STRATEGY: ${{ steps.select.outputs.strategy }}
+        run: |
+          python scripts/agentic_strategy_repair.py \
+            --issue-number "$ISSUE_NUMBER" \
+            --repository "$GITHUB_REPOSITORY" \
+            --strategy "$STRATEGY"
+
+      - name: Read DeepSeek repair evidence
+        if: steps.select.outputs.selected == 'true'
+        id: evidence
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -f runtime/github_issue_autorepair.json
+          echo "status=$(jq -r '.status // ""' runtime/github_issue_autorepair.json)" >> "$GITHUB_OUTPUT"
+          echo "reason=$(jq -r '.reason // .repair_status // .status // ""' runtime/github_issue_autorepair.json)" >> "$GITHUB_OUTPUT"
+          echo "candidate_branch=$(jq -r '.candidate_branch // ""' runtime/github_issue_autorepair.json)" >> "$GITHUB_OUTPUT"
+          echo "candidate_sha=$(jq -r '.candidate_sha // ""' runtime/github_issue_autorepair.json)" >> "$GITHUB_OUTPUT"
+
+      - name: Independently validate and promote exact DeepSeek candidate
+        if: steps.evidence.outputs.status == 'candidate_created'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.select.outputs.issue_number }}
+          TARGET: ${{ steps.select.outputs.target }}
+          STRATEGY: ${{ steps.select.outputs.strategy }}
+          ATTEMPT: ${{ steps.select.outputs.attempt }}
+          CANDIDATE_BRANCH: ${{ steps.evidence.outputs.candidate_branch }}
+          CANDIDATE_SHA: ${{ steps.evidence.outputs.candidate_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          test -n "$CANDIDATE_BRANCH"
+          test -n "$CANDIDATE_SHA"
+          git fetch origin main "$CANDIDATE_BRANCH"
+          git cat-file -e "${CANDIDATE_SHA}^{commit}"
+
+          target_test="tests/test_$(basename "$TARGET" .py).py"
+          mapfile -t changed_files < <(git diff-tree --no-commit-id --name-only -r "$CANDIDATE_SHA")
+          if (( ${#changed_files[@]} == 0 )); then echo 'Candidate contains no changed files' >&2; exit 1; fi
+          for path in "${changed_files[@]}"; do
+            if [[ "$path" != "$TARGET" && "$path" != "$target_test" ]]; then
+              echo "Rejected out-of-scope DeepSeek candidate path: $path" >&2
+              exit 1
+            fi
+          done
+
+          gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq '.body // ""' > /tmp/deepseek-issue-body.md
+          promoted_sha=''
+          for integration_attempt in 1 2 3; do
+            git fetch origin main
+            git checkout -B "genesis/deepseek-integration-${ISSUE_NUMBER}-${GITHUB_RUN_ID}" origin/main
+            if ! git cherry-pick "$CANDIDATE_SHA"; then git cherry-pick --abort || true; continue; fi
+            if [[ "$TARGET" == genesis/*.py ]]; then
+              integrated_base=$(git rev-parse HEAD^)
+              git show "${integrated_base}:${TARGET}" > /tmp/deepseek-semantic-base.py
+              python -m genesis.learned_capability_acceptance \
+                --issue-body-file /tmp/deepseek-issue-body.md \
+                --target "$TARGET" \
+                --base-file /tmp/deepseek-semantic-base.py \
+                --candidate-file "$TARGET"
+            fi
+            python -m py_compile "$TARGET"
+            if [[ -f "$target_test" ]]; then python -m pytest -q "$target_test"; fi
+            python -m pytest -q
+            git fetch origin main
+            integrated_base=$(git rev-parse HEAD^)
+            latest_main=$(git rev-parse origin/main)
+            if [[ "$integrated_base" != "$latest_main" ]]; then continue; fi
+            if git push origin HEAD:main; then promoted_sha=$(git rev-parse HEAD); break; fi
+          done
+          if [[ -z "$promoted_sha" ]]; then echo 'DeepSeek candidate could not be promoted safely' >&2; exit 1; fi
+
+          git fetch origin main
+          git reset --hard origin/main
+          python -m py_compile "$TARGET"
+          if [[ -f "$target_test" ]]; then python -m pytest -q "$target_test"; fi
+          python -m pytest -q
+
+          printf '%s\n%s\n' \
+            "<!-- genesis-deepseek-result:solved -->" \
+            "DeepSeek Agentic Solver solved and independently verified this Issue on attempt ${ATTEMPT} using \`${STRATEGY}\`. Candidate \`${CANDIDATE_SHA}\` was promoted as main SHA \`${promoted_sha}\`; focused and full repository validation passed after promotion." \
+            > /tmp/deepseek-success.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/deepseek-success.md
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-verified >/dev/null
+          for label in genesis-deepseek-working genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying genesis-blocked genesis-solver-exhausted genesis-deferred; do
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+          done
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --method PATCH -f state=closed -f state_reason=completed >/dev/null
+          git push origin --delete "$CANDIDATE_BRANCH" >/dev/null 2>&1 || true
+
+      - name: Comment failure and release for retry
+        if: always() && steps.select.outputs.selected == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.select.outputs.issue_number }}
+          STRATEGY: ${{ steps.select.outputs.strategy }}
+          ATTEMPT: ${{ steps.select.outputs.attempt }}
+          STATUS: ${{ steps.evidence.outputs.status }}
+          REASON: ${{ steps.evidence.outputs.reason }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          state=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state')
+          if [[ "$state" == CLOSED ]]; then exit 0; fi
+          repair_status="${REASON:-${STATUS:-worker_failed_before_evidence}}"
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deepseek-working >/dev/null 2>&1 || true
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-deepseek-agentic --add-label genesis-autonomous >/dev/null 2>&1 || true
+          printf '%s\n%s\n' \
+            "<!-- genesis-deepseek-result:retry -->" \
+            "DeepSeek Agentic Solver attempt ${ATTEMPT} with \`${STRATEGY}\` did not produce a verified solution. repair status: \`${repair_status}\`. The Issue remains open; no successor is created. A future DeepSeek pass will retry this same Issue with a materially different strategy after it again ranks as the best available fit." \
+            > /tmp/deepseek-failure.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/deepseek-failure.md
+
+      - name: Preserve DeepSeek evidence
+        if: always() && steps.select.outputs.selected == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-deepseek-agentic-${{ steps.select.outputs.issue_number }}-${{ github.run_id }}
+          path: |
+            runtime/github_issue_autorepair.json
+            /tmp/genesis-deepseek-provider.log
+          if-no-files-found: ignore
+          retention-days: 30
