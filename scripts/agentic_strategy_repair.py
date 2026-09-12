@@ -9,20 +9,30 @@ import scripts.github_issue_autorepair as base
 
 STRATEGY_GUIDANCE = {
     "evidence_first": (
-        "Agentic Lab strategy: evidence-first. Diagnose the exact prior rejection, validation failure, or missing behavior before editing. "
-        "Use the preserved repair memory as evidence. Do not repeat the previous candidate. Prefer the smallest change that directly addresses the observed failure."
+        "Agentic Lab strategy: evidence-first current-state verification. Before proposing ANY edit, inspect current main, "
+        "the Issue acceptance criteria, preserved repair memory, and existing focused/regression tests. First decide whether "
+        "the objective is already satisfied on current main. If it is already satisfied, do not invent or replay a patch; "
+        "preserve evidence that the current implementation and tests satisfy the Issue so orchestration can treat the Issue "
+        "as stale/already complete. Only when a concrete remaining gap is demonstrated may you edit, and then prefer the "
+        "smallest change that directly addresses that observed gap. Never repeat a rejected candidate merely because the Issue is open."
     ),
     "alternative_implementation": (
-        "Agentic Lab strategy: alternative implementation. The prior method failed. Use a materially different implementation path while keeping the same acceptance criteria and exact target scope. "
-        "Do not reproduce the same control flow, helper shape, or rejected patch with cosmetic changes."
+        "Agentic Lab strategy: alternative implementation. The prior method failed. Re-check current main and the remaining "
+        "acceptance gap first. If the Issue is already satisfied, do not edit. Otherwise use a materially different implementation "
+        "path while keeping the same acceptance criteria and exact target scope. Do not reproduce the same control flow, helper "
+        "shape, or rejected patch with cosmetic changes."
     ),
     "diagnostic_reframe": (
-        "Agentic Lab strategy: diagnostic reframe. Re-evaluate whether the apparent target defect is caused by an adjacent invariant, data shape, state transition, or integration assumption visible in the allowed repository context. "
-        "Then implement the smallest safe target-local correction supported by that diagnosis."
+        "Agentic Lab strategy: diagnostic reframe. Re-check current main before editing. Re-evaluate whether the apparent target "
+        "defect is already fixed or is caused by an adjacent invariant, data shape, state transition, or integration assumption "
+        "visible in the allowed repository context. Then implement the smallest safe target-local correction only if a real remaining "
+        "gap is demonstrated."
     ),
     "dependency_diagnosis": (
-        "Agentic Lab strategy: dependency diagnosis. Determine whether the remaining blocker is lack of a Genesis repair capability, provider/tooling limitation, unavailable dependency, or insufficient safe context. "
-        "If a safe target-local repair is still possible, implement it. Otherwise return without inventing a change; the orchestration layer will open a capability-building dependency issue."
+        "Agentic Lab strategy: dependency diagnosis. Re-check current main before assuming a dependency. Determine whether the "
+        "remaining blocker is lack of a Genesis repair capability, provider/tooling limitation, unavailable dependency, insufficient "
+        "safe context, or an Issue whose objective is already satisfied. If a safe target-local repair is still necessary, implement "
+        "it. Otherwise return without inventing a change."
     ),
 }
 
@@ -52,6 +62,7 @@ def run(issue_number: int, repository: str, strategy: str) -> dict:
         base.load_maintainer_repair_guidance = original_loader
 
     evidence["agentic_strategy"] = strategy
+    evidence["current_state_checked_first"] = True
     reason = str(evidence.get("reason") or evidence.get("repair_status") or "").strip()
     if strategy != "dependency_diagnosis" and reason in CAPABILITY_LIKE_REASONS:
         evidence["prior_capability_signal"] = reason
