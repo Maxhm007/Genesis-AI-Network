@@ -79,6 +79,25 @@
         "non_thinking": true,
         "notes": "Registration only. Not downloaded, benchmarked, trusted or active. Preserve existing model defaults, workflow settings and routing."
       }
+    },
+    {
+      "provider_id": "deepseek-r1-distill-qwen-1.5b-optional",
+      "provider_type": "local-open-weight",
+      "model_id": "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+      "state": "DISCOVERED",
+      "source": "https://huggingface.co/deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B",
+      "license": "mit",
+      "capabilities": ["reasoning", "coding", "planning", "review"],
+      "evidence": [],
+      "metadata": {
+        "trust_remote_code": false,
+        "runtime": "transformers-cpu",
+        "activation_requires_independent_benchmark": true,
+        "optional": true,
+        "owner_requested": true,
+        "gene_scope": "gene-node-1",
+        "notes": "DeepSeek candidate registered directly for Genesis/Gene 0. This does not change Gene 002 or Gene 003 model assignments. Qwen remains active until DeepSeek passes the normal independent benchmark and provider trust lifecycle."
+      }
     }
   ]
 }
