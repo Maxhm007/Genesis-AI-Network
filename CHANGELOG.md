@@ -2,6 +2,14 @@
 
 All notable Genesis AI Network milestones are documented here.
 
+## v0.1.7 - 13-Sep-2026 - 12:28 AM - Align dashboard repair sandbox
+
+### Fixed
+
+- Shared a dashboard-only script exception between strategy routing, path validation and the installed system-repair policy; it no longer requires the missing privileged workflow anchor.
+- Added regression coverage for real proposal validation and rejection of arbitrary scripts, protected controls, traversal and symlink escape.
+- Focused validation: 38 passed, 2 Windows symlink tests skipped. Live deployment and issue closure are not yet verified.
+
 ## v0.1.6 - 12-Sep-2026 - 02:21 AM - Preserve issue discovery completion
 
 ### Fixed
