@@ -129,9 +129,11 @@ jobs:
             if [ "$attempt" -ge "$max_attempts" ]; then
               add_label "$issue_number" genesis-blocked
               add_label "$issue_number" genesis-solver-exhausted
-              add_label "$issue_number" genesis-deferred
+              add_label "$issue_number" agentic-lab
+              add_label "$issue_number" genesis-agentic-escalated
+              remove_label "$issue_number" genesis-deferred
               remove_label "$issue_number" genesis-autonomous
-              status_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Sequential Issue Controller — bounded attempt exhausted**\n\n- Issue: #%s — %s\n- Last check (UTC): %s\n- Controller run: %s\n- Attempt: **%s/%s**\n- Result: **%s**\n- State: **terminally deferred; automatically reopenable after repair-engine generation changes**\n\nThe current repair generation exhausted its safe attempts. Genesis closes this issue as not planned instead of leaving permanent backlog; a future repair-engine generation can reopen it automatically.' \
+              status_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Sequential Issue Controller — bounded attempt exhausted**\n\n- Issue: #%s — %s\n- Last check (UTC): %s\n- Controller run: %s\n- Attempt: **%s/%s**\n- Result: **%s**\n- State: **OPEN; escalated to Agentic Lab**\n\nThe current bounded repair generation exhausted its safe attempts without verified completion. The same Issue remains open and authoritative; only a verified promoted solution may close it.' \
                 "$marker" "$attempt" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$attempt" "$max_attempts" "$result")
             else
               add_label "$issue_number" genesis-autonomous
@@ -139,9 +141,6 @@ jobs:
                 "$marker" "$attempt" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$attempt" "$max_attempts" "$result")
             fi
             upsert_status "$issue_number" "$status_body"
-            if [ "$attempt" -ge "$max_attempts" ]; then
-              gh_retry gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --method PATCH -f state=closed -f state_reason=not_planned >/dev/null
-            fi
           }
 
           ensure_label genesis-claimed 1f6feb 'Claimed by the Genesis Issue Solver'
@@ -152,7 +151,9 @@ jobs:
           ensure_label genesis-solver-exhausted 6e7781 'Genesis Issue Solver exhausted its bounded attempts and moved on'
           ensure_label genesis-verified 0e8a16 'Genesis verified the issue completion condition before closure'
           ensure_label genesis-autonomous 1f883d 'Authorized for Genesis autonomous repair'
-          ensure_label genesis-deferred 8c959f 'Closed after bounded solver exhaustion; automatically reopenable after repair-engine change'
+          ensure_label agentic-lab 8250df 'Normal bounded solver exhausted; Agentic Lab recovery owns this Issue'
+          ensure_label genesis-agentic-escalated 8250df 'Solver exhausted; same authoritative Issue remains open with Agentic Lab'
+          ensure_label genesis-deferred 8c959f 'Legacy deferred-state label; unsolved Issues remain open under Agentic Lab'
 
           echo 'Stopping legacy long-running dispatch loops so this controller is the single queue scheduler.'
           for workflow in genesis-oldest-issue-solver.yml genesis-priority-issue-solver.yml; do
@@ -217,7 +218,6 @@ jobs:
             echo "Recovered stale reservation on issue #${issue_number}."
           done < /tmp/genesis-stale-issues.txt
 
-          # Legacy solver-only transient claims are not authoritative after their runs were cancelled.
           gh_retry gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/genesis-controller-open.json
           python - <<'PY' > /tmp/genesis-transient-only.txt
           import json
