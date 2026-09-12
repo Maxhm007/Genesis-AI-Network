@@ -1,0 +1,117 @@
+name: Genesis Closed Issue Seal
+
+on:
+  issues:
+    types: [closed, reopened]
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-closed-issue-seal.yml
+  workflow_dispatch:
+
+permissions:
+  issues: write
+  contents: read
+
+jobs:
+  seal-closed-issue:
+    if: github.event_name == 'issues' && github.event.action == 'closed'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Seal the closed issue and remove automatic requeue eligibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+          STATE_REASON: ${{ github.event.issue.state_reason }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for spec in \
+            'genesis-closed-sealed-completed:0e8a16:Closed as completed; Genesis must not reopen automatically' \
+            'genesis-closed-sealed-not-planned:6e7781:Closed as not planned; Genesis must not reopen automatically' \
+            'genesis-closed-sealed-duplicate:8250df:Closed as duplicate; Genesis must not reopen automatically'; do
+            IFS=: read -r name color description <<<"$spec"
+            gh label create "$name" --repo "$GITHUB_REPOSITORY" --color "$color" --description "$description" --force >/dev/null
+          done
+
+          for label in genesis-closed-sealed-completed genesis-closed-sealed-not-planned genesis-closed-sealed-duplicate; do
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+          done
+
+          case "${STATE_REASON:-completed}" in
+            not_planned) seal='genesis-closed-sealed-not-planned' ;;
+            duplicate) seal='genesis-closed-sealed-duplicate' ;;
+            *) seal='genesis-closed-sealed-completed' ;;
+          esac
+          gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label "$seal" >/dev/null
+
+          for label in \
+            genesis-solver-exhausted genesis-priority-exhausted genesis-deferred \
+            agentic-lab genesis-agentic-escalated genesis-autonomous \
+            genesis-repair-in-progress genesis-validating genesis-claimed \
+            genesis-working genesis-verifying genesis-priority-claim; do
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+          done
+
+  reject-bot-reopen:
+    if: github.event_name == 'issues' && github.event.action == 'reopened' && github.actor == 'github-actions[bot]'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Re-close any sealed issue reopened by Genesis automation
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ github.event.issue.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          labels=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name]')
+          reason=''
+          if jq -e 'index("genesis-closed-sealed-not-planned") != null' <<<"$labels" >/dev/null; then
+            reason='not_planned'
+          elif jq -e 'index("genesis-closed-sealed-duplicate") != null' <<<"$labels" >/dev/null; then
+            reason='duplicate'
+          elif jq -e 'index("genesis-closed-sealed-completed") != null' <<<"$labels" >/dev/null; then
+            reason='completed'
+          fi
+
+          if [ -z "$reason" ]; then
+            echo 'Issue has no closed seal; leaving the reopen untouched.'
+            exit 0
+          fi
+
+          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" \
+            --method PATCH -f state=closed -f state_reason="$reason" >/dev/null
+          echo "Rejected automatic reopen of sealed issue #${ISSUE_NUMBER}; restored closed/${reason}."
+
+  backfill-existing-closed:
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Seal existing closed issues and remove future requeue eligibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+
+          for spec in \
+            'genesis-closed-sealed-completed:0e8a16:Closed as completed; Genesis must not reopen automatically' \
+            'genesis-closed-sealed-not-planned:6e7781:Closed as not planned; Genesis must not reopen automatically' \
+            'genesis-closed-sealed-duplicate:8250df:Closed as duplicate; Genesis must not reopen automatically'; do
+            IFS=: read -r name color description <<<"$spec"
+            gh label create "$name" --repo "$GITHUB_REPOSITORY" --color "$color" --description "$description" --force >/dev/null
+          done
+
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=closed&per_page=100" --jq '.[] | select(.pull_request == null) | [.number, (.state_reason // "completed")] | @tsv' \
+            | while IFS=$'\t' read -r number state_reason; do
+                case "$state_reason" in
+                  not_planned) seal='genesis-closed-sealed-not-planned' ;;
+                  duplicate) seal='genesis-closed-sealed-duplicate' ;;
+                  *) seal='genesis-closed-sealed-completed' ;;
+                esac
+                gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --add-label "$seal" >/dev/null
+                for label in genesis-solver-exhausted genesis-priority-exhausted genesis-deferred agentic-lab genesis-agentic-escalated genesis-autonomous genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying genesis-priority-claim; do
+                  gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+                done
+              done
