@@ -5,7 +5,7 @@ from pathlib import Path
 
 import scripts.github_issue_autorepair as base
 
-# Push marker: wake the grounded specialist controller after the v2 cutover.
+# Push marker: dispatch the replacement grounded specialist worker after cutover.
 
 PROTECTED_SYSTEM_SCRIPTS = {
     "scripts/secret_guard.py",
