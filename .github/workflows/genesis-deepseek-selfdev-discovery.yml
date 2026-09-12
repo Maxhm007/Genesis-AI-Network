@@ -4,6 +4,14 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '7,37 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - 'scripts/deepseek_selfdev_issue_opener.py'
+      - 'tests/test_deepseek_selfdev_issue_opener.py'
+      - 'scripts/deepseek_agentic_selector.py'
+      - 'tests/test_deepseek_agentic_selector.py'
+      - '.github/workflows/genesis-deepseek-selfdev-discovery.yml'
 
 permissions:
   contents: read
