@@ -1,5 +1,31 @@
 # Genesis AI Network — Project Summary
 
+## Optional additional Qwen3 model
+
+`Qwen/Qwen3-4B-Instruct-2507` is registered as an additional discovered model
+and provider candidate. Existing candidates, active providers, repair models,
+workflow settings, endpoints and routing are unchanged. This is registration,
+not a downloaded, benchmarked or active inference service.
+
+Before activation, verify runtime compatibility (Transformers 4.51 or newer),
+memory/latency budgets, repair-output parsing, independent benchmark evidence
+and the normal provider trust lifecycle. The model is text-only and non-thinking;
+no vision capability or measured benchmark score is claimed.
+
+For an isolated, explicitly authorized evaluation only, the existing server can
+select this model without editing its defaults:
+
+```powershell
+python scripts/local_reasoning_provider.py --model Qwen/Qwen3-4B-Instruct-2507 --host 127.0.0.1 --port 8767 --max-new-tokens 768
+```
+
+This command downloads weights on first use and requires suitable existing
+PyTorch/Transformers dependencies. It has not been executed. Port 8767 is an
+evaluation suggestion, not an assumed free port or a new production endpoint.
+Do not change provider environment variables or production routing as part of
+registration. Existing model limits and settings remain unchanged.
+
+
 Genesis AI Network is an open-source, decentralized, continuously improving scientific AI system whose permanent mission is to advance **physical human immortality** while preserving human autonomy, safety, dignity, privacy and scientific integrity.
 
 ## Core principle

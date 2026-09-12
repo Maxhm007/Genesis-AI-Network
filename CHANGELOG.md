@@ -1,5 +1,12 @@
 # Changelog
 
+## qwen3-additional-v1.0.0 - 13-Sep-2026 - 01:21 AM - Register optional Qwen3 4B candidate
+
+- Added Qwen3-4B-Instruct-2507 to Model Scout discovery and provider trust registries without replacing existing entries or active providers.
+- Kept the new provider DISCOVERED, with no invented benchmark/trust evidence or automatic production routing.
+- Added registration regression tests and isolated evaluation instructions. No model weights downloaded, new server started, workflow changed or default model replaced.
+
+
 All notable Genesis AI Network milestones are documented here.
 
 ## v0.1.7 - 13-Sep-2026 - 12:28 AM - Align dashboard repair sandbox
