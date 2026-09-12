@@ -10,6 +10,7 @@ on:
     paths:
       - .github/workflows/genesis-recovery-solver.yml
       - scripts/recovery_solver_dispatch.py
+      - tests/test_recovery_solver_same_issue_escalation.py
 
 permissions:
   actions: write
@@ -34,6 +35,9 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Verify same-Issue escalation contract
+        run: python -m pytest -q tests/test_recovery_solver_same_issue_escalation.py
 
       - name: Dispatch one exhausted issue through Recovery Solver
         env:
