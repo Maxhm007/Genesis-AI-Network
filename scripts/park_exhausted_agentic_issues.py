@@ -120,10 +120,32 @@ def remove_label(repository: str, token: str, number: int, label: str) -> None:
     request(repository, token, "DELETE", f"/issues/{number}/labels/{urllib.parse.quote(label, safe='')}")
 
 
+def clear_stale_waiting_reservations(repository: str, token: str, number: int, issue_labels: set[str]) -> set[str]:
+    """Waiting issues are terminal for FIFO and must never retain active reservations."""
+    stale = issue_labels & ACTIVE_LABELS
+    for label in sorted(stale):
+        remove_label(repository, token, number, label)
+    return stale
+
+
 def park_issue(repository: str, token: str, issue: dict) -> bool:
     number = int(issue.get("number") or 0)
     issue_labels = labels(issue)
-    if number <= 1 or VERIFIED_LABEL in issue_labels or WAITING_LABEL in issue_labels:
+    if number <= 1 or VERIFIED_LABEL in issue_labels:
+        return False
+    if WAITING_LABEL in issue_labels:
+        stale = clear_stale_waiting_reservations(repository, token, number, issue_labels)
+        if stale:
+            print(
+                json.dumps(
+                    {
+                        "status": "cleared_stale_waiting_reservation",
+                        "issue_number": number,
+                        "removed_labels": sorted(stale),
+                    },
+                    sort_keys=True,
+                )
+            )
         return False
     if not ({AGENTIC_LABEL, AUTONOMOUS_LABEL} & issue_labels):
         return False
