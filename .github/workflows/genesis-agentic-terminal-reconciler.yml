@@ -32,6 +32,7 @@ jobs:
 
           strategies='["evidence_first","alternative_implementation","diagnostic_reframe","dependency_diagnosis"]'
           closed=0
+          reopened=0
 
           gh api --method POST "repos/${GITHUB_REPOSITORY}/labels" \
             -f name='genesis-agentic-escalated' \
@@ -67,6 +68,22 @@ jobs:
             closed=$((closed + 1))
           done
 
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=closed&labels=genesis-task&sort=updated&direction=desc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/recent-closed.json
+          mapfile -t closed_issues < <(jq -r '.[] | select(.pull_request == null) | select(([.labels[].name] | index("genesis-verified")) == null) | select([.labels[].name] | any(. == "genesis-deferred" or . == "genesis-superseded" or . == "genesis-terminal" or . == "genesis-recovery-terminal" or . == "genesis-solver-exhausted" or . == "genesis-blocked")) | .number' /tmp/recent-closed.json)
+
+          for issue_number in "${closed_issues[@]}"; do
+            [ "$reopened" -ge 20 ] && break
+            gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --method PATCH -f state=open >/dev/null
+            for label in genesis-terminal genesis-deferred genesis-superseded genesis-recovery-terminal genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying; do
+              gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+            done
+            gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --add-label genesis-agentic-escalated --add-label genesis-solver-exhausted --add-label agentic-lab >/dev/null
+            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "Genesis reopened this Issue because it was closed without a verified solution. Unsolved Genesis tasks stay open; only verified promoted fixes may close them. Reconciler run: ${GITHUB_RUN_ID}." >/dev/null
+            echo "Reopened unsolved Genesis issue #${issue_number}."
+            reopened=$((reopened + 1))
+          done
+
           echo "Exhausted Agentic issues kept open: ${closed}."
+          echo "Unsolved closed issues reopened: ${reopened}."
           gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
           gh workflow run genesis-sequential-issue-controller.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
