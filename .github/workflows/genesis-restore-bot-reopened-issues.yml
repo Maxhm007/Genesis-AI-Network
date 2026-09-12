@@ -5,35 +5,22 @@ on:
     branches: [main]
     paths:
       - .github/workflows/genesis-restore-bot-reopened-issues.yml
-  workflow_run:
-    workflows:
-      - Genesis Sequential Issue Controller
-    types: [completed]
-  schedule:
-    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
   issues: write
   contents: read
 
-concurrency:
-  group: genesis-restore-bot-reopened-issues
-  cancel-in-progress: false
-
 jobs:
   restore-bot-reopened:
     runs-on: ubuntu-latest
     steps:
-      - name: Re-close issues reopened only by github-actions
+      - name: Re-close only verified issues reopened by automation
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-
-          gh label create genesis-closed-sealed-not-planned --repo "$GITHUB_REPOSITORY" \
-            --color 6e7781 --description 'Closed as not planned; Genesis must not reopen automatically' --force >/dev/null
 
           gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&per_page=100" --jq '.[] | select(.pull_request == null) | select(.state_reason == "reopened") | .number' \
             | while read -r number; do
@@ -48,18 +35,15 @@ jobs:
                   continue
                 fi
 
-                gh issue edit "$number" --repo "$GITHUB_REPOSITORY" \
-                  --add-label genesis-closed-sealed-not-planned >/dev/null
+                labels=$(gh issue view "$number" --repo "$GITHUB_REPOSITORY" --json labels --jq '[.labels[].name]')
+                verified=$(jq -r 'index("genesis-verified") != null or index("genesis-closed-sealed-completed") != null or index("genesis-closed-sealed-duplicate") != null' <<<"$labels")
 
-                for label in \
-                  genesis-solver-exhausted genesis-priority-exhausted genesis-deferred \
-                  agentic-lab genesis-agentic-escalated genesis-autonomous \
-                  genesis-repair-in-progress genesis-validating genesis-claimed \
-                  genesis-working genesis-verifying genesis-priority-claim; do
-                  gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
-                done
+                if [ "$verified" != 'true' ]; then
+                  echo "Leaving unsolved bot-reopened issue #${number} open; no verified completion evidence."
+                  continue
+                fi
 
                 gh api "repos/${GITHUB_REPOSITORY}/issues/${number}" \
-                  --method PATCH -f state=closed -f state_reason=not_planned >/dev/null
-                echo "Restored bot-reopened issue #${number} to closed/not_planned."
+                  --method PATCH -f state=closed -f state_reason=completed >/dev/null
+                echo "Restored verified bot-reopened issue #${number} to closed/completed."
               done
