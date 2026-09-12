@@ -5,11 +5,21 @@ on:
     branches: [main]
     paths:
       - .github/workflows/genesis-restore-bot-reopened-issues.yml
+  workflow_run:
+    workflows:
+      - Genesis Sequential Issue Controller
+    types: [completed]
+  schedule:
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
   issues: write
   contents: read
+
+concurrency:
+  group: genesis-restore-bot-reopened-issues
+  cancel-in-progress: false
 
 jobs:
   restore-bot-reopened:
