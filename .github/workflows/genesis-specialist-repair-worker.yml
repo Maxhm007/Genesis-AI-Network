@@ -289,7 +289,7 @@ jobs:
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --body "Genesis verified and promoted a bounded privileged system-script repair. Candidate: \`${CANDIDATE_SHA}\`. Promoted main SHA: \`${promoted_sha}\`. Verified target: \`${TARGET}\`. Full repository validation passed after promotion. Normal self-development permissions were not widened. Worker run: ${GITHUB_RUN_ID}."
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-verified >/dev/null
-          for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-specialist genesis-blocked genesis-solver-exhausted genesis-deferred genesis-specialist-repair-attempt-1 genesis-specialist-repair-attempt-2 genesis-specialist-repair-attempt-3 genesis-repair-attempt-1 genesis-repair-attempt-2 genesis-repair-attempt-3; do
+          for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-specialist genesis-blocked genesis-solver-exhausted genesis-deferred agentic-lab genesis-agentic-escalated genesis-specialist-repair-attempt-1 genesis-specialist-repair-attempt-2 genesis-specialist-repair-attempt-3 genesis-repair-attempt-1 genesis-repair-attempt-2 genesis-repair-attempt-3; do
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
           done
           gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --method PATCH -f state=closed -f state_reason=completed >/dev/null
@@ -348,11 +348,11 @@ jobs:
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-validating >/dev/null 2>&1 || true
 
           if [[ "$effective_attempt" -ge 3 || "$status" == "blocked" ]]; then
-            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-blocked --add-label genesis-solver-exhausted --add-label genesis-deferred >/dev/null 2>&1 || true
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-blocked --add-label genesis-solver-exhausted --add-label agentic-lab --add-label genesis-agentic-escalated >/dev/null 2>&1 || true
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deferred >/dev/null 2>&1 || true
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-autonomous >/dev/null 2>&1 || true
             gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-              --body "Genesis specialist repair exhausted its bounded attempt set without verified promotion (status: \`${status}\`, attempt: ${effective_attempt}/3). Closing as deferred rather than leaving permanent open backlog. No safety boundary was bypassed."
-            gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --method PATCH -f state=closed -f state_reason=not_planned >/dev/null
+              --body "Genesis specialist repair exhausted its bounded attempt set without verified promotion (status: \`${status}\`, attempt: ${effective_attempt}/3). The same authoritative Issue remains OPEN under Agentic Lab for a materially different recovery strategy. No safety boundary was bypassed."
           else
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --add-label genesis-specialist >/dev/null 2>&1 || true
             gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
