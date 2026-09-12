@@ -3,6 +3,8 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
+from pathlib import Path
 
 import scripts.github_issue_autorepair as base
 
@@ -31,8 +33,9 @@ STRATEGY_GUIDANCE = {
     "dependency_diagnosis": (
         "Agentic Lab strategy: dependency diagnosis. Re-check current main before assuming a dependency. Determine whether the "
         "remaining blocker is lack of a Genesis repair capability, provider/tooling limitation, unavailable dependency, insufficient "
-        "safe context, or an Issue whose objective is already satisfied. If a safe target-local repair is still necessary, implement "
-        "it. Otherwise return without inventing a change; when a real capability gap remains, the orchestration layer will open a capability-building dependency issue."
+        "safe context, or an Issue whose objective is already satisfied. If a reusable repair capability is genuinely missing, the "
+        "orchestration layer will open a capability-building dependency issue. If a safe target-local repair is still necessary, implement "
+        "it. Otherwise return without inventing a change."
     ),
 }
 
@@ -42,12 +45,51 @@ CAPABILITY_LIKE_REASONS = {
     "blocked_protected_or_unsupported_target",
 }
 
+PROTECTED_SCRIPT_TARGETS = {
+    "scripts/secret_guard.py",
+    "scripts/privileged_change_gate.py",
+    "scripts/verify_validator_votes.py",
+    "scripts/action_repair_guard.py",
+    "scripts/issue_acceptance_guard.py",
+}
+
+_SCRIPT_TARGET_RE = re.compile(r"(?:^|[\s`'\"(])(scripts/[A-Za-z0-9_./-]+\.py)")
+
+
+def _explicit_safe_script_paths(issue_text: str, root: Path) -> list[str]:
+    rows: list[str] = []
+    for raw in _SCRIPT_TARGET_RE.findall(issue_text):
+        normalized = raw.replace("\\", "/").removeprefix("./")
+        if ".." in Path(normalized).parts or normalized in PROTECTED_SCRIPT_TARGETS:
+            continue
+        if (root / normalized).is_file() and normalized not in rows:
+            rows.append(normalized)
+    return rows
+
+
+def _script_aware_context_paths(original, issue_text: str, root: Path, limit: int) -> list[str]:
+    explicit_scripts = _explicit_safe_script_paths(issue_text, root)
+    if explicit_scripts:
+        return explicit_scripts[: max(1, min(int(limit), base.MAX_CONTEXT_FILES))]
+    return original(issue_text, root, limit)
+
+
+def _script_aware_allowed_paths(original, context_paths: list[str]) -> set[str]:
+    allowed = set(original(context_paths))
+    for relative in context_paths:
+        path = Path(relative)
+        if relative.startswith("scripts/") and path.suffix == ".py" and relative not in PROTECTED_SCRIPT_TARGETS:
+            allowed.add(f"tests/test_{path.stem}.py")
+    return allowed
+
 
 def run(issue_number: int, repository: str, strategy: str) -> dict:
     if strategy not in STRATEGY_GUIDANCE:
         raise ValueError(f"unsupported Agentic Lab strategy: {strategy}")
 
     original_loader = base.load_maintainer_repair_guidance
+    original_context_paths = base.candidate_context_paths
+    original_allowed_paths = base.allowed_issue_repair_paths
     existing_guidance = original_loader(repository, issue_number)
     strategy_guidance = STRATEGY_GUIDANCE[strategy]
 
@@ -55,11 +97,21 @@ def run(issue_number: int, repository: str, strategy: str) -> dict:
         combined = "\n\n".join(piece for piece in (existing_guidance, strategy_guidance) if piece.strip())
         return combined[: base.MAX_MAINTAINER_GUIDANCE_CHARS]
 
+    def context_paths(issue_text: str, root: Path = base.ROOT, limit: int = base.MAX_CONTEXT_FILES) -> list[str]:
+        return _script_aware_context_paths(original_context_paths, issue_text, root, limit)
+
+    def allowed_paths(paths: list[str]) -> set[str]:
+        return _script_aware_allowed_paths(original_allowed_paths, paths)
+
     base.load_maintainer_repair_guidance = load_guidance
+    base.candidate_context_paths = context_paths
+    base.allowed_issue_repair_paths = allowed_paths
     try:
         evidence = base.run(issue_number, repository)
     finally:
         base.load_maintainer_repair_guidance = original_loader
+        base.candidate_context_paths = original_context_paths
+        base.allowed_issue_repair_paths = original_allowed_paths
 
     evidence["agentic_strategy"] = strategy
     evidence["current_state_checked_first"] = True
