@@ -5,7 +5,7 @@ from pathlib import Path
 
 import scripts.github_issue_autorepair as base
 
-# Push marker: dispatch the replacement grounded specialist worker after cutover.
+# Push marker: wake specialist controller after baseline-test alignment.
 
 PROTECTED_SYSTEM_SCRIPTS = {
     "scripts/secret_guard.py",
