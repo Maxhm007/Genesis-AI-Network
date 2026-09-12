@@ -14,3 +14,10 @@ def test_recovery_solver_stops_reclaiming_escalated_issue():
     source = Path("scripts/recovery_solver_dispatch.py").read_text(encoding="utf-8")
     assert "if RECOVERY_ESCALATED_LABEL in issue_labels:" in source
     assert "continue" in source
+
+
+def test_recovery_solver_runs_dependency_diagnosis_before_escalation():
+    source = Path("scripts/recovery_solver_dispatch.py").read_text(encoding="utf-8")
+    assert '"dependency_diagnosis",' in source
+    assert "MAX_RECOVERY_CYCLES = len(RECOVERY_STRATEGIES)" in source
+    assert "strategy = RECOVERY_STRATEGIES[cycles]" in source
