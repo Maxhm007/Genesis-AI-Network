@@ -9,6 +9,7 @@ import urllib.request
 
 STRATEGY_PREFIX = "<!-- genesis-agentic-strategy:"
 RESULT_PREFIX = "<!-- genesis-agentic-strategy-result:"
+REACTIVATE_PREFIX = "<!-- genesis-agentic-reactivate -->"
 WAITING_LABEL = "genesis-waiting-user"
 AGENTIC_LABEL = "agentic-lab"
 AUTONOMOUS_LABEL = "genesis-autonomous"
@@ -71,9 +72,25 @@ def comments(repository: str, token: str, number: int) -> list[dict]:
     return rows
 
 
+def active_attempt_rows(rows: list[dict]) -> list[dict]:
+    """Return only comments in the current bounded attempt generation.
+
+    A trusted maintainer/user may explicitly reactivate a parked issue after the
+    repair engine itself has been improved. Old strategy history must remain as
+    evidence, but it must not instantly exhaust the new bounded generation.
+    """
+    last_reactivate = -1
+    for index, row in enumerate(rows):
+        body = str(row.get("body") or "").strip()
+        association = str(row.get("author_association") or "").upper()
+        if body.startswith(REACTIVATE_PREFIX) and association in {"OWNER", "MEMBER", "COLLABORATOR"}:
+            last_reactivate = index
+    return rows[last_reactivate + 1 :]
+
+
 def attempted_strategies(rows: list[dict]) -> set[str]:
     attempted: set[str] = set()
-    for row in rows:
+    for row in active_attempt_rows(rows):
         body = str(row.get("body") or "")
         if body.startswith(STRATEGY_PREFIX):
             strategy = body[len(STRATEGY_PREFIX):].split("-->", 1)[0].strip()
@@ -83,7 +100,7 @@ def attempted_strategies(rows: list[dict]) -> set[str]:
 
 
 def has_failed_results(rows: list[dict]) -> bool:
-    return any(str(row.get("body") or "").startswith(RESULT_PREFIX) for row in rows)
+    return any(str(row.get("body") or "").startswith(RESULT_PREFIX) for row in active_attempt_rows(rows))
 
 
 def ensure_label(repository: str, token: str) -> None:
