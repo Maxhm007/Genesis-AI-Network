@@ -35,6 +35,26 @@ TEAM_HINTS = (
 PENDING_STATES = ("new", "assigned", "running", "paused", "blocked", "review", "failed", "quarantined")
 ACTIVE_STATES = ("assigned", "running", "review")
 ACTIVE_TASK_LIMIT = 3
+FAILURE_PRESSURE_STATES = {"failed", "blocked", "quarantined"}
+
+
+def adaptive_active_task_limit(tasks: list[GenesisTask]) -> int:
+    """Reduce concurrency when recent queue state signals low execution confidence.
+
+    This transfers the source-backed idea of an adaptive speculative budget into
+    Genesis task scheduling without weakening the hard maximum of three active
+    tasks. Healthy queues keep the existing limit; one pressured task reduces the
+    budget to two, while multiple or majority-pressure queues run one task at a
+    time until confidence recovers.
+    """
+    if not tasks:
+        return ACTIVE_TASK_LIMIT
+    pressured = sum(1 for task in tasks if task.state in FAILURE_PRESSURE_STATES)
+    if pressured >= 2 or pressured / len(tasks) >= 0.5:
+        return 1
+    if pressured == 1:
+        return 2
+    return ACTIVE_TASK_LIMIT
 
 
 @dataclass(frozen=True)
@@ -107,14 +127,18 @@ class TaskRouterModule:
     def active(self) -> list[GenesisTask]:
         return [task for task in self.pending() if task.state in ACTIVE_STATES]
 
+    def active_limit(self) -> int:
+        return adaptive_active_task_limit(self.pending())
+
     def write_todo(self) -> dict:
         tasks = self.pending()
         active = [task for task in tasks if task.state in ACTIVE_STATES]
+        task_limit = adaptive_active_task_limit(tasks)
         unbacked = [task.task_id for task in tasks if not issue_backed(task)]
         payload = {
             "pending": len(tasks),
             "active": len(active),
-            "active_limit": ACTIVE_TASK_LIMIT,
+            "active_limit": task_limit,
             "active_task_ids": [task.task_id for task in active],
             "github_issue_authority_enforced": issue_authority_enabled(self.root),
             "github_issue_unbacked_task_ids": unbacked,
@@ -122,10 +146,11 @@ class TaskRouterModule:
             "rule": (
                 "GitHub Issues are authoritative in the real Genesis runtime. Every autonomous task must be "
                 "Issue-backed before dispatch. SQLite is execution/cache state only. Keep at most three persistent "
-                "active tasks. Running work is never auto-cancelled. Paused/held work remains durable and resumable. "
-                "Cancellation requires an explicit recorded reason. Failed jobs are diagnosed before retry; repeated "
-                "non-transient failures must change strategy; external-authority blockers pause for minimal owner "
-                "action; exhausted jobs are quarantined."
+                "active tasks, with the active budget reduced automatically when failure pressure is present. Running "
+                "work is never auto-cancelled. Paused/held work remains durable and resumable. Cancellation requires "
+                "an explicit recorded reason. Failed jobs are diagnosed before retry; repeated non-transient failures "
+                "must change strategy; external-authority blockers pause for minimal owner action; exhausted jobs are "
+                "quarantined."
             ),
         }
         self.todo_path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
@@ -136,12 +161,13 @@ class TaskRouterModule:
         issue_sync = route_unbacked_tasks(self.root)
         self.write_todo()
         active = self.active()
-        if len(active) >= ACTIVE_TASK_LIMIT:
+        task_limit = self.active_limit()
+        if len(active) >= task_limit:
             result = {
                 "status": "active_slots_full",
                 "decision": None,
                 "active": len(active),
-                "active_limit": ACTIVE_TASK_LIMIT,
+                "active_limit": task_limit,
                 "active_task_ids": [task.task_id for task in active],
                 "github_issue_authority_enforced": authority,
                 "github_issue_sync": issue_sync,
@@ -161,7 +187,7 @@ class TaskRouterModule:
                 "status": "waiting_for_github_issue" if unbacked else "idle",
                 "decision": None,
                 "active": len(active),
-                "active_limit": ACTIVE_TASK_LIMIT,
+                "active_limit": task_limit,
                 "unbacked_task_ids": unbacked,
                 "github_issue_authority_enforced": authority,
                 "github_issue_sync": issue_sync,
@@ -188,7 +214,7 @@ class TaskRouterModule:
                     "decision": None,
                     "task": asdict(paused),
                     "active": len(active),
-                    "active_limit": ACTIVE_TASK_LIMIT,
+                    "active_limit": task_limit,
                     "problem_solver": problem_step,
                     "recovery_plan": recovery.as_dict() if recovery else None,
                     "github_issue_authority_enforced": authority,
@@ -217,7 +243,7 @@ class TaskRouterModule:
             "decision": decision.as_dict(),
             "task": asdict(assigned),
             "active": len(active) + 1,
-            "active_limit": ACTIVE_TASK_LIMIT,
+            "active_limit": task_limit,
             "ai_team_module": "genesis.ai_team" if decision.use_ai_team else None,
             "recovery_plan": recovery.as_dict() if recovery else None,
             "problem_solver": problem_step,
