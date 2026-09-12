@@ -28,6 +28,12 @@ Genesis currently combines:
 
 ## Autonomous development
 
+The dashboard repair router and executor share an exact exception for
+`scripts/self_evaluation_dashboard.py`. Its candidates still require normal
+tests and promotion validation; other script repairs remain privileged-only.
+Focused policy tests pass locally. Live deployment and automatic closure of
+Issue `#730` remain to be verified.
+
 The software-evolution path is:
 
 `research / measured gap / app need / security finding → persistent task → memory/context → Coding Module → bounded candidate → tests → Security review → independent validators → signed quorum → promotion`

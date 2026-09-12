@@ -6,6 +6,8 @@ This file is a **human-readable near-term backlog**. It is not the authority for
 
 ## Immediate priorities
 
+- [ ] Deploy the dashboard sandbox recovery and verify the corrected Agentic worker automatically validates, promotes and closes Issue `#730`.
+
 - [x] Prevent push and schedule bursts from cancelling GitHub Issue discovery before its publication decision.
 - [x] Verify live automatic Issue closure after the autorepair recovery release; issue `#426` closed as completed with `genesis-solved` after its exact grounding test passed on `main`.
 - [ ] Complete the current proactive validation cycle for the capability-growth integration on `main`.
