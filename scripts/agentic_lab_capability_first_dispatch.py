@@ -9,7 +9,7 @@ import re
 import agentic_lab_recovery_dispatch as agentic
 
 
-STALE_RESERVATION_MINUTES = 100
+STALE_RESERVATION_MINUTES = 135
 SAME_ISSUE_MEMORY_PREFIX = "<!-- genesis-same-issue-recovery-memory:"
 LEGACY_DEPENDENCY_RELEASE = "<!-- genesis-legacy-capability-dependency-released -->"
 FIFO_DECOMPOSITION_PREFIX = "<!-- genesis-fifo-decomposition:"
