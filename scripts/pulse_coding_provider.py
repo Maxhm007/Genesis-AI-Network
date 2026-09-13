@@ -21,6 +21,18 @@ DEFAULT_MAX_NEW_TOKENS = 384
 DEFAULT_ESCALATION_MAX_NEW_TOKENS = 128
 ESCALATION_MAX_PROMPT_CHARS = 8_000
 MAX_NOOP_CORRECTIONS = 2
+PLACEHOLDER_REPLACEMENTS = frozenset(
+    {
+        "replacement text",
+        "replacement code",
+        "new code",
+        "code here",
+        "your code here",
+        "todo",
+        "tbd",
+        "...",
+    }
+)
 REVISION_MARKERS = (
     "PREVIOUS_DEVELOPMENT_FEEDBACK:",
     "PREVIOUS_PIPELINE_FEEDBACK:",
@@ -35,7 +47,7 @@ class AdaptiveCodingModel:
     reliable bounded generation. Long first-pass prompts escalate to the stronger replaceable model
     and are compacted before inference. Revision/retry prompts continue to escalate as before.
     The provider also detects compact edits that would reproduce the exact repository text from
-    NUMBERED_CONTEXT and self-corrects them inside the same pulse.
+    NUMBERED_CONTEXT or copy schema-placeholder text and self-corrects them inside the same pulse.
     """
 
     def __init__(
@@ -294,6 +306,8 @@ class AdaptiveCodingModel:
             edit = edits[0]
             old = edit.get("old")
             new = edit.get("new")
+            if isinstance(new, str) and new.strip().lower() in PLACEHOLDER_REPLACEMENTS:
+                return True
             if isinstance(old, str) and isinstance(new, str) and old == new:
                 return True
             path = edit.get("path")
@@ -335,8 +349,9 @@ class AdaptiveCodingModel:
         previous = raw.encode("utf-8", errors="replace")[:1200].decode("utf-8", errors="replace")
         return (
             prompt
-            + "\nRETRY: previous edit was a NO-OP and would make no repository change. "
-            + "Use OBJECTIVE and NUMBERED_CONTEXT to choose a materially different replacement or a different relevant line. "
+            + "\nRETRY: previous edit was a NO-OP or copied placeholder text and is not a valid repository change. "
+            + "Never use schema/example placeholders such as 'replacement text', 'replacement code', 'new code', or 'code here' as the new value. "
+            + "Use OBJECTIVE and NUMBERED_CONTEXT to write concrete executable replacement code, choosing a materially different replacement or a different relevant line. "
             + "Do not repeat the same line/replacement and do not broaden scope. Return only the required one-edit JSON.\n"
             + f"NOOP_CORRECTION_ATTEMPT: {correction}\n"
             + f"PREVIOUS_NOOP: {previous}\n"
@@ -367,7 +382,7 @@ class AdaptiveCodingModel:
             print(
                 json.dumps(
                     {
-                        "event": "coding_noop_detected",
+                        "event": "coding_noop_or_placeholder_detected",
                         "correction": correction + 1,
                     }
                 ),
@@ -418,6 +433,7 @@ def main() -> None:
                 "replaceable": True,
                 "adaptive_retry_escalation": True,
                 "noop_self_correction": True,
+                "placeholder_self_correction": True,
                 "structural_json_recovery": True,
             }
         ),
