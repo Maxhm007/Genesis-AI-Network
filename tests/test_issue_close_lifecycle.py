@@ -36,7 +36,7 @@ def test_failed_workers_keep_issue_open_for_retry() -> None:
     assert "state=closed -f state_reason=not_planned" not in specialist_release
     assert "state=closed -f state_reason=not_planned" not in controller_retry
     assert "Issue remains OPEN" in bounded_release
-    assert "Issue remains open" in specialist_release
+    assert "same authoritative Issue remains OPEN under Agentic Lab" in specialist_release
     assert "State: **OPEN; escalated" in controller_retry
 
 
