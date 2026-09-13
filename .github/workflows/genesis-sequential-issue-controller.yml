@@ -40,7 +40,7 @@ jobs:
 
           marker='<!-- genesis-oldest-real-issue-solver -->'
           max_attempts=3
-          stale_minutes=105
+          stale_minutes=135
           stale_cutoff=$(date -u -d "${stale_minutes} minutes ago" '+%Y-%m-%dT%H:%M:%SZ')
 
           gh_retry() {
