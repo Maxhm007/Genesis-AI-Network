@@ -37,7 +37,7 @@ class PeerIssue:
 
 
 def is_actionable(issue: dict) -> bool:
-    if issue.get("pull_request"):
+    if "pull_request" in issue:
         return False
     if str(issue.get("state") or "").lower() != "open":
         return False
@@ -112,7 +112,7 @@ def fetch_open_peer_issues(token: str) -> list[PeerIssue]:
 def fetch_canonical_issue_bodies(token: str) -> list[str]:
     url = f"https://api.github.com/repos/{CANONICAL_REPO}/issues?state=all&per_page=100"
     rows = _request("GET", url, token)
-    return [str(row.get("body") or "") for row in rows if not row.get("pull_request")]
+    return [str(row.get("body") or "") for row in rows if "pull_request" not in row]
 
 
 def choose_new_peer_issue(peers: list[PeerIssue], canonical_bodies: list[str]) -> PeerIssue | None:
