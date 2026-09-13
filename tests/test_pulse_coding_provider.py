@@ -139,6 +139,55 @@ def test_noop_line_edit_is_corrected_inside_same_provider_call(monkeypatch):
     assert "previous edit was a NO-OP" in calls[1][1]
 
 
+def test_placeholder_edit_is_corrected_inside_same_provider_call(monkeypatch):
+    module = _load_provider_module()
+    calls: list[tuple[str, str]] = []
+    outputs = [
+        json.dumps(
+            {
+                "edits": [
+                    {
+                        "path": "genesis/coding.py",
+                        "start_line": 3,
+                        "end_line": 3,
+                        "new": "replacement text",
+                    }
+                ]
+            }
+        ),
+        json.dumps(
+            {
+                "edits": [
+                    {
+                        "path": "genesis/coding.py",
+                        "start_line": 3,
+                        "end_line": 3,
+                        "new": "return self.providers.available_providers()[0] if self.providers.available_providers() else None",
+                    }
+                ]
+            }
+        ),
+    ]
+
+    class FakeLocalReasoningModel:
+        def __init__(self, model_id: str, *, max_new_tokens: int) -> None:
+            self.model_id = model_id
+
+        def reason(self, prompt: str, max_new_tokens: int | None = None) -> str:
+            calls.append((self.model_id, prompt))
+            return outputs.pop(0)
+
+    monkeypatch.setattr(module, "LocalReasoningModel", FakeLocalReasoningModel)
+    model = module.AdaptiveCodingModel("small-coder", "strong-coder", max_new_tokens=384)
+
+    result = model.reason(_coding_prompt())
+
+    assert "available_providers" in result
+    assert [model_id for model_id, _ in calls] == ["small-coder", "strong-coder"]
+    assert "copied placeholder text" in calls[1][1]
+    assert "Never use schema/example placeholders" in calls[1][1]
+
+
 def test_noop_correction_is_bounded(monkeypatch):
     module = _load_provider_module()
     calls: list[str] = []
