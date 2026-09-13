@@ -33,6 +33,17 @@ class CodingModule:
     MAX_EDIT_BYTES = 4_000
     MAX_PROPOSAL_ATTEMPTS = 3
     MAX_REPAIR_ECHO_BYTES = 2_000
+    PLACEHOLDER_REPLACEMENTS = frozenset(
+        {
+            "replacement text",
+            "replacement code",
+            "new code",
+            "code here",
+            "insert code here",
+            "todo",
+            "tbd",
+        }
+    )
 
     def __init__(self, root: Path, providers: ProviderRegistry | None = None) -> None:
         self.root = root.resolve()
@@ -192,13 +203,7 @@ class CodingModule:
 
     @classmethod
     def _normalize_python_replacement(cls, removed: str, replacement: str) -> str:
-        """Keep a compact Python line edit at the indentation level it replaces.
-
-        Small local coding models often return syntactically useful statements without the
-        repository indentation shown in NUMBERED_CONTEXT. Replacing an indented statement with
-        that raw text can erase the only body of a try/except/if block. Preserve relative
-        indentation locally; broader structural edits must explicitly replace the parent lines.
-        """
+        """Keep a compact Python line edit at the indentation level it replaces."""
         target_indent = cls._first_nonblank_indent(removed)
         replacement_indent = cls._first_nonblank_indent(replacement)
         if not target_indent or not replacement.strip():
@@ -213,15 +218,16 @@ class CodingModule:
         """Comments and whitespace cannot satisfy a required Python suite body."""
         return any(line.strip() and not line.lstrip().startswith("#") for line in text.splitlines())
 
+    @classmethod
+    def _is_placeholder_replacement(cls, text: str) -> bool:
+        normalized = " ".join(text.strip().lower().split())
+        if normalized in cls.PLACEHOLDER_REPLACEMENTS:
+            return True
+        return bool(re.fullmatch(r"(?:<|\[)?(?:replacement|insert|new)\s+(?:text|code)(?:>|\])?", normalized))
+
     @staticmethod
     def _removes_only_python_suite_statement(source: str, start_line: int, end_line: int) -> bool:
-        """Detect a line edit that removes the sole statement beneath a retained compound block.
-
-        The check is structural and intentionally narrow. If the edit also replaces the parent
-        header, normal AST validation decides whether the new structure is valid. This guard only
-        catches edits such as replacing the sole ``pass`` inside an ``except`` with comments or
-        whitespace, which can never form a syntactically valid suite.
-        """
+        """Detect a line edit that removes the sole statement beneath a retained compound block."""
         try:
             tree = ast.parse(source)
         except SyntaxError:
@@ -250,6 +256,8 @@ class CodingModule:
             raise ValueError("line edit end_line must be an integer")
         if not isinstance(new, str):
             raise ValueError("line edit new text must be a string")
+        if self._is_placeholder_replacement(new):
+            raise ValueError("line edit replacement must be real repository code/content, not placeholder text")
         if start_line < 1 or end_line < start_line:
             raise ValueError("line edit range is invalid")
 
@@ -305,6 +313,8 @@ class CodingModule:
             new = edit.get("new")
             if not isinstance(old, str) or not isinstance(new, str) or not old:
                 raise ValueError("coding edit requires start_line/end_line/new or legacy old/new text")
+            if self._is_placeholder_replacement(new):
+                raise ValueError("coding edit replacement must be real repository code/content, not placeholder text")
             total += len(old.encode("utf-8")) + len(new.encode("utf-8"))
             if total > self.MAX_EDIT_BYTES:
                 raise ValueError("coding proposal edits exceed byte limit")
@@ -332,12 +342,7 @@ class CodingModule:
 
     @classmethod
     def _normalize_proposal_shape(cls, proposal: dict) -> dict:
-        """Recover only narrow, unambiguous one-edit wrappers from small providers.
-
-        This never invents a path, range, old text, or replacement. It only wraps a complete
-        edit the provider already supplied. All ordinary path, byte, Python AST, protected-file,
-        review, validation, and promotion gates still run after normalization.
-        """
+        """Recover only narrow, unambiguous one-edit wrappers from small providers."""
         if isinstance(proposal.get("files"), dict):
             return proposal
         edits = proposal.get("edits")
@@ -409,6 +414,14 @@ class CodingModule:
             provider=provider_name,
         )
 
+    @staticmethod
+    def _output_contract() -> str:
+        return (
+            'Return one JSON object with exactly one "edits" array containing exactly one object. '
+            'That edit object must contain "path", integer "start_line", integer "end_line", and string "new". '
+            'The "new" value must be the actual repository replacement code/content, never an example or placeholder.'
+        )
+
     def _repair_prompt(
         self,
         original_prompt: str,
@@ -422,10 +435,6 @@ class CodingModule:
         preferred_path, preferred_line = edit_hint
         if not preferred_path and allowed_paths:
             preferred_path = allowed_paths[0]
-        example = json.dumps(
-            {"edits": [{"path": preferred_path, "start_line": preferred_line, "end_line": preferred_line, "new": "replacement text"}]},
-            separators=(",", ":"),
-        )
         grounded_source_line = ""
         if preferred_path and preferred_line >= 1:
             try:
@@ -442,9 +451,8 @@ class CodingModule:
             + f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
             + f"GROUNDED_LINE_HINT: {preferred_path}:{preferred_line}\n"
             + f"GROUNDED_SOURCE_LINE: {grounded_source_line}\n"
-            + f"Return ONLY the same JSON shape as: {example}. "
-            + "The hint is derived from OBJECTIVE/NUMBERED_CONTEXT; verify it before using it and never copy an unrelated line number. "
-            + "Copy the path exactly from VALID_PATHS/NUMBERED_CONTEXT. Do not invent, summarize, rename, or substitute the path. "
+            + self._output_contract()
+            + " Copy the path exactly from VALID_PATHS/NUMBERED_CONTEXT. Do not invent, summarize, rename, or substitute the path. "
             + "Choose line numbers exactly from NUMBERED_CONTEXT. Exactly one edit. Do not copy old source text. "
             + "For Python, prefer replacing one complete standalone statement; do not remove the only body of try/except/if/for/while/with/class/def blocks. "
             + "If the defect is inside a Python expression, replace the entire GROUNDED_SOURCE_LINE statement and preserve required leading syntax such as return, raise, assert, or assignment. "
@@ -473,19 +481,15 @@ class CodingModule:
         if not preferred_path and allowed_paths:
             preferred_path = allowed_paths[0]
             edit_hint = (preferred_path, preferred_line)
-        output_example = json.dumps(
-            {"edits": [{"path": preferred_path, "start_line": preferred_line, "end_line": preferred_line, "new": "replacement text"}]},
-            separators=(",", ":"),
-        )
         prompt = (
             "ROLE: bounded_coding_engineer\n"
             "TASK: Make exactly ONE smallest useful edit toward OBJECTIVE using only NUMBERED_CONTEXT.\n"
-            f"OUTPUT: JSON only in this shape: {output_example}\n"
+            f"OUTPUT_CONTRACT: {self._output_contract()}\n"
             f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
             f"GROUNDED_LINE_HINT: {preferred_path}:{preferred_line}\n"
             "RULES: exactly one edit; path must match one key from VALID_PATHS exactly; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text; "
-            "the example/hint is grounded but must be verified against OBJECTIVE and NUMBERED_CONTEXT; never copy an unrelated example line number; "
-            "never emit placeholder path text; no title/rationale/markdown/explanation; do not create files. The local executor resolves those lines against the repository and preserves local Python indentation. "
+            "the hint is grounded but must be verified against OBJECTIVE and NUMBERED_CONTEXT; never copy an unrelated example line number; "
+            "never emit placeholder path or replacement text; no title/rationale/markdown/explanation; do not create files. The local executor resolves those lines against the repository and preserves local Python indentation. "
             "For Python, replace a complete standalone statement rather than deleting the only body of a compound block; a sole body replacement must contain executable code, not only comments or whitespace. "
             "Allowed path prefixes: genesis/, tests/, docs/, config/, desktop/, mobile/. Never change Constitution, Genesis Block, .github, validation/quorum, permissions, secrets, or weaken tests.\n"
             f"OBJECTIVE: {objective}\n"
