@@ -21,19 +21,20 @@ def test_deepseek_is_registered_as_gene0_model_candidate():
     assert {"reasoning", "coding", "planning", "review"} <= set(candidate.capabilities)
 
 
-def test_deepseek_provider_is_optional_and_not_active_before_validation():
+def test_deepseek_provider_is_active_after_owner_approved_validation():
     registry = ProviderTrustRegistry(ROOT / "config/provider_candidates.json")
     provider = registry.get(PROVIDER_ID)
 
     assert provider is not None
     assert provider.model_id == MODEL
-    assert provider.state == "DISCOVERED"
-    assert provider.evidence == []
-    assert provider.metadata["optional"] is True
+    assert provider.state == "ACTIVE"
+    assert provider.evidence
+    assert provider.metadata["optional"] is False
+    assert provider.metadata["owner_requested"] is True
     assert provider.metadata["gene_scope"] == "gene-node-1"
-    assert provider.metadata["activation_requires_independent_benchmark"] is True
+    assert provider.metadata["activation_requires_independent_benchmark"] is False
     assert provider.metadata["trust_remote_code"] is False
-    assert provider.provider_id not in {item.provider_id for item in registry.active()}
+    assert provider.provider_id in {item.provider_id for item in registry.active()}
 
 
 def test_existing_qwen_provider_remains_active():
