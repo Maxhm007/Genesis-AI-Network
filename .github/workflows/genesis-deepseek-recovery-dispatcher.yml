@@ -1,0 +1,38 @@
+name: Genesis DeepSeek Recovery Dispatcher
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '2,12,22,32,42,52 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-deepseek-recovery-dispatcher.yml
+
+permissions:
+  actions: write
+  issues: read
+  contents: read
+
+concurrency:
+  group: genesis-deepseek-recovery-dispatcher
+  cancel-in-progress: false
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Start DeepSeek recovery when idle
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          active=$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=genesis-deepseek-working&per_page=20" --jq 'length')
+          if [ "$active" -gt 0 ]; then
+            echo "DeepSeek already owns ${active} issue(s); no duplicate dispatch."
+            exit 0
+          fi
+          gh workflow run genesis-deepseek-agentic-solver.yml --repo "$GITHUB_REPOSITORY" --ref main
+          echo 'Dispatched DeepSeek Agentic Solver for autonomous best-fit issue selection.'
