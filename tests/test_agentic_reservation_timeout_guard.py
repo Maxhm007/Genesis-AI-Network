@@ -22,6 +22,9 @@ def test_stale_reservation_thresholds_exceed_agentic_worker_timeout():
     controller_stale = _required_int(controller_text, r'^\s*stale_minutes=(\d+)\s*$')
     dispatch_stale = _required_int(dispatch_text, r'^STALE_RESERVATION_MINUTES\s*=\s*(\d+)\s*$')
 
+    # A reservation aged 100-120 minutes must still be valid because the
+    # Agentic worker itself is allowed to run for 120 minutes.
+    assert worker_timeout == 120
     assert controller_stale > worker_timeout
     assert dispatch_stale > worker_timeout
     assert controller_stale >= 135
