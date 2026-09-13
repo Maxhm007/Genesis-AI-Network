@@ -38,3 +38,31 @@ def test_invalid_candidate_still_rejected_with_bounded_feedback(tmp_path):
         module.validate_proposal({"files": {"genesis/sample.py": source}}, "test")
     assert "invalid Python syntax" in str(raised.value)
     assert len(str(raised.value)) < 3000
+
+
+def test_placeholder_edit_is_rejected_and_retried_with_real_code(tmp_path):
+    target = tmp_path / "genesis" / "sample.py"
+    target.parent.mkdir()
+    target.write_text("VALUE = 1\n")
+    module = CodingModule(tmp_path)
+
+    class Provider:
+        name = "test"
+
+        def __init__(self):
+            self.prompts = []
+
+        def reason(self, prompt):
+            self.prompts.append(prompt)
+            replacement = "replacement text" if len(self.prompts) == 1 else "VALUE = 2"
+            return json.dumps({"edits": [{"path": "genesis/sample.py", "start_line": 1,
+                                         "end_line": 1, "new": replacement}]})
+
+    provider = Provider()
+    proposal = module.propose("Change VALUE to 2", ["genesis/sample.py"], provider=provider)
+
+    assert len(provider.prompts) == 2
+    assert "not placeholder text" in provider.prompts[1]
+    assert '"new":"replacement text"' not in provider.prompts[0]
+    assert '"new":"replacement text"' not in provider.prompts[1]
+    assert proposal.files["genesis/sample.py"] == "VALUE = 2\n"
