@@ -3,8 +3,8 @@ from __future__ import annotations
 from pathlib import Path
 
 from genesis.capability_issue_router import (
-    CAPABILITY_LABEL,
-    ROUTER_PAUSE_PREFIX,
+    PERFORMANCE_LABEL,
+    PERFORMANCE_REASON_PREFIX,
     route_capability_growth,
 )
 from genesis.modules.task_queue import PersistentTaskQueue
@@ -23,7 +23,7 @@ class FakeGitHub:
             row = dict(payload or {})
             self.labels.append(row)
             return row
-        if method == "GET" and path.startswith("/issues?state=all&labels="):
+        if method == "GET" and path.startswith("/issues?state=all"):
             return list(self.issues)
         if method == "POST" and path == "/issues":
             row = {
@@ -41,7 +41,10 @@ class FakeGitHub:
             number = int(path.rsplit("/", 1)[1])
             for row in self.issues:
                 if row["number"] == number:
-                    row.update(payload or {})
+                    patch = dict(payload or {})
+                    if "labels" in patch:
+                        patch["labels"] = [{"name": value} for value in patch["labels"]]
+                    row.update(patch)
                     return dict(row)
             return None
         raise AssertionError((method, path, payload))
@@ -72,11 +75,6 @@ def _source_task(root: Path, *, state: str = "new"):
                 "unit": "percent",
             },
             "baseline_score": 32.0,
-            "discovery": {
-                "finding": {
-                    "acceptance": "Pass tests and validators, then remeasure the same benchmark for real gain."
-                }
-            },
             "requires_independent_validation": True,
             "score_fabrication_forbidden": True,
         },
@@ -90,71 +88,63 @@ def _source_task(root: Path, *, state: str = "new"):
     return queue, task
 
 
-def test_capability_growth_is_cut_over_to_one_issue_backed_devlab_task(tmp_path: Path) -> None:
+def test_capability_growth_becomes_closed_performance_indicator(tmp_path: Path) -> None:
     queue, source = _source_task(tmp_path)
     github = FakeGitHub()
 
     report = route_capability_growth(tmp_path, requester=github.request)
 
     assert report["status"] == "ok"
-    assert len(report["routed"]) == 1
-    paused = queue.get(source.task_id)
-    assert paused is not None
-    assert paused.state == "paused"
-    assert str(paused.state_reason).startswith(ROUTER_PAUSE_PREFIX)
+    assert report["routed"] == []
+    assert len(report["indicators"]) == 1
+    current = queue.get(source.task_id)
+    assert current is not None
+    assert current.state == "cancelled"
+    assert str(current.state_reason).startswith(PERFORMANCE_REASON_PREFIX)
 
-    routed = report["routed"][0]
-    execution = queue.get(routed["execution_task_id"])
-    assert execution is not None
-    assert execution.payload["task_type"] == "capability_growth"
-    assert execution.payload["executor"] == "genesis.devlab"
-    assert execution.payload["execution_lane"] == "github_issue"
-    assert execution.payload["source_capability_task_id"] == source.task_id
-    assert execution.payload["github_issue_number"] == 501
-    assert execution.payload["close_github_issue_after_promotion"] is True
-    assert execution.payload["requires_independent_validation"] is True
-    assert execution.payload["score_fabrication_forbidden"] is True
-
-    assert github.labels[0]["name"] == CAPABILITY_LABEL
-    assert github.issues[0]["title"].startswith("Genesis Control: Capability Growth")
-    assert f"<!-- genesis-capability-source:{source.task_id} -->" in github.issues[0]["body"]
-    assert "authoritative execution lane" in github.issues[0]["body"]
+    assert github.labels[0]["name"] == PERFORMANCE_LABEL
+    assert len(github.issues) == 1
+    indicator = github.issues[0]
+    assert indicator["state"] == "closed"
+    assert indicator["state_reason"] == "not_planned"
+    assert indicator["title"].startswith("[Performance Indicator]")
+    assert indicator["labels"] == [{"name": PERFORMANCE_LABEL}]
+    assert f"<!-- genesis-capability-source:{source.task_id} -->" in indicator["body"]
+    assert "must not enter DevLab" in indicator["body"]
 
 
-def test_capability_issue_routing_is_idempotent_and_never_creates_second_execution_task(tmp_path: Path) -> None:
+def test_indicator_routing_is_idempotent_and_creates_no_execution_task(tmp_path: Path) -> None:
     queue, source = _source_task(tmp_path)
     github = FakeGitHub()
 
     first = route_capability_growth(tmp_path, requester=github.request)
     second = route_capability_growth(tmp_path, requester=github.request)
 
-    assert len(first["routed"]) == 1
-    assert second["routed"] == []
-    assert len(second["already_routed"]) == 1
+    assert len(first["indicators"]) == 1
+    assert len(second["indicators"]) == 1
     assert len(github.issues) == 1
     executions = [
         task
         for task in queue.list(limit=100)
         if task.payload.get("source_capability_task_id") == source.task_id
     ]
-    assert len(executions) == 1
+    assert executions == []
 
 
-def test_in_flight_legacy_capability_work_is_not_migrated_mid_candidate(tmp_path: Path) -> None:
+def test_running_capability_measurement_is_cancelled_not_left_in_solver_lane(tmp_path: Path) -> None:
     queue, source = _source_task(tmp_path, state="running")
     github = FakeGitHub()
 
     report = route_capability_growth(tmp_path, requester=github.request)
 
-    assert report["routed"] == []
-    assert report["skipped_in_flight"] == [source.task_id]
+    assert report["skipped_in_flight"] == []
     current = queue.get(source.task_id)
     assert current is not None
-    assert current.state == "running"
-    assert github.issues == []
+    assert current.state == "cancelled"
+    assert github.issues[0]["state"] == "closed"
 
 
-def test_github_failure_leaves_source_capability_task_executable(tmp_path: Path) -> None:
+def test_github_failure_still_removes_performance_measurement_from_execution_queue(tmp_path: Path) -> None:
     queue, source = _source_task(tmp_path)
 
     def unavailable(method: str, path: str, payload: dict | None = None):
@@ -162,13 +152,31 @@ def test_github_failure_leaves_source_capability_task_executable(tmp_path: Path)
 
     report = route_capability_growth(tmp_path, requester=unavailable)
 
-    assert report["status"] == "blocked"
+    assert report["status"] == "partial"
     current = queue.get(source.task_id)
     assert current is not None
-    assert current.state == "new"
-    executions = [
-        task
-        for task in queue.list(limit=100)
-        if task.payload.get("source_capability_task_id") == source.task_id
-    ]
-    assert executions == []
+    assert current.state == "cancelled"
+    assert str(current.state_reason).startswith(PERFORMANCE_REASON_PREFIX)
+    assert report["routed"] == []
+
+
+def test_legacy_execution_task_is_cancelled_when_source_is_reclassified(tmp_path: Path) -> None:
+    queue, source = _source_task(tmp_path)
+    execution, _ = queue.create_unique(
+        "legacy-capability-execution",
+        "Legacy benchmark repair",
+        module_id="genesis.coding",
+        payload={
+            "task_type": "capability_growth",
+            "source_capability_task_id": source.task_id,
+            "github_issue_number": 336,
+        },
+    )
+    github = FakeGitHub()
+
+    report = route_capability_growth(tmp_path, requester=github.request)
+
+    current_execution = queue.get(execution.task_id)
+    assert current_execution is not None
+    assert current_execution.state == "cancelled"
+    assert report["indicators"][0]["cancelled_legacy_execution_tasks"] == [execution.task_id]
