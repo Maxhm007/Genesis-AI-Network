@@ -12,6 +12,7 @@ def test_strategy_runner_injects_materially_different_guidance(monkeypatch, tmp_
 
     monkeypatch.setattr(module.base, "EVIDENCE_PATH", tmp_path / "evidence.json")
     monkeypatch.setattr(module.base, "MAX_MAINTAINER_GUIDANCE_CHARS", 3000)
+    monkeypatch.setattr(module, "_close_if_current_main_satisfies", lambda issue_number, repository: None)
     monkeypatch.setattr(module.base, "load_maintainer_repair_guidance", lambda repository, issue_number: "existing maintainer guidance")
 
     def fake_run(issue_number, repository):
@@ -112,3 +113,91 @@ def test_navigation_landmark_micro_repair_refuses_protected_or_ambiguous_targets
         ["scripts/a.py", "scripts/b.py"],
         tmp_path,
     ) is None
+
+
+def test_benchmark_runner_satisfaction_requires_existing_adapter_and_route(tmp_path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "genesis" / "benchmark_execution.py").write_text(
+        'from .swe_bench_pro_evidence import SWEBenchProEvidenceAdapter\n'
+        'EVIDENCE_ADAPTER_BENCHMARKS = {"swe_bench_pro"}\n'
+        'def advance(self, benchmark_id, input_path, job):\n'
+        '    if benchmark_id == "swe_bench_pro" and input_path.is_file():\n'
+        '        return SWEBenchProEvidenceAdapter(self.root).stage(job)\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "genesis" / "swe_bench_pro_evidence.py").write_text(
+        'class SWEBenchProEvidenceAdapter:\n    pass\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_benchmark_execution.py").write_text(
+        'def test_swe_bench_pro_route():\n    assert "swe_bench_pro"\n',
+        encoding="utf-8",
+    )
+    issue = {
+        "state": "open",
+        "body": (
+            '- **Task type:** `benchmark_runner_integration`\n'
+            '- **Target:** `genesis/benchmark_execution.py`\n'
+            'Make benchmark swe_bench_pro executable for Genesis using the official/comparable benchmark runner.\n'
+        ),
+    }
+
+    result = module._benchmark_runner_satisfaction(issue, tmp_path)
+
+    assert result is not None
+    assert result["benchmark_id"] == "swe_bench_pro"
+    assert result["adapter"] == "SWEBenchProEvidenceAdapter"
+
+
+def test_agentic_lab_closes_already_satisfied_benchmark_after_full_suite(monkeypatch, tmp_path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "genesis" / "benchmark_execution.py").write_text(
+        'from .swe_bench_pro_evidence import SWEBenchProEvidenceAdapter\n'
+        'EVIDENCE_ADAPTER_BENCHMARKS = {"swe_bench_pro"}\n'
+        'def advance(self, benchmark_id, input_path, job):\n'
+        '    if benchmark_id == "swe_bench_pro" and input_path.is_file():\n'
+        '        return SWEBenchProEvidenceAdapter(self.root).stage(job)\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "genesis" / "swe_bench_pro_evidence.py").write_text(
+        'class SWEBenchProEvidenceAdapter:\n    pass\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_benchmark_execution.py").write_text(
+        'def test_swe_bench_pro_route():\n    assert True\n',
+        encoding="utf-8",
+    )
+    issue = {
+        "state": "open",
+        "body": (
+            '- **Task type:** `benchmark_runner_integration`\n'
+            '- **Target:** `genesis/benchmark_execution.py`\n'
+            'Make benchmark swe_bench_pro executable for Genesis using the official/comparable benchmark runner.\n'
+        ),
+    }
+    calls: list[tuple[str, str, object]] = []
+
+    def fake_api(method, url, payload=None):
+        calls.append((method, url, payload))
+        if method == "GET":
+            return issue
+        if method == "PATCH":
+            return {"state": "closed"}
+        return {}
+
+    label_calls: list[dict] = []
+    monkeypatch.setattr(module.base, "_api_json", fake_api)
+    monkeypatch.setattr(module.base, "_set_labels", lambda repository, issue_number, **kwargs: label_calls.append(kwargs))
+    monkeypatch.setattr(module, "_full_suite_passes", lambda root: (True, "1129 passed, 41 skipped"))
+
+    result = module._close_if_current_main_satisfies(350, "owner/repo", tmp_path)
+
+    assert result is not None
+    assert result["status"] == "completed"
+    assert result["reason"] == "current_main_already_satisfies_issue"
+    assert result["full_suite_verified"] is True
+    assert label_calls[0]["add"] == ("genesis-verified",)
+    assert any(method == "POST" and str(url).endswith("/comments") for method, url, _ in calls)
+    assert any(method == "PATCH" and payload == {"state": "closed", "state_reason": "completed"} for method, _, payload in calls)
