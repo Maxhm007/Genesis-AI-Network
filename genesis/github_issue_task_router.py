@@ -20,6 +20,8 @@ SOURCE_MARKER_PREFIX = "<!-- genesis-task-id:"
 CAPABILITY_SOURCE_PREFIX = "<!-- genesis-capability-source:"
 SELF_IMPROVEMENT_SOURCE_PREFIX = "<!-- genesis-self-improvement-source:"
 TERMINAL_STATES = {"complete", "cancelled"}
+PERFORMANCE_TASK_TYPES = {"frontier_benchmark_measurement"}
+PERFORMANCE_REASON_PREFIX = "performance_indicator:"
 LINK_KEYS = (
     "source_self_improvement_task_id",
     "source_capability_task_id",
@@ -61,14 +63,6 @@ def _github_request(method: str, path: str, payload: dict | None = None):
 
 
 def issue_authority_enabled(root: Path) -> bool:
-    """Return whether this path is the real Genesis repository runtime.
-
-    Unit tests frequently create temporary SQLite queues while GitHub Actions still
-    exposes repository credentials. Those fixtures must never create real Issues.
-    The actual Actions checkout is identified by GITHUB_WORKSPACE; local production
-    clones are identified by their .git directory. Tests can explicitly force this
-    policy with GENESIS_FORCE_GITHUB_TASK_AUTHORITY=1 or an injected requester.
-    """
     root = Path(root).resolve()
     if os.environ.get("GENESIS_FORCE_GITHUB_TASK_AUTHORITY", "").strip() == "1":
         return True
@@ -105,6 +99,10 @@ def _problem_fingerprint(task: GenesisTask) -> str:
 
 def _task_type(task: GenesisTask) -> str:
     return str(task.payload.get("task_type") or "autonomous_task").strip() or "autonomous_task"
+
+
+def _performance_indicator_task(task: GenesisTask) -> bool:
+    return _task_type(task) in PERFORMANCE_TASK_TYPES
 
 
 def _issue_title(task: GenesisTask) -> str:
@@ -248,7 +246,6 @@ def _ensure_issue(
             return created
         return None
 
-    # Preserve richer specialist issue text/labels if one already owns the task.
     body_text = str(issue.get("body") or "")
     is_general = _source_marker(task.task_id) in body_text
     patch: dict[str, object] = {}
@@ -265,22 +262,37 @@ def _ensure_issue(
     return issue
 
 
+def _terminalize_performance_indicators(queue: PersistentTaskQueue) -> list[dict]:
+    rows: list[dict] = []
+    for task in queue.list(limit=5000):
+        if task.state in TERMINAL_STATES or issue_backed(task) or not _performance_indicator_task(task):
+            continue
+        reason = (
+            f"{PERFORMANCE_REASON_PREFIX} {_task_type(task)} is measurement/reporting work, "
+            "not an actionable repair issue"
+        )
+        updated = queue.cancel(task.task_id, reason)
+        rows.append(
+            {
+                "task_id": updated.task_id,
+                "task_type": _task_type(updated),
+                "state": updated.state,
+                "reason": updated.state_reason,
+            }
+        )
+    return rows
+
+
 def route_unbacked_tasks(
     root: Path,
     *,
     requester: GithubRequester | None = None,
 ) -> dict:
-    """Bind non-terminal autonomous tasks to GitHub Issues before execution.
+    """Bind actionable autonomous tasks to GitHub Issues before execution.
 
-    GitHub Issues are authoritative. The SQLite queue is execution/cache state only.
-    Existing matching Issues are always reused before admission capacity is tested.
-    Low-priority research/capability candidates are left unbacked and therefore
-    non-executable when the active autonomous backlog is full; they remain durable
-    in the same queue and are reconsidered on the next routing cycle. Repair,
-    security/action-failure and owner-prioritized work bypasses that admission cap.
-
-    An injected requester explicitly opts a caller (normally a unit test) into the
-    real routing behavior without requiring the caller to be the production repo.
+    Pure benchmark-measurement tasks are performance indicators, not repair work.
+    They are terminalized before issue admission and must be represented by closed
+    reporting/indicator records rather than open solver issues.
     """
     root = Path(root).resolve()
     runtime = root / "runtime"
@@ -289,17 +301,21 @@ def route_unbacked_tasks(
     queue = PersistentTaskQueue(runtime / "genesis_tasks.sqlite3")
     explicit_requester = requester is not None
 
+    performance_indicators = _terminalize_performance_indicators(queue)
     candidates = [
         task
         for task in queue.list(limit=5000)
-        if task.state not in TERMINAL_STATES and not issue_backed(task)
+        if task.state not in TERMINAL_STATES
+        and not issue_backed(task)
+        and not _performance_indicator_task(task)
     ]
     max_active = configured_max_active()
     result = {
         "status": "ok",
         "enforced": bool(explicit_requester or issue_authority_enabled(root)),
-        "policy": "GitHub Issues are the authoritative task source; SQLite is execution/cache state only.",
+        "policy": "Actionable work uses GitHub Issues; performance measurements stay out of the solver lane.",
         "candidate_count": len(candidates),
+        "performance_indicators": performance_indicators,
         "backpressure": {
             "max_active_autonomous_issues": max_active,
             "active_capacity_issues": 0,
@@ -323,7 +339,7 @@ def route_unbacked_tasks(
     requester = requester or _github_request
     if not _ensure_label(requester):
         result["status"] = "blocked"
-        result["reason"] = "GitHub Issue lane unavailable; unbacked tasks remain non-executable"
+        result["reason"] = "GitHub Issue lane unavailable; unbacked actionable tasks remain non-executable"
         result["blocked"] = [task.task_id for task in candidates]
         report_path.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
         return result
@@ -347,8 +363,6 @@ def route_unbacked_tasks(
             )
             continue
 
-        # Dedupe/reuse happens before capacity admission. Existing authoritative
-        # work must never receive a second issue merely because the backlog is full.
         matched = _find_issue_for_task(existing, task)
         if matched is not None:
             was_open = str(matched.get("state") or "open") == "open"
