@@ -50,6 +50,13 @@ CAPABILITY_DEPENDENCY_PREFIX = "<!-- genesis-capability-dependency:"
 CAPABILITY_RELEASE_PREFIX = "<!-- genesis-agentic-capability-release:"
 CAPABILITY_WORK_PREFIX = "<!-- genesis-capability-work:"
 HUMAN_MARKER = "<!-- genesis-agentic-needs-human -->"
+NON_ACTIONABLE_TASK_TYPES = {
+    "frontier_benchmark_measurement",
+    "performance_indicator",
+    "benchmark_measurement",
+    "metric_measurement",
+}
+NON_ACTIONABLE_MARKER = "<!-- genesis-performance-indicator -->"
 
 
 def request(repository: str, token: str, method: str, path: str, payload: dict | None = None):
@@ -89,6 +96,26 @@ def labels(issue: dict) -> set[str]:
     return result
 
 
+def issue_task_type(body: str) -> str:
+    prefix = "- **Task type:** `"
+    for line in str(body or "").splitlines():
+        if line.startswith(prefix) and "`" in line[len(prefix):]:
+            return line[len(prefix):].split("`", 1)[0].strip().lower()
+    return ""
+
+
+def actionable_issue(issue: dict) -> bool:
+    title = str(issue.get("title") or "").strip().lower()
+    body = str(issue.get("body") or "")
+    if title.startswith("[performance indicator]"):
+        return False
+    if NON_ACTIONABLE_MARKER in body:
+        return False
+    if issue_task_type(body) in NON_ACTIONABLE_TASK_TYPES:
+        return False
+    return True
+
+
 def explicit_target(body: str) -> str:
     prefix = "- **Target:** `"
     for line in str(body or "").splitlines():
@@ -121,7 +148,11 @@ def open_agentic_issues(repository: str, token: str) -> list[dict]:
         )
         if not isinstance(batch, list):
             raise RuntimeError("Agentic Lab issue response was not a list")
-        rows.extend(row for row in batch if isinstance(row, dict) and not row.get("pull_request"))
+        rows.extend(
+            row
+            for row in batch
+            if isinstance(row, dict) and not row.get("pull_request") and actionable_issue(row)
+        )
         if len(batch) < 100:
             break
     return rows
