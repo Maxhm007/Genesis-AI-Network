@@ -28,7 +28,7 @@ permissions:
 
 concurrency:
   group: genesis-agentic-lab-recovery
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   dispatch-oldest-agentic-issue:
