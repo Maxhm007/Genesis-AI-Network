@@ -9,21 +9,22 @@ from typing import Any
 
 from .agents_last_exam_evidence import AgentsLastExamEvidenceAdapter
 from .modules.task_queue import GenesisTask, PersistentTaskQueue
+from .swe_bench_pro_evidence import SWEBenchProEvidenceAdapter
 from .terminal_bench_evidence import TerminalBench21EvidenceAdapter
 
 
 class BenchmarkExecutionPlanner:
     """Advance frontier benchmark tasks without fabricating capability evidence.
 
-    pass
-    adapter. If no real result is available, the planner creates bounded coding
-    work for missing runner integration. Once that bounded lane is exhausted, an
-    execution/readiness blocker is surfaced instead of endlessly generating code.
+    Benchmark-specific adapters stage only real, provenance-bearing evidence. If no
+    real result is available, the planner creates bounded coding work for missing
+    runner integration. Once that bounded lane is exhausted, an execution/readiness
+    blocker is surfaced instead of endlessly generating code.
     """
 
     TERMINAL_RUNNER_STATES = {"complete", "quarantined", "cancelled"}
     MAX_RUNNER_INTEGRATION_GENERATIONS = 4
-    EVIDENCE_ADAPTER_BENCHMARKS = {"agents_last_exam", "terminal_bench_2_1"}
+    EVIDENCE_ADAPTER_BENCHMARKS = {"agents_last_exam", "terminal_bench_2_1", "swe_bench_pro"}
     TERMINAL_BENCH_ENV = (
         "GENESIS_BENCHMARK_AGENT",
         "GENESIS_BENCHMARK_MODEL",
@@ -33,7 +34,7 @@ class BenchmarkExecutionPlanner:
     def __init__(self, root: Path) -> None:
         self.root = Path(root).resolve()
         self.runtime = self.root / "runtime"
-        self.queue = PersistentTaskQueue(self.runtime / 'genesis_tasks.sqlite3')
+        self.queue = PersistentTaskQueue(self.runtime / "genesis_tasks.sqlite3")
         self.input_dir = self.runtime / "competitive_benchmark_inputs"
 
     @staticmethod
@@ -81,13 +82,7 @@ class BenchmarkExecutionPlanner:
 
     @staticmethod
     def _runner_context(benchmark_id: str) -> list[str]:
-        """Order editable context by execution value because autonomous Coding is bounded.
-
-        Context supplied to autonomous coding must remain inside the self-development
-        sandbox. Workflow/entry-point scripts may be useful for humans to inspect,
-        but including an uneditable `scripts/` path can make Coding choose it as the
-        proposal target and fail before any benchmark adapter work is attempted.
-        """
+        """Order editable context by execution value because autonomous Coding is bounded."""
         if benchmark_id == "terminal_bench_2_1":
             return [
                 "genesis/terminal_bench_evidence.py",
@@ -99,6 +94,17 @@ class BenchmarkExecutionPlanner:
                 "genesis/evaluation.py",
                 "tests/test_benchmark_evidence.py",
                 "tests/test_competitive_benchmarks.py",
+            ]
+        if benchmark_id == "swe_bench_pro":
+            return [
+                "genesis/swe_bench_pro_evidence.py",
+                "genesis/benchmark_execution.py",
+                "tests/test_swe_bench_pro_evidence.py",
+                "tests/test_benchmark_execution.py",
+                "genesis/benchmark_evidence.py",
+                "genesis/benchmark_evidence_validation.py",
+                "genesis/competitive_benchmarks.py",
+                "genesis/evaluation.py",
             ]
         return [
             "genesis/benchmark_execution.py",
@@ -130,9 +136,7 @@ class BenchmarkExecutionPlanner:
                 return {
                     "status": "runner_integration_exhausted",
                     "benchmark_id": benchmark_id,
-                    "reason": (
-                        "bounded runner-integration work is exhausted and no benchmark-specific evidence adapter is active"
-                    ),
+                    "reason": "bounded runner-integration work is exhausted and no benchmark-specific evidence adapter is active",
                     "missing": readiness["missing"],
                     "readiness": readiness,
                     "last_runner_task_id": latest.task_id,
@@ -144,9 +148,7 @@ class BenchmarkExecutionPlanner:
                 return {
                     "status": "external_execution_required",
                     "benchmark_id": benchmark_id,
-                    "reason": (
-                        "bounded runner-integration work is exhausted; real benchmark execution prerequisites are missing"
-                    ),
+                    "reason": "bounded runner-integration work is exhausted; real benchmark execution prerequisites are missing",
                     "missing": readiness["missing"],
                     "readiness": readiness,
                     "last_runner_task_id": latest.task_id,
@@ -219,8 +221,15 @@ class BenchmarkExecutionPlanner:
                 "engineering_assistance_required": True,
                 "owner_action_required": False,
             }
+
+        if benchmark_id == "terminal_bench_2_1" and input_path.is_file():
             job = json.loads(input_path.read_text(encoding="utf-8"))
             staged = TerminalBench21EvidenceAdapter(self.root).stage(job)
+            return {"status": "evidence_staged", "benchmark_id": benchmark_id, "candidate_path": str(staged)}
+
+        if benchmark_id == "swe_bench_pro" and input_path.is_file():
+            job = json.loads(input_path.read_text(encoding="utf-8"))
+            staged = SWEBenchProEvidenceAdapter(self.root).stage(job)
             return {"status": "evidence_staged", "benchmark_id": benchmark_id, "candidate_path": str(staged)}
 
         return self._runner_task(task, benchmark_id)
