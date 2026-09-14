@@ -4,6 +4,8 @@ import argparse
 import json
 import os
 import re
+import subprocess
+import sys
 from pathlib import Path
 
 import scripts.github_issue_autorepair as base
@@ -60,7 +62,31 @@ PROTECTED_SCRIPT_TARGETS = {
     "scripts/issue_acceptance_guard.py",
 }
 
+BENCHMARK_ADAPTERS = {
+    "agents_last_exam": "AgentsLastExamEvidenceAdapter",
+    "terminal_bench_2_1": "TerminalBench21EvidenceAdapter",
+    "swe_bench_pro": "SWEBenchProEvidenceAdapter",
+}
+ACTIVE_AGENTIC_LABELS = (
+    "genesis-repair-in-progress",
+    "genesis-validating",
+    "genesis-claimed",
+    "genesis-working",
+    "genesis-verifying",
+    "genesis-blocked",
+    "genesis-solver-exhausted",
+    "genesis-deferred",
+    "genesis-waiting-capability",
+    "genesis-needs-human",
+    "agentic-lab",
+    "genesis-qwen3-agentic",
+    "genesis-agentic-escalated",
+)
+
 _SCRIPT_TARGET_RE = re.compile(r"(?:^|[\s`'\"(])(scripts/[A-Za-z0-9_./-]+\.py)")
+_BENCHMARK_ID_RE = re.compile(r"Make benchmark ([a-z0-9_]+) executable for Genesis")
+_TASK_TYPE_RE = re.compile(r"^- \*\*Task type:\*\* `([^`]+)`", re.MULTILINE)
+_TARGET_RE = re.compile(r"^- \*\*Target:\*\* `([^`]+)`", re.MULTILINE)
 
 
 def _explicit_safe_script_paths(issue_text: str, root: Path) -> list[str]:
@@ -92,6 +118,118 @@ def _script_aware_allowed_paths(original, context_paths: list[str]) -> set[str]:
         if relative in ALLOWED_SCRIPT_PATHS and relative not in PROTECTED_SCRIPT_TARGETS:
             allowed.add(f"tests/test_{path.stem}.py")
     return allowed
+
+
+def _benchmark_runner_satisfaction(issue: dict, root: Path) -> dict | None:
+    body = str(issue.get("body") or "")
+    task_type = _TASK_TYPE_RE.search(body)
+    if task_type is None or task_type.group(1).strip() != "benchmark_runner_integration":
+        return None
+    target = _TARGET_RE.search(body)
+    if target is None or target.group(1).strip() != "genesis/benchmark_execution.py":
+        return None
+    benchmark_match = _BENCHMARK_ID_RE.search(body)
+    if benchmark_match is None:
+        return None
+    benchmark_id = benchmark_match.group(1)
+    adapter = BENCHMARK_ADAPTERS.get(benchmark_id)
+    if not adapter:
+        return None
+
+    planner_path = root / "genesis" / "benchmark_execution.py"
+    evidence_path = root / "genesis" / (
+        "swe_bench_pro_evidence.py" if benchmark_id == "swe_bench_pro" else
+        "terminal_bench_evidence.py" if benchmark_id == "terminal_bench_2_1" else
+        "agents_last_exam_evidence.py"
+    )
+    tests_path = root / "tests" / "test_benchmark_execution.py"
+    if not planner_path.is_file() or not evidence_path.is_file() or not tests_path.is_file():
+        return None
+
+    planner = planner_path.read_text(encoding="utf-8")
+    evidence = evidence_path.read_text(encoding="utf-8")
+    tests = tests_path.read_text(encoding="utf-8")
+    required = (
+        adapter in planner,
+        benchmark_id in planner,
+        f'if benchmark_id == "{benchmark_id}"' in planner,
+        f"{adapter}(self.root).stage(job)" in planner,
+        f'class {adapter}' in evidence,
+        benchmark_id in tests,
+    )
+    if not all(required):
+        return None
+
+    return {
+        "benchmark_id": benchmark_id,
+        "target": "genesis/benchmark_execution.py",
+        "adapter": adapter,
+        "focused_tests": [
+            "tests/test_benchmark_execution.py",
+            f"tests/test_{benchmark_id}_evidence.py" if benchmark_id != "terminal_bench_2_1" else "tests/test_terminal_bench_evidence.py",
+        ],
+    }
+
+
+def _full_suite_passes(root: Path) -> tuple[bool, str]:
+    completed = subprocess.run(
+        [sys.executable, "-m", "pytest", "-q"],
+        cwd=root,
+        text=True,
+        stdout=subprocess.PIPE,
+        stderr=subprocess.STDOUT,
+        check=False,
+    )
+    output = completed.stdout.strip()
+    return completed.returncode == 0, output[-4000:]
+
+
+def _close_if_current_main_satisfies(issue_number: int, repository: str, root: Path = base.ROOT) -> dict | None:
+    issue_url = f"https://api.github.com/repos/{repository}/issues/{issue_number}"
+    issue = base._api_json("GET", issue_url)
+    if not isinstance(issue, dict) or str(issue.get("state") or "").lower() != "open":
+        return None
+    satisfaction = _benchmark_runner_satisfaction(issue, root)
+    if satisfaction is None:
+        return None
+
+    passed, test_output = _full_suite_passes(root)
+    if not passed:
+        return None
+
+    base._set_labels(
+        repository,
+        issue_number,
+        add=("genesis-verified",),
+        remove=ACTIVE_AGENTIC_LABELS,
+    )
+    marker = "<!-- genesis-current-main-satisfied -->"
+    comment = (
+        f"{marker}\n"
+        "Genesis verified that the current `main` already satisfies this benchmark-runner integration issue, so no additional model-generated patch is required.\n\n"
+        f"- Benchmark: `{satisfaction['benchmark_id']}`\n"
+        f"- Target: `{satisfaction['target']}`\n"
+        f"- Adapter: `{satisfaction['adapter']}`\n"
+        "- Verification: full repository `pytest -q` passed on current `main`\n"
+        "- Closure rule: current-state satisfaction verified before close; no successor issue created."
+    )
+    base._api_json("POST", issue_url + "/comments", {"body": comment})
+    closed = base._api_json("PATCH", issue_url, {"state": "closed", "state_reason": "completed"})
+    if not isinstance(closed, dict) or str(closed.get("state") or "").lower() != "closed":
+        return None
+    return {
+        "status": "completed",
+        "reason": "current_main_already_satisfies_issue",
+        "repair_status": "completed",
+        "issue_number": issue_number,
+        "repository": repository,
+        "candidate_branch": "",
+        "candidate_sha": "",
+        "current_state_checked_first": True,
+        "current_main_satisfaction": satisfaction,
+        "full_suite_verified": True,
+        "full_suite_output_tail": test_output,
+    }
 
 
 def _navigation_landmark_micro_repair(issue: dict, context_paths: list[str], root: Path):
@@ -138,6 +276,13 @@ def _micro_repair_or_original(original, issue: dict, context_paths: list[str], r
 def run(issue_number: int, repository: str, strategy: str) -> dict:
     if strategy not in STRATEGY_GUIDANCE:
         raise ValueError(f"unsupported Agentic Lab strategy: {strategy}")
+
+    already_satisfied = _close_if_current_main_satisfies(issue_number, repository)
+    if already_satisfied is not None:
+        already_satisfied["agentic_strategy"] = strategy
+        base.EVIDENCE_PATH.write_text(json.dumps(already_satisfied, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return already_satisfied
+
     original_loader = base.load_maintainer_repair_guidance
     original_context_paths = base.candidate_context_paths
     original_allowed_paths = base.allowed_issue_repair_paths
