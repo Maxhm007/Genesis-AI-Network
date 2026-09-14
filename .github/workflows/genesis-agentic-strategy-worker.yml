@@ -56,7 +56,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Verify Agentic Lab reservation and safe target
+      - name: Verify actionable Agentic Lab reservation and safe target
         id: eligibility
         env:
           GH_TOKEN: ${{ github.token }}
@@ -69,10 +69,22 @@ jobs:
           state=$(jq -r '.state' <<<"$issue_json")
           reserved=$(jq -r '([.labels[].name] | index("genesis-repair-in-progress")) != null' <<<"$issue_json")
           agentic=$(jq -r '([.labels[].name] | index("agentic-lab")) != null' <<<"$issue_json")
+          title=$(jq -r '.title // ""' <<<"$issue_json")
           body=$(jq -r '.body // ""' <<<"$issue_json")
           target=$(printf '%s\n' "$body" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
+          task_type=$(printf '%s\n' "$body" | sed -nE 's/^- \*\*Task type:\*\* `([^`]+)`.*/\1/p' | head -n1)
+
+          actionable=true
+          title_lc=$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]')
+          if [[ "$title_lc" == "[performance indicator]"* ]]; then actionable=false; fi
+          case "$task_type" in
+            frontier_benchmark_measurement|performance_indicator|benchmark_measurement|metric_measurement)
+              actionable=false ;;
+          esac
+          if grep -Fq '<!-- genesis-performance-indicator -->' <<<"$body"; then actionable=false; fi
 
           safe=true
+          if [[ "$actionable" != "true" ]]; then safe=false; fi
           if [[ "$state" != "OPEN" || "$reserved" != "true" || "$agentic" != "true" ]]; then safe=false; fi
           if [[ -z "$target" || "$target" == *".."* || ! -f "$target" ]]; then safe=false; fi
           if [[ "$target" != genesis/*.py && "$target" != scripts/*.py ]]; then safe=false; fi
@@ -83,7 +95,18 @@ jobs:
 
           echo "target=$target" >> "$GITHUB_OUTPUT"
           echo "eligible=$safe" >> "$GITHUB_OUTPUT"
-          if [[ "$safe" != "true" ]]; then
+          echo "actionable=$actionable" >> "$GITHUB_OUTPUT"
+
+          if [[ "$actionable" != "true" ]]; then
+            for label in genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying genesis-blocked genesis-solver-exhausted genesis-deferred genesis-waiting-capability genesis-needs-human agentic-lab genesis-qwen3-agentic genesis-autonomous; do
+              gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
+            done
+            printf '%s\n%s\n' \
+              '<!-- genesis-non-actionable-skip -->' \
+              'Genesis skipped this item because it is a performance/measurement indicator, not an actionable repair Issue. Solver and Agentic labels were released; measurement history remains authoritative.' \
+              > /tmp/genesis-non-actionable-skip.md
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-non-actionable-skip.md
+          elif [[ "$safe" != "true" ]]; then
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress >/dev/null 2>&1 || true
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --add-label agentic-lab --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
             printf '%s\n%s\n' \
