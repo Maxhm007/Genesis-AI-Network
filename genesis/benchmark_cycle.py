@@ -95,13 +95,15 @@ def candidate_tasks(
 
 
 def advance_one_benchmark(root: Path) -> dict[str, Any]:
-    """Advance at most one Issue-backed durable frontier benchmark task in production.
+    """Advance at most one durable frontier benchmark activity.
 
-    GitHub Issues are authoritative in the real Genesis runtime; SQLite is
-    execution/cache state only. Benchmark work is therefore routed to an Issue
-    before it may run. Temporary unit-test roots retain isolated behavior without
-    mutating the real repository. The planner never invents scores or changes
-    validation/promotion authority.
+    Pure frontier benchmark measurements are performance indicators, not repair
+    work. They are terminalized by the GitHub task router and reported here as
+    performance history activity rather than entering the solver lane. Concrete
+    benchmark-runner integration defects remain separate actionable tasks/issues.
+
+    Legacy Issue-backed benchmark tasks can still be advanced safely when already
+    present, but new measurement-only tasks never create solver work.
     """
     root = Path(root).resolve()
     queue = PersistentTaskQueue(root / "runtime" / "genesis_tasks.sqlite3")
@@ -110,6 +112,15 @@ def advance_one_benchmark(root: Path) -> dict[str, Any]:
     planner = BenchmarkExecutionPlanner(root)
     candidates = candidate_tasks(queue, planner, require_issue=authority)
     if not candidates:
+        indicators = list(issue_sync.get("performance_indicators") or [])
+        if indicators:
+            return {
+                "status": "performance_indicator_recorded",
+                "task_ids": [str(row.get("task_id") or "") for row in indicators if row.get("task_id")],
+                "performance_indicators": indicators,
+                "github_issue_authority_enforced": authority,
+                "github_issue_sync": issue_sync,
+            }
         unbacked = [
             task.task_id for task in queue.list(limit=200)
             if authority
