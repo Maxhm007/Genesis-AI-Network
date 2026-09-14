@@ -125,7 +125,7 @@ def test_coding_module_repairs_parse_and_schema_errors_with_same_provider(tmp_pa
     assert provider.calls == 3
     assert "RETRY:" in provider.prompts[1]
     assert "Exactly one edit" in provider.prompts[2]
-    assert '"path":"genesis/example.py"' in provider.prompts[1]
+    assert "GROUNDED_LINE_HINT: genesis/example.py:1" in provider.prompts[1]
     assert "existing allowed path" not in provider.prompts[1]
 
 
@@ -155,7 +155,7 @@ def test_coding_prompt_requires_exactly_one_small_edit(tmp_path: Path):
     module.propose("Tune one value", ["genesis/example.py"], provider=provider)
     assert "exactly ONE smallest useful edit" in provider.prompt
     assert "no title/rationale/markdown/explanation" in provider.prompt
-    assert '"path":"genesis/example.py"' in provider.prompt
+    assert "GROUNDED_LINE_HINT: genesis/example.py:1" in provider.prompt
     assert "existing allowed path" not in provider.prompt
     assert module.MAX_EDITS == 1
     assert module.MAX_CONTEXT_BYTES <= 12_000
@@ -177,7 +177,7 @@ def test_coding_prompt_grounds_example_on_objective_marker_not_line_one(tmp_path
     )
     assert provider.calls == 2
     assert "GROUNDED_LINE_HINT: genesis/learned_capabilities.py:5" in provider.prompts[0]
-    assert '"start_line":5,"end_line":5' in provider.prompts[0]
+    assert 'integer "start_line", integer "end_line"' in provider.prompts[0]
     assert "line edit may not overwrite a Python __future__ import" in provider.prompts[1]
     assert "Change strategy" in provider.prompts[1]
     assert proposal.files["genesis/learned_capabilities.py"].startswith("from __future__ import annotations")
