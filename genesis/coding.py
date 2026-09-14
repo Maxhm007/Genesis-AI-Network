@@ -27,6 +27,8 @@ class CodingModule:
 
     MAX_CONTEXT_FILES = 4
     MAX_CONTEXT_BYTES = 12_000
+    MAX_TEST_CONTEXT_FILES = 2
+    MAX_TEST_CONTEXT_BYTES = 4_000
     MAX_FILES = 6
     MAX_TOTAL_BYTES = 80_000
     MAX_EDITS = 1
@@ -95,6 +97,38 @@ class CodingModule:
             text = data[:remaining].decode("utf-8", errors="replace")
             context[normalized] = text
             total += len(text.encode("utf-8"))
+        return context
+
+    def _related_test_context(self, paths: list[str]) -> dict[str, str]:
+        """Read a small amount of matching test evidence without making tests editable."""
+        tests_dir = self.root / "tests"
+        if not tests_dir.is_dir():
+            return {}
+        candidates: list[Path] = []
+        for relative in paths:
+            normalized = str(relative).replace("\\", "/").lstrip("./")
+            source = Path(normalized)
+            if not normalized.startswith("genesis/") or source.suffix != ".py":
+                continue
+            for candidate in sorted(tests_dir.glob(f"test_{source.stem}*.py")):
+                if candidate.is_file() and candidate not in candidates:
+                    candidates.append(candidate)
+                if len(candidates) >= self.MAX_TEST_CONTEXT_FILES:
+                    break
+            if len(candidates) >= self.MAX_TEST_CONTEXT_FILES:
+                break
+
+        context: dict[str, str] = {}
+        remaining = self.MAX_TEST_CONTEXT_BYTES
+        for candidate in candidates:
+            if remaining <= 0:
+                break
+            relative = candidate.relative_to(self.root).as_posix()
+            self.executor._validate_paths([relative])
+            data = candidate.read_bytes()[:remaining]
+            text = data.decode("utf-8", errors="replace")
+            context[relative] = text
+            remaining -= len(text.encode("utf-8"))
         return context
 
     @staticmethod
@@ -473,8 +507,11 @@ class CodingModule:
         provider = provider or self._provider()
         if provider is None:
             raise RuntimeError("no intelligence provider available")
-        context = self.read_context(context_paths or [])
+        requested_paths = context_paths or []
+        context = self.read_context(requested_paths)
+        test_context = self._related_test_context(requested_paths)
         numbered_context = {path: self._number_context(text) for path, text in context.items()}
+        numbered_test_context = {path: self._number_context(text) for path, text in test_context.items()}
         allowed_paths = tuple(numbered_context)
         edit_hint = self._best_edit_hint(objective, context)
         preferred_path, preferred_line = edit_hint
@@ -489,11 +526,13 @@ class CodingModule:
             f"GROUNDED_LINE_HINT: {preferred_path}:{preferred_line}\n"
             "RULES: exactly one edit; path must match one key from VALID_PATHS exactly; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text; "
             "the hint is grounded but must be verified against OBJECTIVE and NUMBERED_CONTEXT; never copy an unrelated example line number; "
+            "READ_ONLY_TEST_CONTEXT is evidence for expected behavior only and can never be an edit target; never weaken or rewrite tests to make a candidate pass; "
             "never emit placeholder path or replacement text; no title/rationale/markdown/explanation; do not create files. The local executor resolves those lines against the repository and preserves local Python indentation. "
             "For Python, replace a complete standalone statement rather than deleting the only body of a compound block; a sole body replacement must contain executable code, not only comments or whitespace. "
             "Allowed path prefixes: genesis/, tests/, docs/, config/, desktop/, mobile/. Never change Constitution, Genesis Block, .github, validation/quorum, permissions, secrets, or weaken tests.\n"
             f"OBJECTIVE: {objective}\n"
             f"NUMBERED_CONTEXT: {json.dumps(numbered_context, sort_keys=True)}\n"
+            f"READ_ONLY_TEST_CONTEXT: {json.dumps(numbered_test_context, sort_keys=True)}\n"
         )
         current_prompt = prompt
         last_error: Exception | None = None
