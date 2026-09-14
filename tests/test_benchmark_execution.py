@@ -1,31 +1,9 @@
 from __future__ import annotations
 
-from pathlib import Path
-
 import json
-
 from pathlib import Path
+
 from genesis.benchmark_execution import BenchmarkExecutionPlanner
-from genesis.modules.task_queue import PersistentTaskQueue
-from genesis.selfdev import normalize_selfdev_path
-
-def make_task(root: Path, benchmark_id: str = "terminal_bench_2_1"):
-    queue = PersistentTaskQueue(root / "runtime" / "genesis_tasks.sqlite3")
-    return queue.create(
-        f"Measure {benchmark_id}",
-        module_id="genesis.evaluation",
-        priority=92,
-        payload={
-            "task_type": "frontier_benchmark_measurement",
-            "benchmark": {"benchmark_id": benchmark_id},
-        },
-    )
-
-def quarantine(queue: PersistentTaskQueue, task_id: str) -> None:
-    queue.transition(task_id, "assigned", module_id="genesis.coding")
-    queue.transition(task_id, "running", module_id="genesis.coding")
-    queue.transition(task_id, "failed", module_id="genesis.coding")
-    queue.transition(task_id, "quarantined", module_id="genesis.coding")
 from genesis.modules.task_queue import PersistentTaskQueue
 from genesis.selfdev import normalize_selfdev_path
 
@@ -79,8 +57,65 @@ def test_terminal_runner_context_prioritizes_editable_executable_files(tmp_path:
     ]
 
 
+def test_swe_bench_pro_runner_context_prioritizes_existing_evidence_adapter(tmp_path: Path) -> None:
+    task = make_task(tmp_path, "swe_bench_pro")
+    result = BenchmarkExecutionPlanner(tmp_path).advance(task)
+    child = BenchmarkExecutionPlanner(tmp_path).queue.get(result["task_id"])
+    assert child is not None
+    assert child.payload["context_paths"][:4] == [
+        "genesis/swe_bench_pro_evidence.py",
+        "genesis/benchmark_execution.py",
+        "tests/test_swe_bench_pro_evidence.py",
+        "tests/test_benchmark_execution.py",
+    ]
+    readiness = BenchmarkExecutionPlanner._execution_readiness("swe_bench_pro")
+    assert readiness == {"ready": True, "missing": [], "benchmark_id": "swe_bench_pro"}
+
+
+def test_swe_bench_pro_input_is_staged_through_verified_adapter(tmp_path: Path, monkeypatch) -> None:
+    task = make_task(tmp_path, "swe_bench_pro")
+    planner = BenchmarkExecutionPlanner(tmp_path)
+    planner.input_dir.mkdir(parents=True, exist_ok=True)
+    (planner.input_dir / "swe_bench_pro.json").write_text(json.dumps({"raw": "official-result"}), encoding="utf-8")
+    staged = tmp_path / "runtime" / "staged-swe-bench-pro.json"
+
+    def fake_stage(self, job):
+        assert job == {"raw": "official-result"}
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_text("{}", encoding="utf-8")
+        return staged
+
+    monkeypatch.setattr("genesis.benchmark_execution.SWEBenchProEvidenceAdapter.stage", fake_stage)
+    result = planner.advance(task)
+    assert result == {
+        "status": "evidence_staged",
+        "benchmark_id": "swe_bench_pro",
+        "candidate_path": str(staged),
+    }
+    assert planner._runner_tasks("swe_bench_pro") == []
+
+
+def test_terminal_bench_input_is_staged_through_verified_adapter(tmp_path: Path, monkeypatch) -> None:
+    task = make_task(tmp_path, "terminal_bench_2_1")
+    planner = BenchmarkExecutionPlanner(tmp_path)
+    planner.input_dir.mkdir(parents=True, exist_ok=True)
+    (planner.input_dir / "terminal_bench_2_1.json").write_text(json.dumps({"raw": "terminal-result"}), encoding="utf-8")
+    staged = tmp_path / "runtime" / "staged-terminal.json"
+
+    def fake_stage(self, job):
+        assert job == {"raw": "terminal-result"}
+        staged.parent.mkdir(parents=True, exist_ok=True)
+        staged.write_text("{}", encoding="utf-8")
+        return staged
+
+    monkeypatch.setattr("genesis.benchmark_execution.TerminalBench21EvidenceAdapter.stage", fake_stage)
+    result = planner.advance(task)
+    assert result["status"] == "evidence_staged"
+    assert result["candidate_path"] == str(staged)
+
+
 def test_runner_context_is_inside_self_development_sandbox(tmp_path: Path) -> None:
-    for benchmark_id in ("terminal_bench_2_1", "agents_last_exam"):
+    for benchmark_id in ("terminal_bench_2_1", "agents_last_exam", "swe_bench_pro"):
         context = BenchmarkExecutionPlanner._runner_context(benchmark_id)
         assert context
         for path in context:
