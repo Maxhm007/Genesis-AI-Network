@@ -5,6 +5,7 @@ from pathlib import Path
 from genesis.github_issue_task_router import (
     AUTONOMOUS_REPAIR_LABEL,
     GENESIS_TASK_LABEL,
+    PERFORMANCE_REASON_PREFIX,
     issue_authority_enabled,
     route_unbacked_tasks,
 )
@@ -78,6 +79,27 @@ def test_unbacked_task_creates_issue_and_binds_same_task(tmp_path: Path) -> None
     assert len(issue_creates) == 1
     assert issue_creates[0] is not None
     assert issue_creates[0]["labels"] == [GENESIS_TASK_LABEL, AUTONOMOUS_REPAIR_LABEL]
+
+
+def test_frontier_benchmark_measurement_never_enters_open_issue_lane(tmp_path: Path) -> None:
+    queue = _queue(tmp_path)
+    task, _ = queue.create_unique(
+        "frontier-benchmark:example",
+        "Measure a frontier benchmark and record the score.",
+        module_id="genesis.evaluation",
+        payload={"task_type": "frontier_benchmark_measurement"},
+    )
+    github = FakeGithub()
+
+    result = route_unbacked_tasks(tmp_path, requester=github)
+
+    current = queue.get(task.task_id)
+    assert current is not None
+    assert current.state == "cancelled"
+    assert str(current.state_reason).startswith(PERFORMANCE_REASON_PREFIX)
+    assert result["candidate_count"] == 0
+    assert result["performance_indicators"][0]["task_id"] == task.task_id
+    assert not any(method == "POST" and path == "/issues" for method, path, _ in github.calls)
 
 
 def test_specialist_execution_issue_is_reused_for_source_task(tmp_path: Path) -> None:
