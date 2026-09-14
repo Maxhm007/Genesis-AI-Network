@@ -263,6 +263,9 @@ class GenePulse:
         if authority and issue_sync_after.get("blocked"):
             needs_next = False
             reason = "github_issue_authority_unavailable"
+        elif authority and not issue_sync_after.get("blocked"):
+            needs_next = True
+            reason = "continuing_with_authority"
 
         return PulseResult(
             logical_id=self.logical_id,
