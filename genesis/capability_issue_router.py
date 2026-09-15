@@ -14,6 +14,7 @@ from .modules.task_queue import GenesisTask, PersistentTaskQueue
 CAPABILITY_LABEL = "genesis-capability"
 PERFORMANCE_LABEL = "performance-indicator"
 CONTROL_TITLE_PREFIX = "[Performance Indicator] Capability Benchmark"
+LEGACY_CONTROL_TITLE_PREFIX = "Genesis Control: Capability Growth"
 SOURCE_MARKER_PREFIX = "<!-- genesis-capability-source:"
 ROUTER_PAUSE_PREFIX = "github_capability_issue_router:"
 PERFORMANCE_REASON_PREFIX = "performance_indicator:"
@@ -56,6 +57,18 @@ def _github_request(method: str, path: str, payload: dict | None = None):
 
 def _source_marker(task_id: str) -> str:
     return f"{SOURCE_MARKER_PREFIX}{task_id} -->"
+
+
+def _source_task_id_from_issue(issue: dict) -> str:
+    body = str(issue.get("body") or "")
+    start = body.find(SOURCE_MARKER_PREFIX)
+    if start < 0:
+        return ""
+    start += len(SOURCE_MARKER_PREFIX)
+    end = body.find("-->", start)
+    if end < 0:
+        return ""
+    return body[start:end].strip()
 
 
 def _is_source_capability_task(task: GenesisTask) -> bool:
@@ -137,6 +150,13 @@ def _existing_indicator_issues(requester: GithubRequester) -> list[dict]:
     return [row for row in rows if isinstance(row, dict) and "pull_request" not in row]
 
 
+def _open_issues(requester: GithubRequester) -> list[dict]:
+    rows = requester("GET", "/issues?state=open&per_page=100", None)
+    if not isinstance(rows, list):
+        return []
+    return [row for row in rows if isinstance(row, dict) and "pull_request" not in row]
+
+
 def _find_issue(existing: list[dict], task_id: str) -> dict | None:
     marker = _source_marker(task_id)
     for issue in existing:
@@ -211,6 +231,94 @@ def _cancel_legacy_execution_tasks(
     return cancelled
 
 
+def _legacy_performance_issue(issue: dict) -> bool:
+    title = str(issue.get("title") or "")
+    body = str(issue.get("body") or "")
+    if not title.startswith(LEGACY_CONTROL_TITLE_PREFIX):
+        return False
+    return (
+        SOURCE_MARKER_PREFIX in body
+        and "- **Benchmark:**" in body
+        and "- **Validated baseline:**" in body
+        and "- **Reference:**" in body
+        and "Improve the measured Genesis capability gap" in body
+    )
+
+
+def _cancel_tasks_backing_legacy_issue(
+    queue: PersistentTaskQueue,
+    issue: dict,
+    reason: str,
+) -> list[str]:
+    number = int(issue.get("number") or 0)
+    source_task_id = _source_task_id_from_issue(issue)
+    cancelled: list[str] = []
+    for task in queue.list(limit=5000):
+        payload = dict(task.payload or {})
+        linked = (
+            (source_task_id and task.task_id == source_task_id)
+            or int(payload.get("github_issue_number") or 0) == number
+            or (source_task_id and str(payload.get("source_capability_task_id") or "") == source_task_id)
+        )
+        if not linked or payload.get("task_type") != "capability_growth":
+            continue
+        if task.state in TERMINAL_STATES:
+            continue
+        queue.cancel(task.task_id, reason)
+        cancelled.append(task.task_id)
+    return cancelled
+
+
+def _reclassify_legacy_indicators(
+    requester: GithubRequester,
+    queue: PersistentTaskQueue,
+) -> list[dict]:
+    result: list[dict] = []
+    reason = (
+        f"{PERFORMANCE_REASON_PREFIX} legacy capability-growth benchmark gap is a changing measurement, "
+        "not an immediately actionable repair task"
+    )
+    for issue in _open_issues(requester):
+        if not _legacy_performance_issue(issue):
+            continue
+        number = int(issue.get("number") or 0)
+        if number <= 0:
+            continue
+        title = str(issue.get("title") or "")
+        body = str(issue.get("body") or "")
+        if "<!-- genesis-performance-indicator -->" not in body:
+            body = (
+                body.rstrip()
+                + "\n\n<!-- genesis-performance-indicator -->\n"
+                + "### Performance indicator classification\n"
+                + "This legacy capability-growth record is a changing benchmark measurement. It stays closed and must not enter DevLab, Issue Solver, Agentic Lab, Qwen3, DeepSeek, or repair retry lanes. Concrete defects or missing capabilities require a separate actionable issue.\n"
+            )
+        if not title.startswith("[Performance Indicator]"):
+            title = f"[Performance Indicator] {title}"[:240]
+        cancelled = _cancel_tasks_backing_legacy_issue(queue, issue, reason)
+        updated = requester(
+            "PATCH",
+            f"/issues/{number}",
+            {
+                "title": title,
+                "body": body,
+                "labels": [PERFORMANCE_LABEL],
+                "state": "closed",
+                "state_reason": "not_planned",
+            },
+        )
+        if isinstance(updated, dict):
+            result.append(
+                {
+                    "github_issue_number": number,
+                    "classification": PERFORMANCE_LABEL,
+                    "state": str(updated.get("state") or ""),
+                    "cancelled_linked_tasks": cancelled,
+                }
+            )
+    return result
+
+
 def route_capability_growth(
     root: Path,
     *,
@@ -233,7 +341,8 @@ def route_capability_growth(
     indicators: list[dict] = []
     blocked: list[dict] = []
 
-    github_ready = _ensure_performance_label(requester) if sources else True
+    github_ready = _ensure_performance_label(requester)
+    legacy_indicators = _reclassify_legacy_indicators(requester, queue) if github_ready else []
     existing = _existing_indicator_issues(requester) if github_ready and sources else []
 
     for source in sources:
@@ -267,6 +376,7 @@ def route_capability_growth(
         "status": "ok" if not blocked else "partial",
         "source_tasks": len(sources),
         "indicators": indicators,
+        "legacy_indicators": legacy_indicators,
         "routed": [],
         "already_routed": [],
         "skipped_in_flight": [],
@@ -276,10 +386,11 @@ def route_capability_growth(
             "performance_indicators_are_closed_by_default": True,
             "performance_indicators_never_create_execution_tasks": True,
             "legacy_capability_growth_execution_is_cancelled": True,
+            "legacy_capability_growth_issues_are_terminally_reclassified": True,
             "concrete_defects_require_separate_actionable_issues": True,
         },
     }
-    if sources and not github_ready:
+    if (sources or legacy_indicators) and not github_ready:
         result["status"] = "partial"
         result["blocked"].append(
             {
