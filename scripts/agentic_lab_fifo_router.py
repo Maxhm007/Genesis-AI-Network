@@ -42,17 +42,80 @@ def _labels(issue: dict) -> set[str]:
     return rows
 
 
+def _legacy_capability_performance_issue(issue: dict) -> bool:
+    title = str(issue.get("title") or "")
+    body = str(issue.get("body") or "")
+    return (
+        title.startswith("Genesis Control: Capability Growth")
+        and "<!-- genesis-capability-source:" in body
+        and "- **Benchmark:**" in body
+        and "- **Validated baseline:**" in body
+        and "- **Reference:**" in body
+        and "Improve the measured Genesis capability gap" in body
+    )
+
+
+def _terminalize_performance_indicators(repository: str, token: str, issues: list[dict]) -> list[int]:
+    closed: list[int] = []
+    for issue in issues:
+        if not _legacy_capability_performance_issue(issue):
+            continue
+        number = int(issue.get("number") or 0)
+        if number <= 0:
+            continue
+        title = str(issue.get("title") or "")
+        body = str(issue.get("body") or "")
+        if not title.startswith("[Performance Indicator]"):
+            title = f"[Performance Indicator] {title}"[:240]
+        if "<!-- genesis-performance-indicator -->" not in body:
+            body = (
+                body.rstrip()
+                + "\n\n<!-- genesis-performance-indicator -->\n"
+                + "### Performance indicator classification\n"
+                + "Genesis classified this legacy capability-growth record as a changing benchmark measurement. It stays closed and must not enter DevLab, Issue Solver, Agentic Lab, Qwen3, DeepSeek, or repair retry lanes. Concrete defects or missing capabilities require a separate actionable issue.\n"
+            )
+        _request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/comments",
+            {
+                "body": (
+                    "<!-- genesis-performance-indicator-auto-close -->\n"
+                    "Genesis Agentic FIFO terminal classification: this legacy capability-growth record is a performance indicator, not immediate repair work. "
+                    "The benchmark value remains measurable over time; concrete defects must use separate actionable Issues. Closing as not planned and removing it from Agentic repair lanes."
+                )
+            },
+        )
+        updated = _request(
+            repository,
+            token,
+            "PATCH",
+            f"/issues/{number}",
+            {
+                "title": title,
+                "body": body,
+                "labels": ["performance-indicator"],
+                "state": "closed",
+                "state_reason": "not_planned",
+            },
+        )
+        if isinstance(updated, dict) and str(updated.get("state") or "").lower() == "closed":
+            closed.append(number)
+    return closed
+
+
 def _actionable(issue: dict) -> bool:
     labels = _labels(issue)
     if "genesis-autonomous" not in labels or "genesis-verified" in labels:
         return False
-    if labels & {"genesis-persistent", "duplicate", "invalid", "wontfix", "genesis-superseded"}:
+    if labels & {"genesis-persistent", "duplicate", "invalid", "wontfix", "genesis-superseded", "performance-indicator"}:
         return False
     title = str(issue.get("title") or "").strip().lower()
     body = str(issue.get("body") or "").lower()
-    if title.startswith(("[genesis gene chat]", "genesis chat:", "[genesis hourly report]", "[genesis ops]")):
+    if title.startswith(("[genesis gene chat]", "genesis chat:", "[genesis hourly report]", "[genesis ops]", "[performance indicator]")):
         return False
-    if "persistent github-native reporting channel" in body:
+    if "persistent github-native reporting channel" in body or "<!-- genesis-performance-indicator -->" in body:
         return False
     return int(issue.get("number") or 0) > 1
 
@@ -81,6 +144,11 @@ def main() -> int:
         raise RuntimeError("GITHUB_REPOSITORY and GITHUB_TOKEN are required")
 
     issues = _open_fifo(repository, token)
+    terminalized = _terminalize_performance_indicators(repository, token, issues)
+    if terminalized:
+        print(json.dumps({"status": "terminalized_performance_indicators", "issues": terminalized}, sort_keys=True))
+        issues = _open_fifo(repository, token)
+
     actionable = [issue for issue in issues if _actionable(issue)]
     if not actionable:
         return legacy.main()
