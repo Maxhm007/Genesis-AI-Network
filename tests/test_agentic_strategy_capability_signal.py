@@ -1,9 +1,15 @@
 import scripts.agentic_strategy_repair as module
 
 
+def _isolate_preflight_state_checks(monkeypatch):
+    monkeypatch.setattr(module, "_close_if_legacy_performance_indicator", lambda issue_number, repository: None)
+    monkeypatch.setattr(module, "_close_if_current_main_satisfies", lambda issue_number, repository: None)
+
+
 def test_capability_signal_does_not_pause_before_dependency_strategy(monkeypatch, tmp_path):
     monkeypatch.setattr(module.base, "EVIDENCE_PATH", tmp_path / "evidence.json")
     monkeypatch.setattr(module.base, "load_maintainer_repair_guidance", lambda repository, issue_number: "")
+    _isolate_preflight_state_checks(monkeypatch)
     monkeypatch.setattr(
         module.base,
         "run",
@@ -23,6 +29,7 @@ def test_capability_signal_does_not_pause_before_dependency_strategy(monkeypatch
 def test_dependency_strategy_preserves_capability_signal(monkeypatch, tmp_path):
     monkeypatch.setattr(module.base, "EVIDENCE_PATH", tmp_path / "evidence.json")
     monkeypatch.setattr(module.base, "load_maintainer_repair_guidance", lambda repository, issue_number: "")
+    _isolate_preflight_state_checks(monkeypatch)
     monkeypatch.setattr(
         module.base,
         "run",
