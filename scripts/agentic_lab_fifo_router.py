@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import os
+import urllib.error
 import urllib.request
 
 import agentic_lab_capability_first_dispatch as legacy
@@ -74,19 +75,9 @@ def _terminalize_performance_indicators(repository: str, token: str, issues: lis
                 + "### Performance indicator classification\n"
                 + "Genesis classified this legacy capability-growth record as a changing benchmark measurement. It stays closed and must not enter DevLab, Issue Solver, Agentic Lab, Qwen3, DeepSeek, or repair retry lanes. Concrete defects or missing capabilities require a separate actionable issue.\n"
             )
-        _request(
-            repository,
-            token,
-            "POST",
-            f"/issues/{number}/comments",
-            {
-                "body": (
-                    "<!-- genesis-performance-indicator-auto-close -->\n"
-                    "Genesis Agentic FIFO terminal classification: this legacy capability-growth record is a performance indicator, not immediate repair work. "
-                    "The benchmark value remains measurable over time; concrete defects must use separate actionable Issues. Closing as not planned and removing it from Agentic repair lanes."
-                )
-            },
-        )
+
+        # Terminal state is authoritative. A saturated/locked comment thread must
+        # never prevent performance-indicator classification from completing.
         updated = _request(
             repository,
             token,
@@ -100,8 +91,26 @@ def _terminalize_performance_indicators(repository: str, token: str, issues: lis
                 "state_reason": "not_planned",
             },
         )
-        if isinstance(updated, dict) and str(updated.get("state") or "").lower() == "closed":
-            closed.append(number)
+        if not isinstance(updated, dict) or str(updated.get("state") or "").lower() != "closed":
+            continue
+        closed.append(number)
+
+        try:
+            _request(
+                repository,
+                token,
+                "POST",
+                f"/issues/{number}/comments",
+                {
+                    "body": (
+                        "<!-- genesis-performance-indicator-auto-close -->\n"
+                        "Genesis Agentic FIFO terminal classification: this legacy capability-growth record is a performance indicator, not immediate repair work. "
+                        "The benchmark value remains measurable over time; concrete defects must use separate actionable Issues. Closed as not planned and removed from Agentic repair lanes."
+                    )
+                },
+            )
+        except urllib.error.HTTPError as exc:
+            print(json.dumps({"status": "comment_skipped", "issue_number": number, "http_status": exc.code}, sort_keys=True))
     return closed
 
 
