@@ -120,6 +120,80 @@ def _script_aware_allowed_paths(original, context_paths: list[str]) -> set[str]:
     return allowed
 
 
+def _legacy_capability_performance_issue(issue: dict) -> bool:
+    title = str(issue.get("title") or "")
+    body = str(issue.get("body") or "")
+    return (
+        title.startswith("Genesis Control: Capability Growth")
+        and "<!-- genesis-capability-source:" in body
+        and "- **Benchmark:**" in body
+        and "- **Validated baseline:**" in body
+        and "- **Reference:**" in body
+        and "Improve the measured Genesis capability gap" in body
+    )
+
+
+def _close_if_legacy_performance_indicator(issue_number: int, repository: str) -> dict | None:
+    issue_url = f"https://api.github.com/repos/{repository}/issues/{issue_number}"
+    issue = base._api_json("GET", issue_url)
+    if not isinstance(issue, dict) or str(issue.get("state") or "").lower() != "open":
+        return None
+    if not _legacy_capability_performance_issue(issue):
+        return None
+
+    title = str(issue.get("title") or "")
+    body = str(issue.get("body") or "")
+    if not title.startswith("[Performance Indicator]"):
+        title = f"[Performance Indicator] {title}"[:240]
+    if "<!-- genesis-performance-indicator -->" not in body:
+        body = (
+            body.rstrip()
+            + "\n\n<!-- genesis-performance-indicator -->\n"
+            + "### Performance indicator classification\n"
+            + "Genesis classified this legacy capability-growth record as a changing benchmark measurement. It stays closed and must not enter DevLab, Issue Solver, Agentic Lab, Qwen3, DeepSeek, or repair retry lanes. Concrete defects or missing capabilities require a separate actionable issue.\n"
+        )
+
+    marker = "<!-- genesis-performance-indicator-auto-close -->"
+    base._api_json(
+        "POST",
+        issue_url + "/comments",
+        {
+            "body": (
+                f"{marker}\n"
+                "Genesis terminal classification: this legacy capability-growth record is a performance indicator, not immediate repair work. "
+                "The changing benchmark value remains measurable over time; concrete defects must use separate actionable Issues. "
+                "Agentic repair is stopped and this Issue is closed as not planned."
+            )
+        },
+    )
+    closed = base._api_json(
+        "PATCH",
+        issue_url,
+        {
+            "title": title,
+            "body": body,
+            "labels": ["performance-indicator"],
+            "state": "closed",
+            "state_reason": "not_planned",
+        },
+    )
+    if not isinstance(closed, dict) or str(closed.get("state") or "").lower() != "closed":
+        return None
+    return {
+        "status": "completed",
+        "reason": "legacy_capability_growth_performance_indicator",
+        "repair_status": "completed",
+        "classification": "performance-indicator",
+        "issue_number": issue_number,
+        "repository": repository,
+        "candidate_branch": "",
+        "candidate_sha": "",
+        "current_state_checked_first": True,
+        "full_suite_verified": False,
+        "closure_state_reason": "not_planned",
+    }
+
+
 def _benchmark_runner_satisfaction(issue: dict, root: Path) -> dict | None:
     body = str(issue.get("body") or "")
     task_type = _TASK_TYPE_RE.search(body)
@@ -276,6 +350,12 @@ def _micro_repair_or_original(original, issue: dict, context_paths: list[str], r
 def run(issue_number: int, repository: str, strategy: str) -> dict:
     if strategy not in STRATEGY_GUIDANCE:
         raise ValueError(f"unsupported Agentic Lab strategy: {strategy}")
+
+    performance_indicator = _close_if_legacy_performance_indicator(issue_number, repository)
+    if performance_indicator is not None:
+        performance_indicator["agentic_strategy"] = strategy
+        base.EVIDENCE_PATH.write_text(json.dumps(performance_indicator, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return performance_indicator
 
     already_satisfied = _close_if_current_main_satisfies(issue_number, repository)
     if already_satisfied is not None:
