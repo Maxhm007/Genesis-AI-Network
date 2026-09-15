@@ -12,6 +12,7 @@ def test_strategy_runner_injects_materially_different_guidance(monkeypatch, tmp_
 
     monkeypatch.setattr(module.base, "EVIDENCE_PATH", tmp_path / "evidence.json")
     monkeypatch.setattr(module.base, "MAX_MAINTAINER_GUIDANCE_CHARS", 3000)
+    monkeypatch.setattr(module, "_close_if_legacy_performance_indicator", lambda issue_number, repository: None)
     monkeypatch.setattr(module, "_close_if_current_main_satisfies", lambda issue_number, repository: None)
     monkeypatch.setattr(module.base, "load_maintainer_repair_guidance", lambda repository, issue_number: "existing maintainer guidance")
 
@@ -201,3 +202,42 @@ def test_agentic_lab_closes_already_satisfied_benchmark_after_full_suite(monkeyp
     assert label_calls[0]["add"] == ("genesis-verified",)
     assert any(method == "POST" and str(url).endswith("/comments") for method, url, _ in calls)
     assert any(method == "PATCH" and payload == {"state": "closed", "state_reason": "completed"} for method, _, payload in calls)
+
+
+def test_agentic_lab_terminally_closes_legacy_capability_growth_as_performance_indicator(monkeypatch):
+    issue = {
+        "state": "open",
+        "title": "Genesis Control: Capability Growth — software_engineering / swe_bench_pro / generation 6",
+        "body": (
+            "<!-- genesis-capability-source:task-9cdb99cf5204434c -->\n"
+            "- **Benchmark:** `swe_bench_pro`\n"
+            "- **Validated baseline:** 0.0 percent\n"
+            "- **Reference:** 80.3 percent\n\n"
+            "### Objective\n"
+            "Improve the measured Genesis capability gap for benchmark swe_bench_pro.\n"
+        ),
+    }
+    calls: list[tuple[str, str, object]] = []
+
+    def fake_api(method, url, payload=None):
+        calls.append((method, url, payload))
+        if method == "GET":
+            return issue
+        if method == "PATCH":
+            return {"state": "closed"}
+        return {}
+
+    monkeypatch.setattr(module.base, "_api_json", fake_api)
+
+    result = module._close_if_legacy_performance_indicator(336, "owner/repo")
+
+    assert result is not None
+    assert result["status"] == "completed"
+    assert result["classification"] == "performance-indicator"
+    assert result["closure_state_reason"] == "not_planned"
+    patches = [payload for method, _, payload in calls if method == "PATCH"]
+    assert patches
+    assert patches[-1]["state"] == "closed"
+    assert patches[-1]["state_reason"] == "not_planned"
+    assert patches[-1]["labels"] == ["performance-indicator"]
+    assert patches[-1]["title"].startswith("[Performance Indicator]")
