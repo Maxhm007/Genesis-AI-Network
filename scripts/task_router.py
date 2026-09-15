@@ -29,19 +29,16 @@ def route_tasks(root: Path, *, open_issue_count: int | None = None) -> dict:
         os.environ[BACKLOG_REDUCTION_MODE_ENV] = "1"
 
     try:
+        # Performance-indicator reconciliation is terminal cleanup, not new
+        # actionable admission. It must always run, including backlog reduction,
+        # so legacy benchmark/capability records cannot remain in repair lanes.
+        capability_issues = route_capability_growth(root)
         if backlog_reduction:
-            capability_issues = {
-                "status": "deferred_backlog_reduction",
-                "reason": "existing GitHub Issue backlog is above the reduction high-water mark",
-                "open_issue_count": open_issue_count,
-                "high_water": high_water,
-            }
             # Existing specialist Issues are backlog, not new admission. Adopt them
             # into their bounded execution tasks while publication of new
             # self-improvement Issues remains disabled.
             self_improvement_issues = route_existing_self_improvement(root)
         else:
-            capability_issues = route_capability_growth(root)
             self_improvement_issues = route_self_improvement(root)
 
         # Dedupe remains safe/useful during drain mode because it reduces duplicate
