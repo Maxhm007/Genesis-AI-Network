@@ -25,6 +25,8 @@ class FakeGitHub:
             return row
         if method == "GET" and path.startswith("/issues?state=all"):
             return list(self.issues)
+        if method == "GET" and path == "/issues?state=open&per_page=100":
+            return [row for row in self.issues if row.get("state") == "open"]
         if method == "POST" and path == "/issues":
             row = {
                 "number": self.next_issue,
@@ -180,3 +182,58 @@ def test_legacy_execution_task_is_cancelled_when_source_is_reclassified(tmp_path
     assert current_execution is not None
     assert current_execution.state == "cancelled"
     assert report["indicators"][0]["cancelled_legacy_execution_tasks"] == [execution.task_id]
+
+
+def test_legacy_backed_capability_issue_is_closed_as_performance_indicator(tmp_path: Path) -> None:
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "genesis_tasks.sqlite3")
+    source, _ = queue.create_unique(
+        "legacy-capability-source",
+        "Improve measured Genesis capability gap",
+        module_id="genesis.coding",
+        payload={
+            "source": "genesis.evolution_learning",
+            "task_type": "capability_growth",
+            "github_issue_number": 336,
+        },
+    )
+    execution, _ = queue.create_unique(
+        "legacy-capability-execution-336",
+        "Legacy issue-backed capability execution",
+        module_id="genesis.coding",
+        payload={
+            "task_type": "capability_growth",
+            "source_capability_task_id": source.task_id,
+            "github_issue_number": 336,
+        },
+    )
+    github = FakeGitHub()
+    github.issues.append(
+        {
+            "number": 336,
+            "title": "Genesis Control: Capability Growth — software_engineering / swe_bench_pro / generation 6",
+            "body": (
+                f"<!-- genesis-capability-source:{source.task_id} -->\n"
+                "- **Benchmark:** `swe_bench_pro`\n"
+                "- **Validated baseline:** 0.0 percent\n"
+                "- **Reference:** 80.3 percent\n\n"
+                "### Objective\n"
+                "Improve the measured Genesis capability gap for benchmark swe_bench_pro.\n"
+            ),
+            "labels": [{"name": "agentic-lab"}, {"name": "genesis-qwen3-agentic"}],
+            "state": "open",
+        }
+    )
+
+    report = route_capability_growth(tmp_path, requester=github.request)
+
+    assert report["status"] == "ok"
+    assert report["source_tasks"] == 0
+    assert report["legacy_indicators"][0]["github_issue_number"] == 336
+    issue = github.issues[0]
+    assert issue["state"] == "closed"
+    assert issue["state_reason"] == "not_planned"
+    assert issue["title"].startswith("[Performance Indicator]")
+    assert issue["labels"] == [{"name": PERFORMANCE_LABEL}]
+    assert "<!-- genesis-performance-indicator -->" in issue["body"]
+    assert queue.get(source.task_id).state == "cancelled"
+    assert queue.get(execution.task_id).state == "cancelled"
