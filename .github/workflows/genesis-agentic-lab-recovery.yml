@@ -11,6 +11,7 @@ on:
       - scripts/agentic_lab_recovery_dispatch.py
       - scripts/agentic_lab_capability_first_dispatch.py
       - scripts/agentic_lab_fifo_router.py
+      - scripts/agentic_parallel_dispatch.py
       - scripts/park_exhausted_agentic_issues.py
       - scripts/android_issue_repair.py
       - scripts/capability_issue_priority_dispatch.py
@@ -18,7 +19,7 @@ on:
       - scripts/pulse_coding_provider.py
       - genesis/github_issue_capability_builder.py
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -30,8 +31,11 @@ concurrency:
   group: genesis-agentic-lab-recovery
   cancel-in-progress: true
 
+env:
+  GENESIS_AGENTIC_MAX_PARALLEL: '4'
+
 jobs:
-  dispatch-oldest-agentic-issue:
+  dispatch-agentic-pool:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
@@ -45,13 +49,12 @@ jobs:
         with:
           python-version: '3.12'
 
-      # Operational no-op: retry after explicit maintainer reactivation and deterministic micro-repair support.
       - name: Park exhausted unsolved issues without closing them
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/park_exhausted_agentic_issues.py
 
-      - name: Dispatch oldest FIFO issue to the correct repair lane
+      - name: Fill bounded parallel Agentic issue pool
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/agentic_lab_fifo_router.py
+        run: python scripts/agentic_parallel_dispatch.py
