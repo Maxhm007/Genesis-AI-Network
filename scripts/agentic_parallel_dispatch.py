@@ -9,6 +9,14 @@ import agentic_lab_recovery_dispatch as agentic
 
 MAX_PARALLEL = int(os.environ.get("GENESIS_AGENTIC_MAX_PARALLEL", "4"))
 
+# The strategy worker already supports qwen3_fallback, but the recovery selector's
+# default STRATEGIES tuple historically omitted it. Keep the ordinary bounded
+# strategies first, then make Qwen3 a real autonomous final fallback instead of a
+# manual-only option. This affects every safely routable Agentic Lab issue, not a
+# specific issue number.
+if "qwen3_fallback" not in agentic.STRATEGIES:
+    agentic.STRATEGIES = (*agentic.STRATEGIES, "qwen3_fallback")
+
 
 def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
     """Return every safely routable autonomous issue instead of a strict FIFO prefix.
@@ -31,6 +39,7 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
                 "selector": "bounded_parallel_autonomous",
                 "eligible": [int(row.get("number") or 0) for row in eligible],
                 "max_parallel": MAX_PARALLEL,
+                "strategies": list(agentic.STRATEGIES),
             },
             sort_keys=True,
         )
@@ -86,6 +95,7 @@ def main() -> int:
         "active_after": _active_issue_numbers(repository, token),
         "legacy_dependencies_released": released,
         "agentic_visibility_restored": restored,
+        "strategies": list(agentic.STRATEGIES),
     }
     print(json.dumps(result, sort_keys=True))
     return 0
