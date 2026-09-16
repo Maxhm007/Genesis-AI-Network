@@ -230,6 +230,8 @@ class BenchmarkExecutionPlanner:
         if benchmark_id == "swe_bench_pro" and input_path.is_file():
             job = json.loads(input_path.read_text(encoding="utf-8"))
             staged = SWEBenchProEvidenceAdapter(self.root).stage(job)
-            return {"status": "evidence_staged", "benchmark_id": benchmark_id, "candidate_path": str(staged)}
-
+            if benchmark_id == "swe_bench_pro" and input_path.is_file():
+                job = json.loads(input_path.read_text(encoding="utf-8"))
+                staged = SWEBenchProEvidenceAdapter(self.root).stage(job)
+                return {"status": "evidence_staged", "benchmark_id": benchmark_id, "candidate_path": str(staged)}
         return self._runner_task(task, benchmark_id)
