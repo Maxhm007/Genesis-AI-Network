@@ -22,8 +22,9 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
     """Return every safely routable autonomous issue instead of a strict FIFO prefix.
 
     Active issues stay in the list so reserve_and_dispatch can skip them using its
-    per-issue ACTIVE_LABELS check. This allows other issues to advance while one
-    worker is slow, without dispatching a duplicate worker for the same issue.
+    per-issue ACTIVE_LABELS check. Integration-sensitive issues remain eligible for
+    the same bounded pool; their issue body can authorize additional safe context
+    without weakening per-file validation or duplicate-worker protection.
     """
     eligible: list[dict] = []
     for issue in policy._all_open_issues_fifo(repository, token):
