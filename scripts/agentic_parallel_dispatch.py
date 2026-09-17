@@ -9,22 +9,17 @@ import agentic_lab_recovery_dispatch as agentic
 
 MAX_PARALLEL = int(os.environ.get("GENESIS_AGENTIC_MAX_PARALLEL", "4"))
 
-# The strategy worker already supports qwen3_fallback, but the recovery selector's
-# default STRATEGIES tuple historically omitted it. Keep the ordinary bounded
-# strategies first, then make Qwen3 a real autonomous final fallback instead of a
-# manual-only option. This affects every safely routable Agentic Lab issue, not a
-# specific issue number.
 if "qwen3_fallback" not in agentic.STRATEGIES:
     agentic.STRATEGIES = (*agentic.STRATEGIES, "qwen3_fallback")
 
 
 def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
-    """Return every safely routable autonomous issue instead of a strict FIFO prefix.
+    """Return all safely routable issues; per-issue labels prevent duplicate work.
 
-    Active issues stay in the list so reserve_and_dispatch can skip them using its
-    per-issue ACTIVE_LABELS check. Integration-sensitive issues remain eligible for
-    the same bounded pool; their issue body can authorize additional safe context
-    without weakening per-file validation or duplicate-worker protection.
+    Integration-sensitive issues stay eligible when their authoritative issue body
+    explicitly names additional safe repository context. This lets the existing
+    repair engine see adjacent benchmark/evidence modules without broadening any
+    protected-file or promotion boundary.
     """
     eligible: list[dict] = []
     for issue in policy._all_open_issues_fifo(repository, token):
@@ -34,17 +29,12 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
         if not agentic.safe_lane(target):
             continue
         eligible.append(issue)
-    print(
-        json.dumps(
-            {
-                "selector": "bounded_parallel_autonomous",
-                "eligible": [int(row.get("number") or 0) for row in eligible],
-                "max_parallel": MAX_PARALLEL,
-                "strategies": list(agentic.STRATEGIES),
-            },
-            sort_keys=True,
-        )
-    )
+    print(json.dumps({
+        "selector": "bounded_parallel_autonomous",
+        "eligible": [int(row.get("number") or 0) for row in eligible],
+        "max_parallel": MAX_PARALLEL,
+        "strategies": list(agentic.STRATEGIES),
+    }, sort_keys=True))
     return eligible
 
 
@@ -64,8 +54,6 @@ def main() -> int:
     if not repository or not token:
         raise RuntimeError("GITHUB_REPOSITORY and GITHUB_TOKEN are required")
 
-    # Keep the established same-issue strategy memory and recovery behavior, but
-    # replace the global FIFO lock with a bounded multi-issue worker pool.
     agentic.issue_comments = policy._all_issue_comments
     agentic.open_agentic_issues = _parallel_routable_issues
     agentic.next_strategy = policy._least_recently_used_strategy
