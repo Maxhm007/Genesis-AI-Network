@@ -14,13 +14,7 @@ if "qwen3_fallback" not in agentic.STRATEGIES:
 
 
 def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
-    """Return all safely routable issues; per-issue labels prevent duplicate work.
-
-    Integration-sensitive issues stay eligible when their authoritative issue body
-    explicitly names additional safe repository context. This lets the existing
-    repair engine see adjacent benchmark/evidence modules without broadening any
-    protected-file or promotion boundary.
-    """
+    """Return all safely routable issues; per-issue labels prevent duplicates."""
     eligible: list[dict] = []
     for issue in policy._all_open_issues_fifo(repository, token):
         if not policy._actionable(issue):
