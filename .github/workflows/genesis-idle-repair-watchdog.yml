@@ -1,5 +1,6 @@
 name: Genesis Idle Repair Watchdog
 # workflow-governor credential wake
+# workflow-governor token-precedence wake
 
 on:
   push:
