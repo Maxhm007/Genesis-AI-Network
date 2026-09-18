@@ -258,7 +258,10 @@ def remove_schedule_block(text: str) -> str:
 
 def choose_autonomous_action(report: GovernanceReport) -> Finding | None:
     priority = {"delete": 0, "remove_schedule": 1}
-    candidates = [f for f in report.findings if f.auto_action in priority]
+    candidates = [
+        f for f in report.findings
+        if f.auto_action in priority and Path(f.workflow).name not in PROTECTED_WORKFLOWS
+    ]
     candidates.sort(key=lambda f: (priority[f.auto_action or ""], f.workflow))
     return candidates[0] if candidates else None
 
