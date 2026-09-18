@@ -2077,4 +2077,37 @@ register_capability(
     _learned_sequential_information_flow_427,
 )
 
+
+def _learned_tensor_split_plan_431(total: int, parts: int) -> tuple[tuple[int, int], ...]:
+    """Build contiguous deterministic tensor-shard ranges for bounded parallel execution."""
+    total_i = int(total)
+    parts_i = int(parts)
+    if total_i < 0 or parts_i < 1 or parts_i > 256:
+        raise ValueError("tensor split inputs are out of bounds")
+    base, extra = divmod(total_i, parts_i)
+    plan: list[tuple[int, int]] = []
+    start = 0
+    for index in range(parts_i):
+        width = base + (1 if index < extra else 0)
+        stop = start + width
+        plan.append((start, stop))
+        start = stop
+    return tuple(plan)
+
+
+register_capability(
+    "tensor_split_plan_431",
+    (
+        "Build deterministic contiguous tensor-shard ranges for bounded tensor-parallel "
+        "execution. The plan covers the full extent exactly once, preserves order, "
+        "and supports empty tail shards when there are more parts than elements."
+    ),
+    (
+        "External learning evidence from Issue #431: llama.cpp build b10549 enabled "
+        "tensor split for LFM2/LFM2MOE (#26993). Genesis applies the transferable "
+        "lesson as a bounded architecture-neutral tensor partition planner."
+    ),
+    _learned_tensor_split_plan_431,
+)
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
