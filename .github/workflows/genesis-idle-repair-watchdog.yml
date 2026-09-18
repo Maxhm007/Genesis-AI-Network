@@ -44,3 +44,6 @@ jobs:
           else
             echo "No wake required."
           fi
+
+          echo "Waking Workflow Governor as an independent governance heartbeat."
+          gh workflow run genesis-workflow-governor.yml --repo "${REPO}" -f apply=true
