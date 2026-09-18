@@ -10,6 +10,8 @@ on:
       - '.github/workflows/github-issue-discovery.yml'
       - 'scripts/github_issue_discovery.py'
       - 'scripts/github_issue_discovery_resilient.py'
+      - 'scripts/deferred_issue_release.py'
+      - 'genesis/issue_governor.py'
       - 'tests/test_github_issue_discovery.py'
       - 'tests/test_issue_discovery_engine.py'
       - 'tests/test_issue_discovery_workflows.py'
@@ -51,6 +53,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Restore deferred issue candidate queue
+        id: deferred-queue
+        uses: actions/cache/restore@v4
+        with:
+          path: runtime/deferred_issue_candidates.json
+          key: genesis-deferred-issues-${{ github.run_id }}
+          restore-keys: |
+            genesis-deferred-issues-
+
+      - name: Release one deferred candidate when backlog health allows
+        run: python scripts/deferred_issue_release.py
 
       - name: Restore open-model caches
         uses: actions/cache@v4
@@ -122,6 +136,13 @@ jobs:
             echo 'No new grounded issue was opened; solver wake is unnecessary.'
           fi
 
+      - name: Save deferred issue candidate queue
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: runtime/deferred_issue_candidates.json
+          key: genesis-deferred-issues-${{ github.run_id }}
+
       - name: Preserve discovery evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -129,6 +150,8 @@ jobs:
           name: genesis-github-issue-discovery-${{ github.run_id }}
           path: |
             runtime/github_issue_discovery.json
+            runtime/deferred_issue_candidates.json
+            runtime/deferred_issue_release.json
             runtime/discovery/last_result.json
             runtime/discovery/history.jsonl
             /tmp/genesis-github-issue-discovery.log
