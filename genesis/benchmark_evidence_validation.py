@@ -7,6 +7,7 @@ from pathlib import Path
 from typing import Any
 
 from .benchmark_evidence import BenchmarkEvidenceError
+from .coding_agent_index_evidence import CodingAgentIndexEvidenceAdapter
 from .swe_bench_pro_evidence import SWEBenchProEvidenceAdapter
 
 
@@ -38,6 +39,8 @@ def validate_candidate(root: Path, candidate_path: Path) -> dict[str, Any]:
     benchmark_id = str(candidate.get("benchmark_id") or "").strip()
     if benchmark_id == "swe_bench_pro":
         return SWEBenchProEvidenceAdapter(root).validate_staged_candidate(candidate)
+    if benchmark_id == "coding_agent_index":
+        return CodingAgentIndexEvidenceAdapter(root).validate_staged_candidate(candidate)
     raise BenchmarkEvidenceError(
         f"no independent benchmark-specific validator is registered for {benchmark_id or 'unknown'}"
     )
