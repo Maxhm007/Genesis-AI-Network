@@ -8,6 +8,7 @@ from pathlib import Path
 from typing import Any
 
 from .agents_last_exam_evidence import AgentsLastExamEvidenceAdapter
+from .coding_agent_index_evidence import CodingAgentIndexEvidenceAdapter
 from .modules.task_queue import GenesisTask, PersistentTaskQueue
 from .swe_bench_pro_evidence import SWEBenchProEvidenceAdapter
 from .terminal_bench_evidence import TerminalBench21EvidenceAdapter
@@ -24,7 +25,7 @@ class BenchmarkExecutionPlanner:
 
     TERMINAL_RUNNER_STATES = {"complete", "quarantined", "cancelled"}
     MAX_RUNNER_INTEGRATION_GENERATIONS = 4
-    EVIDENCE_ADAPTER_BENCHMARKS = {"agents_last_exam", "terminal_bench_2_1", "swe_bench_pro"}
+    EVIDENCE_ADAPTER_BENCHMARKS = {"agents_last_exam", "terminal_bench_2_1", "swe_bench_pro", "coding_agent_index"}
     TERMINAL_BENCH_ENV = (
         "GENESIS_BENCHMARK_AGENT",
         "GENESIS_BENCHMARK_MODEL",
@@ -59,6 +60,12 @@ class BenchmarkExecutionPlanner:
 
     @classmethod
     def _execution_readiness(cls, benchmark_id: str) -> dict[str, Any]:
+        if benchmark_id == "coding_agent_index":
+            return {
+                "ready": True,
+                "missing": [],
+                **CodingAgentIndexEvidenceAdapter.execution_readiness(),
+            }
         if benchmark_id != "terminal_bench_2_1":
             return {
                 "ready": benchmark_id in cls.EVIDENCE_ADAPTER_BENCHMARKS,
@@ -83,6 +90,16 @@ class BenchmarkExecutionPlanner:
     @staticmethod
     def _runner_context(benchmark_id: str) -> list[str]:
         """Order editable context by execution value because autonomous Coding is bounded."""
+        if benchmark_id == "coding_agent_index":
+            return [
+                "genesis/coding_agent_index_evidence.py",
+                "genesis/benchmark_execution.py",
+                "tests/test_coding_agent_index_evidence.py",
+                "tests/test_benchmark_execution.py",
+                "genesis/benchmark_evidence.py",
+                "genesis/benchmark_evidence_validation.py",
+                "genesis/competitive_benchmarks.py",
+            ]
         if benchmark_id == "terminal_bench_2_1":
             return [
                 "genesis/terminal_bench_evidence.py",
@@ -219,6 +236,24 @@ class BenchmarkExecutionPlanner:
                 "missing": ["official_ale_full_experiment_result"],
                 "readiness": AgentsLastExamEvidenceAdapter.execution_readiness(),
                 "engineering_assistance_required": True,
+                "owner_action_required": False,
+            }
+
+        if benchmark_id == "coding_agent_index":
+            if input_path.is_file():
+                job = json.loads(input_path.read_text(encoding="utf-8"))
+                staged = CodingAgentIndexEvidenceAdapter(self.root).stage(job)
+                return {"status": "evidence_staged", "benchmark_id": benchmark_id, "candidate_path": str(staged)}
+            return {
+                "status": "external_execution_required",
+                "benchmark_id": benchmark_id,
+                "reason": (
+                    "Coding Agent Index v1.5 evidence adapter is ready; a complete official/comparable "
+                    "task-level run is still required"
+                ),
+                "missing": ["coding_agent_index_v1_5_task_level_results"],
+                "readiness": CodingAgentIndexEvidenceAdapter.execution_readiness(),
+                "engineering_assistance_required": False,
                 "owner_action_required": False,
             }
 
