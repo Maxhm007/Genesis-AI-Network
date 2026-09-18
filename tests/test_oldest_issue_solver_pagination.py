@@ -41,12 +41,6 @@ def test_sequential_controller_prioritizes_concrete_repairs_before_general_work(
     assert "print(candidates[0])" in text
 
 
-def test_legacy_solver_entrypoints_do_not_scan_or_claim_the_queue():
-    oldest = OLDEST.read_text(encoding="utf-8")
-    priority = PRIORITY.read_text(encoding="utf-8")
-
-    for text in (oldest, priority):
-        assert "genesis-sequential-issue-controller.yml" in text
-        assert "gh api --paginate" not in text
-        assert "genesis-repair-in-progress" not in text
-        assert "genesis-bounded-repair-worker.yml" not in text
+def test_legacy_solver_entrypoints_are_retired():
+    assert not OLDEST.exists()
+    assert not PRIORITY.exists()
