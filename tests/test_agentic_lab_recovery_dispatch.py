@@ -224,3 +224,28 @@ def test_ready_capability_rearms_parent_even_if_waiting_label_was_manually_remov
         and path == "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches"
         for method, path, _ in calls
     )
+
+
+def test_unresolved_capability_blocks_even_without_waiting_label(monkeypatch):
+    calls: list[tuple[str, str, dict | None]] = []
+    issue = _issue(48)
+    comments = [
+        {"body": "<!-- genesis-capability-dependency:99 -->\nwaiting"},
+    ]
+    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [issue])
+    monkeypatch.setattr(module, "safe_lane", lambda target: "generic")
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET" and path == "/issues/48/comments?per_page=100":
+            return comments
+        if method == "GET" and path == "/issues/99":
+            return {"number": 99, "state": "open", "state_reason": None, "labels": []}
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+
+    result = module.reserve_and_dispatch("owner/repo", "token")
+
+    assert result == {"status": "idle", "reason": "no_safely_routable_agentic_issue"}
+    assert not any("/actions/workflows/" in path for _, path, _ in calls)
