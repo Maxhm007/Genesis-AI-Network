@@ -2142,4 +2142,44 @@ register_capability(
     _learned_clamped_k_tiles_432,
 )
 
+
+def _learned_mmproj_device_resolver_433(
+    requested_device: str | None,
+    legacy_env_device: str | None,
+    available,
+) -> str | None:
+    """Resolve a multimodal projector device with explicit CLI-over-env precedence."""
+    choices = tuple(str(item).strip() for item in available if str(item).strip())
+    if len(choices) > 256:
+        raise ValueError("available device list is out of bounds")
+
+    requested = str(requested_device).strip() if requested_device is not None else ""
+    legacy = str(legacy_env_device).strip() if legacy_env_device is not None else ""
+
+    if requested:
+        if requested not in choices:
+            raise ValueError("requested mmproj device is unavailable")
+        return requested
+    if legacy:
+        if legacy not in choices:
+            raise ValueError("legacy mmproj backend device is unavailable")
+        return legacy
+    return choices[0] if choices else None
+
+
+register_capability(
+    "mmproj_device_resolver_433",
+    (
+        "Resolve a multimodal projector execution device with explicit request precedence, "
+        "backward-compatible legacy environment fallback, and deterministic defaulting to "
+        "the first available device. Unavailable explicit selections fail safely."
+    ),
+    (
+        "External learning evidence from Issue #433: llama.cpp build b10541 added the "
+        "--mmproj-device argument while preserving the MTMD_BACKEND_DEVICE environment "
+        "fallback, enabling the multimodal projector backend to be selected independently."
+    ),
+    _learned_mmproj_device_resolver_433,
+)
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
