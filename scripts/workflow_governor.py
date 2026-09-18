@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 import subprocess
 import sys
 import time
@@ -37,6 +38,17 @@ def existing_governor_pr() -> str | None:
 
 
 GOVERNOR_BRANCH_PREFIX = "genesis/privileged-candidate-workflow-governor-"
+CURRENT_GOVERNOR_BRANCH_RE = re.compile(
+    r"^genesis/privileged-candidate-workflow-governor-\d{10}-[A-Za-z0-9._-]+$"
+)
+ORPHAN_RECOVERY_FORBIDDEN_PATHS = {
+    ".github/workflows/genesis-workflow-governor.yml",
+    ".github/workflows/genesis-workflow-governor-validator.yml",
+    "genesis/autonomy_guard.py",
+    "genesis/workflow_governor.py",
+    "scripts/workflow_governor.py",
+    "tests/test_workflow_governor.py",
+}
 
 
 def governor_candidate_branches() -> list[str]:
@@ -142,9 +154,22 @@ def recover_orphan_governor_candidates() -> str | None:
     for branch in branches:
         if _branch_open_pr(branch):
             continue
+        if not CURRENT_GOVERNOR_BRANCH_RE.fullmatch(branch):
+            delete_governor_branch(branch)
+            print(f"Deleted legacy workflow-governor candidate branch: {branch}")
+            continue
         if branch_equivalent_to_main(branch):
             delete_governor_branch(branch)
             print(f"Deleted superseded workflow-governor candidate branch: {branch}")
+            continue
+        changed = _compare_changed_files(branch)
+        if changed is None:
+            continue
+        if len(changed) > 2 or any(path in ORPHAN_RECOVERY_FORBIDDEN_PATHS for path in changed):
+            print(
+                "Skipped unsafe orphan workflow-governor candidate; owner review required: "
+                f"{branch} ({', '.join(changed)})"
+            )
             continue
         orphaned.append(branch)
 
