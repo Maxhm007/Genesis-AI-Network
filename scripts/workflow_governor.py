@@ -102,7 +102,11 @@ def validate_candidate() -> None:
         check=True,
     )
     _ = validation
-    run(sys.executable, "-m", "pytest", "-q", "tests/test_workflow_governor.py", check=True)
+    tests = run(sys.executable, "-m", "pytest", "-q", "tests/test_workflow_governor.py", check=False)
+    if tests.returncode != 0:
+        print(tests.stdout, file=sys.stderr)
+        print(tests.stderr, file=sys.stderr)
+        raise RuntimeError("workflow governor focused tests failed")
 
 
 def create_candidate_pr(action) -> int:
