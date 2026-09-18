@@ -186,3 +186,30 @@ def test_invalid_evaluation_task_does_not_create_work(tmp_path: Path) -> None:
     result = planner.advance(task)
     assert result["status"] == "invalid_task"
     assert len(planner.queue.list(limit=20)) == 1
+
+
+
+def test_coding_agent_index_is_supported_by_verified_adapter() -> None:
+    readiness = BenchmarkExecutionPlanner._execution_readiness("coding_agent_index")
+    assert readiness["ready"] is True
+    assert readiness["missing"] == []
+    assert readiness["index_version"] == "1.5"
+    assert readiness["aggregation"] == "equal_weight_mean_of_component_pass_at_1"
+
+    context = BenchmarkExecutionPlanner._runner_context("coding_agent_index")
+    assert context[:4] == [
+        "genesis/coding_agent_index_evidence.py",
+        "genesis/benchmark_execution.py",
+        "tests/test_coding_agent_index_evidence.py",
+        "tests/test_benchmark_execution.py",
+    ]
+
+
+def test_coding_agent_index_without_result_reports_external_evidence_requirement(tmp_path: Path) -> None:
+    task = make_task(tmp_path, "coding_agent_index")
+    result = BenchmarkExecutionPlanner(tmp_path).advance(task)
+    assert result["status"] == "external_execution_required"
+    assert result["benchmark_id"] == "coding_agent_index"
+    assert result["missing"] == ["coding_agent_index_v1_5_task_level_results"]
+    assert result["readiness"]["index_version"] == "1.5"
+    assert BenchmarkExecutionPlanner(tmp_path)._runner_tasks("coding_agent_index") == []
