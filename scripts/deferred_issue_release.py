@@ -55,6 +55,7 @@ def _list_issues(repository: str) -> list[dict]:
 def release_one(repository: str, *, queue_path: Path = QUEUE_PATH) -> dict:
     queue = _load_queue(queue_path)
     if not queue:
+        _save_queue(queue_path, [])
         return {"status": "idle", "queued_candidates": 0}
 
     issues = _list_issues(repository)
