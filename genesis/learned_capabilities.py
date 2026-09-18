@@ -2110,4 +2110,36 @@ register_capability(
     _learned_tensor_split_plan_431,
 )
 
+
+def _learned_clamped_k_tiles_432(k_extent: int, tile_size: int = 32) -> tuple[tuple[int, int], ...]:
+    """Plan bounded K-axis tiles without reading beyond the valid tensor extent."""
+    k_i = int(k_extent)
+    tile_i = int(tile_size)
+    if k_i < 0 or tile_i < 1 or tile_i > 4096:
+        raise ValueError("K extent or tile size is out of bounds")
+    tiles: list[tuple[int, int]] = []
+    start = 0
+    while start < k_i:
+        stop = min(k_i, start + tile_i)
+        tiles.append((start, stop))
+        start = stop
+    return tuple(tiles)
+
+
+register_capability(
+    "clamped_k_tiles_432",
+    (
+        "Plan dynamic bounded K-axis tiles so every tensor slice is clamped to the "
+        "remaining valid extent. Aligned inputs retain full-width tiles while the "
+        "final unaligned tile is shortened to prevent out-of-bounds reads."
+    ),
+    (
+        "External learning evidence from Issue #432: llama.cpp build b10545 fixed "
+        "the Metal tensor mat-mat path by replacing a static K=32 tail with a "
+        "dynamic extent clamped to min(32, K - loop_k), preventing undefined "
+        "out-of-bounds reads for K values not divisible by 32."
+    ),
+    _learned_clamped_k_tiles_432,
+)
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
