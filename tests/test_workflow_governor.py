@@ -172,3 +172,31 @@ def test_orphan_recovery_deletes_superseded_branch_without_opening_pr(monkeypatc
 
     assert runner.recover_orphan_governor_candidates() is None
     assert deleted == ["genesis/privileged-candidate-workflow-governor-123-worker"]
+
+
+def test_current_governor_candidate_format_is_narrow():
+    assert runner.CURRENT_GOVERNOR_BRANCH_RE.fullmatch(
+        "genesis/privileged-candidate-workflow-governor-1789759343-worker"
+    )
+    assert not runner.CURRENT_GOVERNOR_BRANCH_RE.fullmatch(
+        "genesis/privileged-candidate-workflow-governor-860"
+    )
+
+
+def test_orphan_recovery_refuses_control_root_candidate(monkeypatch):
+    branch = "genesis/privileged-candidate-workflow-governor-1789759343-governor"
+    monkeypatch.setenv("GENESIS_WORKFLOW_TOKEN", "test-token")
+    monkeypatch.setattr(runner, "governor_candidate_branches", lambda: [branch])
+    monkeypatch.setattr(runner, "_branch_open_pr", lambda branch: None)
+    monkeypatch.setattr(runner, "branch_equivalent_to_main", lambda branch: False)
+    monkeypatch.setattr(
+        runner,
+        "_compare_changed_files",
+        lambda branch: ["scripts/workflow_governor.py"],
+    )
+    monkeypatch.setattr(runner, "existing_governor_pr", lambda: None)
+    created = []
+    monkeypatch.setattr(runner, "ensure_labels", lambda: created.append("labels"))
+
+    assert runner.recover_orphan_governor_candidates() is None
+    assert created == []
