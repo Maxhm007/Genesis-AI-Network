@@ -1,0 +1,73 @@
+name: Genesis Workflow Governor
+
+on:
+  workflow_dispatch:
+    inputs:
+      apply:
+        description: Create one safe autonomous workflow candidate
+        required: false
+        default: 'true'
+  schedule:
+    - cron: '43 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - genesis/workflow_governor.py
+      - scripts/workflow_governor.py
+      - tests/test_workflow_governor.py
+      - .github/workflows/genesis-workflow-governor.yml
+      - .github/workflows/genesis-workflow-governor-validator.yml
+
+permissions:
+  contents: write
+  pull-requests: write
+  issues: write
+  actions: read
+
+concurrency:
+  group: genesis-workflow-governor
+  cancel-in-progress: true
+
+jobs:
+  govern:
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - name: Checkout authoritative main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install governance validation dependencies
+        run: python -m pip install --disable-pip-version-check pytest pyyaml
+
+      - name: Analyze and govern one workflow decision
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          apply='true'
+          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
+            apply="${{ inputs.apply }}"
+          fi
+          if [[ "$apply" == "true" ]]; then
+            python scripts/workflow_governor.py --apply
+          else
+            python scripts/workflow_governor.py
+          fi
+
+      - name: Upload governance evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-workflow-governance-${{ github.run_id }}
+          path: runtime/workflow_governance.json
+          if-no-files-found: warn
+          retention-days: 14
