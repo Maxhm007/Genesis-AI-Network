@@ -25,6 +25,7 @@ class BenchmarkExecutionPlanner:
 
     TERMINAL_RUNNER_STATES = {"complete", "quarantined", "cancelled"}
     MAX_RUNNER_INTEGRATION_GENERATIONS = 4
+    MAX_WORKING_MEMORY_ATTEMPTS = 4
     EVIDENCE_ADAPTER_BENCHMARKS = {"agents_last_exam", "terminal_bench_2_1", "swe_bench_pro", "coding_agent_index"}
     TERMINAL_BENCH_ENV = (
         "GENESIS_BENCHMARK_AGENT",
@@ -57,6 +58,33 @@ class BenchmarkExecutionPlanner:
             return max(1, int(task.payload.get("work_generation", 1)))
         except Exception:
             return 1
+
+    @classmethod
+    def _working_memory(cls, benchmark_id: str, attempts: list[GenesisTask]) -> dict[str, Any]:
+        """Summarize recent runner experience into bounded task-local working memory."""
+        ordered = sorted(attempts, key=cls._runner_generation)
+        recent = ordered[-cls.MAX_WORKING_MEMORY_ATTEMPTS :]
+        events: list[dict[str, Any]] = []
+        for item in recent:
+            failure = str(item.last_error or "").strip()
+            if not failure and item.failure_history:
+                failure = str(item.failure_history[-1].get("error") or "").strip()
+            events.append(
+                {
+                    "task_id": item.task_id,
+                    "work_generation": cls._runner_generation(item),
+                    "state": item.state,
+                    "failure": failure[:500],
+                }
+            )
+        latest = events[-1] if events else None
+        return {
+            "benchmark_id": benchmark_id,
+            "recent_attempts": events,
+            "latest_failure": latest["failure"] if latest else "",
+            "latest_state": latest["state"] if latest else "",
+            "next_generation": (latest["work_generation"] + 1) if latest else 1,
+        }
 
     @classmethod
     def _execution_readiness(cls, benchmark_id: str) -> dict[str, Any]:
@@ -136,6 +164,7 @@ class BenchmarkExecutionPlanner:
     def _runner_task(self, task: GenesisTask, benchmark_id: str) -> dict[str, Any]:
         context = self._runner_context(benchmark_id)
         existing = self._runner_tasks(benchmark_id)
+        working_memory = self._working_memory(benchmark_id, existing)
         latest = max(existing, key=self._runner_generation) if existing else None
         if latest is not None and latest.state not in self.TERMINAL_RUNNER_STATES:
             return {
@@ -192,6 +221,10 @@ class BenchmarkExecutionPlanner:
             )
             if prior_failure:
                 objective += f" Previous bounded attempt ended with: {prior_failure[:500]}"
+            objective += (
+                " Use the bounded working-memory summary in this task payload to localize the latest failure "
+                "and choose the next repair approach; do not replay the full historical transcript."
+            )
         dedupe_key = f"benchmark-runner:{benchmark_id}" if generation == 1 else f"benchmark-runner:{benchmark_id}:generation:{generation}"
         child, created = self.queue.create_unique(
             dedupe_key,
@@ -207,6 +240,7 @@ class BenchmarkExecutionPlanner:
                 "requires_independent_validation": True,
                 "work_generation": generation,
                 "strategy_change_required": generation > 1,
+                "working_memory": working_memory,
             },
         )
         return {
