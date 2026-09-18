@@ -131,11 +131,39 @@ def create_candidate_pr(action) -> int:
             f"Genesis workflow governance: {action.kind} ({action.workflow})",
         )
         repository = os.environ.get("GITHUB_REPOSITORY", "Maxhm007/Genesis-AI-Network")
-        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        token = os.environ.get("GENESIS_WORKFLOW_TOKEN")
         if not token:
-            raise RuntimeError("workflow governor cannot publish candidate branch: GitHub token unavailable")
+            marker = "<!-- genesis-workflow-token-required -->"
+            title = "Genesis Workflow Governor requires Workflows-write credential"
+            body = (
+                marker + "\n"
+                "The Workflow Governor analyzed the repository and prepared a valid workflow candidate, "
+                "but GitHub's built-in GITHUB_TOKEN cannot modify files under .github/workflows/.\n\n"
+                "Required repository secret: GENESIS_WORKFLOW_TOKEN\n"
+                "Credential requirements: Workflows write, Contents write, Pull requests write, Issues write.\n\n"
+                f"Blocked action: {action.kind} on {action.workflow}\n"
+                f"Evidence: {action.evidence}\n"
+                "Genesis will continue auditing safely and will resume autonomous workflow mutation when the credential is available."
+            )
+            existing = gh(
+                "issue", "list", "--state", "open", "--search", title,
+                "--json", "number,title,body",
+                "--jq", f'.[] | select(.title == "{title}") | .number',
+                check=False,
+            ).stdout.strip().splitlines()
+            if existing:
+                gh("issue", "comment", existing[0], "--body", body, check=False)
+            else:
+                gh("issue", "create", "--title", title, "--body", body, check=False)
+            print("Workflow mutation blocked safely: GENESIS_WORKFLOW_TOKEN is not configured.")
+            return 0
         push_url = f"https://x-access-token:{token}@github.com/{repository}.git"
-        run("git", "push", push_url, f"HEAD:refs/heads/{branch}")
+        pushed = run("git", "push", push_url, f"HEAD:refs/heads/{branch}", check=False)
+        if pushed.returncode != 0:
+            raise RuntimeError(
+                "workflow candidate branch publish failed with GENESIS_WORKFLOW_TOKEN: "
+                + (pushed.stderr or pushed.stdout)[-1600:]
+            )
 
         ensure_labels()
         body = (
