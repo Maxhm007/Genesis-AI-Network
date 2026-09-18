@@ -2,6 +2,15 @@ name: Genesis GitHub Issue Discovery
 
 on:
   workflow_dispatch:
+  pull_request:
+    branches: [main]
+    paths:
+      - '.github/workflows/github-issue-discovery.yml'
+      - 'genesis/issue_governor.py'
+      - 'scripts/github_issue_discovery.py'
+      - 'scripts/deferred_issue_release.py'
+      - 'tests/test_issue_governor.py'
+      - 'tests/test_github_issue_discovery.py'
   schedule:
     - cron: '19 * * * *'
   push:
@@ -10,7 +19,10 @@ on:
       - '.github/workflows/github-issue-discovery.yml'
       - 'scripts/github_issue_discovery.py'
       - 'scripts/github_issue_discovery_resilient.py'
+      - 'scripts/deferred_issue_release.py'
+      - 'genesis/issue_governor.py'
       - 'tests/test_github_issue_discovery.py'
+      - 'tests/test_issue_governor.py'
       - 'tests/test_issue_discovery_engine.py'
       - 'tests/test_issue_discovery_workflows.py'
 
@@ -38,7 +50,26 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  policy-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout candidate
+        uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Verify issue-governance policy
+        run: python -m pytest -q tests/test_issue_governor.py tests/test_github_issue_discovery.py
+
   discover:
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -51,6 +82,18 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+
+      - name: Restore deferred issue candidate queue
+        id: deferred-queue
+        uses: actions/cache/restore@v4
+        with:
+          path: runtime/deferred_issue_candidates.json
+          key: genesis-deferred-issues-${{ github.run_id }}
+          restore-keys: |
+            genesis-deferred-issues-
+
+      - name: Release one deferred candidate when backlog health allows
+        run: python scripts/deferred_issue_release.py
 
       - name: Restore open-model caches
         uses: actions/cache@v4
@@ -66,7 +109,7 @@ jobs:
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
       - name: Verify discovery and publication boundaries
-        run: python -m pytest -q tests/test_issue_discovery_engine.py tests/test_github_issue_discovery.py tests/test_issue_discovery_workflows.py
+        run: python -m pytest -q tests/test_issue_governor.py tests/test_issue_discovery_engine.py tests/test_github_issue_discovery.py tests/test_issue_discovery_workflows.py
 
       - name: Install free local discovery intelligence
         run: |
@@ -122,6 +165,13 @@ jobs:
             echo 'No new grounded issue was opened; solver wake is unnecessary.'
           fi
 
+      - name: Save deferred issue candidate queue
+        if: always()
+        uses: actions/cache/save@v4
+        with:
+          path: runtime/deferred_issue_candidates.json
+          key: genesis-deferred-issues-${{ github.run_id }}
+
       - name: Preserve discovery evidence
         if: always()
         uses: actions/upload-artifact@v4
@@ -129,6 +179,8 @@ jobs:
           name: genesis-github-issue-discovery-${{ github.run_id }}
           path: |
             runtime/github_issue_discovery.json
+            runtime/deferred_issue_candidates.json
+            runtime/deferred_issue_release.json
             runtime/discovery/last_result.json
             runtime/discovery/history.jsonl
             /tmp/genesis-github-issue-discovery.log
