@@ -69,7 +69,7 @@ jobs:
           done
 
           gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=closed&labels=genesis-task&sort=updated&direction=desc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/recent-closed.json
-          mapfile -t closed_issues < <(jq -r '.[] | select(.pull_request == null) | select(([.labels[].name] | index("genesis-verified")) == null) | select([.labels[].name] | any(. == "genesis-deferred" or . == "genesis-superseded" or . == "genesis-terminal" or . == "genesis-recovery-terminal" or . == "genesis-solver-exhausted" or . == "genesis-blocked")) | .number' /tmp/recent-closed.json)
+          mapfile -t closed_issues < <(jq -r '.[] | select(.pull_request == null) | select(([.labels[].name] | index("genesis-verified")) == null) | select(([.labels[].name] | any(startswith("genesis-closed-sealed-"))) | not) | select([.labels[].name] | any(. == "genesis-deferred" or . == "genesis-superseded" or . == "genesis-terminal" or . == "genesis-recovery-terminal" or . == "genesis-solver-exhausted" or . == "genesis-blocked")) | .number' /tmp/recent-closed.json)
 
           for issue_number in "${closed_issues[@]}"; do
             [ "$reopened" -ge 20 ] && break
