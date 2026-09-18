@@ -57,6 +57,9 @@ jobs:
           print(f'validated {len(paths)} workflow YAML files')
           PY
 
+      - name: Run governance and guard tests
+        run: python -m pytest -q tests/test_workflow_governor.py tests/test_autonomy_guard.py
+
       - name: Enforce privileged autonomy guard
         run: |
           python - <<'PY'
@@ -68,9 +71,6 @@ jobs:
           if not decision.autonomous_allowed:
               raise SystemExit('owner escalation required: ' + '; '.join(decision.reasons))
           PY
-
-      - name: Run governance and guard tests
-        run: python -m pytest -q tests/test_workflow_governor.py tests/test_autonomy_guard.py
 
       - name: Reject overly broad autonomous workflow changes
         run: |
