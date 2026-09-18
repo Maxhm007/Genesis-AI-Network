@@ -50,6 +50,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
+          GENESIS_WORKFLOW_TOKEN: ${{ secrets.GENESIS_WORKFLOW_TOKEN }}
         shell: bash
         run: |
           set -euo pipefail
