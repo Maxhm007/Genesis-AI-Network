@@ -213,3 +213,50 @@ def test_coding_agent_index_without_result_reports_external_evidence_requirement
     assert result["missing"] == ["coding_agent_index_v1_5_task_level_results"]
     assert result["readiness"]["index_version"] == "1.5"
     assert BenchmarkExecutionPlanner(tmp_path)._runner_tasks("coding_agent_index") == []
+
+
+def test_runner_working_memory_is_bounded_and_localizes_latest_failure(tmp_path: Path) -> None:
+    task = make_task(tmp_path, "new_frontier_benchmark")
+    planner = BenchmarkExecutionPlanner(tmp_path)
+
+    created = []
+    for generation in range(1, 6):
+        child = planner.queue.create(
+            f"runner {generation}",
+            module_id="genesis.coding",
+            payload={
+                "task_type": "benchmark_runner_integration",
+                "benchmark_id": "new_frontier_benchmark",
+                "work_generation": generation,
+            },
+        )
+        child.last_error = f"failure-{generation}"
+        created.append(child)
+
+    memory = planner._working_memory("new_frontier_benchmark", created)
+    assert memory["benchmark_id"] == "new_frontier_benchmark"
+    assert len(memory["recent_attempts"]) == planner.MAX_WORKING_MEMORY_ATTEMPTS
+    assert [item["work_generation"] for item in memory["recent_attempts"]] == [2, 3, 4, 5]
+    assert memory["latest_failure"] == "failure-5"
+    assert memory["latest_state"] == created[-1].state
+    assert memory["next_generation"] == 6
+
+
+def test_next_runner_generation_carries_compact_working_memory(tmp_path: Path) -> None:
+    task = make_task(tmp_path, "new_frontier_benchmark")
+    planner = BenchmarkExecutionPlanner(tmp_path)
+
+    first = planner.advance(task)
+    child = planner.queue.get(first["task_id"])
+    assert child is not None
+    child.last_error = "adapter contract mismatch"
+    quarantine(planner.queue, child.task_id)
+
+    second = planner.advance(task)
+    second_child = planner.queue.get(second["task_id"])
+    assert second_child is not None
+    memory = second_child.payload["working_memory"]
+    assert memory["latest_failure"] == "adapter contract mismatch"
+    assert memory["latest_state"] == "quarantined"
+    assert memory["next_generation"] == 2
+    assert "do not replay the full historical transcript" in second_child.objective
