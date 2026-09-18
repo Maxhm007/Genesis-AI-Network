@@ -130,7 +130,12 @@ def create_candidate_pr(action) -> int:
             "git", "commit", "-m",
             f"Genesis workflow governance: {action.kind} ({action.workflow})",
         )
-        run("git", "push", "origin", branch)
+        repository = os.environ.get("GITHUB_REPOSITORY", "Maxhm007/Genesis-AI-Network")
+        token = os.environ.get("GITHUB_TOKEN") or os.environ.get("GH_TOKEN")
+        if not token:
+            raise RuntimeError("workflow governor cannot publish candidate branch: GitHub token unavailable")
+        push_url = f"https://x-access-token:{token}@github.com/{repository}.git"
+        run("git", "push", push_url, f"HEAD:refs/heads/{branch}")
 
         ensure_labels()
         body = (
