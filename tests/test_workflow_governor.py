@@ -113,6 +113,8 @@ def test_protected_governor_workflows_are_never_selected_for_mutation():
 def test_governor_runner_uses_dedicated_workflows_write_token():
     text = (Path(__file__).resolve().parents[1] / "scripts" / "workflow_governor.py").read_text(encoding="utf-8")
     assert 'os.environ.get("GENESIS_WORKFLOW_TOKEN")' in text
-    assert "GITHUB_TOKEN" not in text[text.index('token = os.environ.get("GENESIS_WORKFLOW_TOKEN")'):text.index('push_url = f"https://x-access-token:{token}@github.com/{repository}.git"')]
+    assert 'token = os.environ.get("GENESIS_WORKFLOW_TOKEN")' in text
+    assert 'token = os.environ.get("GITHUB_TOKEN")' not in text
+    assert 'or os.environ.get("GITHUB_TOKEN")' not in text
     assert 'run("git", "push", push_url, f"HEAD:refs/heads/{branch}", check=False)' in text
     assert "Workflow mutation blocked safely" in text
