@@ -515,12 +515,10 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         dependency = unresolved_capability_dependency(comments)
         if dependency:
             if not capability_ready(repository, token, dependency):
-                if WAITING_CAPABILITY_LABEL in issue_labels:
-                    continue
-            else:
-                comments = _release_waiting_issue(repository, token, issue, comments, dependency)
-                issue_labels -= {WAITING_CAPABILITY_LABEL, "genesis-blocked", "genesis-deferred", EXHAUSTED_LABEL, NEEDS_HUMAN_LABEL}
-                issue_labels |= {"genesis-autonomous", AGENTIC_LABEL}
+                continue
+            comments = _release_waiting_issue(repository, token, issue, comments, dependency)
+            issue_labels -= {WAITING_CAPABILITY_LABEL, "genesis-blocked", "genesis-deferred", EXHAUSTED_LABEL, NEEDS_HUMAN_LABEL}
+            issue_labels |= {"genesis-autonomous", AGENTIC_LABEL}
         elif WAITING_CAPABILITY_LABEL in issue_labels:
             continue
 
