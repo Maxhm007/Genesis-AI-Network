@@ -188,6 +188,20 @@ def capability_dependency_number(comments: list[dict]) -> int | None:
     return None
 
 
+def unresolved_capability_dependency(comments: list[dict]) -> int | None:
+    dependency: int | None = None
+    for row in comments:
+        body = str(row.get("body") or "")
+        found = _marker_number(body, CAPABILITY_DEPENDENCY_PREFIX)
+        if found:
+            dependency = found
+            continue
+        released = _marker_number(body, CAPABILITY_RELEASE_PREFIX)
+        if released and dependency == released:
+            dependency = None
+    return dependency
+
+
 def _latest_release_index(comments: list[dict]) -> int:
     latest = -1
     for index, row in enumerate(comments):
@@ -218,7 +232,8 @@ def next_strategy(comments: list[dict]) -> str:
 
 
 def latest_result_status(comments: list[dict]) -> str:
-    for row in reversed(comments):
+    release_index = _latest_release_index(comments)
+    for row in reversed(comments[release_index + 1 :]):
         body = str(row.get("body") or "")
         if not body.startswith(RESULT_MARKER_PREFIX):
             continue
@@ -461,18 +476,24 @@ def _release_waiting_issue(
     number = int(issue.get("number") or 0)
     for label in (WAITING_CAPABILITY_LABEL, "genesis-blocked", "genesis-deferred", EXHAUSTED_LABEL, NEEDS_HUMAN_LABEL):
         remove_label(repository, token, number, label)
-    marker = f"{CAPABILITY_RELEASE_PREFIX}{dependency} -->"
     request(
         repository,
         token,
         "POST",
-        f"/issues/{number}/comments",
-        {
-            "body": (
-                f"{marker}\n"
-                f"Capability Issue #{dependency} is verified/completed. Genesis is releasing this parent Issue for a fresh Agentic Lab strategy cycle using the new capability state."
-            )
-        },
+        f"/issues/{number}/labels",
+        {"labels": ["genesis-autonomous", AGENTIC_LABEL]},
+    )
+    marker = f"{CAPABILITY_RELEASE_PREFIX}{dependency} -->"
+    _post_once(
+        repository,
+        token,
+        number,
+        comments,
+        marker,
+        (
+            f"{marker}\n"
+            f"Capability Issue #{dependency} is verified/completed. Genesis is releasing this parent Issue for a fresh Agentic Lab strategy cycle using the new capability state."
+        ),
     )
     return issue_comments(repository, token, number)
 
@@ -491,12 +512,17 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             continue
 
         comments = issue_comments(repository, token, number)
-        if WAITING_CAPABILITY_LABEL in issue_labels:
-            dependency = capability_dependency_number(comments)
-            if not dependency or not capability_ready(repository, token, dependency):
-                continue
-            comments = _release_waiting_issue(repository, token, issue, comments, dependency)
-            issue_labels -= {WAITING_CAPABILITY_LABEL, "genesis-blocked", "genesis-deferred", EXHAUSTED_LABEL, NEEDS_HUMAN_LABEL}
+        dependency = unresolved_capability_dependency(comments)
+        if dependency:
+            if not capability_ready(repository, token, dependency):
+                if WAITING_CAPABILITY_LABEL in issue_labels:
+                    continue
+            else:
+                comments = _release_waiting_issue(repository, token, issue, comments, dependency)
+                issue_labels -= {WAITING_CAPABILITY_LABEL, "genesis-blocked", "genesis-deferred", EXHAUSTED_LABEL, NEEDS_HUMAN_LABEL}
+                issue_labels |= {"genesis-autonomous", AGENTIC_LABEL}
+        elif WAITING_CAPABILITY_LABEL in issue_labels:
+            continue
 
         if issue_labels & ACTIVE_LABELS:
             continue
