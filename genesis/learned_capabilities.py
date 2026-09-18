@@ -2182,4 +2182,39 @@ register_capability(
     _learned_mmproj_device_resolver_433,
 )
 
+def _learned_d0fb55ced066(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('fixed', 'speculative', 'decoding', 'after', 'multimodal', 'input', 'dflash', 'mtmd', 'chunk', 'decode', 'ggml-org', 'llama.cpp', 'v0.4.1', 'published', 'https', 'github.com')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_d0fb55ced066',
+    'Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Fixed speculative decoding after multimodal input and DFlash mtmd chunk decode ([#28715]( [#28587](.',
+    "ggml-org/llama.cpp release 'v0.4.1', published 2026-09-14T18:27:29Z: Fixed speculative decoding after multimodal input and DFlash mtmd chunk decode ([#28715]( [#28587](. Source: https://github.com/ggml-org/llama.cpp/releases/tag/v0.4.1",
+    _learned_d0fb55ced066,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
