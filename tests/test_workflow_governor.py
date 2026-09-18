@@ -1,5 +1,7 @@
 from pathlib import Path
 
+from scripts import workflow_governor as runner
+
 from genesis.workflow_governor import (
     Finding,
     PROTECTED_WORKFLOWS,
@@ -118,3 +120,55 @@ def test_governor_runner_uses_dedicated_workflows_write_token():
     assert 'or os.environ.get("GITHUB_TOKEN")' not in text
     assert 'run("git", "push", push_url, f"HEAD:refs/heads/{branch}", check=False)' in text
     assert "Workflow mutation blocked safely" in text
+
+
+def test_orphan_candidate_equivalent_to_main_when_changed_blobs_match(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "_compare_changed_files",
+        lambda branch: [".github/workflows/worker.yml"],
+    )
+
+    def fake_sha(ref, path):
+        assert path == ".github/workflows/worker.yml"
+        return "same-blob"
+
+    monkeypatch.setattr(runner, "_content_sha", fake_sha)
+
+    assert runner.branch_equivalent_to_main(
+        "genesis/privileged-candidate-workflow-governor-123-worker"
+    )
+
+
+def test_orphan_candidate_not_equivalent_when_blob_differs(monkeypatch):
+    monkeypatch.setattr(
+        runner,
+        "_compare_changed_files",
+        lambda branch: [".github/workflows/worker.yml"],
+    )
+    monkeypatch.setattr(
+        runner,
+        "_content_sha",
+        lambda ref, path: "main-blob" if ref == "main" else "candidate-blob",
+    )
+
+    assert not runner.branch_equivalent_to_main(
+        "genesis/privileged-candidate-workflow-governor-123-worker"
+    )
+
+
+def test_orphan_recovery_deletes_superseded_branch_without_opening_pr(monkeypatch):
+    monkeypatch.setenv("GENESIS_WORKFLOW_TOKEN", "test-token")
+    monkeypatch.setattr(
+        runner,
+        "governor_candidate_branches",
+        lambda: ["genesis/privileged-candidate-workflow-governor-123-worker"],
+    )
+    monkeypatch.setattr(runner, "_branch_open_pr", lambda branch: None)
+    monkeypatch.setattr(runner, "branch_equivalent_to_main", lambda branch: True)
+    deleted = []
+    monkeypatch.setattr(runner, "delete_governor_branch", deleted.append)
+    monkeypatch.setattr(runner, "existing_governor_pr", lambda: None)
+
+    assert runner.recover_orphan_governor_candidates() is None
+    assert deleted == ["genesis/privileged-candidate-workflow-governor-123-worker"]
