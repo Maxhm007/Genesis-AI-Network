@@ -51,14 +51,14 @@ def main() -> int:
     agentic.issue_comments = policy._all_issue_comments
     agentic.open_agentic_issues = _parallel_routable_issues
     agentic.next_strategy = policy._least_recently_used_strategy
-    agentic.capability_gap_status = lambda _status: False
-    agentic.pause_for_capability = policy._same_issue_pause
 
+    # Do not override capability escalation here. When every materially different
+    # repair strategy reports a capability blocker, the canonical Agentic recovery
+    # layer must pause the parent and create/reuse one bounded capability Issue.
+    # The former same-Issue override forced endless retries and could never converge.
     all_open = policy._all_open_issues_fifo(repository, token)
     restored = policy._restore_agentic_visibility(repository, token, all_open)
-    released = policy._release_legacy_waiting_dependencies(
-        repository, token, policy._all_open_issues_fifo(repository, token)
-    )
+    released: list[int] = []
 
     active_before = _active_issue_numbers(repository, token)
     free_slots = max(0, MAX_PARALLEL - len(active_before))
@@ -77,6 +77,7 @@ def main() -> int:
         "dispatched": [row.get("issue_number") for row in dispatched],
         "active_after": _active_issue_numbers(repository, token),
         "legacy_dependencies_released": released,
+        "capability_escalation": "enabled",
         "agentic_visibility_restored": restored,
         "strategies": list(agentic.STRATEGIES),
     }
