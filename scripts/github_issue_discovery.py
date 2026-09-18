@@ -252,6 +252,13 @@ def publish_discovery(
         value_score=value.score,
         severity=severity,
     )
+    body = issue_body(
+        discovery,
+        fingerprint,
+        problem_fp=problem_fp,
+        occurrence_fp=occurrence_fp,
+        value={"score": value.score, "breakdown": value.breakdown},
+    )
     if decision == "defer":
         queued = persist_deferred_candidate(
             deferred_path,
@@ -269,6 +276,8 @@ def publish_discovery(
                 "value_score": value.score,
                 "value_breakdown": value.breakdown,
                 "backlog_state": health.state,
+                "body": body,
+                "labels": ["genesis-autonomous"],
             },
         )
         return {
