@@ -19,5 +19,5 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/genesis-oldest-issue-solver.yml/dispatches" \
+            "repos/${GITHUB_REPOSITORY}/actions/workflows/genesis-sequential-issue-controller.yml/dispatches" \
             -f ref=main
