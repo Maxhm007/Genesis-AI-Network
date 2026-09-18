@@ -159,3 +159,68 @@ def test_capability_issue_does_not_spawn_infinite_capability_chain(monkeypatch):
 
     assert result["status"] == "needs_human"
     assert not any(method == "POST" and path == "/issues" for method, path, _ in calls)
+
+
+def test_capability_release_resets_prior_result_and_strategy_history():
+    comments = [
+        {"body": "<!-- genesis-agentic-strategy:evidence_first -->\nmethod"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `blocked_protected_or_unsupported_target`"},
+        {"body": "<!-- genesis-capability-dependency:88 -->\nwaiting"},
+        {"body": "<!-- genesis-agentic-capability-release:88 -->\nreleased"},
+    ]
+
+    assert module.unresolved_capability_dependency(comments) is None
+    assert module.latest_result_status(comments) == ""
+    assert module.attempted_strategies(comments) == []
+    assert module.next_strategy(comments) == "evidence_first"
+
+
+def test_ready_capability_rearms_parent_even_if_waiting_label_was_manually_removed(monkeypatch):
+    calls: list[tuple[str, str, dict | None]] = []
+    issue = _issue(
+        47,
+        extra_labels=("genesis-solver-exhausted",),
+    )
+    comments = [
+        {"body": "<!-- genesis-agentic-strategy:evidence_first -->\nmethod"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `blocked_protected_or_unsupported_target`"},
+        {"body": "<!-- genesis-capability-dependency:88 -->\nwaiting"},
+    ]
+    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [issue])
+    monkeypatch.setattr(module, "safe_lane", lambda target: "generic")
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET" and path == "/issues/47/comments?per_page=100":
+            release = [
+                row for row in comments
+                if row["body"].startswith("<!-- genesis-agentic-capability-release:")
+            ]
+            return comments + release
+        if method == "GET" and path == "/issues/88":
+            return {"number": 88, "state": "closed", "state_reason": "completed", "labels": []}
+        if method == "POST" and path == "/issues/47/comments":
+            comments.append({"body": payload["body"]})
+            return {}
+        if method == "POST" and path == "/labels":
+            return {}
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+
+    result = module.reserve_and_dispatch("owner/repo", "token")
+
+    assert result["status"] == "dispatched"
+    assert result["issue_number"] == 47
+    assert result["strategy"] == "evidence_first"
+    assert any(
+        method == "POST"
+        and path == "/issues/47/labels"
+        and "genesis-autonomous" in (payload or {}).get("labels", [])
+        for method, path, payload in calls
+    )
+    assert any(
+        method == "POST"
+        and path == "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches"
+        for method, path, _ in calls
+    )
