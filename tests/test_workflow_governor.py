@@ -108,3 +108,9 @@ def test_protected_governor_workflows_are_never_selected_for_mutation():
     })()
     action = choose_autonomous_action(report)
     assert action is None
+
+
+def test_governor_runner_uses_explicit_authenticated_push():
+    text = (Path(__file__).resolve().parents[1] / "scripts" / "workflow_governor.py").read_text(encoding="utf-8")
+    assert "x-access-token:{token}@github.com/{repository}.git" in text
+    assert 'run("git", "push", push_url, f"HEAD:refs/heads/{branch}")' in text
