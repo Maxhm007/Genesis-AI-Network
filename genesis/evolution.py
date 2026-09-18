@@ -60,7 +60,7 @@ class EvolutionManager:
             return False
         path = Path(row[0])
         try:
-            payload = json.loads(path.read_text(encoding="utf-8"))
+            payload = json.loads(path.read_text(encoding='utf-8'))
             ok = (
                 payload.get("status") == "candidate"
                 and isinstance(payload.get("changes"), dict)
