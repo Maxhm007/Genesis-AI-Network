@@ -14,7 +14,7 @@ from .autonomy_proof import AutonomyProofLedger
 
 PROTECTED_PATHS = {"GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"}
 ALLOWED_PREFIXES = ("genesis/", "tests/", "docs/", "config/", "desktop/", "mobile/", ".github/")
-ALLOWED_SCRIPT_PATHS = frozenset({"scripts/self_evaluation_dashboard.py"})
+ALLOWED_SCRIPT_PATHS = frozenset({\n    "scripts/self_evaluation_dashboard.py",\n    "scripts/dashboard_navigation_fallback.py",\n    "scripts/validate_dashboard_artifact.py",\n})
 CANDIDATE_TEST_PROVIDER_ENV = (
     "GENESIS_PROVIDER_URL",
     "GENESIS_PROVIDER_NAME",
