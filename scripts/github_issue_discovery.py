@@ -276,6 +276,7 @@ def publish_discovery(
                 "value_score": value.score,
                 "value_breakdown": value.breakdown,
                 "backlog_state": health.state,
+                "severity": severity,
                 "body": body,
                 "labels": ["genesis-autonomous"],
             },
