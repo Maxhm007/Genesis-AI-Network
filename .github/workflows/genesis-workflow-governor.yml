@@ -8,7 +8,7 @@ on:
         required: false
         default: 'true'
   schedule:
-    - cron: '43 * * * *'
+    - cron: '3,13,23,33,43,53 * * * *'
   push:
     branches: [main]
     paths:
