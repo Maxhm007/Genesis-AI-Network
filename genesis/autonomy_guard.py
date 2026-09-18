@@ -24,6 +24,8 @@ OWNER_ESCALATION_PATHS = {
     ".github/workflows/candidate-pr-gate.yml",
     ".github/workflows/independent-validator-gate.yml",
     ".github/workflows/secret-guard.yml",
+    ".github/workflows/genesis-workflow-governor.yml",
+    ".github/workflows/genesis-workflow-governor-validator.yml",
     "genesis/autonomy_guard.py",
     "scripts/secret_guard.py",
     "scripts/privileged_change_gate.py",
