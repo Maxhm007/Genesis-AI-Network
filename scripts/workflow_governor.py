@@ -169,6 +169,13 @@ def create_candidate_pr(action) -> int:
                 + (pushed.stderr or pushed.stdout)[-1600:]
             )
 
+        # Use the dedicated workflow-governance credential for subsequent GitHub CLI
+        # operations too. GH_TOKEN takes precedence in gh, so leaving the built-in
+        # Actions token here would make PR creation fail even after the branch push
+        # succeeds.
+        os.environ["GH_TOKEN"] = token
+        os.environ["GITHUB_TOKEN"] = token
+
         ensure_labels()
         body = (
             f"Autonomous workflow-governance candidate for #{ISSUE_NUMBER}.\n\n"
