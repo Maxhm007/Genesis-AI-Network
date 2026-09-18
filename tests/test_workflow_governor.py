@@ -107,5 +107,4 @@ def test_protected_governor_workflows_are_never_selected_for_mutation():
         )
     })()
     action = choose_autonomous_action(report)
-    # Selection is generic; apply_candidate enforces the protected boundary.
-    assert action is not None
+    assert action is None
