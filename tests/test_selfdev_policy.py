@@ -54,6 +54,20 @@ def test_selfdev_allows_bounded_code_and_tests(tmp_path: Path):
         "config/example.json",
     ])
 
+def test_selfdev_allows_bounded_dashboard_repair_scripts(tmp_path: Path):
+    executor = SelfDevelopmentExecutor(tmp_path)
+    executor._validate_paths([
+        "scripts/self_evaluation_dashboard.py",
+        "scripts/dashboard_navigation_fallback.py",
+        "scripts/validate_dashboard_artifact.py",
+    ])
+
+
+def test_selfdev_still_rejects_unapproved_scripts(tmp_path: Path):
+    with pytest.raises(RuntimeError, match="outside self-development sandbox"):
+        normalize_selfdev_path(tmp_path, "scripts/arbitrary.py")
+
+
 
 def test_candidate_tests_do_not_inherit_live_provider_endpoints(tmp_path: Path, monkeypatch):
     monkeypatch.setenv("GENESIS_PROVIDER_URL", "http://127.0.0.1:8766")
