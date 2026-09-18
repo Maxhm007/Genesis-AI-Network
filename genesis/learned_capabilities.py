@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import math
 from typing import Callable
 
 
@@ -2016,5 +2017,64 @@ register_capability(
     _learned_3abd0a92554a,
 )
 
+
+
+def _learned_sequential_information_flow_427(
+    reference_probs,
+    tilted_probs,
+    *,
+    max_steps: int = 4096,
+) -> dict[str, object]:
+    """Decompose bounded Bernoulli path information into exact per-step KL terms."""
+    refs = tuple(float(value) for value in reference_probs)
+    tilts = tuple(float(value) for value in tilted_probs)
+    limit = int(max_steps)
+    if len(refs) != len(tilts):
+        raise ValueError("probability paths must have equal length")
+    if limit < 1 or limit > 100000 or len(refs) > limit:
+        raise ValueError("information-flow step bound is invalid")
+
+    terms: list[float] = []
+    for tilted, reference in zip(tilts, refs):
+        if not 0.0 <= tilted <= 1.0 or not 0.0 <= reference <= 1.0:
+            raise ValueError("probabilities must be between 0 and 1")
+        if (tilted > 0.0 and reference == 0.0) or (
+            tilted < 1.0 and reference == 1.0
+        ):
+            divergence = math.inf
+        else:
+            divergence = 0.0
+            if tilted > 0.0:
+                divergence += tilted * math.log(tilted / reference)
+            if tilted < 1.0:
+                divergence += (1.0 - tilted) * math.log(
+                    (1.0 - tilted) / (1.0 - reference)
+                )
+        terms.append(divergence)
+
+    total = math.inf if any(math.isinf(value) for value in terms) else math.fsum(terms)
+    return {
+        "per_step_kl": tuple(terms),
+        "path_relative_entropy": total,
+        "steps": len(terms),
+    }
+
+
+register_capability(
+    "sequential_information_flow_427",
+    (
+        "Decompose a bounded sequential Bernoulli change-of-measure into per-step "
+        "conditional KL divergences and their exact chain-rule path sum. This "
+        "provides Genesis with a concrete information-flow accounting primitive "
+        "for sequential evidence without performing external side effects."
+    ),
+    (
+        "External learning evidence from Issue #427: exact variational identities "
+        "for nonnegative martingales can be understood through information flow "
+        "on path space, with relative entropy resolved by the chain rule into "
+        "per-step conditional divergences."
+    ),
+    _learned_sequential_information_flow_427,
+)
 
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
