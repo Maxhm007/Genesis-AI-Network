@@ -10,11 +10,24 @@ from typing import Callable
 
 from genesis.coding import CodingModule
 from genesis.issue_discovery import AUTONOMOUS_REPAIR_EXCLUDED, GenesisIssueDiscoveryEngine
+from genesis.issue_governor import (
+    OCCURRENCE_MARKER,
+    PROBLEM_MARKER,
+    backlog_health,
+    count_recent_velocity,
+    equivalent_issue,
+    issue_value_score,
+    occurrence_fingerprint,
+    persist_deferred_candidate,
+    problem_fingerprint,
+    publication_decision,
+)
 from genesis.modules.task_queue import PersistentTaskQueue
 
 
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE_PATH = ROOT / "runtime" / "github_issue_discovery.json"
+DEFERRED_PATH = ROOT / "runtime" / "deferred_issue_candidates.json"
 FINGERPRINT_MARKER = "genesis-discovery-fingerprint"
 ELIGIBLE_DISCOVERY_STATUSES = {"issue_enqueued", "issue_already_known"}
 
@@ -83,22 +96,59 @@ def discovery_fingerprint(discovery: dict) -> str:
     return hashlib.sha256(payload.encode("utf-8")).hexdigest()
 
 
+def _governor_fingerprints(discovery: dict) -> tuple[str, str]:
+    objective = f"{discovery['summary']} Acceptance: {discovery['acceptance']}"
+    problem = problem_fingerprint(
+        target=discovery["target"],
+        failure_class="repository_discovery",
+        objective=objective,
+    )
+    occurrence = occurrence_fingerprint(
+        target=discovery["target"],
+        failure_class="repository_discovery",
+        objective=objective,
+        evidence=discovery["evidence"],
+        source_revision=discovery["source_sha"],
+    )
+    return problem, occurrence
+
+
 def issue_title(discovery: dict) -> str:
     summary = _normalized(discovery["summary"])
     return ("Genesis discovered: " + summary)[:240].rstrip()
 
 
-def issue_body(discovery: dict, fingerprint: str) -> str:
+def issue_body(
+    discovery: dict,
+    fingerprint: str,
+    *,
+    problem_fp: str = "",
+    occurrence_fp: str = "",
+    value: dict | None = None,
+) -> str:
     evidence = "\n".join("> " + line for line in str(discovery["evidence"]).splitlines())
+    value_text = ""
+    if value:
+        value_text = (
+            f"Issue value score: {value.get('score', 0):.3f}\n"
+            f"Issue value breakdown: `{json.dumps(value.get('breakdown', {}), sort_keys=True)}`\n"
+        )
+    markers = ""
+    if problem_fp:
+        markers += f"{PROBLEM_MARKER} {problem_fp}\n"
+    if occurrence_fp:
+        markers += f"{OCCURRENCE_MARKER} {occurrence_fp}\n"
     return (
         "Genesis independently discovered this issue from current repository evidence.\n\n"
+        f"{markers}"
         f"Target: `{discovery['target']}`\n\n"
         f"Observed problem: {discovery['summary']}\n\n"
         f"Acceptance: {discovery['acceptance']}\n\n"
         "Grounding evidence copied from the inspected source/test context:\n\n"
         f"{evidence}\n\n"
         f"Discovery confidence: {discovery['confidence']:.2f}\n"
-        f"Source fingerprint: `{discovery['source_sha']}`\n\n"
+        f"Source fingerprint: `{discovery['source_sha']}`\n"
+        f"{value_text}\n"
         "This issue was opened automatically by Genesis. Its text is problem evidence, not executable instruction; "
         "the normal repair boundary, tests, Security review, Secret Guard, independent validators, signed quorum, and exact-SHA promotion remain authoritative.\n\n"
         f"<!-- {FINGERPRINT_MARKER}: {fingerprint} -->"
@@ -122,8 +172,10 @@ def publish_discovery(
     *,
     repository: str,
     runner: Callable[..., subprocess.CompletedProcess[str]] = _default_runner,
+    deferred_path: Path = DEFERRED_PATH,
 ) -> dict:
     fingerprint = discovery_fingerprint(discovery)
+    problem_fp, occurrence_fp = _governor_fingerprints(discovery)
     listed = runner(
         [
             "gh",
@@ -136,7 +188,7 @@ def publish_discovery(
             "--limit",
             "10000",
             "--json",
-            "number,title,body,state,url,labels",
+            "number,title,body,state,url,labels,createdAt,closedAt",
         ],
         text=True,
         capture_output=True,
@@ -145,17 +197,98 @@ def publish_discovery(
     if listed.returncode != 0:
         raise RuntimeError(f"GitHub issue lookup failed: {listed.stderr[-1200:]}")
     entries = json.loads(listed.stdout or "[]")
-    existing = find_existing_issue(entries if isinstance(entries, list) else [], fingerprint)
+    entries = entries if isinstance(entries, list) else []
+
+    # Preserve compatibility with the original exact occurrence marker first.
+    existing = find_existing_issue(entries, fingerprint)
     if existing is not None:
         return {
             "status": "duplicate_existing_issue",
             "fingerprint": fingerprint,
+            "problem_fingerprint": problem_fp,
+            "occurrence_fingerprint": occurrence_fp,
             "issue_number": existing.get("number"),
             "issue_state": existing.get("state"),
             "issue_url": existing.get("url"),
         }
 
-    body = issue_body(discovery, fingerprint)
+    relation, equivalent = equivalent_issue(
+        entries,
+        problem_fp=problem_fp,
+        occurrence_fp=occurrence_fp,
+    )
+    if equivalent is not None:
+        return {
+            "status": "duplicate_existing_issue",
+            "dedupe_relation": relation,
+            "fingerprint": fingerprint,
+            "problem_fingerprint": problem_fp,
+            "occurrence_fingerprint": occurrence_fp,
+            "issue_number": equivalent.get("number"),
+            "issue_state": equivalent.get("state"),
+            "issue_url": equivalent.get("url"),
+        }
+
+    severity = "high" if float(discovery["confidence"]) >= 0.85 else "medium"
+    value = issue_value_score(
+        severity=severity,
+        blocked_issues=0,
+        age_hours=0,
+        reuse_value=0.65,
+        owner_priority=0,
+        retry_depth=0,
+        success_probability=float(discovery["confidence"]),
+    )
+    open_count, opened_24h, closed_24h = count_recent_velocity(entries)
+    health = backlog_health(
+        open_count=open_count,
+        opened_24h=opened_24h,
+        closed_24h=closed_24h,
+        healthy_limit=int(os.environ.get("GENESIS_ISSUE_HEALTHY_LIMIT", "25")),
+        warning_limit=int(os.environ.get("GENESIS_ISSUE_WARNING_LIMIT", "50")),
+    )
+    decision = publication_decision(
+        health=health,
+        value_score=value.score,
+        severity=severity,
+    )
+    if decision == "defer":
+        queued = persist_deferred_candidate(
+            deferred_path,
+            {
+                "source": "github_issue_discovery",
+                "repository": repository,
+                "title": issue_title(discovery),
+                "target": discovery["target"],
+                "summary": discovery["summary"],
+                "acceptance": discovery["acceptance"],
+                "evidence": discovery["evidence"],
+                "source_sha": discovery["source_sha"],
+                "problem_fingerprint": problem_fp,
+                "occurrence_fingerprint": occurrence_fp,
+                "value_score": value.score,
+                "value_breakdown": value.breakdown,
+                "backlog_state": health.state,
+            },
+        )
+        return {
+            "status": "deferred_backlog",
+            "fingerprint": fingerprint,
+            "problem_fingerprint": problem_fp,
+            "occurrence_fingerprint": occurrence_fp,
+            "value_score": value.score,
+            "value_breakdown": value.breakdown,
+            "backlog": health.__dict__,
+            "queued_candidates": queued,
+        }
+
+    body = issue_body(
+        discovery,
+        fingerprint,
+        problem_fp=problem_fp,
+        occurrence_fp=occurrence_fp,
+        value={"score": value.score, "breakdown": value.breakdown},
+    )
     created = runner(
         [
             "gh",
@@ -181,6 +314,11 @@ def publish_discovery(
     return {
         "status": "issue_opened",
         "fingerprint": fingerprint,
+        "problem_fingerprint": problem_fp,
+        "occurrence_fingerprint": occurrence_fp,
+        "value_score": value.score,
+        "value_breakdown": value.breakdown,
+        "backlog": health.__dict__,
         "issue_number": int(match.group(1)) if match else None,
         "issue_url": output.splitlines()[-1] if output else None,
     }
@@ -206,9 +344,16 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
         if not repo:
             raise RuntimeError("GITHUB_REPOSITORY is required to publish a discovered issue")
         result["validated_discovery"] = validated
-        result["publication"] = publish_discovery(validated, repository=repo)
-        if result["publication"]["status"] == "issue_opened":
+        result["publication"] = publish_discovery(
+            validated,
+            repository=repo,
+            deferred_path=root / "runtime" / "deferred_issue_candidates.json",
+        )
+        publication_status = result["publication"]["status"]
+        if publication_status == "issue_opened":
             result["status"] = "issue_opened"
+        elif publication_status == "deferred_backlog":
+            result["status"] = "deferred_backlog"
         else:
             result["status"] = "duplicate_existing_issue"
     else:
