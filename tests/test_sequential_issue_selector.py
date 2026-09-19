@@ -52,3 +52,12 @@ def test_selector_is_explainable():
     assert row['kind'] == 'repair'
     assert 'breakdown' in row
     assert row['base_score'] >= 0
+
+
+def test_architecture_issue_is_routable_without_file_target():
+    arch = issue(60, '[Genesis Architecture] improve control plane', 'Acceptance: route architecture work autonomously')
+    row = candidate(arch, now=NOW)
+    assert row is not None
+    assert row['kind'] == 'architecture'
+    assert row['target'] == ''
+    assert row['lane_bonus'] == 18.0
