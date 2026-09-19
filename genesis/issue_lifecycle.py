@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import re
 from dataclasses import dataclass
+from datetime import datetime
 from typing import Iterable
 
 
@@ -13,6 +14,7 @@ SUCCESSOR_ROOT_RE = re.compile(r"<!-- genesis-unsolved-root:(\d+) -->")
 SUCCESSOR_PARENT_RE = re.compile(r"<!-- genesis-unsolved-successor-of:(\d+) -->")
 CAPABILITY_PARENT_RE = re.compile(r"<!-- genesis-capability-parent:(\d+) -->")
 PROBLEM_FP_RE = re.compile(r"^Genesis-Problem-Fingerprint:\s*([^\n]+)$", re.MULTILINE | re.IGNORECASE)
+OCCURRENCE_FP_RE = re.compile(r"^Genesis-Occurrence-Fingerprint:\s*([^\n]+)$", re.MULTILINE | re.IGNORECASE)
 
 
 @dataclass(frozen=True)
@@ -55,6 +57,33 @@ def is_superseded(issue: dict) -> bool:
 def problem_fingerprint(issue: dict) -> str:
     match = PROBLEM_FP_RE.search(str(issue.get("body") or ""))
     return match.group(1).strip().lower() if match else ""
+
+
+def occurrence_fingerprint(issue: dict) -> str:
+    match = OCCURRENCE_FP_RE.search(str(issue.get("body") or ""))
+    return match.group(1).strip().lower() if match else ""
+
+
+def _timestamp(issue: dict, *names: str) -> datetime | None:
+    for name in names:
+        value = str(issue.get(name) or "")
+        if not value:
+            continue
+        try:
+            return datetime.fromisoformat(value.replace("Z", "+00:00"))
+        except ValueError:
+            continue
+    return None
+
+
+def _verified_equivalent_predates_fix(issue: dict, other: dict) -> bool:
+    occurrence = occurrence_fingerprint(issue)
+    other_occurrence = occurrence_fingerprint(other)
+    if occurrence and other_occurrence:
+        return occurrence == other_occurrence
+    created = _timestamp(issue, "created_at", "createdAt")
+    resolved = _timestamp(other, "closed_at", "closedAt", "updated_at", "updatedAt")
+    return created is not None and resolved is not None and created <= resolved
 
 
 def root_issue_number(issue: dict) -> int | None:
@@ -120,6 +149,7 @@ def lifecycle_decision(
                 problem_fingerprint(other) == fp
                 and is_closed(other)
                 and is_verified(other)
+                and _verified_equivalent_predates_fix(issue, other)
             ):
                 return LifecycleDecision(
                     "close_duplicate" if not is_closed(issue) else "keep_closed",
