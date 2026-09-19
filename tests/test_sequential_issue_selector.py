@@ -61,3 +61,17 @@ def test_architecture_issue_is_routable_without_file_target():
     assert row['kind'] == 'architecture'
     assert row['target'] == ''
     assert row['lane_bonus'] == 18.0
+
+
+def test_routed_architecture_issue_leaves_main_queue():
+    routed = issue(70, '[Genesis Architecture] already routed', 'control plane work', labels=('genesis-architecture-route',))
+    assert candidate(routed, now=NOW) is None
+
+
+def test_system_wide_architecture_outranks_narrower_older_architecture():
+    older = issue(80, '[Genesis Architecture] deduplicate issue creation', 'Prevent duplicate autonomous issues and consolidate equivalent work.', created_at='2026-09-18T00:00:00Z')
+    broad = issue(81, '[Genesis Architecture] recover every workflow failure', 'Detect failures from every active workflow on main regardless of which active workflow failed. Make failed Actions first-class autonomous work with retry -> repair -> verification and durable memory.', created_at='2026-09-19T15:00:00Z')
+    selected = select([older, broad], now=NOW)['selected']
+    assert selected['number'] == 81
+    assert selected['breakdown']['architecture_impact'] > 0
+    assert selected['architecture_breakdown']
