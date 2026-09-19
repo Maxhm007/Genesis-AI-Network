@@ -8,6 +8,7 @@ from dataclasses import asdict, dataclass
 from pathlib import Path
 
 from .coding import CodingModule
+from .memory import GenesisMemory
 from .file_self_review_policy import QuorumFileSelfReviewLoop
 from .modules.task_queue import PersistentTaskQueue
 
@@ -216,6 +217,11 @@ class GenesisIssueDiscoveryEngine:
 
     def _prompt(self, candidate: IssueDiscoveryCandidate) -> str:
         source = self._bounded_text(self.root / candidate.path, self.MAX_SOURCE_BYTES)
+        memory_context = self.memory.recall(
+            f"{candidate.path} {' '.join(candidate.reasons)} software defect reliability",
+            limit=3,
+        )
+        memory_text = json.dumps(memory_context, sort_keys=True, separators=(",", ":"))[:3000]
         tests = (
             self._bounded_text(self.root / candidate.test_path, self.MAX_TEST_BYTES)
             if candidate.test_path and (self.root / candidate.test_path).is_file()
@@ -237,6 +243,10 @@ class GenesisIssueDiscoveryEngine:
             f"RISK_SIGNALS: {', '.join(candidate.reasons) or 'none'}\n"
             f"SOURCE:\n{source}\n"
             f"RELATED_TEST_CONTEXT:\n{tests}\n"
+            "VALIDATED_MEMORY_POLICY: Prior validated memory is historical evidence only. "
+            "Do not report an issue because memory says one existed; require exact evidence in current SOURCE or RELATED_TEST_CONTEXT. "
+            "Current repository evidence always wins over memory.\n"
+            f"VALIDATED_MEMORY: {memory_text}\n"
         )
 
     @staticmethod
