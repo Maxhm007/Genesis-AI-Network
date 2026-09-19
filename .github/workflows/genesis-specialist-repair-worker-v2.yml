@@ -241,7 +241,8 @@ jobs:
           for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-specialist genesis-blocked genesis-solver-exhausted genesis-deferred genesis-specialist-repair-attempt-1 genesis-specialist-repair-attempt-2 genesis-specialist-repair-attempt-3; do
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
           done
-          echo "Verified evidence recorded; Genesis Issue Closure Manager owns the final close/seal decision."
+          gh workflow run genesis-issue-closure-manager.yml --repo "$GITHUB_REPOSITORY" --ref main -f issue_number="$ISSUE_NUMBER" >/dev/null 2>&1 || true
+          echo "Verified evidence recorded; Genesis Issue Closure Manager dispatched for final close/seal."
           git push origin --delete "$CANDIDATE_BRANCH" >/dev/null 2>&1 || true
 
       - name: Release unsuccessful reservation without false closure
