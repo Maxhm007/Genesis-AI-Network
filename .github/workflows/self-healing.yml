@@ -60,6 +60,13 @@ jobs:
         if: ${{ env.GENESIS_SKIP_REPAIR != 'true' }}
         run: pip install -r requirements.txt
 
+      - name: Hydrate validated Genesis memory
+        if: ${{ env.GENESIS_SKIP_REPAIR != 'true' }}
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/github_memory_sync.py --repository "$GITHUB_REPOSITORY" --max-issues 100 || echo "Verified memory sync unavailable; self-healing continues without hydrated memory."
+
       - name: Ingest upstream workflow failure into GAPS
         if: ${{ env.GENESIS_SKIP_REPAIR != 'true' && github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure' }}
         env:
