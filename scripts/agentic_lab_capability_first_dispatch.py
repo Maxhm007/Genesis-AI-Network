@@ -14,6 +14,7 @@ SAME_ISSUE_MEMORY_PREFIX = "<!-- genesis-same-issue-recovery-memory:"
 LEGACY_DEPENDENCY_RELEASE = "<!-- genesis-legacy-capability-dependency-released -->"
 FIFO_DECOMPOSITION_PREFIX = "<!-- genesis-fifo-decomposition:"
 FIFO_BLOCKED_MARKER = "<!-- genesis-fifo-decomposition-blocked -->"
+INFRA_QUARANTINE_MARKER = "<!-- genesis-agentic-infrastructure-quarantine -->"
 
 
 def _all_issue_comments(repository: str, token: str, number: int) -> list[dict]:
@@ -26,6 +27,15 @@ def _all_issue_comments(repository: str, token: str, number: int) -> list[dict]:
         if len(batch) < 100:
             break
     return rows
+
+
+def _infra_quarantined(repository: str, token: str, number: int) -> bool:
+    if number <= 0:
+        return False
+    return any(
+        INFRA_QUARANTINE_MARKER in str(row.get("body") or "")
+        for row in _all_issue_comments(repository, token, number)
+    )
 
 
 def _all_open_issues_fifo(repository: str, token: str) -> list[dict]:
@@ -70,6 +80,8 @@ def _restore_agentic_visibility(repository: str, token: str, issues: list[dict])
         number = int(issue.get("number") or 0)
         if number <= 1:
             continue
+        if _infra_quarantined(repository, token, number):
+            continue
         title = str(issue.get("title") or "").strip().lower()
         body = str(issue.get("body") or "").lower()
         if title.startswith(("[genesis gene chat]", "genesis chat:", "[genesis hourly report]", "[genesis ops]")):
@@ -110,6 +122,8 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
         if not _actionable(issue):
             continue
         number = int(issue.get("number") or 0)
+        if _infra_quarantined(repository, token, number):
+            continue
         body = str(issue.get("body") or "")
         explicit = agentic.explicit_target(body)
         if agentic.safe_lane(explicit):
@@ -155,6 +169,9 @@ def _fifo_autonomous_issues(repository: str, token: str) -> list[dict]:
     eligible: list[dict] = []
     for issue in _all_open_issues_fifo(repository, token):
         if not _actionable(issue):
+            continue
+        number = int(issue.get("number") or 0)
+        if _infra_quarantined(repository, token, number):
             continue
         target = agentic.explicit_target(str(issue.get("body") or ""))
         if not agentic.safe_lane(target):
