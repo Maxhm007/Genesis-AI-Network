@@ -82,7 +82,7 @@ jobs:
             exit 0
           fi
 
-          gh api --paginate "repos/\${GITHUB_REPOSITORY}/issues/\${number}/comments?per_page=100" | jq -s 'add // []' > /tmp/deepseek-comments.json
+          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${number}/comments?per_page=100" | jq -s 'add // []' > /tmp/deepseek-comments.json
           plan=$(python scripts/deepseek_agentic_selector.py \
             --issue-json /tmp/deepseek-issue.json \
             --comments-json /tmp/deepseek-comments.json \
@@ -92,12 +92,12 @@ jobs:
             reason=$(jq -r '.reason // "anti_stuck_not_eligible"' <<<"$plan")
             token=$(jq -r '.state_token // ""' <<<"$plan")
             printf '%s\n%s\n' \
-              "<!-- genesis-deepseek-epoch-exhausted:\${token} -->" \
-              "DeepSeek did not consume another repair slot because the Anti-Stuck Controller returned \`\${reason}\`. Another compatible lane or capability dependency may proceed." \
+              "<!-- genesis-deepseek-epoch-exhausted:${token} -->" \
+              "DeepSeek did not consume another repair slot because the Anti-Stuck Controller returned \`${reason}\`. Another compatible lane or capability dependency may proceed." \
               > /tmp/deepseek-exhausted.md
             gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body-file /tmp/deepseek-exhausted.md >/dev/null 2>&1 || true
             echo 'selected=false' >> "$GITHUB_OUTPUT"
-            echo "DeepSeek skipped #\${number}: \${reason}."
+            echo "DeepSeek skipped #${number}: ${reason}."
             exit 0
           fi
 
@@ -118,8 +118,8 @@ jobs:
           gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --add-label genesis-deepseek-agentic --add-label genesis-deepseek-working --add-label genesis-autonomous >/dev/null
           printf '%s\n%s\n%s\n' \
             "$attempt_marker" \
-            "<!-- genesis-deepseek-attempt:\${attempt} -->" \
-            "DeepSeek Agentic Solver claimed this Issue (selection score: \${score}; target: \`\${target}\`). Attempt \${attempt} uses state-scoped strategy \`\${strategy}\` through supporting Gene \`Gene 003\`. Equivalent attempts in this material-state epoch are forbidden." \
+            "<!-- genesis-deepseek-attempt:${attempt} -->" \
+            "DeepSeek Agentic Solver claimed this Issue (selection score: ${score}; target: \`${target}\`). Attempt ${attempt} uses state-scoped strategy \`${strategy}\` through supporting Gene \`Gene 003\`. Equivalent attempts in this material-state epoch are forbidden." \
             > /tmp/deepseek-claim.md
           gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body-file /tmp/deepseek-claim.md
 
