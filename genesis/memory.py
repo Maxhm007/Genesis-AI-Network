@@ -278,7 +278,7 @@ class GenesisMemory:
             confidence=float(lesson.confidence),
             importance=0.8,
             state="validated",
-            metadata={"lesson_evidence": dict(lesson.evidence)},
+            metadata={"lesson_evidence": dict(lesson.evidence)}
         )
 
     def remember_event(self, *, topic: str, content: str, source_ref: str, success: bool) -> MemoryItem:
