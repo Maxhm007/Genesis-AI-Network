@@ -110,7 +110,7 @@ jobs:
         if: steps.eligibility.outputs.eligible == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/github_memory_sync.py --repository "$GITHUB_REPOSITORY" --max-issues 100
+        run: python scripts/github_memory_sync.py --repository "$GITHUB_REPOSITORY" --max-issues 100 || echo "Verified memory sync unavailable; continue without hydrated memory."
 
       - name: Restore open-model cache
         if: steps.eligibility.outputs.eligible == 'true'
@@ -224,7 +224,7 @@ jobs:
           python -m py_compile "$TARGET"
           [[ ! -f "$target_test" ]] || python -m pytest -q "$target_test"
           python -m pytest -q
-          python scripts/record_verified_repair_memory.py \
+          if ! python scripts/record_verified_repair_memory.py \
             --repository "$GITHUB_REPOSITORY" \
             --issue-number "$ISSUE_NUMBER" \
             --target "$TARGET" \
@@ -232,6 +232,9 @@ jobs:
             --promoted-sha "$promoted" \
             --worker-run "$GITHUB_RUN_ID" \
             --evidence-file runtime/github_issue_autorepair.json
+          then
+            echo "Verified repair memory recording failed; repair verification remains authoritative." >&2
+          fi
 
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Genesis grounded specialist repair was independently validated and promoted. Candidate: \`${CANDIDATE_SHA}\`. Main: \`${promoted}\`. Target: \`${TARGET}\`. Full validation passed. Worker run: ${GITHUB_RUN_ID}."
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-verified >/dev/null
