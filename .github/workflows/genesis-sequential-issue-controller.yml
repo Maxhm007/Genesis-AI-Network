@@ -333,8 +333,8 @@ jobs:
                   urgent_candidates.append(number)
                   continue
 
-              match = re.search(r'^- \*\*Target:\*\* `([^`]+)`', body, re.MULTILINE)
-              target = match.group(1).strip() if match else ''
+              from genesis.issue_target import extract_issue_target
+              target = extract_issue_target(body)
               if not target.startswith('genesis/') or not target.endswith('.py'):
                   continue
               if '..' in target or target in protected_targets:
@@ -417,7 +417,7 @@ jobs:
           fi
 
           if [ "$resolved" != true ] && printf '%s' "$body_text" | grep -qi 'Syntax error'; then
-            target=$(printf '%s' "$body_text" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
+            target=$(printf '%s' "$body_text" | python -m genesis.issue_target)
             if [ -n "$target" ] && [ -f "$target" ]; then
               remove_label "$issue_number" genesis-working
               add_label "$issue_number" genesis-verifying
@@ -437,7 +437,7 @@ jobs:
           fi
 
           if [ "$resolved" != true ]; then
-            target=$(printf '%s' "$body_text" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
+            target=$(printf '%s' "$body_text" | python -m genesis.issue_target)
             safe_target=true
             if [[ -z "$target" || "$target" != genesis/*.py || "$target" == *".."* || ! -f "$target" ]]; then
               safe_target=false
