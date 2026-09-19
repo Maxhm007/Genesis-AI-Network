@@ -5,6 +5,8 @@ import json
 import re
 from pathlib import Path
 
+from genesis.issue_lifecycle import local_claim_block_reason
+
 
 CONFLICT_LABELS = {
     "genesis-repair-in-progress",
@@ -63,6 +65,10 @@ def target_from(issue: dict) -> str:
 
 
 def score(issue: dict) -> tuple[int, dict]:
+    lifecycle_block = local_claim_block_reason(issue)
+    if lifecycle_block:
+        return (-10_000, {"reason": f"lifecycle_{lifecycle_block}"})
+
     labels = _labels(issue)
     if labels & CONFLICT_LABELS or labels & UNSUITABLE_LABELS:
         return (-10_000, {"reason": "conflicting_or_unsuitable_label"})
