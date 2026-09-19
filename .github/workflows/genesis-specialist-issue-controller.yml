@@ -61,7 +61,7 @@ jobs:
           from pathlib import Path
 
           issues = json.loads(Path('/tmp/genesis-specialist-open.json').read_text())
-          target_re = re.compile(r'^- \*\*Target:\*\* `([^`]+)`', re.MULTILINE)
+          from genesis.issue_target import extract_issue_target
           task_type_re = re.compile(r'^- \*\*Task type:\*\* `([^`]+)`', re.MULTILINE)
           actionable_prefixes = ('[Genesis Task]', '[Genesis Repair]', '[Genesis Self Improvement]')
           excluded_labels = {
@@ -131,7 +131,7 @@ jobs:
           from pathlib import Path
 
           issues = json.loads(Path('/tmp/genesis-specialist-open.json').read_text())
-          target_re = re.compile(r'^- \*\*Target:\*\* `([^`]+)`', re.MULTILINE)
+          from genesis.issue_target import extract_issue_target
           active = {
               'genesis-claimed', 'genesis-working', 'genesis-verifying',
               'genesis-repair-in-progress', 'genesis-validating', 'genesis-priority-claim',
