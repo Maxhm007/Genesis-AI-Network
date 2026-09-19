@@ -230,8 +230,8 @@ def test_runner_working_memory_is_bounded_and_localizes_latest_failure(tmp_path:
                 "work_generation": generation,
             },
         )
-        child.last_error = f"failure-{generation}"
-        created.append(child)
+        failed = planner.queue.record_failure(child.task_id, f"failure-{generation}")
+        created.append(failed)
 
     memory = planner._working_memory("new_frontier_benchmark", created)
     assert memory["benchmark_id"] == "new_frontier_benchmark"
@@ -249,8 +249,10 @@ def test_next_runner_generation_carries_compact_working_memory(tmp_path: Path) -
     first = planner.advance(task)
     child = planner.queue.get(first["task_id"])
     assert child is not None
-    child.last_error = "adapter contract mismatch"
-    quarantine(planner.queue, child.task_id)
+    planner.queue.record_failure(child.task_id, "adapter contract mismatch")
+    failed_child = planner.queue.get(child.task_id)
+    assert failed_child is not None
+    planner.queue.transition(failed_child.task_id, "quarantined", module_id="genesis.coding")
 
     second = planner.advance(task)
     second_child = planner.queue.get(second["task_id"])
