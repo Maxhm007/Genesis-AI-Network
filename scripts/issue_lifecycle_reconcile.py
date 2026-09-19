@@ -6,7 +6,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from genesis.issue_lifecycle import lifecycle_decision
+from genesis.issue_lifecycle import family_id, lifecycle_decision
 
 
 ACTIVE_LABELS = (
@@ -163,7 +163,13 @@ def reconcile(repository: str, token: str, max_changes: int = 50) -> dict:
                 reason=decision.reason,
                 reference=decision.reference_issue,
             )
-            changes.append({"issue": number, "action": decision.action, "reason": decision.reason})
+            changes.append({
+                "issue": number,
+                "family_id": family_id(issue),
+                "action": decision.action,
+                "reason": decision.reason,
+                "reference_issue": decision.reference_issue,
+            })
             issue["state"] = "closed"
             issue.setdefault("labels", []).append({"name": "genesis-superseded"})
 
@@ -176,7 +182,12 @@ def reconcile(repository: str, token: str, max_changes: int = 50) -> dict:
         decision = lifecycle_decision(issue, by_number)
         if decision.action == "reopen":
             reopen_issue(repository, token, number)
-            changes.append({"issue": number, "action": "reopen", "reason": decision.reason})
+            changes.append({
+                "issue": number,
+                "family_id": family_id(issue),
+                "action": "reopen",
+                "reason": decision.reason,
+            })
             issue["state"] = "open"
 
     return {"status": "ok", "changes": changes, "change_count": len(changes)}
