@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from genesis.issue_target import extract_issue_target
+
 import hashlib
 import json
 import os
