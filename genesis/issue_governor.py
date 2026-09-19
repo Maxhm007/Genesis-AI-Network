@@ -9,6 +9,8 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import Iterable
 
+from .issue_lifecycle import is_closed, is_verified, root_issue_number
+
 
 PROBLEM_MARKER = "Genesis-Problem-Fingerprint:"
 OCCURRENCE_MARKER = "Genesis-Occurrence-Fingerprint:"
@@ -134,15 +136,35 @@ def equivalent_issue(
     problem_fp: str,
     occurrence_fp: str,
 ) -> tuple[str, dict | None]:
+    entries = list(issues)
+    by_number = {
+        int(issue.get("number") or 0): issue
+        for issue in entries
+        if int(issue.get("number") or 0) > 0
+    }
     closed_occurrence = None
-    for issue in issues:
+    for issue in entries:
         body = str(issue.get("body") or "")
         same_problem = extract_marker(body, PROBLEM_MARKER) == _norm(problem_fp)
         same_occurrence = extract_marker(body, OCCURRENCE_MARKER) == _norm(occurrence_fp)
+
         if same_problem and _issue_state(issue) == "open":
+            root_number = root_issue_number(issue)
+            if root_number:
+                root = by_number.get(root_number)
+                if root is not None:
+                    if not is_closed(root):
+                        return "reuse_open_root", root
+                    if not is_verified(root):
+                        return "reuse_closed_root", root
+                    # A stale successor of a verified root must not suppress a
+                    # legitimate fresh post-fix recurrence.
+                    continue
             return "reuse_open", issue
+
         if same_occurrence and _issue_state(issue) == "closed":
             closed_occurrence = issue
+
     if closed_occurrence is not None:
         return "reuse_closed_occurrence", closed_occurrence
     return "new", None
