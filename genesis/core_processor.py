@@ -6,6 +6,7 @@ from pathlib import Path
 
 from .gene_compute import GeneComputeFabric
 from .gene_lifecycle import GeneLifecycleManager, GeneNeed
+from .memory import GenesisMemory
 from .modules.task_queue import GenesisTask, PersistentTaskQueue
 from .resource import ResourceModule, ResourceSnapshot
 from .task_router import TaskRouterModule
@@ -38,6 +39,7 @@ class GenesisCoreProcessor:
         self.router = TaskRouterModule(self.root)
         self.resources = ResourceModule()
         self.gene_fabric = GeneComputeFabric(self.root)
+        self.memory = GenesisMemory(self.root)
         self.status_path = self.runtime / "core_processor.json"
 
     def _state_summary(self) -> dict:
@@ -123,8 +125,10 @@ class GenesisCoreProcessor:
             selected_task = self.queue.get(str(decision["task_id"]))
 
         worker = None
+        memory_context: list[dict] = []
         if selected_task is not None:
             worker = self.gene_fabric.select(selected_task.module_id, selected_task.objective)
+            memory_context = self.memory.recall(selected_task.objective, limit=4)
 
         result = {
             "processor": self.MODULE_ID,
@@ -152,6 +156,11 @@ class GenesisCoreProcessor:
             },
             "gene_topology": self.gene_fabric.topology(),
             "gene_lifecycle": lifecycle,
+            "memory": {
+                "policy": "validated-only recall; memory is evidence, not authority",
+                "recalled": memory_context,
+                "stats": self.memory.store.stats(),
+            },
             "system_state_before": before,
             "system_state_after": self._state_summary(),
             "principle": "Gene 0 coordinates; Gene workers provide model-backed intelligence; Security and validators retain independent authority.",
