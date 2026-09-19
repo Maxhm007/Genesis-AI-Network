@@ -342,8 +342,9 @@ jobs:
                   remove_label "$issue_number" genesis-blocked
                   remove_label "$issue_number" genesis-solver-exhausted
                   clear_reservation_labels "$issue_number"
+                  gh workflow run genesis-issue-closure-manager.yml --repo "$GITHUB_REPOSITORY" --ref main -f issue_number="$issue_number" >/dev/null 2>&1 || true
                   resolved=true
-                  echo "Verified recovered Action failure #${issue_number} via newer successful workflow run ${recovered_run}; Closure Manager owns final close/seal."
+                  echo "Verified recovered Action failure #${issue_number} via newer successful workflow run ${recovered_run}; Closure Manager dispatched for final close/seal."
                 fi
               fi
             fi
@@ -359,8 +360,9 @@ jobs:
               remove_label "$issue_number" genesis-blocked
               remove_label "$issue_number" genesis-solver-exhausted
               clear_reservation_labels "$issue_number"
+              gh workflow run genesis-issue-closure-manager.yml --repo "$GITHUB_REPOSITORY" --ref main -f issue_number="$issue_number" >/dev/null 2>&1 || true
               resolved=true
-                echo "Verified stale Action failure #${issue_number}; Closure Manager owns the final close/seal decision."
+                echo "Verified stale Action failure #${issue_number}; Closure Manager dispatched for final close/seal."
               fi
             fi
           fi
@@ -377,8 +379,9 @@ jobs:
                 remove_label "$issue_number" genesis-blocked
                 remove_label "$issue_number" genesis-solver-exhausted
                 clear_reservation_labels "$issue_number"
+                gh workflow run genesis-issue-closure-manager.yml --repo "$GITHUB_REPOSITORY" --ref main -f issue_number="$issue_number" >/dev/null 2>&1 || true
                 resolved=true
-                echo "Verified satisfied syntax issue #${issue_number}; Closure Manager owns the final close/seal decision."
+                echo "Verified satisfied syntax issue #${issue_number}; Closure Manager dispatched for final close/seal."
               fi
             fi
           fi
