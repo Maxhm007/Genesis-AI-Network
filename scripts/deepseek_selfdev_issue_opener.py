@@ -18,8 +18,8 @@ AUTONOMOUS_LABEL = "genesis-autonomous"
 OPEN_BACKLOG_CAP = max(1, int(os.environ.get("GENESIS_DEEPSEEK_DISCOVERY_OPEN_CAP", "3")))
 FILES_PER_RUN = max(2, min(6, int(os.environ.get("GENESIS_DEEPSEEK_DISCOVERY_FILES", "4"))))
 MAX_FILE_CHARS = 3500
-PROVIDER_MAX_NEW_TOKENS = max(128, min(640, int(os.environ.get("GENESIS_PROVIDER_MAX_NEW_TOKENS", "320"))))
-PROVIDER_TIMEOUT_SECONDS = max(120, min(900, int(os.environ.get("GENESIS_DEEPSEEK_DISCOVERY_TIMEOUT", "360"))))
+PROVIDER_MAX_NEW_TOKENS = max(128, min(384, int(os.environ.get("GENESIS_PROVIDER_MAX_NEW_TOKENS", "192"))))
+PROVIDER_TIMEOUT_SECONDS = max(60, min(300, int(os.environ.get("GENESIS_DEEPSEEK_DISCOVERY_TIMEOUT", "150"))))
 
 PROTECTED_TARGETS = {
     "genesis/autonomy_guard.py",
@@ -262,7 +262,15 @@ def run(root: Path = ROOT, *, reasoner=_provider_reason) -> dict:
         result.update(status="no_targets")
         return result
 
-    response = reasoner(discovery_prompt(root, targets))
+    try:
+        response = reasoner(discovery_prompt(root, targets))
+    except (TimeoutError, urllib.error.URLError, RuntimeError) as exc:
+        result.update(
+            status="provider_unavailable",
+            reason=f"{type(exc).__name__}: {exc}",
+            retryable=True,
+        )
+        return result
     raw = extract_json_object(response)
     proposal = normalize_proposal(raw, root, set(targets))
     if proposal is None:
