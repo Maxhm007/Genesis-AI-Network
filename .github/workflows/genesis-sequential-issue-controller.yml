@@ -321,7 +321,10 @@ jobs:
                   continue
               if 'genesis-solver-exhausted' in labels:
                   continue
-              if labels & {'genesis-superseded', 'genesis-verified'}:
+              if labels & {
+                  'genesis-superseded', 'genesis-verified',
+                  'genesis-waiting-capability', 'genesis-needs-human', 'genesis-blocked',
+              }:
                   continue
 
               is_action_failure = lower_title.startswith('genesis action failure:') or lower_title.startswith('[genesis action failure]')
