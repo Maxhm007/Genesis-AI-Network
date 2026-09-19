@@ -10,6 +10,9 @@ on:
       - .github/workflows/genesis-agentic-terminal-reconciler.yml
       - genesis/issue_lifecycle.py
       - tests/test_core_processor.py
+      - tests/test_unsolved_issue_reactivation.py
+      - tests/test_autonomy_heartbeat.py
+      - tests/test_benchmark_execution.py
       - tests/test_gene_lifecycle.py
       - genesis/core_processor.py
       - genesis/gene_lifecycle.py
