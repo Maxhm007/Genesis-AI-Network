@@ -10,6 +10,7 @@ from pathlib import Path
 
 import scripts.github_issue_autorepair as base
 from genesis.selfdev import ALLOWED_SCRIPT_PATHS, normalize_selfdev_path
+from genesis.issue_target import extract_issue_target
 
 
 STRATEGY_GUIDANCE = {
@@ -199,8 +200,8 @@ def _benchmark_runner_satisfaction(issue: dict, root: Path) -> dict | None:
     task_type = _TASK_TYPE_RE.search(body)
     if task_type is None or task_type.group(1).strip() != "benchmark_runner_integration":
         return None
-    target = _TARGET_RE.search(body)
-    if target is None or target.group(1).strip() != "genesis/benchmark_execution.py":
+    target = extract_issue_target(body)
+    if target != "genesis/benchmark_execution.py":
         return None
     benchmark_match = _BENCHMARK_ID_RE.search(body)
     if benchmark_match is None:
