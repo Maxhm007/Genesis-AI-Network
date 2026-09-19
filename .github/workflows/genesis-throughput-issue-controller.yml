@@ -72,8 +72,9 @@ jobs:
 
           issue_number=$(python - <<'PY'
           import json
-          import re
           from pathlib import Path
+
+          from genesis.issue_target import extract_issue_target
 
           rows = json.loads(Path('/tmp/open.json').read_text())
           protected = {
@@ -106,8 +107,7 @@ jobs:
                   continue
               if labels & busy or labels & excluded:
                   continue
-              m = re.search(r'^- \*\*Target:\*\* `([^`]+)`', body, re.MULTILINE)
-              target = m.group(1).strip() if m else ''
+              target = extract_issue_target(body)
               if not target.startswith('genesis/') or not target.endswith('.py'):
                   continue
               if '..' in target or target in protected or not Path(target).is_file():
