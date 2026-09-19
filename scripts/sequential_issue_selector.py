@@ -36,6 +36,7 @@ EXCLUDED_LABELS = {
     "genesis-needs-human",
     "genesis-blocked",
     "genesis-solver-exhausted",
+    "genesis-architecture-route",
 }
 
 CONCRETE_REPAIR_LABELS = {
@@ -80,6 +81,41 @@ def _severity(labels: set[str]) -> str:
     if lowered & {"low", "severity-low", "priority-low"}:
         return "low"
     return "medium"
+
+
+def _architecture_impact(issue: dict) -> tuple[float, dict[str, float]]:
+    text = f"{issue.get('title') or ''}\n{issue.get('body') or ''}".lower()
+    signals = {
+        "system_wide": (
+            "every active workflow",
+            "regardless of which active workflow",
+            "system-wide",
+            "control-plane",
+            "control plane",
+        ),
+        "autonomy_loop": (
+            "autonomous repair loop",
+            "first-class autonomous",
+            "workflow-governance",
+            "workflow governance",
+            "retry -> repair -> verification",
+            "retry → repair → verification",
+        ),
+        "cross_cutting": (
+            "without maintaining",
+            "hard-coded",
+            "hard coded",
+            "durable memory",
+            "deduplicate failures",
+            "newly added workflow",
+        ),
+    }
+    breakdown: dict[str, float] = {}
+    weights = {"system_wide": 9.0, "autonomy_loop": 7.0, "cross_cutting": 4.0}
+    for name, phrases in signals.items():
+        if any(phrase in text for phrase in phrases):
+            breakdown[name] = weights[name]
+    return min(20.0, sum(breakdown.values())), breakdown
 
 
 def _retry_depth(issue: dict) -> int:
@@ -171,7 +207,8 @@ def candidate(issue: dict, *, now: datetime | None = None) -> dict | None:
     )
 
     lane_bonus = {"urgent": 25.0, "architecture": 18.0, "repair": 10.0, "general": 0.0}[kind]
-    score = min(125.0, value.score + lane_bonus)
+    architecture_impact, architecture_breakdown = _architecture_impact(issue) if kind == "architecture" else (0.0, {})
+    score = min(125.0, value.score + lane_bonus + architecture_impact)
 
     return {
         "number": number,
@@ -180,7 +217,8 @@ def candidate(issue: dict, *, now: datetime | None = None) -> dict | None:
         "score": round(score, 3),
         "base_score": value.score,
         "lane_bonus": lane_bonus,
-        "breakdown": value.breakdown,
+        "breakdown": {**value.breakdown, "architecture_impact": architecture_impact},
+        "architecture_breakdown": architecture_breakdown,
         "created_at": str(issue.get("created_at") or ""),
     }
 
