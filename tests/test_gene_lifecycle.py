@@ -238,3 +238,37 @@ def test_lifecycle_decisions_are_recorded(tmp_path: Path):
     assert data["lifecycle_decisions"]
     assert data["lifecycle_decisions"][-1]["authority"] == "Gene 0"
     assert data["lifecycle_decisions"][-1]["reason"] == "insufficient_evidence"
+
+
+def test_support_gene_recommendation_cannot_mutate_membership(tmp_path: Path):
+    path = _registry(tmp_path)
+    manager = GeneLifecycleManager(path)
+    before = json.loads(path.read_text())["genes"]
+
+    result = manager.record_recommendation(
+        "Gene 002",
+        _need(memory_pressure=True, backlog_pressure=True),
+        "create a memory shard specialist",
+    )
+
+    after_data = json.loads(path.read_text())
+    assert result["action"] == "recommendation_recorded"
+    assert result["registry_mutated"] is False
+    assert after_data["genes"] == before
+    assert after_data["lifecycle_decisions"][-1]["recommender"] == "Gene 002"
+
+
+def test_monitor_gene_degrades_suspends_and_recovers(tmp_path: Path):
+    path = _registry(tmp_path)
+    manager = GeneLifecycleManager(path)
+    manager.create_candidate(_need(memory_pressure=True, backlog_pressure=True))
+    manager.activate_if_valid(4)
+
+    degraded = manager.monitor_gene(4, health_score=0.2)
+    assert degraded["gene"]["status"] == "degraded"
+
+    recovered = manager.monitor_gene(4, health_score=0.8)
+    assert recovered["gene"]["status"] == "active"
+
+    suspended = manager.monitor_gene(4, health_score=0.8, resource_ok=False)
+    assert suspended["gene"]["status"] == "suspended"
