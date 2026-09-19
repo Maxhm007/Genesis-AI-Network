@@ -159,8 +159,7 @@ jobs:
               if labels & (active | terminal):
                   continue
               body = str(issue.get('body') or '')
-              match = target_re.search(body)
-              target = match.group(1).strip().replace('\\', '/') if match else ''
+              target = extract_issue_target(body).replace('\\\\', '/')
               if not target.startswith('scripts/') or not target.endswith('.py'):
                   continue
               if '..' in Path(target).parts or target in protected_scripts:
