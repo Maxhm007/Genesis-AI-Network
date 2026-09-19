@@ -19,6 +19,7 @@ RECOVERY_LABEL = "genesis-recovery-solver"
 RECOVERY_ESCALATED_LABEL = "genesis-agentic-escalated"
 RECOVERY_MARKER = "<!-- genesis-recovery-solver-cycle:"
 RECOVERY_ESCALATED_MARKER = "<!-- genesis-recovery-same-issue-escalation -->"
+INFRA_QUARANTINE_MARKER = "<!-- genesis-agentic-infrastructure-quarantine -->"
 # Every bounded recovery generation must start by checking current main. This
 # prevents Genesis from blindly repairing stale Issues whose objective is already
 # satisfied and makes the remaining strategies operate on fresh evidence.
@@ -189,6 +190,22 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             continue
 
         comments = issue_comments(repository, token, number)
+        if any(INFRA_QUARANTINE_MARKER in str(row.get("body") or "") for row in comments):
+            # Infrastructure-quarantined Issues must not be reclaimed by the
+            # Recovery Solver. Otherwise this lane simply re-adds Agentic labels
+            # and recreates the same pre-evidence failure loop.
+            for stale_label in (
+                RECOVERY_LABEL,
+                "genesis-repair-in-progress",
+                "genesis-validating",
+                "genesis-working",
+                "genesis-verifying",
+                AGENTIC_LABEL,
+                RECOVERY_ESCALATED_LABEL,
+            ):
+                _remove_label(repository, token, number, stale_label)
+            continue
+
         cycles = recovery_cycle_count(comments)
         if cycles >= MAX_RECOVERY_CYCLES:
             outcome = finalize_exhausted_issue(repository, token, issue, comments)
