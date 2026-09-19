@@ -667,12 +667,15 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         )
         for label in ("genesis-deferred", "genesis-blocked", EXHAUSTED_LABEL, NEEDS_HUMAN_LABEL):
             remove_label(repository, token, number, label)
+        claim_labels = ["genesis-autonomous", AGENTIC_LABEL]
+        if provider != "deepseek":
+            claim_labels.insert(0, "genesis-repair-in-progress")
         request(
             repository,
             token,
             "POST",
             f"/issues/{number}/labels",
-            {"labels": ["genesis-repair-in-progress", "genesis-autonomous", AGENTIC_LABEL]},
+            {"labels": claim_labels},
         )
 
         if not has_state_marker(comments, state_token):
