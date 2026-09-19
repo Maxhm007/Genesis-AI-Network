@@ -14,19 +14,19 @@ from scripts.github_issue_discovery import (
     validate_discovery,
 )
 
-
 ROOT = Path(__file__).resolve().parents[1]
-CURSOR_PATH = ROOT / "runtime" / "github_issue_discovery_cursor.json"
 BATCH_SIZE = max(1, min(20, int(os.environ.get("GENESIS_DISCOVERY_BATCH_SIZE", "5"))))
+
 
 def _load_cursor(path: Path, candidate_count: int) -> int:
     if candidate_count <= 0 or not path.is_file():
         return 0
     try:
-        data = json.loads(path.read_text(encoding="utf-8"))
-        return int(data.get("next_index", 0)) % candidate_count
+        payload = json.loads(path.read_text(encoding="utf-8"))
+        return int(payload.get("next_index", 0)) % candidate_count
     except (OSError, ValueError, TypeError, json.JSONDecodeError):
         return 0
+
 
 def _save_cursor(path: Path, next_index: int, candidate_count: int) -> None:
     path.parent.mkdir(parents=True, exist_ok=True)
@@ -36,6 +36,7 @@ def _save_cursor(path: Path, next_index: int, candidate_count: int) -> None:
     }
     path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
 
+
 def _rotating_batch(candidates: list, start: int, limit: int) -> list:
     if not candidates:
         return []
@@ -44,18 +45,13 @@ def _rotating_batch(candidates: list, start: int, limit: int) -> list:
 
 
 def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> dict:
-    """Publish at most one fresh grounded issue without candidate starvation.
-
-    Discovery keeps moving through eligible ranked candidates until it either
-    opens one fresh Issue or exhausts the complete eligible candidate set for
-    the current repository snapshot. Duplicate findings, provider timeouts, and
-    clean batches are excluded only for the remainder of this invocation.
-    Strict validation and all-state deduplication remain unchanged.
-    """
+    """Review one bounded rotating candidate batch and publish at most one Issue."""
 
     root = Path(root).resolve()
     runtime = root / "runtime" / "github_issue_discovery"
     runtime.mkdir(parents=True, exist_ok=True)
+    cursor_path = root / "runtime" / "github_issue_discovery_cursor.json"
+
     queue = PersistentTaskQueue(runtime / "tasks.sqlite3")
     provider = provider or CodingModule(root)._provider()
     engine = GenesisIssueDiscoveryEngine(root)
@@ -63,18 +59,33 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
 
     original_rank_candidates = engine.rank_candidates
     eligible_candidates = original_rank_candidates(include_protected=False)
-    cursor_path = root / "runtime" / "github_issue_discovery_cursor.json"
     start_index = _load_cursor(cursor_path, len(eligible_candidates))
     batch_candidates = _rotating_batch(eligible_candidates, start_index, BATCH_SIZE)
-    eligible_targets = {candidate.path for candidate in batch_candidates}
+    batch_targets = {candidate.path for candidate in batch_candidates}
     next_index = start_index + len(batch_candidates)
+
     excluded_targets: set[str] = set()
     duplicate_publications: list[dict] = []
     timeout_skips: list[dict] = []
     clean_batch_skips: list[str] = []
     last_discovery: dict | None = None
 
-    while eligible_targets - excluded_targets:
+    def finish(result: dict) -> dict:
+        _save_cursor(cursor_path, next_index, len(eligible_candidates))
+        EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
+        EVIDENCE_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+        return result
+
+    if not batch_candidates:
+        return finish({
+            "status": "no_candidates",
+            "eligible_candidate_count": len(eligible_candidates),
+            "batch_candidate_count": 0,
+            "batch_start_index": start_index,
+            "batch_targets": [],
+        })
+
+    while batch_targets - excluded_targets:
         def rank_without_blockers(*, include_protected: bool = False):
             if include_protected:
                 return []
@@ -110,7 +121,7 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
                 if not isinstance(scan, dict):
                     continue
                 target = str(scan.get("target") or "").strip()
-                if target and target in eligible_targets and target not in excluded_targets:
+                if target and target in batch_targets and target not in excluded_targets:
                     scanned_targets.append(target)
 
                 if scan.get("status") != "provider_error":
@@ -118,7 +129,7 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
                 error = str(scan.get("error") or "").lower()
                 if "timeout" not in error and "timed out" not in error:
                     continue
-                if target and target in eligible_targets and target not in excluded_targets:
+                if target and target in batch_targets and target not in excluded_targets:
                     timed_out_targets.append(target)
                     timeout_skips.append({
                         "target": target,
@@ -129,27 +140,15 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
                 excluded_targets.update(timed_out_targets)
                 continue
 
-            # A clean batch is not evidence that the repository has no work.
-            # Exclude every target inspected in this invocation and continue to
-            # the next ranked candidates until the complete eligible set is done.
             if discovery_status == "no_issue_found" and scanned_targets:
-                fresh_scanned_targets = [
-                    target for target in scanned_targets if target not in excluded_targets
-                ]
-                if fresh_scanned_targets:
-                    excluded_targets.update(fresh_scanned_targets)
-                    clean_batch_skips.extend(fresh_scanned_targets)
+                fresh = [target for target in scanned_targets if target not in excluded_targets]
+                if fresh:
+                    excluded_targets.update(fresh)
+                    clean_batch_skips.extend(fresh)
                     continue
 
-            # No progress means there is no safe candidate left to advance.
             result["status"] = discovery_status or "no_issue_found"
-            _save_cursor(cursor_path, next_index, len(eligible_candidates))
-            _save_cursor(cursor_path, next_index, len(eligible_candidates))
-            _save_cursor(cursor_path, next_index, len(eligible_candidates))
-            _save_cursor(cursor_path, next_index, len(eligible_candidates))
-    EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            EVIDENCE_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            return result
+            return finish(result)
 
         validated = validate_discovery(discovery_result, root)
         if not repository:
@@ -161,15 +160,11 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
 
         if publication["status"] == "issue_opened":
             result["status"] = "issue_opened"
-            EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            EVIDENCE_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            return result
+            return finish(result)
 
         if publication["status"] != "duplicate_existing_issue":
             result["status"] = str(publication.get("status") or "publication_stopped")
-            EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
-            EVIDENCE_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-            return result
+            return finish(result)
 
         duplicate_publications.append(
             {
@@ -180,10 +175,10 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
         )
         excluded_targets.add(validated["target"])
 
-    result = {
-        "status": "candidates_exhausted",
+    return finish({
+        "status": "batch_exhausted",
         "discovery": last_discovery or {"status": "no_issue_found"},
-        "publication": {"status": "no_fresh_issue_after_full_scan"},
+        "publication": {"status": "no_fresh_issue_in_batch"},
         "eligible_candidate_count": len(eligible_candidates),
         "batch_candidate_count": len(batch_candidates),
         "batch_start_index": start_index,
@@ -192,10 +187,7 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
         "skipped_duplicate_publications": duplicate_publications,
         "skipped_provider_timeouts": timeout_skips,
         "skipped_clean_targets": clean_batch_skips,
-    }
-    EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
-    EVIDENCE_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
-    return result
+    })
 
 
 def main() -> None:
