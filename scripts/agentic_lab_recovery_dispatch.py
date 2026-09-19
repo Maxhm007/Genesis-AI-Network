@@ -9,6 +9,17 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from genesis.anti_stuck import (
+    Attempt,
+    anti_stuck_decision,
+    attempt_history,
+    attempt_marker,
+    has_state_marker,
+    material_state_token,
+    materially_equivalent_attempt,
+    next_lane_strategy,
+    state_marker,
+)
 from genesis.issue_lifecycle import local_claim_block_reason
 
 
@@ -175,6 +186,32 @@ def ensure_label(repository: str, token: str, name: str, color: str, description
 def issue_comments(repository: str, token: str, number: int) -> list[dict]:
     rows = request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
     return [row for row in rows if isinstance(row, dict)]
+
+
+def ensure_anti_stuck_epoch(
+    repository: str,
+    token: str,
+    issue: dict,
+    comments: list[dict],
+    target: str,
+) -> tuple[str, list[dict]]:
+    state_token = material_state_token(issue, target, comments, root=ROOT)
+    if not has_state_marker(comments, state_token):
+        request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{int(issue.get('number') or 0)}/comments",
+            {
+                "body": (
+                    f"{state_marker(state_token)}\n"
+                    "Genesis Anti-Stuck Controller started a new attempt epoch because "
+                    "repository state, issue evidence, or capability-release state materially changed."
+                )
+            },
+        )
+        comments = issue_comments(repository, token, int(issue.get("number") or 0))
+    return state_token, comments
 
 
 def _marker_number(text: str, prefix: str) -> int | None:
@@ -547,19 +584,75 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         if not lane:
             continue
 
+        state_token, comments = ensure_anti_stuck_epoch(
+            repository, token, issue, comments, target
+        )
+        history = attempt_history(comments, state_token, target)
+        policy = anti_stuck_decision(history)
         status = latest_result_status(comments)
-        strategy = next_strategy(comments)
-        if capability_gap_status(status) or not strategy:
+
+        if capability_gap_status(status) or policy.action == "capability":
             result = pause_for_capability(
                 repository,
                 token,
                 issue,
                 comments,
                 target,
-                status or "strategy_set_exhausted",
+                status or policy.reason,
             )
             print(json.dumps(result, sort_keys=True))
             return result
+
+        provider = "agentic-default"
+        gene = "Gene 0"
+        workflow = "genesis-agentic-strategy-worker.yml"
+
+        if policy.action == "switch_lane" and policy.provider == "qwen3":
+            provider = "qwen3"
+            strategy = "qwen3_fallback"
+        elif policy.action == "switch_lane" and policy.provider == "deepseek":
+            provider = "deepseek"
+            gene = "Gene 003"
+            workflow = "genesis-deepseek-agentic-solver.yml"
+            strategy = next_lane_strategy(
+                history,
+                provider=provider,
+                gene=gene,
+                target=target,
+                strategies=("evidence_first", "alternative_implementation", "diagnostic_reframe"),
+            ) or "evidence_first"
+        else:
+            strategy = next_lane_strategy(
+                history,
+                provider=provider,
+                gene=gene,
+                target=target,
+                strategies=STRATEGIES,
+            )
+
+        if not strategy:
+            result = pause_for_capability(
+                repository,
+                token,
+                issue,
+                comments,
+                target,
+                "strategy_set_exhausted",
+            )
+            print(json.dumps(result, sort_keys=True))
+            return result
+
+        candidate = Attempt(
+            strategy=strategy,
+            provider=provider,
+            gene=gene,
+            target=target,
+            blocker=status,
+        )
+        if materially_equivalent_attempt(history, candidate):
+            # Reject duplicate work before it consumes a repair slot and let the
+            # loop consider another eligible Issue.
+            continue
 
         ensure_label(
             repository,
@@ -586,21 +679,32 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             f"/issues/{number}/comments",
             {
                 "body": (
+                    f"{attempt_marker(candidate)}\n"
                     f"{strategy_marker}\n"
-                    f"Agentic Lab is trying a materially different recovery method: `{strategy}`. "
-                    "Prior failure evidence remains attached to this same authoritative Issue. The Issue stays open unless a verified repair is promoted. "
-                    "All existing tests, Security, protected-file, signing, secret, validation, exact-promotion, and owner-control boundaries remain mandatory."
+                    f"Genesis Anti-Stuck Controller selected provider `{provider}`, supporting Gene `{gene}`, "
+                    f"and materially different strategy `{strategy}` for state epoch `{state_token}`. "
+                    "Prior failure evidence remains attached to this same authoritative Issue. "
+                    "Validation, protected-file, signing, secret, exact-promotion, and owner-control boundaries remain mandatory."
                 )
             },
         )
+
+        dispatch_path = (
+            "/actions/workflows/genesis-deepseek-agentic-solver.yml/dispatches"
+            if workflow == "genesis-deepseek-agentic-solver.yml"
+            else "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches"
+        )
+        dispatch_inputs = {"issue_number": str(number)}
+        if workflow == "genesis-agentic-strategy-worker.yml":
+            dispatch_inputs["strategy"] = strategy
 
         try:
             request(
                 repository,
                 token,
                 "POST",
-                "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches",
-                {"ref": "main", "inputs": {"issue_number": str(number), "strategy": strategy}},
+                dispatch_path,
+                {"ref": "main", "inputs": dispatch_inputs},
             )
         except Exception:
             remove_label(repository, token, number, "genesis-repair-in-progress")
@@ -614,7 +718,10 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             "target": target,
             "lane": lane,
             "strategy": strategy,
-            "workflow": "genesis-agentic-strategy-worker.yml",
+            "provider": provider,
+            "gene": gene,
+            "state_token": state_token,
+            "workflow": workflow,
         }
         print(json.dumps(result, sort_keys=True))
         return result
