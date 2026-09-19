@@ -24,6 +24,16 @@ on:
       - genesis/learned_capabilities.py
       - tests/test_persistent_memory_capability.py
       - genesis/memory.py
+      - tests/test_durable_memory_workflows.py
+      - tests/test_github_memory_sync.py
+      - tests/test_coding_module.py
+      - tests/test_memory.py
+      - .github/workflows/genesis-specialist-repair-worker-v2.yml
+      - .github/workflows/genesis-agentic-strategy-worker.yml
+      - .github/workflows/genesis-bounded-repair-worker.yml
+      - scripts/record_verified_repair_memory.py
+      - scripts/github_memory_sync.py
+      - genesis/coding.py
       - tests/test_core_processor.py
       - tests/test_unsolved_issue_reactivation.py
       - tests/test_autonomy_heartbeat.py
