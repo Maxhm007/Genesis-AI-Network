@@ -33,6 +33,7 @@ CONFLICT_LABELS = {
 UNSUITABLE_LABELS = {
     "genesis-needs-human",
     "genesis-waiting-capability",
+    "genesis-blocked",
 }
 
 PROTECTED_TARGETS = {
