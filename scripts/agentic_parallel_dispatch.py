@@ -19,6 +19,9 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
     for issue in policy._all_open_issues_fifo(repository, token):
         if not policy._actionable(issue):
             continue
+        number = int(issue.get("number") or 0)
+        if policy._infra_quarantined(repository, token, number):
+            continue
         target = agentic.explicit_target(str(issue.get("body") or ""))
         if not agentic.safe_lane(target):
             continue
