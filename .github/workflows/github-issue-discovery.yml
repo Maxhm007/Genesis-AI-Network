@@ -36,7 +36,8 @@ env:
   GENESIS_PROVIDER_URL: http://127.0.0.1:8767
   GENESIS_PROVIDER_NAME: qwen3-1.7b-github-issue-discovery
   GENESIS_PROVIDER_TIMEOUT_SECONDS: '90'
-  GENESIS_PROVIDER_MAX_NEW_TOKENS: '128'\n  GENESIS_DISCOVERY_BATCH_SIZE: '5'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '128'
+  GENESIS_DISCOVERY_BATCH_SIZE: '5'
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
   GH_TOKEN: ${{ github.token }}
@@ -189,7 +190,8 @@ jobs:
           path: |
             runtime/github_issue_discovery.json
             runtime/deferred_issue_candidates.json
-            runtime/deferred_issue_release.json\n            runtime/github_issue_discovery_cursor.json
+            runtime/deferred_issue_release.json
+            runtime/github_issue_discovery_cursor.json
             runtime/discovery/last_result.json
             runtime/discovery/history.jsonl
             /tmp/genesis-github-issue-discovery.log
