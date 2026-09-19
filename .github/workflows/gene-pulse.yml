@@ -20,6 +20,7 @@ on:
 
 permissions:
   contents: read
+  issues: read
 
 concurrency:
   group: gene-pulse-${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
@@ -54,6 +55,11 @@ jobs:
           restore-keys: |
             gene-runtime-${{ env.GENE_ID }}-
 
+      - name: Hydrate validated Genesis memory
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/github_memory_sync.py --repository "$GITHUB_REPOSITORY" --max-issues 100 || echo "Verified memory sync unavailable; pulse continues with local cached memory."
+
       - name: Cache DeepSeek model
         if: env.GENE_ID == 'gene-node-1'
         uses: actions/cache@v4
@@ -87,6 +93,10 @@ jobs:
 
       - name: Execute one pulse
         run: python scripts/gene_pulse.py --gene "$GENE_ID" --output runtime/pulse_result.json
+
+      - name: Synchronize validated learning into Genesis memory
+        if: always()
+        run: python scripts/memory_sync.py || echo "Validated learning memory sync unavailable; pulse evidence remains authoritative."
 
       - name: Save Gene persistent pulse state
         if: always()
