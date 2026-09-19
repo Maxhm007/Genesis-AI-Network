@@ -55,6 +55,7 @@ class GenesisIssueDiscoveryEngine:
         self.runtime.mkdir(parents=True, exist_ok=True)
         self.last_result_path = self.runtime / "last_result.json"
         self.history_path = self.runtime / "history.jsonl"
+        self.memory = GenesisMemory(self.root)
 
     def _git(self, *args: str) -> subprocess.CompletedProcess[str]:
         return subprocess.run(["git", *args], cwd=self.root, text=True, capture_output=True, check=False)
