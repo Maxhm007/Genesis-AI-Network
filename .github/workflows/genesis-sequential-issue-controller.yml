@@ -8,6 +8,11 @@ on:
     branches: [main]
     paths:
       - .github/workflows/genesis-sequential-issue-controller.yml
+      - scripts/sequential_issue_selector.py
+      - scripts/action_failure_recovery.py
+      - genesis/issue_governor.py
+      - tests/test_sequential_issue_selector.py
+      - tests/test_action_failure_recovery.py
 
 permissions:
   contents: read
