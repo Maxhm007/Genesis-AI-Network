@@ -16,6 +16,31 @@ from scripts.github_issue_discovery import (
 
 
 ROOT = Path(__file__).resolve().parents[1]
+CURSOR_PATH = ROOT / "runtime" / "github_issue_discovery_cursor.json"
+BATCH_SIZE = max(1, min(20, int(os.environ.get("GENESIS_DISCOVERY_BATCH_SIZE", "5"))))
+
+def _load_cursor(path: Path, candidate_count: int) -> int:
+    if candidate_count <= 0 or not path.is_file():
+        return 0
+    try:
+        data = json.loads(path.read_text(encoding="utf-8"))
+        return int(data.get("next_index", 0)) % candidate_count
+    except (OSError, ValueError, TypeError, json.JSONDecodeError):
+        return 0
+
+def _save_cursor(path: Path, next_index: int, candidate_count: int) -> None:
+    path.parent.mkdir(parents=True, exist_ok=True)
+    payload = {
+        "next_index": 0 if candidate_count <= 0 else int(next_index) % candidate_count,
+        "candidate_count": int(candidate_count),
+    }
+    path.write_text(json.dumps(payload, indent=2, sort_keys=True) + "\n", encoding="utf-8")
+
+def _rotating_batch(candidates: list, start: int, limit: int) -> list:
+    if not candidates:
+        return []
+    limit = min(max(1, limit), len(candidates))
+    return [candidates[(start + offset) % len(candidates)] for offset in range(limit)]
 
 
 def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> dict:
@@ -38,7 +63,11 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
 
     original_rank_candidates = engine.rank_candidates
     eligible_candidates = original_rank_candidates(include_protected=False)
-    eligible_targets = {candidate.path for candidate in eligible_candidates}
+    cursor_path = root / "runtime" / "github_issue_discovery_cursor.json"
+    start_index = _load_cursor(cursor_path, len(eligible_candidates))
+    batch_candidates = _rotating_batch(eligible_candidates, start_index, BATCH_SIZE)
+    eligible_targets = {candidate.path for candidate in batch_candidates}
+    next_index = start_index + len(batch_candidates)
     excluded_targets: set[str] = set()
     duplicate_publications: list[dict] = []
     timeout_skips: list[dict] = []
@@ -47,9 +76,11 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
 
     while eligible_targets - excluded_targets:
         def rank_without_blockers(*, include_protected: bool = False):
+            if include_protected:
+                return []
             return [
                 candidate
-                for candidate in original_rank_candidates(include_protected=include_protected)
+                for candidate in batch_candidates
                 if candidate.path not in excluded_targets
             ]
 
@@ -61,7 +92,10 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
             "status": "discovery_complete",
             "discovery": discovery_result,
             "publication": {"status": "not_publishable"},
-            "eligible_candidate_count": len(eligible_targets),
+            "eligible_candidate_count": len(eligible_candidates),
+            "batch_candidate_count": len(batch_candidates),
+            "batch_start_index": start_index,
+            "batch_targets": [candidate.path for candidate in batch_candidates],
             "scanned_or_excluded_count": len(excluded_targets),
             "skipped_duplicate_publications": duplicate_publications,
             "skipped_provider_timeouts": timeout_skips,
@@ -109,7 +143,11 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
 
             # No progress means there is no safe candidate left to advance.
             result["status"] = discovery_status or "no_issue_found"
-            EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
+            _save_cursor(cursor_path, next_index, len(eligible_candidates))
+            _save_cursor(cursor_path, next_index, len(eligible_candidates))
+            _save_cursor(cursor_path, next_index, len(eligible_candidates))
+            _save_cursor(cursor_path, next_index, len(eligible_candidates))
+    EVIDENCE_PATH.parent.mkdir(parents=True, exist_ok=True)
             EVIDENCE_PATH.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
             return result
 
@@ -146,7 +184,10 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
         "status": "candidates_exhausted",
         "discovery": last_discovery or {"status": "no_issue_found"},
         "publication": {"status": "no_fresh_issue_after_full_scan"},
-        "eligible_candidate_count": len(eligible_targets),
+        "eligible_candidate_count": len(eligible_candidates),
+        "batch_candidate_count": len(batch_candidates),
+        "batch_start_index": start_index,
+        "batch_targets": [candidate.path for candidate in batch_candidates],
         "scanned_or_excluded_count": len(excluded_targets),
         "skipped_duplicate_publications": duplicate_publications,
         "skipped_provider_timeouts": timeout_skips,
