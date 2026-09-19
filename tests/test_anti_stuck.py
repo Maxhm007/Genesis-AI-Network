@@ -142,3 +142,36 @@ def test_capability_release_changes_material_state(tmp_path: Path):
 def test_waiting_capability_releases_worker_capacity():
     assert should_release_worker(["genesis-task", "genesis-waiting-capability"]) is True
     assert should_release_worker(["genesis-task", "genesis-autonomous"]) is False
+
+
+
+def test_scheduled_selectors_release_capability_waiting_work():
+    root = Path(__file__).resolve().parents[1]
+    sequential = (root / ".github/workflows/genesis-sequential-issue-controller.yml").read_text(encoding="utf-8")
+    specialist = (root / ".github/workflows/genesis-specialist-issue-controller.yml").read_text(encoding="utf-8")
+    throughput = (root / ".github/workflows/genesis-throughput-issue-controller.yml").read_text(encoding="utf-8")
+
+    for text in (sequential, specialist, throughput):
+        assert "genesis-waiting-capability" in text
+        assert "genesis-needs-human" in text
+        assert "genesis-blocked" in text
+
+
+def test_deepseek_workflow_uses_state_scoped_anti_stuck_planner():
+    root = Path(__file__).resolve().parents[1]
+    workflow = (root / ".github/workflows/genesis-deepseek-agentic-solver.yml").read_text(encoding="utf-8")
+
+    assert "--comments-json /tmp/deepseek-comments.json" in workflow
+    assert "deepseek_strategy_epoch_exhausted" not in workflow  # reason comes from planner, not hard-coded retry cycling
+    assert "attempt_marker=$(jq -r '.attempt_marker'" in workflow
+    assert "case $(((attempt - 1) % 3))" not in workflow
+
+
+def test_agentic_dispatch_uses_cross_provider_anti_stuck_policy():
+    root = Path(__file__).resolve().parents[1]
+    source = (root / "scripts/agentic_lab_recovery_dispatch.py").read_text(encoding="utf-8")
+
+    assert "anti_stuck_decision(history)" in source
+    assert 'provider == "deepseek"' in source
+    assert "genesis-deepseek-agentic-solver.yml" in source
+    assert "materially_equivalent_attempt(history, candidate)" in source
