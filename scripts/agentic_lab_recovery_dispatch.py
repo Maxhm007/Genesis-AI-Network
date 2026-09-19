@@ -9,6 +9,8 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
+from genesis.issue_lifecycle import local_claim_block_reason
+
 
 ROOT = Path(__file__).resolve().parents[1]
 AGENTIC_LABEL = "agentic-lab"
@@ -512,6 +514,21 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             continue
 
         comments = issue_comments(repository, token, number)
+        lifecycle_block = local_claim_block_reason(issue, comments)
+        if lifecycle_block:
+            for stale_label in (
+                "genesis-repair-in-progress",
+                "genesis-validating",
+                "genesis-autonomous",
+                "genesis-deferred",
+                "genesis-blocked",
+                EXHAUSTED_LABEL,
+                NEEDS_HUMAN_LABEL,
+                AGENTIC_LABEL,
+            ):
+                remove_label(repository, token, number, stale_label)
+            continue
+
         dependency = unresolved_capability_dependency(comments)
         if dependency:
             if not capability_ready(repository, token, dependency):
