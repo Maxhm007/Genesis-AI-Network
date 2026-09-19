@@ -20,7 +20,7 @@ def reconcile_closed_github_issue_tasks(
 ) -> dict:
     """Make authoritative GitHub Issue closure terminal for cached task execution.
 
-    ``open_issue_numbers`` is the current Pulse intake snapshot. A linked Issue that
+    issue_number = int(issue_number)
     is absent from that snapshot is never assumed closed: the exact Issue is fetched
     and must explicitly report ``state=closed`` before any SQLite task row is
     cancelled. This keeps GitHub authoritative while treating SQLite as resumable
