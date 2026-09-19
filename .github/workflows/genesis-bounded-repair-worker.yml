@@ -281,7 +281,7 @@ jobs:
           for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-claimed genesis-working genesis-verifying genesis-blocked genesis-solver-exhausted genesis-deferred agentic-lab genesis-agentic-escalated; do
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
           done
-          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --method PATCH -f state=closed -f state_reason=completed >/dev/null
+          echo "Verified evidence recorded; Genesis Issue Closure Manager owns the final close/seal decision."
           git push origin --delete "$CANDIDATE_BRANCH" >/dev/null 2>&1 || true
           echo "promoted_sha=$promoted_sha" >> "$GITHUB_OUTPUT"
 
@@ -293,8 +293,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          issue_state=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state')
-          if [[ "$issue_state" == "CLOSED" ]]; then
+          issue_json=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels)
+          issue_state=$(jq -r '.state' <<<"$issue_json")
+          verified=$(jq -r '([.labels[].name] | index("genesis-verified")) != null' <<<"$issue_json")
+          if [[ "$issue_state" == "CLOSED" || "$verified" == "true" ]]; then
             exit 0
           fi
 
