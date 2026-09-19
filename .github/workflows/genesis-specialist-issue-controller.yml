@@ -11,6 +11,7 @@ on:
       - .github/workflows/genesis-specialist-repair-worker-v2.yml
       - scripts/specialist_issue_autorepair.py
       - genesis/github_issue_capability_builder.py
+      - tests/test_github_issue_capability_builder.py
       - scripts/requeue_exhausted_issues.py
 
 permissions:
@@ -88,7 +89,7 @@ jobs:
                   continue
               if 'genesis-needs-routing' in labels:
                   continue
-              if target_re.search(body):
+              if extract_issue_target(body):
                   continue
               if lower_title.startswith(('[genesis escalation]', '[genesis ops]')):
                   continue
