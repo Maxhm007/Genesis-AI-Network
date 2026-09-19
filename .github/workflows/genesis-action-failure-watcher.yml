@@ -1,180 +1,60 @@
 name: Genesis Action Failure Watcher
 
 on:
-  workflow_run:
-    workflows:
-      - Genesis Tiny Problem Detection Test
-      - Genesis Oldest Real Issue Solver
-      - Genesis Bounded Repair Worker
-      - Genesis Recent AI Capability Discovery
-    types: [completed]
   workflow_dispatch:
-    inputs:
-      run_id:
-        description: Optional failed workflow run ID for controlled verification
-        required: false
-        default: ''
+  schedule:
+    - cron: '*/10 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - scripts/action_failure_watchdog.py
+      - scripts/action_failure_fresh_reconcile.py
+      - scripts/action_issue_autorepair.py
+      - scripts/action_repair_selector.py
+      - .github/workflows/genesis-action-failure-watcher.yml
 
 permissions:
   contents: read
-  actions: read
+  actions: write
   issues: write
 
+concurrency:
+  group: genesis-action-failure-watcher
+  cancel-in-progress: false
+
 jobs:
-  create-failure-issue:
-    if: >
-      (github.event_name == 'workflow_run' && github.event.workflow_run.conclusion == 'failure') ||
-      (github.event_name == 'workflow_dispatch' && inputs.run_id != '')
+  detect-retry-route:
     runs-on: ubuntu-latest
+    timeout-minutes: 12
     steps:
-      - name: Checkout current main for bounded target validation
+      - name: Checkout current main
         uses: actions/checkout@v4
         with:
+          ref: main
           fetch-depth: 1
 
-      - name: Create issue for failed Action run
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install repository dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Detect and reconcile Action failures across all main workflows
         env:
           GH_TOKEN: ${{ github.token }}
-          EVENT_RUN_ID: ${{ github.event.workflow_run.id }}
-          REQUESTED_RUN_ID: ${{ inputs.run_id }}
-        shell: bash
-        run: |
-          set -euo pipefail
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/action_failure_watchdog.py --repository "$GITHUB_REPOSITORY"
 
-          RUN_ID="${EVENT_RUN_ID:-}"
-          if [ -z "$RUN_ID" ]; then
-            RUN_ID="${REQUESTED_RUN_ID:-}"
-          fi
-          [[ "$RUN_ID" =~ ^[0-9]+$ ]] || {
-            echo "A numeric failed workflow run ID is required."
-            exit 1
-          }
+      - name: Retry one newly detected or pending failure once
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/action_failure_watchdog.py --repository "$GITHUB_REPOSITORY" --retry-once
 
-          run_json=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}")
-          conclusion=$(printf '%s' "$run_json" | jq -r '.conclusion // ""')
-          if [ "$conclusion" != "failure" ]; then
-            echo "Run ${RUN_ID} conclusion is '${conclusion}', not failure; no issue created."
-            exit 0
-          fi
-
-          WORKFLOW_NAME=$(printf '%s' "$run_json" | jq -r '.name // "GitHub Action"')
-          WORKFLOW_PATH=$(printf '%s' "$run_json" | jq -r '.path // ""')
-          HEAD_SHA=$(printf '%s' "$run_json" | jq -r '.head_sha // ""')
-          HEAD_BRANCH=$(printf '%s' "$run_json" | jq -r '.head_branch // ""')
-          EVENT_NAME=$(printf '%s' "$run_json" | jq -r '.event // ""')
-          RUN_ATTEMPT=$(printf '%s' "$run_json" | jq -r '.run_attempt // 1')
-          CREATED_AT=$(printf '%s' "$run_json" | jq -r '.created_at // ""')
-          RUN_URL=$(printf '%s' "$run_json" | jq -r '.html_url // ""')
-
-          title="[Genesis Action Failure] ${WORKFLOW_NAME} — run ${RUN_ID}"
-          existing=$(gh issue list \
-            --repo "$GITHUB_REPOSITORY" \
-            --state all \
-            --limit 1000 \
-            --json number,title \
-            | jq -r --arg title "$title" '[.[] | select(.title == $title)][0].number // empty')
-
-          if [ -n "$existing" ]; then
-            echo "Failure run ${RUN_ID} already has issue #${existing}; no duplicate created."
-            exit 0
-          fi
-
-          if ! gh label list --repo "$GITHUB_REPOSITORY" --limit 100 --json name --jq '.[].name' | grep -Fxq genesis-action-failure; then
-            gh label create genesis-action-failure \
-              --repo "$GITHUB_REPOSITORY" \
-              --color d1242f \
-              --description 'Created automatically when a GitHub Action run fails'
-          fi
-
-          jobs_json=$(gh api "repos/${GITHUB_REPOSITORY}/actions/runs/${RUN_ID}/jobs?per_page=100")
-          failed_summary=$(printf '%s' "$jobs_json" | jq -r '
-            [.jobs[] | select(.conclusion == "failure") | {
-              job: .name,
-              failed_steps: [.steps[]? | select(.conclusion == "failure") | .name]
-            }]
-            | if length == 0 then
-                "Failure details were not available from the jobs API."
-              else
-                map("- Job: **" + .job + "**\n  - Failed step(s): " +
-                    (if (.failed_steps|length) == 0 then "not reported" else (.failed_steps|join(", ")) end))
-                | join("\n")
-              end')
-
-          gh run view "$RUN_ID" --repo "$GITHUB_REPOSITORY" --log-failed > /tmp/genesis-failed.log 2>&1 || true
-
-          python - <<'PY'
-          import re
-          from pathlib import Path
-
-          raw = Path("/tmp/genesis-failed.log").read_text(encoding="utf-8", errors="replace")
-          raw = re.sub(r"(?i)(authorization:\s*(?:bearer|token)\s+)\S+", r"\1[REDACTED]", raw)
-          raw = re.sub(r"\b(?:gh[pousr]_|github_pat_)[A-Za-z0-9_]{12,}\b", "[REDACTED_TOKEN]", raw)
-          raw = re.sub(r"(?i)(secret|token|password|api[_-]?key)\s*[=:]\s*[^\s]+", r"\1=[REDACTED]", raw)
-          lines = [line[-500:] for line in raw.splitlines() if line.strip()]
-          bounded = "\n".join(lines)[-2400:]
-          Path("/tmp/genesis-failed-sanitized.log").write_text(bounded, encoding="utf-8")
-          PY
-
-          TARGET=$(python - <<'PY'
-          import re
-          from pathlib import Path
-
-          protected = {
-              "genesis/autonomy_guard.py",
-              "genesis/autonomy_proof.py",
-              "genesis/blockchain.py",
-              "genesis/ephemeral_validator.py",
-              "genesis/security.py",
-              "genesis/selfdev.py",
-              "genesis/issue_solver.py",
-              "genesis/file_self_review.py",
-              "genesis/file_self_review_policy.py",
-          }
-
-          evidence = Path("/tmp/genesis-failed-sanitized.log").read_text(encoding="utf-8", errors="replace")
-          for match in re.finditer(r"(genesis/[A-Za-z0-9_./-]+\.py)", evidence):
-              candidate = match.group(1).replace("\\", "/")
-              if ".." in candidate or candidate in protected:
-                  continue
-              if Path(candidate).is_file():
-                  print(candidate)
-                  break
-          PY
-          )
-
-          marker="<!-- genesis-action-failure-run:${RUN_ID} -->"
-          {
-            printf '%s\n' "$marker"
-            printf '%s\n\n' 'Genesis detected a failed GitHub Actions run. This issue was created automatically by the independent **Action Failure Watcher**. The watcher does not repair or close issues.'
-            printf 'Workflow: **%s** (`%s`)\n' "$WORKFLOW_NAME" "$WORKFLOW_PATH"
-            printf -- '- **Run ID:** `%s`\n' "$RUN_ID"
-            printf -- '- **Run attempt:** `%s`\n' "$RUN_ATTEMPT"
-            printf -- '- **Trigger event:** `%s`\n' "$EVENT_NAME"
-            printf -- '- **Branch:** `%s`\n' "$HEAD_BRANCH"
-            printf -- '- **Head SHA:** `%s`\n' "$HEAD_SHA"
-            printf -- '- **Created (UTC):** `%s`\n' "$CREATED_AT"
-            printf -- '- **Run:** %s\n' "$RUN_URL"
-            if [ -n "$TARGET" ]; then
-              printf -- '- **Target:** `%s`\n' "$TARGET"
-            fi
-            printf '\n### Failure evidence\n%s\n' "$failed_summary"
-
-            if [ -s /tmp/genesis-failed-sanitized.log ]; then
-              printf '\n### Sanitized failed-log excerpt\n```text\n'
-              cat /tmp/genesis-failed-sanitized.log
-              printf '\n```\n'
-            fi
-
-            printf '\n### Processing rule\n'
-            printf '%s\n' 'This issue now belongs to the normal GitHub issue queue. The independent Issue Solver may validate, repair, verify, and close it. The Action Failure Watcher itself performs no repair.'
-            if [ -z "$TARGET" ]; then
-              printf '%s\n' 'No autonomous Python repair target was inferred because the failure evidence did not name a current safe `genesis/*.py` file.'
-            fi
-          } > /tmp/genesis-action-failure-issue.md
-
-          issue_url=$(gh issue create \
-            --repo "$GITHUB_REPOSITORY" \
-            --title "$title" \
-            --body-file /tmp/genesis-action-failure-issue.md \
-            --label genesis-action-failure)
-          echo "Created failure issue: $issue_url"
+      - name: Wake authoritative issue controller
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run genesis-sequential-issue-controller.yml --repo "$GITHUB_REPOSITORY" --ref main || true
