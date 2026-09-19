@@ -142,7 +142,7 @@ jobs:
         if: steps.select.outputs.selected == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/github_memory_sync.py --repository "$GITHUB_REPOSITORY" --max-issues 100
+        run: python scripts/github_memory_sync.py --repository "$GITHUB_REPOSITORY" --max-issues 100 || echo "Verified memory sync unavailable; continue without hydrated memory."
 
       - name: Restore DeepSeek model cache
         if: steps.select.outputs.selected == 'true'
@@ -284,7 +284,7 @@ jobs:
           if [[ -f "$target_test" ]]; then python -m pytest -q "$target_test"; fi
           python -m pytest -q
 
-          python scripts/record_verified_repair_memory.py \
+          if ! python scripts/record_verified_repair_memory.py \
             --repository "$GITHUB_REPOSITORY" \
             --issue-number "$ISSUE_NUMBER" \
             --target "$TARGET" \
@@ -292,6 +292,9 @@ jobs:
             --promoted-sha "$promoted_sha" \
             --worker-run "$GITHUB_RUN_ID" \
             --evidence-file runtime/github_issue_autorepair.json
+          then
+            echo "Verified repair memory recording failed; repair verification remains authoritative." >&2
+          fi
 
           printf '%s\n%s\n' \
             "<!-- genesis-deepseek-result:solved -->" \
