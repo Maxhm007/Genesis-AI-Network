@@ -87,7 +87,7 @@ jobs:
           }
           excluded = {
               'genesis-solver-exhausted', 'agentic-lab', 'genesis-agentic-escalated',
-              'genesis-needs-human', 'genesis-waiting-capability',
+              'genesis-needs-human', 'genesis-waiting-capability', 'genesis-blocked',
               'genesis-superseded', 'genesis-verified',
           }
 
