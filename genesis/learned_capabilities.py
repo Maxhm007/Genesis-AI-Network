@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+import json
 import math
 from typing import Callable
 
@@ -2214,6 +2215,157 @@ register_capability(
     'Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Fixed speculative decoding after multimodal input and DFlash mtmd chunk decode ([#28715]( [#28587](.',
     "ggml-org/llama.cpp release 'v0.4.1', published 2026-09-14T18:27:29Z: Fixed speculative decoding after multimodal input and DFlash mtmd chunk decode ([#28715]( [#28587](. Source: https://github.com/ggml-org/llama.cpp/releases/tag/v0.4.1",
     _learned_d0fb55ced066,
+)
+
+
+
+
+def _structured_output_schema(
+    output,
+    schema: dict,
+    *,
+    max_depth: int = 16,
+    max_nodes: int = 2048,
+    max_json_chars: int = 1_000_000,
+):
+    """Parse and validate bounded machine-readable output against an explicit schema.
+
+    This intentionally implements a small deterministic JSON-Schema-like subset
+    needed by Genesis rather than silently accepting unsupported schema keywords.
+    """
+    if not isinstance(schema, dict):
+        raise TypeError("schema must be a dictionary")
+    if not 1 <= int(max_depth) <= 64:
+        raise ValueError("max_depth is out of bounds")
+    if not 1 <= int(max_nodes) <= 100_000:
+        raise ValueError("max_nodes is out of bounds")
+    if not 1 <= int(max_json_chars) <= 10_000_000:
+        raise ValueError("max_json_chars is out of bounds")
+
+    if isinstance(output, (str, bytes)):
+        if isinstance(output, bytes):
+            text = output.decode("utf-8", errors="strict")
+        else:
+            text = output
+        if len(text) > int(max_json_chars):
+            raise ValueError("structured output exceeds JSON size bound")
+        try:
+            value = json.loads(text)
+        except json.JSONDecodeError as exc:
+            raise ValueError("structured output is not valid JSON") from exc
+    else:
+        value = output
+
+    supported = {
+        "type", "properties", "required", "items", "additionalProperties",
+        "enum", "minItems", "maxItems", "minLength", "maxLength",
+        "minimum", "maximum",
+    }
+    node_count = 0
+
+    def validate(instance, rule, path: str, depth: int):
+        nonlocal node_count
+        node_count += 1
+        if node_count > int(max_nodes):
+            raise ValueError("schema validation node bound exceeded")
+        if depth > int(max_depth):
+            raise ValueError("schema validation depth bound exceeded")
+        if not isinstance(rule, dict):
+            raise TypeError(f"{path}: schema node must be a dictionary")
+
+        unknown = set(rule) - supported
+        if unknown:
+            raise ValueError(f"{path}: unsupported schema keyword(s): {', '.join(sorted(unknown))}")
+
+        expected = rule.get("type")
+        type_checks = {
+            "object": lambda x: isinstance(x, dict),
+            "array": lambda x: isinstance(x, list),
+            "string": lambda x: isinstance(x, str),
+            "integer": lambda x: isinstance(x, int) and not isinstance(x, bool),
+            "number": lambda x: isinstance(x, (int, float)) and not isinstance(x, bool),
+            "boolean": lambda x: isinstance(x, bool),
+            "null": lambda x: x is None,
+        }
+        if expected is not None:
+            if expected not in type_checks:
+                raise ValueError(f"{path}: unsupported schema type: {expected}")
+            if not type_checks[expected](instance):
+                raise ValueError(f"{path}: expected {expected}")
+
+        if "enum" in rule:
+            enum = rule["enum"]
+            if not isinstance(enum, list) or not enum:
+                raise ValueError(f"{path}: enum must be a non-empty list")
+            if instance not in enum:
+                raise ValueError(f"{path}: value is not in enum")
+
+        if isinstance(instance, dict):
+            properties = rule.get("properties", {})
+            required = rule.get("required", [])
+            if not isinstance(properties, dict):
+                raise ValueError(f"{path}: properties must be an object")
+            if not isinstance(required, list) or any(not isinstance(x, str) for x in required):
+                raise ValueError(f"{path}: required must be a list of strings")
+            missing = [name for name in required if name not in instance]
+            if missing:
+                raise ValueError(f"{path}: missing required field(s): {', '.join(sorted(missing))}")
+            additional = rule.get("additionalProperties", True)
+            if additional not in (True, False):
+                raise ValueError(f"{path}: additionalProperties must be boolean")
+            if additional is False:
+                extra = set(instance) - set(properties)
+                if extra:
+                    raise ValueError(f"{path}: unexpected field(s): {', '.join(sorted(extra))}")
+            for key, child_rule in properties.items():
+                if key in instance:
+                    validate(instance[key], child_rule, f"{path}.{key}", depth + 1)
+
+        if isinstance(instance, list):
+            minimum_items = rule.get("minItems")
+            maximum_items = rule.get("maxItems")
+            if minimum_items is not None and len(instance) < int(minimum_items):
+                raise ValueError(f"{path}: too few items")
+            if maximum_items is not None and len(instance) > int(maximum_items):
+                raise ValueError(f"{path}: too many items")
+            if "items" in rule:
+                for index, child in enumerate(instance):
+                    validate(child, rule["items"], f"{path}[{index}]", depth + 1)
+
+        if isinstance(instance, str):
+            minimum_length = rule.get("minLength")
+            maximum_length = rule.get("maxLength")
+            if minimum_length is not None and len(instance) < int(minimum_length):
+                raise ValueError(f"{path}: string is too short")
+            if maximum_length is not None and len(instance) > int(maximum_length):
+                raise ValueError(f"{path}: string is too long")
+
+        if isinstance(instance, (int, float)) and not isinstance(instance, bool):
+            minimum = rule.get("minimum")
+            maximum = rule.get("maximum")
+            if minimum is not None and instance < minimum:
+                raise ValueError(f"{path}: value is below minimum")
+            if maximum is not None and instance > maximum:
+                raise ValueError(f"{path}: value is above maximum")
+
+        return instance
+
+    return validate(value, schema, "$", 0)
+
+
+register_capability(
+    "structured_output_schema",
+    (
+        "Parse JSON model output and validate it against a bounded explicit schema "
+        "before downstream use. Invalid JSON, schema violations, unsupported schema "
+        "keywords, excessive depth, and excessive validation work fail closed."
+    ),
+    (
+        "Issue #801 requires schema-constrained machine-readable output for the "
+        "Qwen-based Genesis baseline. The capability uses deterministic local "
+        "validation and does not depend on model-provider-native structured-output support."
+    ),
+    _structured_output_schema,
 )
 
 
