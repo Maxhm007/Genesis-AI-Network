@@ -655,38 +655,85 @@ def run(issue_number: int, repository: str, root: Path = ROOT) -> dict:
 
     result = attempt.result
     if attempt.status == "candidate_repaired" and result and result.commit_sha:
-        push = _git("push", "--set-upstream", "origin", result.branch)
-        if push.returncode != 0:
+        # Candidate creation may take several minutes while other autonomous
+        # workflows legitimately advance main. Rebase onto the latest main
+        # before publishing so the candidate branch differs only by its bounded
+        # repair commit and never carries stale workflow/control-plane content.
+        fetch = _git("fetch", "origin", "main")
+        if fetch.returncode != 0:
             evidence.update({
                 "status": "retry_pending",
-                "reason": "candidate_push_failed",
-                "push_error": push.stderr[-2000:],
+                "reason": "candidate_main_refresh_failed",
+                "refresh_error": fetch.stderr[-2000:],
             })
             _upsert_status_comment(
                 repository,
                 issue_number,
-                "Genesis produced a test-passing candidate, but the candidate push failed. The issue remains queued for autonomous retry.",
+                "Genesis produced a test-passing candidate, but could not refresh current main before publication. The issue remains queued for autonomous retry.",
                 repair_memory=repair_memory,
             )
         else:
-            evidence.update({
-                "status": "candidate_created",
-                "candidate_branch": result.branch,
-                "candidate_sha": result.commit_sha,
-                "changed_files": list(result.changed_files),
-            })
-            _set_labels(
-                repository,
-                issue_number,
-                add=(VALIDATING_LABEL,),
-                remove=(AUTONOMOUS_LABEL, BLOCKED_LABEL),
-            )
-            _upsert_status_comment(
-                repository,
-                issue_number,
-                f"Genesis created candidate `{result.branch}` at `{result.commit_sha[:12]}` after bounded validation-feedback self-correction. Independent validation, Secret Guard, and exact-SHA promotion are now required before this issue can close.",
-                repair_memory=repair_memory,
-            )
+            rebase = _git("rebase", "origin/main")
+            if rebase.returncode != 0:
+                _git("rebase", "--abort")
+                evidence.update({
+                    "status": "retry_pending",
+                    "reason": "candidate_rebase_failed",
+                    "rebase_error": rebase.stderr[-2000:],
+                })
+                _upsert_status_comment(
+                    repository,
+                    issue_number,
+                    "Genesis produced a test-passing candidate, but main changed incompatibly before publication. The candidate was not pushed; the issue remains queued for a fresh autonomous retry.",
+                    repair_memory=repair_memory,
+                )
+            else:
+                refreshed = _git("rev-parse", "HEAD")
+                refreshed_sha = refreshed.stdout.strip() if refreshed.returncode == 0 else ""
+                if not refreshed_sha:
+                    evidence.update({
+                        "status": "retry_pending",
+                        "reason": "candidate_sha_refresh_failed",
+                    })
+                    _upsert_status_comment(
+                        repository,
+                        issue_number,
+                        "Genesis rebased the candidate onto current main but could not establish the exact candidate SHA. The issue remains queued for autonomous retry.",
+                        repair_memory=repair_memory,
+                    )
+                else:
+                    push = _git("push", "--set-upstream", "origin", result.branch)
+                    if push.returncode != 0:
+                        evidence.update({
+                            "status": "retry_pending",
+                            "reason": "candidate_push_failed",
+                            "push_error": push.stderr[-2000:],
+                        })
+                        _upsert_status_comment(
+                            repository,
+                            issue_number,
+                            "Genesis produced and rebased a test-passing candidate, but the candidate push failed. The issue remains queued for autonomous retry.",
+                            repair_memory=repair_memory,
+                        )
+                    else:
+                        evidence.update({
+                            "status": "candidate_created",
+                            "candidate_branch": result.branch,
+                            "candidate_sha": refreshed_sha,
+                            "changed_files": list(result.changed_files),
+                        })
+                        _set_labels(
+                            repository,
+                            issue_number,
+                            add=(VALIDATING_LABEL,),
+                            remove=(AUTONOMOUS_LABEL, BLOCKED_LABEL),
+                        )
+                        _upsert_status_comment(
+                            repository,
+                            issue_number,
+                            f"Genesis created candidate `{result.branch}` at `{refreshed_sha[:12]}` after bounded validation-feedback self-correction and rebasing onto current main. Independent validation, Secret Guard, and exact-SHA promotion are now required before this issue can close.",
+                            repair_memory=repair_memory,
+                        )
     elif attempt.status in {
         "blocked_no_safe_context",
         "blocked_protected_or_unsupported_target",
