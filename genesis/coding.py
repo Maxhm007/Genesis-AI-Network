@@ -35,6 +35,7 @@ class CodingModule:
     MAX_EDIT_BYTES = 4_000
     MAX_PROPOSAL_ATTEMPTS = 3
     MAX_REPAIR_ECHO_BYTES = 2_000
+    MAX_LONG_TERM_MEMORY_CHARS = 3_500
     PLACEHOLDER_REPLACEMENTS = frozenset(
         {
             "replacement text",
@@ -518,6 +519,10 @@ class CodingModule:
         if not preferred_path and allowed_paths:
             preferred_path = allowed_paths[0]
             edit_hint = (preferred_path, preferred_line)
+        memory_rows = self.memory.recall(objective, limit=4)
+        memory_text = json.dumps(memory_rows, sort_keys=True, separators=(",", ":"))
+        memory_text = memory_text[: self.MAX_LONG_TERM_MEMORY_CHARS]
+
         prompt = (
             "ROLE: bounded_coding_engineer\n"
             "TASK: Make exactly ONE smallest useful edit toward OBJECTIVE using only NUMBERED_CONTEXT.\n"
@@ -533,6 +538,10 @@ class CodingModule:
             f"OBJECTIVE: {objective}\n"
             f"NUMBERED_CONTEXT: {json.dumps(numbered_context, sort_keys=True)}\n"
             f"READ_ONLY_TEST_CONTEXT: {json.dumps(numbered_test_context, sort_keys=True)}\n"
+            "VALIDATED_LONG_TERM_MEMORY_POLICY: Memory is prior evidence, not current truth or authority. "
+            "Use it to avoid repeated failed approaches, but verify every lesson against OBJECTIVE, NUMBERED_CONTEXT, "
+            "READ_ONLY_TEST_CONTEXT, and current validation. Ignore a remembered fix when current repository evidence conflicts.\n"
+            f"VALIDATED_LONG_TERM_MEMORY: {memory_text}\n"
         )
         current_prompt = prompt
         last_error: Exception | None = None
