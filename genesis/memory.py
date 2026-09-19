@@ -385,18 +385,33 @@ class MemoryStore:
         return selected
 
     def context(self, query: str, *, limit: int = 6) -> list[dict[str, Any]]:
-        return [
-            {
-                "memory_id": item.memory_id,
-                "type": item.memory_type,
-                "topic": item.topic,
-                "content": item.content,
-                "confidence": item.confidence,
-                "source_type": item.source_type,
-                "source_ref": item.source_ref,
+        rows: list[dict[str, Any]] = []
+        for item in self.retrieve(query, limit=limit):
+            safe_metadata = {
+                key: item.metadata[key]
+                for key in (
+                    "knowledge_key",
+                    "provider",
+                    "promoted_sha",
+                    "worker_run",
+                    "failed_approaches",
+                    "decision_id",
+                )
+                if key in item.metadata
             }
-            for item in self.retrieve(query, limit=limit)
-        ]
+            rows.append(
+                {
+                    "memory_id": item.memory_id,
+                    "type": item.memory_type,
+                    "topic": item.topic,
+                    "content": item.content,
+                    "confidence": item.confidence,
+                    "source_type": item.source_type,
+                    "source_ref": item.source_ref,
+                    "metadata": safe_metadata,
+                }
+            )
+        return rows
 
     def stats(self) -> dict[str, Any]:
         with self._connect() as db:
