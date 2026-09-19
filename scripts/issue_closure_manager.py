@@ -7,15 +7,26 @@ import os
 import re
 
 from genesis.issue_lifecycle import family_id, lifecycle_decision, labels
-from scripts.issue_lifecycle_reconcile import (
-    ACTIVE_LABELS,
-    all_issues,
-    ensure_label,
-    issue_comments,
-    post_comment,
-    remove_label,
-    request,
-)
+try:
+    from scripts.issue_lifecycle_reconcile import (
+        ACTIVE_LABELS,
+        all_issues,
+        ensure_label,
+        issue_comments,
+        post_comment,
+        remove_label,
+        request,
+    )
+except ModuleNotFoundError:
+    from issue_lifecycle_reconcile import (
+        ACTIVE_LABELS,
+        all_issues,
+        ensure_label,
+        issue_comments,
+        post_comment,
+        remove_label,
+        request,
+    )
 
 CERT_MARKER = "<!-- genesis-closure-certificate -->"
 VERIFIED_LABEL = "genesis-verified"
