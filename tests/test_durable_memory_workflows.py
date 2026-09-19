@@ -41,3 +41,12 @@ def test_memory_sync_does_not_replace_normal_validation():
         assert "python -m pytest -q" in text, path.name
         assert "git push origin HEAD:main" in text, path.name
         assert "genesis-verified" in text, path.name
+
+
+
+def test_memory_failure_cannot_override_verified_repair_lifecycle():
+    for path in WORKFLOWS:
+        text = path.read_text(encoding="utf-8")
+        assert '|| echo "Verified memory sync unavailable; continue without hydrated memory."' in text, path.name
+        assert "if ! python scripts/record_verified_repair_memory.py" in text, path.name
+        assert "repair verification remains authoritative" in text, path.name
