@@ -462,6 +462,52 @@ class GenesisMemory:
         )
 
 
+
+    def remember_verified_decision(
+        self,
+        *,
+        decision_id: str,
+        topic: str,
+        rationale: str,
+        source_ref: str,
+        evidence: dict[str, Any],
+        confidence: float = 1.0,
+    ) -> MemoryItem:
+        decision_id = _bounded_text(decision_id, 200, "decision_id")
+        topic = _bounded_text(topic, MAX_TOPIC_CHARS, "topic")
+        rationale = _bounded_text(rationale, MAX_CONTENT_CHARS, "rationale")
+        source_ref = _bounded_text(source_ref, MAX_SOURCE_REF_CHARS, "source_ref")
+        if not evidence:
+            raise ValueError("verified decision requires evidence")
+        if contains_sensitive_material(evidence):
+            raise ValueError("decision evidence contains sensitive material")
+        knowledge_key = f"decision:{decision_id}".lower()
+        candidate = self.store.add(
+            memory_type="decision",
+            topic=topic,
+            content=rationale,
+            source_type="verified_architecture_decision",
+            source_ref=source_ref,
+            confidence=max(0.0, min(float(confidence), 1.0)),
+            importance=0.95,
+            state="candidate",
+            metadata={
+                "knowledge_key": knowledge_key,
+                "decision_id": decision_id,
+            },
+        )
+        if candidate.state == "candidate":
+            candidate = self.store.transition(candidate.memory_id, "validated", evidence=dict(evidence))
+        self.store.supersede_knowledge_key(
+            knowledge_key,
+            keep_memory_id=candidate.memory_id,
+            evidence={
+                "reason": "newer verified architectural decision",
+                "replacement_memory_id": candidate.memory_id,
+            },
+        )
+        return candidate
+
     def remember_verified_repair(
         self,
         *,
