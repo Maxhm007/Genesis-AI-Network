@@ -57,7 +57,7 @@ jobs:
           state=$(jq -r '.state' <<<"$issue_json")
           reserved=$(jq -r '([.labels[].name] | index("genesis-repair-in-progress")) != null' <<<"$issue_json")
           body=$(jq -r '.body // ""' <<<"$issue_json")
-          target=$(printf '%s\n' "$body" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
+          target=$(printf '%s\n' "$body" | python -m genesis.issue_target)
           safe=true
           if [[ "$state" != "OPEN" || "$reserved" != "true" ]]; then safe=false; fi
           if [[ -z "$target" || "$target" != scripts/*.py || "$target" == *".."* || ! -f "$target" ]]; then safe=false; fi
