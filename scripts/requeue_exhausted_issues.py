@@ -22,6 +22,8 @@ ENGINE_PATHS = (
     "scripts/requeue_exhausted_issues.py",
     "genesis/github_issue_cleanup.py",
     "genesis/github_issue_capability_builder.py",
+    "genesis/issue_lifecycle.py",
+    "scripts/issue_lifecycle_reconcile.py",
     "genesis/learned_capabilities.py",
 )
 ACTIVE_LABELS = {
