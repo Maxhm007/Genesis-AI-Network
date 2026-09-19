@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from typing import Iterable
 
 LIFECYCLE_STATES = (
     "genesis-claimed",
@@ -20,15 +19,48 @@ TERMINAL_FLAGS = {
     "genesis-closed-sealed-not-planned",
 }
 
-CLASSIFICATION_PREFIXES = (
-    "genesis-action-",
-    "genesis-deepseek-",
-    "genesis-qwen3-",
-    "genesis-integration-",
-    "genesis-specialist",
-    "gene-peer-sync",
-    "agentic-lab",
-)
+PROTECTED_MANUAL_LABELS = {
+    "security",
+    "critical",
+    "owner-priority",
+    "owner_priority",
+    "production-down",
+    "bug",
+    "enhancement",
+    "documentation",
+    "duplicate",
+    "invalid",
+    "wontfix",
+}
+
+# Canonical Genesis-owned label metadata. Genesis may create/update these labels.
+GENESIS_LABELS: dict[str, tuple[str, str]] = {
+    "genesis-autonomous": ("1f883d", "Authorized for Genesis autonomous repair"),
+    "genesis-claimed": ("1f6feb", "Claimed by the Genesis issue lifecycle"),
+    "genesis-working": ("fbca04", "Genesis is actively working this issue"),
+    "genesis-repair-in-progress": ("b60205", "Reserved for one bounded Genesis repair worker"),
+    "genesis-validating": ("8250df", "Genesis is independently validating a candidate"),
+    "genesis-verifying": ("8250df", "Genesis is verifying completion evidence"),
+    "genesis-solver-exhausted": ("6e7781", "Bounded solver exhausted; issue requires recovery"),
+    "genesis-blocked": ("d73a4a", "Genesis cannot safely advance this issue yet"),
+    "genesis-verified": ("0e8a16", "Genesis independently verified completion"),
+    "genesis-superseded": ("6e7781", "Current authority marks this issue duplicate, superseded, or orphaned"),
+    "agentic-lab": ("8250df", "Agentic Lab recovery owns this issue"),
+    "genesis-action-failure": ("d1242f", "A GitHub Actions workflow failed and requires recovery"),
+    "genesis-deepseek-agentic": ("5319e7", "DeepSeek agentic repair lane"),
+    "genesis-qwen3-agentic": ("5319e7", "Qwen3 agentic repair lane"),
+    "genesis-integration-route": ("5319e7", "Integration-sensitive repair route"),
+    "genesis-specialist": ("5319e7", "Specialist repair lane"),
+    "gene-peer-sync": ("0e8a16", "Issue synchronized from a Genesis peer Gene"),
+}
+
+# Obsolete Genesis-owned labels are migrated to the canonical replacement.
+LABEL_ALIASES: dict[str, str] = {
+    "genesis-in-progress": "genesis-working",
+    "genesis-repairing": "genesis-repair-in-progress",
+    "genesis-validation": "genesis-validating",
+    "genesis-action-error": "genesis-action-failure",
+}
 
 @dataclass(frozen=True)
 class TagPlan:
@@ -47,40 +79,61 @@ def _names(issue: dict) -> set[str]:
             out.add(name)
     return out
 
-def canonicalize_issue_tags(issue: dict) -> TagPlan:
-    """Return Genesis-owned label corrections without changing issue semantics.
+def is_genesis_owned(name: str) -> bool:
+    name = str(name or "").strip()
+    if not name or name in PROTECTED_MANUAL_LABELS:
+        return False
+    return name.startswith("genesis-") or name in {"agentic-lab", "gene-peer-sync"}
 
-    Classification labels may coexist. Lifecycle execution labels are exclusive:
-    the most advanced current state wins. Terminal verified/superseded state
-    clears active execution state. This makes Genesis, not individual workers,
-    the final authority over contradictory tag combinations.
-    """
+def canonicalize_issue_tags(issue: dict) -> TagPlan:
+    """Return Genesis-owned label corrections without changing issue semantics."""
     labels = _names(issue)
+    add: set[str] = set()
     remove: set[str] = set()
 
-    if labels & TERMINAL_FLAGS:
-        remove.update(label for label in LIFECYCLE_STATES if label in labels)
-        remove.update({"genesis-autonomous", "genesis-deferred"})
-        return TagPlan(remove=tuple(sorted(remove)), reason="terminal_state_authority")
+    for old, new in LABEL_ALIASES.items():
+        if old in labels:
+            remove.add(old)
+            add.add(new)
 
-    active = [label for label in LIFECYCLE_STATES if label in labels]
+    effective = (labels - remove) | add
+
+    if effective & TERMINAL_FLAGS:
+        remove.update(label for label in LIFECYCLE_STATES if label in effective)
+        remove.update({"genesis-autonomous", "genesis-deferred"})
+        return TagPlan(tuple(sorted(add)), tuple(sorted(remove)), "terminal_state_authority")
+
+    active = [label for label in LIFECYCLE_STATES if label in effective]
     if len(active) > 1:
-        # Ordered from early -> late; keep the furthest progressed state.
         winner = active[-1]
         remove.update(label for label in active if label != winner)
-        return TagPlan(remove=tuple(sorted(remove)), reason=f"exclusive_lifecycle:{winner}")
+        return TagPlan(tuple(sorted(add)), tuple(sorted(remove)), f"exclusive_lifecycle:{winner}")
 
-    if "genesis-solver-exhausted" in labels and "agentic-lab" not in labels:
-        return TagPlan(add=("agentic-lab",), reason="exhausted_requires_agentic_owner")
+    if "genesis-solver-exhausted" in effective and "agentic-lab" not in effective:
+        add.add("agentic-lab")
 
-    if "genesis-repair-in-progress" in labels and "genesis-autonomous" not in labels:
-        return TagPlan(add=("genesis-autonomous",), reason="repair_requires_autonomous_authority")
+    if "genesis-repair-in-progress" in effective and "genesis-autonomous" not in effective:
+        add.add("genesis-autonomous")
 
-    return TagPlan(reason="already_canonical")
+    reason = "already_canonical" if not add and not remove else "genesis_tag_authority"
+    return TagPlan(tuple(sorted(add)), tuple(sorted(remove)), reason)
 
-def classification_labels(issue: dict) -> tuple[str, ...]:
-    labels = _names(issue)
-    return tuple(sorted(
-        label for label in labels
-        if any(label.startswith(prefix) for prefix in CLASSIFICATION_PREFIXES)
-    ))
+def desired_label_definition(name: str) -> tuple[str, str] | None:
+    return GENESIS_LABELS.get(name)
+
+def retired_genesis_labels(existing_names: set[str], used_names: set[str]) -> tuple[str, ...]:
+    """Return obsolete Genesis-owned labels safe to delete from repository metadata.
+
+    A label is retired only when Genesis owns it, it is not canonical, and no
+    current issue uses it. Manual/protected labels are never candidates.
+    """
+    canonical = set(GENESIS_LABELS)
+    aliases = set(LABEL_ALIASES)
+    retired = {
+        name for name in existing_names
+        if is_genesis_owned(name)
+        and name not in canonical
+        and name not in aliases
+        and name not in used_names
+    }
+    return tuple(sorted(retired))
