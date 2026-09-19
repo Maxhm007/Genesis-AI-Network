@@ -49,6 +49,26 @@ def test_navigation_fallback_exposes_current_item_to_assistive_technology(tmp_pa
     assert "item.addEventListener('click'" in html
 
 
+def test_navigation_fallback_hashchange_synchronizes_full_dashboard_state(tmp_path: Path):
+    page = tmp_path / "index.html"
+    page.write_text(_page(), encoding="utf-8")
+    nav.patch_navigation(page)
+    html = page.read_text(encoding="utf-8")
+    assert "function syncFromLocation()" in html
+    assert "typeof window.switchView === 'function'" in html
+    assert "window.switchView(view)" in html
+    assert "window.addEventListener('hashchange', syncFromLocation)" in html
+
+
+def test_navigation_fallback_unknown_hash_falls_back_to_default_view(tmp_path: Path):
+    page = tmp_path / "index.html"
+    page.write_text(_page(), encoding="utf-8")
+    nav.patch_navigation(page)
+    html = page.read_text(encoding="utf-8")
+    assert "if (navItems.some((item) => item.dataset.view === requested)) return requested;" in html
+    assert "return navItems[0].dataset.view;" in html
+
+
 def test_navigation_fallback_is_idempotent(tmp_path: Path):
     page = tmp_path / "index.html"
     page.write_text(_page(), encoding="utf-8")
