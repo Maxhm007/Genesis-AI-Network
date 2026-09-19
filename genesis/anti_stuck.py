@@ -269,3 +269,25 @@ def should_release_worker(labels: Iterable[str]) -> bool:
             "genesis-verified",
         }
     )
+
+
+def next_lane_strategy(
+    history: Iterable[Attempt],
+    *,
+    provider: str,
+    gene: str,
+    target: str,
+    strategies: Iterable[str],
+) -> str:
+    used = {
+        attempt.strategy.strip().lower()
+        for attempt in history
+        if attempt.provider.strip().lower() == provider.strip().lower()
+        and attempt.gene.strip().lower() == gene.strip().lower()
+        and attempt.target.strip().lower() == target.strip().lower()
+    }
+    for strategy in strategies:
+        candidate = str(strategy).strip()
+        if candidate and candidate.lower() not in used:
+            return candidate
+    return ""
