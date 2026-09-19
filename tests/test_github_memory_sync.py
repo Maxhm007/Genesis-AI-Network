@@ -49,6 +49,10 @@ def test_verified_repair_record_is_portable_and_importable(tmp_path: Path, monke
             return {"number": 829, "title": "Reject bool issue numbers"}
         if method == "GET" and path == "/issues/829/comments?per_page=100":
             return []
+        if method == "POST" and path == "/labels":
+            return {"name": "genesis-memory"}
+        if method == "POST" and path == "/issues/829/labels":
+            return {"labels": [{"name": "genesis-memory"}]}
         if method == "POST" and path == "/issues/829/comments":
             return {"id": 1}
         raise AssertionError((method, path))
@@ -96,3 +100,10 @@ def test_recorded_repair_memory_redacts_sensitive_failed_validation(tmp_path: Pa
         ],
     )
     assert item.metadata["failed_approaches"] == [{"outcome": "redacted_sensitive_validation"}]
+
+
+
+def test_sync_query_is_scoped_to_memory_label():
+    source = Path(__file__).resolve().parents[1] / "scripts" / "github_memory_sync.py"
+    text = source.read_text(encoding="utf-8")
+    assert "label:genesis-verified label:genesis-memory" in text
