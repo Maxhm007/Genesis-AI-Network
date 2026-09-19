@@ -58,6 +58,8 @@ def _active_source(task: GenesisTask, executions: list[GenesisTask]) -> bool:
 
 def _canonical_rank(task: GenesisTask, executions: list[GenesisTask]) -> tuple[int, str, str]:
     if any(row.state in IN_FLIGHT_STATES for row in executions):
+        if row.state == 'cancelled':
+            queue.cancel_task(row.task_id)
         rank = 0
     elif any(row.state not in TERMINAL_STATES for row in executions):
         rank = 1
