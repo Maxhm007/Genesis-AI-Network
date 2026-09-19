@@ -45,13 +45,22 @@ def _aria_current_script() -> str:
   }}
   function currentView() {{
     const hash = window.location.hash || '';
-    if (hash.startsWith('#view-')) return hash.slice(6);
+    if (hash.startsWith('#view-')) {{
+      const requested = hash.slice(6);
+      if (navItems.some((item) => item.dataset.view === requested)) return requested;
+      return navItems[0].dataset.view;
+    }}
     const active = document.querySelector('.nav [data-view].active');
     return active ? active.dataset.view : navItems[0].dataset.view;
   }}
+  function syncFromLocation() {{
+    const view = currentView();
+    if (typeof window.switchView === 'function') window.switchView(view);
+    setCurrent(view);
+  }}
   navItems.forEach((item) => item.addEventListener('click', () => setCurrent(item.dataset.view)));
-  window.addEventListener('hashchange', () => setCurrent(currentView()));
-  setCurrent(currentView());
+  window.addEventListener('hashchange', syncFromLocation);
+  syncFromLocation();
 }})();
 </script>'''
 
