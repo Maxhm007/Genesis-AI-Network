@@ -4,6 +4,7 @@ import json
 from pathlib import Path
 
 from genesis.coding import CodingModule
+import genesis.github_issue_capability_builder as capability_builder
 from genesis.github_issue_capability_builder import GitHubIssueLearnedCapabilityProvider
 from genesis.selfdev import SelfDevResult
 from scripts.github_issue_autorepair import propose_issue_repair, solve_reported_issue
@@ -266,3 +267,67 @@ def test_github_issue_solver_prefers_specialized_builder_before_qwen(tmp_path: P
     assert executor.proposal["provenance"]["provider"] == "genesis-deterministic-capability-builder"
     rendered = executor.proposal["files"]["genesis/learned_capabilities.py"]
     assert "reusable_build_artifact_85ee71b19ede" in rendered
+
+
+def _capability_growth_issue() -> dict:
+    return {
+        "number": 792,
+        "title": "[Genesis Capability] Repair genesis/learned_capabilities.py blocker: retry_pending_capability",
+        "user": {"login": "github-actions[bot]"},
+        "body": (
+            "<!-- genesis-capability-work:cabd9d3a394808c2 -->\n"
+            "<!-- genesis-capability-parent:744 -->\n"
+            "- **Blocked target:** `genesis/learned_capabilities.py`\n"
+            "- **Observed blocker:** `retry_pending_capability`\n"
+            "- **Task type:** `capability_growth`\n"
+            "- **Target:** `genesis/github_issue_capability_builder.py`\n"
+        ),
+    }
+
+
+def test_machine_capability_growth_issue_gets_bounded_self_repair_route(tmp_path: Path, monkeypatch) -> None:
+    builder = tmp_path / "genesis" / "github_issue_capability_builder.py"
+    builder.parent.mkdir(parents=True, exist_ok=True)
+    builder.write_text("VALUE = 1\n", encoding="utf-8")
+
+    class FakeHTTPProvider:
+        def __init__(self, base_url: str, name: str = "fake", timeout: float = 20.0) -> None:
+            self.base_url = base_url
+            self.name = name
+            self.timeout = timeout
+
+        def available(self) -> bool:
+            return True
+
+        def reason(self, prompt: str) -> str:
+            return '{"edits":[]}'
+
+    monkeypatch.setenv("GENESIS_REPAIR_PROVIDER_URL", "http://local-provider")
+    monkeypatch.setattr(capability_builder, "GenesisHTTPProvider", FakeHTTPProvider)
+
+    provider = GitHubIssueLearnedCapabilityProvider.for_issue(
+        tmp_path,
+        _capability_growth_issue(),
+        CodingModule(tmp_path),
+    )
+
+    assert isinstance(provider, capability_builder.EvidenceFirstRepairFollowupProvider)
+    assert provider.target_path == "genesis/github_issue_capability_builder.py"
+    assert provider.delegate.name == "genesis-github-capability-repair"
+
+
+def test_user_authored_capability_growth_issue_cannot_select_self_repair_route(tmp_path: Path, monkeypatch) -> None:
+    builder = tmp_path / "genesis" / "github_issue_capability_builder.py"
+    builder.parent.mkdir(parents=True, exist_ok=True)
+    builder.write_text("VALUE = 1\n", encoding="utf-8")
+    issue = _capability_growth_issue()
+    issue["user"] = {"login": "Maxhm007"}
+    monkeypatch.setenv("GENESIS_REPAIR_PROVIDER_URL", "http://local-provider")
+
+    provider = GitHubIssueLearnedCapabilityProvider.for_issue(
+        tmp_path,
+        issue,
+        CodingModule(tmp_path),
+    )
+
+    assert provider is None
