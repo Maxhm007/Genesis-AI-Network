@@ -30,14 +30,8 @@ def test_issue_controller_has_independent_scheduled_continuity() -> None:
     assert "genesis-bounded-repair-worker.yml" in text
 
 
-def test_legacy_oldest_solver_is_delegate_only() -> None:
-    text = LEGACY_OLDEST.read_text(encoding="utf-8")
-
-    assert "delegate-to-sequential-controller" in text
-    assert "genesis-sequential-issue-controller.yml" in text
-    assert "genesis-bounded-repair-worker.yml" not in text
-    assert "Start successor solver run" not in text
-    assert "genesis-oldest-issue-solver.yml/dispatches" not in text
+def test_legacy_oldest_solver_is_retired() -> None:
+    assert not LEGACY_OLDEST.exists()
 
 
 def test_bounded_worker_cannot_overlap_same_issue() -> None:
