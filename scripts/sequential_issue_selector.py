@@ -122,6 +122,8 @@ def classify(issue: dict) -> str:
         or "syntax error" in lower_body
     ):
         return "urgent"
+    if lower_title.startswith("[genesis architecture]") or "genesis-architecture" in labels:
+        return "architecture"
     if lower_title.startswith(("[genesis detected]", "[genesis repair]")) or labels & CONCRETE_REPAIR_LABELS:
         return "repair"
     return "general"
@@ -150,12 +152,12 @@ def candidate(issue: dict, *, now: datetime | None = None) -> dict | None:
 
     kind = classify(issue)
     target = _safe_target(issue)
-    if kind not in {"urgent"} and not target:
+    if kind not in {"urgent", "architecture"} and not target:
         return None
 
     retry_depth = _retry_depth(issue)
     owner_priority = 1.0 if labels & {"owner-priority", "owner_priority", "user-priority"} else 0.0
-    reuse_value = 0.9 if labels & {"genesis-capability", "genesis-capability-blocker", "capability-blocker"} else 0.7
+    reuse_value = 0.95 if kind == "architecture" else (0.9 if labels & {"genesis-capability", "genesis-capability-blocker", "capability-blocker"} else 0.7)
     success_probability = max(0.2, 0.9 - 0.07 * retry_depth)
 
     value = issue_value_score(
@@ -168,7 +170,7 @@ def candidate(issue: dict, *, now: datetime | None = None) -> dict | None:
         success_probability=success_probability,
     )
 
-    lane_bonus = {"urgent": 25.0, "repair": 10.0, "general": 0.0}[kind]
+    lane_bonus = {"urgent": 25.0, "architecture": 18.0, "repair": 10.0, "general": 0.0}[kind]
     score = min(125.0, value.score + lane_bonus)
 
     return {
