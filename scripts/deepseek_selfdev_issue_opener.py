@@ -18,6 +18,8 @@ AUTONOMOUS_LABEL = "genesis-autonomous"
 OPEN_BACKLOG_CAP = max(1, int(os.environ.get("GENESIS_DEEPSEEK_DISCOVERY_OPEN_CAP", "3")))
 FILES_PER_RUN = max(2, min(6, int(os.environ.get("GENESIS_DEEPSEEK_DISCOVERY_FILES", "4"))))
 MAX_FILE_CHARS = 3500
+PROVIDER_MAX_NEW_TOKENS = max(128, min(640, int(os.environ.get("GENESIS_PROVIDER_MAX_NEW_TOKENS", "320"))))
+PROVIDER_TIMEOUT_SECONDS = max(120, min(900, int(os.environ.get("GENESIS_DEEPSEEK_DISCOVERY_TIMEOUT", "360"))))
 
 PROTECTED_TARGETS = {
     "genesis/autonomy_guard.py",
@@ -61,19 +63,30 @@ def _github(method: str, path: str, payload: dict | None = None):
 
 
 def _provider_reason(prompt: str) -> str:
-    data = json.dumps({"prompt": prompt, "max_new_tokens": 640}).encode("utf-8")
-    request = urllib.request.Request(
-        f"{PROVIDER_URL}/reason",
-        data=data,
-        method="POST",
-        headers={"Content-Type": "application/json"},
-    )
-    with urllib.request.urlopen(request, timeout=420) as response:
-        payload = json.loads(response.read().decode("utf-8"))
-    text = str(payload.get("response") or "").strip()
-    if not text:
-        raise RuntimeError("DeepSeek discovery provider returned no response")
-    return text
+    token_budgets = (PROVIDER_MAX_NEW_TOKENS, max(128, PROVIDER_MAX_NEW_TOKENS // 2))
+    last_error: Exception | None = None
+    for attempt, max_new_tokens in enumerate(token_budgets, start=1):
+        data = json.dumps({"prompt": prompt, "max_new_tokens": max_new_tokens}).encode("utf-8")
+        request = urllib.request.Request(
+            f"{PROVIDER_URL}/reason",
+            data=data,
+            method="POST",
+            headers={"Content-Type": "application/json"},
+        )
+        try:
+            with urllib.request.urlopen(request, timeout=PROVIDER_TIMEOUT_SECONDS) as response:
+                payload = json.loads(response.read().decode("utf-8"))
+            text = str(payload.get("response") or "").strip()
+            if text:
+                return text
+            last_error = RuntimeError("DeepSeek discovery provider returned no response")
+        except (TimeoutError, urllib.error.URLError) as exc:
+            last_error = exc
+        if attempt < len(token_budgets):
+            continue
+    if last_error is not None:
+        raise RuntimeError(f"DeepSeek discovery provider failed after bounded retry: {type(last_error).__name__}: {last_error}")
+    raise RuntimeError("DeepSeek discovery provider failed after bounded retry")
 
 
 def extract_json_object(text: str) -> dict:
