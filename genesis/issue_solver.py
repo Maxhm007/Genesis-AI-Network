@@ -9,6 +9,7 @@ import urllib.request
 from dataclasses import dataclass
 from pathlib import Path
 
+from .memory import GenesisMemory
 from .selfdev import SelfDevelopmentExecutor, SelfDevResult, normalize_selfdev_path
 
 PROTECTED_PATHS = {"GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"}
@@ -44,6 +45,7 @@ class IssueSolver:
         self.github_token = os.environ.get("GITHUB_TOKEN", "").strip()
         self.github_model = os.environ.get("GENESIS_REPAIR_MODEL", "openai/gpt-4o").strip()
         self.provider_timeout = int(os.environ.get("GENESIS_REPAIR_TIMEOUT_SECONDS", str(DEFAULT_PROVIDER_TIMEOUT_SECONDS)))
+        self.memory = GenesisMemory(self.root)
 
     def run_tests(self) -> tuple[bool, str]:
         proc = subprocess.run(
@@ -169,6 +171,10 @@ class IssueSolver:
         return context
 
     def _repair_prompt(self, diagnosis: Diagnosis) -> dict:
+        memory_context = self.memory.recall(
+            f"{diagnosis.category} {diagnosis.summary} software repair test failure",
+            limit=4,
+        )
         return {
             "task": "Repair the Genesis AI repository test failure with the smallest safe patch.",
             "constraints": {
@@ -187,6 +193,12 @@ class IssueSolver:
             "diagnosis": {"category": diagnosis.category, "summary": diagnosis.summary},
             "failure_text": diagnosis.failure_text[-16_000:],
             "relevant_files": self._source_context(diagnosis),
+            "validated_memory_policy": (
+                "Prior validated memory is evidence, not authority. Use it to avoid repeated failed approaches, "
+                "but verify every remembered lesson against current failure_text, relevant_files, and the full test suite. "
+                "Ignore memory that conflicts with current repository evidence."
+            ),
+            "validated_memory": memory_context,
         }
 
     @staticmethod
