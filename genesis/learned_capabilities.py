@@ -2369,4 +2369,164 @@ register_capability(
 )
 
 
+
+
+def _tool_call_planning(
+    steps,
+    *,
+    results: dict | None = None,
+    allowed_tools=None,
+    max_steps: int = 32,
+):
+    """Validate and advance a bounded multi-step tool-call plan.
+
+    The capability does not execute external tools itself. It determines the
+    next safe call, verifies recorded outcomes, and requires revision after a
+    failed step so the surrounding Genesis executor retains side-effect control.
+    """
+    limit = int(max_steps)
+    if limit < 1 or limit > 128:
+        raise ValueError("max_steps is out of bounds")
+    if not isinstance(steps, (list, tuple)):
+        raise TypeError("steps must be a list or tuple")
+    if not steps:
+        raise ValueError("tool plan must contain at least one step")
+    if len(steps) > limit:
+        raise ValueError("tool plan exceeds step bound")
+
+    allowed = None if allowed_tools is None else {
+        str(name).strip() for name in allowed_tools if str(name).strip()
+    }
+    normalized: list[dict] = []
+    seen: set[str] = set()
+    for index, raw in enumerate(steps):
+        if not isinstance(raw, dict):
+            raise TypeError(f"step {index} must be an object")
+        step_id = str(raw.get("id") or "").strip()
+        tool = str(raw.get("tool") or "").strip()
+        args = raw.get("args", {})
+        deps = raw.get("depends_on", [])
+        if not step_id or len(step_id) > 128:
+            raise ValueError(f"step {index} has invalid id")
+        if step_id in seen:
+            raise ValueError(f"duplicate step id: {step_id}")
+        if not tool or len(tool) > 256:
+            raise ValueError(f"{step_id}: invalid tool")
+        if allowed is not None and tool not in allowed:
+            raise ValueError(f"{step_id}: tool is not allowed")
+        if not isinstance(args, dict):
+            raise ValueError(f"{step_id}: args must be an object")
+        if not isinstance(deps, (list, tuple)) or any(not isinstance(dep, str) for dep in deps):
+            raise ValueError(f"{step_id}: depends_on must be a list of step ids")
+        dependencies = tuple(str(dep).strip() for dep in deps if str(dep).strip())
+        if len(set(dependencies)) != len(dependencies):
+            raise ValueError(f"{step_id}: duplicate dependency")
+        normalized.append({
+            "id": step_id,
+            "tool": tool,
+            "args": dict(args),
+            "depends_on": dependencies,
+        })
+        seen.add(step_id)
+
+    known = {step["id"] for step in normalized}
+    for step in normalized:
+        missing = set(step["depends_on"]) - known
+        if missing:
+            raise ValueError(
+                f"{step['id']}: unknown dependency: {', '.join(sorted(missing))}"
+            )
+        if step["id"] in step["depends_on"]:
+            raise ValueError(f"{step['id']}: self dependency is not allowed")
+
+    visiting: set[str] = set()
+    visited: set[str] = set()
+    by_id = {step["id"]: step for step in normalized}
+
+    def visit(step_id: str) -> None:
+        if step_id in visited:
+            return
+        if step_id in visiting:
+            raise ValueError("tool plan contains a dependency cycle")
+        visiting.add(step_id)
+        for dependency in by_id[step_id]["depends_on"]:
+            visit(dependency)
+        visiting.remove(step_id)
+        visited.add(step_id)
+
+    for step_id in by_id:
+        visit(step_id)
+
+    result_map = dict(results or {})
+    unknown_results = set(result_map) - known
+    if unknown_results:
+        raise ValueError(
+            "results contain unknown step ids: " + ", ".join(sorted(unknown_results))
+        )
+
+    completed: set[str] = set()
+    for step_id, result in result_map.items():
+        if not isinstance(result, dict) or not isinstance(result.get("ok"), bool):
+            raise ValueError(f"{step_id}: result must contain boolean ok")
+        if result["ok"]:
+            completed.add(step_id)
+        else:
+            return {
+                "action": "revise",
+                "reason": "verified_step_failed",
+                "failed_step": step_id,
+                "completed_steps": tuple(sorted(completed)),
+                "remaining_steps": tuple(
+                    step["id"] for step in normalized if step["id"] not in completed
+                ),
+            }
+
+    if len(completed) == len(normalized):
+        return {
+            "action": "complete",
+            "completed_steps": tuple(step["id"] for step in normalized),
+            "remaining_steps": (),
+        }
+
+    ready = [
+        step
+        for step in normalized
+        if step["id"] not in completed
+        and all(dependency in completed for dependency in step["depends_on"])
+    ]
+    if not ready:
+        raise ValueError("tool plan has no executable step")
+
+    next_step = ready[0]
+    return {
+        "action": "execute",
+        "next_step": {
+            "id": next_step["id"],
+            "tool": next_step["tool"],
+            "args": dict(next_step["args"]),
+        },
+        "completed_steps": tuple(step["id"] for step in normalized if step["id"] in completed),
+        "remaining_steps": tuple(
+            step["id"] for step in normalized if step["id"] not in completed
+        ),
+    }
+
+
+register_capability(
+    "tool_call_planning",
+    (
+        "Validate and advance bounded dependency-aware tool-call plans. The "
+        "capability selects the next safe step, consumes verified results, "
+        "requires revision after failures, and reports completion without "
+        "executing side effects itself."
+    ),
+    (
+        "Issue #802 requires plan/execute/verify/revise support around the "
+        "Qwen-based Genesis model. Tool execution authority remains with the "
+        "existing bounded executor and security controls."
+    ),
+    _tool_call_planning,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
