@@ -22,6 +22,8 @@ on:
       - tests/test_structured_output_schema.py
       - tests/test_tool_call_planning.py
       - genesis/learned_capabilities.py
+      - tests/test_persistent_memory_capability.py
+      - genesis/memory.py
       - tests/test_core_processor.py
       - tests/test_unsolved_issue_reactivation.py
       - tests/test_autonomy_heartbeat.py
