@@ -691,21 +691,29 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             )
 
         strategy_marker = f"{STRATEGY_MARKER_PREFIX}{strategy} -->"
+        if provider == "deepseek":
+            comment_body = (
+                "<!-- genesis-anti-stuck-lane-switch:deepseek -->\n"
+                f"Genesis Anti-Stuck Controller is switching Issue #{number} to provider `deepseek` "
+                f"through supporting Gene `Gene 003` for state epoch `{state_token}`. "
+                "The DeepSeek lane records its own concrete attempt only after it accepts the reservation, "
+                "so a failed handoff does not consume an attempt."
+            )
+        else:
+            comment_body = (
+                f"{attempt_marker(candidate)}\n"
+                f"{strategy_marker}\n"
+                f"Genesis Anti-Stuck Controller selected provider `{provider}`, supporting Gene `{gene}`, "
+                f"and materially different strategy `{strategy}` for state epoch `{state_token}`. "
+                "Prior failure evidence remains attached to this same authoritative Issue. "
+                "Validation, protected-file, signing, secret, exact-promotion, and owner-control boundaries remain mandatory."
+            )
         request(
             repository,
             token,
             "POST",
             f"/issues/{number}/comments",
-            {
-                "body": (
-                    f"{attempt_marker(candidate)}\n"
-                    f"{strategy_marker}\n"
-                    f"Genesis Anti-Stuck Controller selected provider `{provider}`, supporting Gene `{gene}`, "
-                    f"and materially different strategy `{strategy}` for state epoch `{state_token}`. "
-                    "Prior failure evidence remains attached to this same authoritative Issue. "
-                    "Validation, protected-file, signing, secret, exact-promotion, and owner-control boundaries remain mandatory."
-                )
-            },
+            {"body": comment_body},
         )
 
         dispatch_path = (
