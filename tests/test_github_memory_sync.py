@@ -5,6 +5,7 @@ from pathlib import Path
 
 from genesis.memory import GenesisMemory, MemoryStore
 from scripts import github_memory_sync
+from scripts import record_verified_decision_memory
 from scripts import record_verified_repair_memory
 
 
@@ -107,3 +108,73 @@ def test_sync_query_is_scoped_to_memory_label():
     source = Path(__file__).resolve().parents[1] / "scripts" / "github_memory_sync.py"
     text = source.read_text(encoding="utf-8")
     assert "label:genesis-verified label:genesis-memory" in text
+
+
+
+def test_hydration_keeps_newest_knowledge_key_current(tmp_path: Path):
+    source = GenesisMemory(tmp_path / "source")
+    first = source.remember_verified_decision(
+        decision_id="routing-policy",
+        topic="Routing policy",
+        rationale="Use the older routing rule.",
+        source_ref="issue:1",
+        evidence={"version": 1},
+    )
+    first_payload = source.store.portable_payload(first.memory_id)
+
+    second = source.remember_verified_decision(
+        decision_id="routing-policy",
+        topic="Routing policy",
+        rationale="Use the newer verified routing rule.",
+        source_ref="issue:2",
+        evidence={"version": 2},
+    )
+    second_payload = source.store.portable_payload(second.memory_id)
+
+    target = GenesisMemory(tmp_path / "target")
+    result = github_memory_sync.hydrate_payloads(target, [first_payload, second_payload])
+
+    assert result["ignored"] == 0
+    assert target.store.get(second.memory_id).state == "validated"
+    assert target.store.get(first.memory_id).state == "superseded"
+    recalled = target.recall("routing policy")
+    assert any(row["memory_id"] == second.memory_id for row in recalled)
+    assert all(row["memory_id"] != first.memory_id for row in recalled)
+
+
+def test_verified_architecture_decision_is_recorded_as_portable_memory(tmp_path: Path, monkeypatch):
+    calls = []
+
+    def fake_api(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET" and path == "/issues/865":
+            return {
+                "number": 865,
+                "state": "closed",
+                "labels": [{"name": "genesis-verified"}],
+            }
+        if method == "GET" and path == "/issues/865/comments?per_page=100":
+            return []
+        if method == "POST" and path == "/issues/865/comments":
+            return {"id": 5}
+        raise AssertionError((method, path))
+
+    monkeypatch.setattr(record_verified_decision_memory, "_api", fake_api)
+    monkeypatch.setattr(record_verified_decision_memory, "_ensure_memory_label", lambda *args: None)
+
+    result = record_verified_decision_memory.record_decision(
+        "owner/repo",
+        "token",
+        issue_number=865,
+        decision_id="one-root-authority",
+        topic="Issue family authority",
+        rationale="Keep one authoritative root issue across retries.",
+        evidence={"full_suite_passed": True},
+        root=tmp_path,
+    )
+
+    assert result["status"] == "recorded"
+    posted = [payload["body"] for method, path, payload in calls if method == "POST"][0]
+    portable = github_memory_sync.decode_memory_marker(posted)
+    assert portable["record"]["memory_type"] == "decision"
+    assert portable["record"]["metadata"]["decision_id"] == "one-root-authority"
