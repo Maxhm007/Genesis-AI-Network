@@ -79,7 +79,7 @@ jobs:
               | sed -E 's/.*:([0-9]+) -->/\1/' \
               | sort -n -u \
               | wc -l \
-              | tr -d ' ')
+              | tr -d ' ' || true)
             attempts=${attempts:-0}
 
             # Agentic strategy results do not always carry the generic attempt marker;
