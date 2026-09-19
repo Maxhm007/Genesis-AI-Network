@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import hashlib
+import hmac
 import json
 import math
 import re
@@ -36,6 +37,15 @@ def utc_now() -> str:
 
 def _tokens(text: str) -> set[str]:
     return {token for token in re.findall(r"[a-z0-9_]{2,}", text.lower())}
+
+
+def is_genesis_root(root: Path) -> bool:
+    path = Path(root).resolve()
+    return (
+        (path / "genesis").is_dir()
+        and (path / "GENESIS_BLOCK.json").is_file()
+        and (path / "GENESIS_CONSTITUTION.md").is_file()
+    )
 
 
 def contains_sensitive_material(value: object) -> bool:
@@ -75,7 +85,7 @@ def _verify_portable_payload(payload: dict[str, Any]) -> dict[str, Any]:
     expected = str(payload.get("integrity_sha256") or "")
     canonical = json.dumps(record, sort_keys=True, separators=(",", ":"), ensure_ascii=False)
     actual = hashlib.sha256(canonical.encode("utf-8")).hexdigest()
-    if not expected or not hashlib.compare_digest(expected, actual):
+    if not expected or not hmac.compare_digest(expected, actual):
         raise ValueError("portable memory integrity check failed")
     if record.get("state") != "validated":
         raise ValueError("only validated memory may be imported as trusted portable memory")
