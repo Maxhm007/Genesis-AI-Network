@@ -3,6 +3,7 @@ from __future__ import annotations
 from pathlib import Path
 
 from genesis.core_processor import GenesisCoreProcessor
+from genesis.gene_lifecycle import GeneNeed
 from genesis.resource import ResourceModule
 
 
@@ -71,3 +72,34 @@ def test_core_processor_throttles_dispatch_when_capacity_is_low(tmp_path: Path) 
     assert result["resource"]["dispatch_allowed"] is False
     assert result["routing"]["status"] == "resource_throttled"
     assert processor.queue.get(task.task_id).state == "new"
+
+
+def test_core_processor_can_run_bounded_gene_lifecycle_evaluation(tmp_path: Path) -> None:
+    registry = {
+        "schema_version": 3,
+        "registry_authority": "Gene 0",
+        "reserved": [{"display_identity": "Gene 001", "serial": 1, "status": "reserved_for_owner_definition"}],
+        "genes": [
+            {"display_identity": "Gene 0", "serial": 0, "logical_id": "gene-node-1", "role": "coordinator", "status": "active", "capabilities": ["coordination"]},
+            {"display_identity": "Gene 002", "serial": 2, "logical_id": "gene-node-2", "role": "research", "status": "active", "capabilities": ["research", "validation"]},
+            {"display_identity": "Gene 003", "serial": 3, "logical_id": "gene-node-3", "role": "engineering", "status": "active", "capabilities": ["engineering", "repair"]},
+        ],
+    }
+    (tmp_path / "GENE_REGISTRY.json").write_text(__import__("json").dumps(registry), encoding="utf-8")
+    processor = GenesisCoreProcessor(tmp_path)
+    need = GeneNeed(
+        role="memory_shard_specialist",
+        objective="Relieve memory pressure",
+        capabilities=("memory_sharding", "knowledge_routing"),
+        evidence={"memory_pressure": True, "backlog_pressure": True},
+        memory_responsibility="longevity-shard",
+        replicas=("Gene 0",),
+    )
+
+    result = processor.cycle(gene_needs=(need,))
+
+    assert result["gene_lifecycle"]["status"] == "evaluated"
+    assert result["gene_lifecycle"]["authority"] == "Gene 0"
+    assert result["gene_lifecycle"]["decisions"][0]["action"] == "created_candidate"
+    persisted = __import__("json").loads((tmp_path / "GENE_REGISTRY.json").read_text())
+    assert any(gene["serial"] == 4 for gene in persisted["genes"])
