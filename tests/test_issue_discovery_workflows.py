@@ -22,9 +22,10 @@ def test_general_issue_discovery_has_native_schedule_and_solver_handoff() -> Non
     assert "python scripts/github_issue_discovery_resilient.py" in text
     assert "gh workflow run genesis-sequential-issue-controller.yml" in text
 
-    # A full evidence scan can outlive a push burst. New invocations must wait
-    # instead of repeatedly cancelling discovery before publication.
-    assert "timeout-minutes: 120" in text
+    # Discovery is bounded per run and persists its rotating cursor.
+    assert "timeout-minutes: 35" in text
+    assert "GENESIS_DISCOVERY_BATCH_SIZE: '5'" in text
+    assert "runtime/github_issue_discovery_cursor.json" in text
 
     # Discovery is an admission lane, never a second repair/promotion lane.
     assert "github_issue_autorepair.py" not in text
