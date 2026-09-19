@@ -123,9 +123,15 @@ def current_epoch_comments(comments: Iterable[dict], token: str) -> list[dict]:
     if latest >= 0:
         return rows[latest + 1 :]
     # Migration behavior: before the first universal state marker, preserve
-    # existing lane-local attempt evidence. Once epochs exist, a different
-    # token means material state changed and old attempts are no longer eligible.
-    return [] if any_epoch else rows
+    # existing lane-local attempt evidence, but never carry attempts across a
+    # capability release because that is a material capability-state change.
+    if any_epoch:
+        return []
+    latest_release = -1
+    for index, row in enumerate(rows):
+        if _body(row).startswith(CAPABILITY_RELEASE_PREFIX):
+            latest_release = index
+    return rows[latest_release + 1 :]
 
 
 def has_state_marker(comments: Iterable[dict], token: str) -> bool:
