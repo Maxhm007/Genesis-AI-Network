@@ -103,3 +103,43 @@ def test_core_processor_can_run_bounded_gene_lifecycle_evaluation(tmp_path: Path
     assert result["gene_lifecycle"]["decisions"][0]["action"] == "created_candidate"
     persisted = __import__("json").loads((tmp_path / "GENE_REGISTRY.json").read_text())
     assert any(gene["serial"] == 4 for gene in persisted["genes"])
+
+
+
+def test_core_processor_recalls_only_validated_persistent_memory(tmp_path: Path) -> None:
+    processor = GenesisCoreProcessor(tmp_path)
+    trusted = processor.memory.store.add(
+        memory_type="repair",
+        topic="bounded coding defect",
+        content="Use validated repair knowledge before repeating a failed coding strategy.",
+        source_type="verified_issue",
+        source_ref="#829",
+        state="candidate",
+    )
+    processor.memory.store.transition(
+        trusted.memory_id,
+        "validated",
+        evidence={"full_suite_passed": True},
+    )
+    processor.memory.store.add(
+        memory_type="repair",
+        topic="bounded coding defect",
+        content="Unverified guess that must not enter normal recall.",
+        source_type="draft",
+        source_ref="draft-1",
+        state="candidate",
+    )
+    processor.queue.create(
+        "Fix a bounded coding defect with prior repair knowledge",
+        module_id="genesis.coding",
+        priority=80,
+        payload={"target_path": "genesis/example.py"},
+    )
+
+    result = processor.cycle()
+
+    recalled = result["memory"]["recalled"]
+    assert result["memory"]["policy"].startswith("validated-only")
+    assert len(recalled) == 1
+    assert recalled[0]["memory_id"] == trusted.memory_id
+    assert "Unverified guess" not in str(recalled)
