@@ -94,7 +94,7 @@ jobs:
         if: steps.eligibility.outputs.eligible == 'true'
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/github_memory_sync.py --repository "$GITHUB_REPOSITORY" --max-issues 100
+        run: python scripts/github_memory_sync.py --repository "$GITHUB_REPOSITORY" --max-issues 100 || echo "Verified memory sync unavailable; continue without hydrated memory."
 
       - name: Restore open-model cache
         if: steps.eligibility.outputs.eligible == 'true'
@@ -263,7 +263,7 @@ jobs:
           fi
           python -m pytest -q
 
-          python scripts/record_verified_repair_memory.py \
+          if ! python scripts/record_verified_repair_memory.py \
             --repository "$GITHUB_REPOSITORY" \
             --issue-number "$ISSUE_NUMBER" \
             --target "$TARGET" \
@@ -271,6 +271,9 @@ jobs:
             --promoted-sha "$promoted_sha" \
             --worker-run "$GITHUB_RUN_ID" \
             --evidence-file runtime/github_issue_autorepair.json
+          then
+            echo "Verified repair memory recording failed; repair verification remains authoritative." >&2
+          fi
 
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
             --body "Genesis verified and promoted a bounded repair. Candidate: \`${CANDIDATE_SHA}\`. Promoted main SHA: \`${promoted_sha}\`. Verified target: \`${TARGET}\`. Evidence: target compilation, target-specific tests when present, and the full repository test suite passed after promotion. Worker run: ${GITHUB_RUN_ID}."
