@@ -43,7 +43,9 @@ def route_existing_self_improvement(
 
     This lane exists specifically for backlog-reduction mode. It never creates,
     reopens, edits, or relabels a GitHub Issue. It only converts an already-open
-    authoritative self-improvement Issue into the bounded execution task expected
+        if not isinstance(rows, list):
+        return []
+        return [row for row in rows if isinstance(row, dict) and "pull_request" not in row]
     by the specialist research/capability worker.
     """
 
