@@ -113,10 +113,19 @@ def current_epoch_comments(comments: Iterable[dict], token: str) -> list[dict]:
     rows = list(comments)
     marker = state_marker(token)
     latest = -1
+    any_epoch = False
     for index, row in enumerate(rows):
-        if marker in _body(row):
+        body = _body(row)
+        if STATE_PREFIX in body:
+            any_epoch = True
+        if marker in body:
             latest = index
-    return rows[latest + 1 :] if latest >= 0 else []
+    if latest >= 0:
+        return rows[latest + 1 :]
+    # Migration behavior: before the first universal state marker, preserve
+    # existing lane-local attempt evidence. Once epochs exist, a different
+    # token means material state changed and old attempts are no longer eligible.
+    return [] if any_epoch else rows
 
 
 def has_state_marker(comments: Iterable[dict], token: str) -> bool:
