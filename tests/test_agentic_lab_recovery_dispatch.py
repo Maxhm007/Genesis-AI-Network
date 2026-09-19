@@ -129,7 +129,7 @@ def test_capability_gap_creates_dependency_and_pauses_parent(monkeypatch):
     assert not any("genesis-agentic-strategy-worker.yml/dispatches" in path for _, path, _ in calls)
 
 
-def test_capability_issue_does_not_spawn_infinite_capability_chain(monkeypatch):
+def test_capability_issue_switches_provider_before_human_escalation(monkeypatch):
     calls: list[tuple[str, str, dict | None]] = []
     issue = _issue(
         46,
@@ -149,6 +149,9 @@ def test_capability_issue_does_not_spawn_infinite_capability_chain(monkeypatch):
         calls.append((method, path, payload))
         if method == "GET" and path == "/issues/46/comments?per_page=100":
             return comments
+        if method == "POST" and path == "/issues/46/comments":
+            comments.append({"body": payload["body"]})
+            return {}
         if method == "POST" and path == "/labels":
             return {}
         return {}
@@ -157,8 +160,48 @@ def test_capability_issue_does_not_spawn_infinite_capability_chain(monkeypatch):
 
     result = module.reserve_and_dispatch("owner/repo", "token")
 
-    assert result["status"] == "needs_human"
+    assert result["status"] == "dispatched"
+    assert result["provider"] == "qwen3"
+    assert result["strategy"] == "qwen3_fallback"
     assert not any(method == "POST" and path == "/issues" for method, path, _ in calls)
+
+
+def test_agentic_switches_to_deepseek_after_qwen3_failure(monkeypatch):
+    calls: list[tuple[str, str, dict | None]] = []
+    issue = _issue(49)
+    comments = [
+        {"body": "<!-- genesis-agentic-strategy:evidence_first -->\nmethod"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `failed`"},
+        {"body": "<!-- genesis-agentic-strategy:alternative_implementation -->\nmethod"},
+        {"body": "<!-- genesis-agentic-strategy-result:alternative_implementation -->\nrepair status: `failed`"},
+        {"body": "<!-- genesis-agentic-strategy:qwen3_fallback -->\nmethod"},
+        {"body": "<!-- genesis-agentic-strategy-result:qwen3_fallback -->\nrepair status: `failed`"},
+    ]
+    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [issue])
+    monkeypatch.setattr(module, "safe_lane", lambda target: "generic")
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET" and path == "/issues/49/comments?per_page=100":
+            return comments
+        if method == "POST" and path == "/issues/49/comments":
+            comments.append({"body": payload["body"]})
+            return {}
+        if method == "POST" and path == "/labels":
+            return {}
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+
+    result = module.reserve_and_dispatch("owner/repo", "token")
+
+    assert result["provider"] == "deepseek"
+    assert result["gene"] == "Gene 003"
+    assert result["workflow"] == "genesis-deepseek-agentic-solver.yml"
+    assert any(
+        path == "/actions/workflows/genesis-deepseek-agentic-solver.yml/dispatches"
+        for _, path, _ in calls
+    )
 
 
 def test_capability_release_resets_prior_result_and_strategy_history():
