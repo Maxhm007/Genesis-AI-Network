@@ -9,6 +9,7 @@ from pathlib import Path
 from typing import Callable
 
 from .github_issue_task_router import issue_authority_enabled
+from .issue_target import extract_issue_target
 
 
 PROTECTED_LABELS = {"genesis-persistent", "genesis-control"}
@@ -209,7 +210,7 @@ def _routing_target(issue: dict, root: Path) -> tuple[str, str] | None:
     lower_title = title.lower()
     lower_body = body.lower()
 
-    if TARGET_RE.search(body):
+    if extract_issue_target(body):
         return None
     task_type = _task_type(body)
     mapped = TASK_TYPE_TARGETS.get(task_type, "")
