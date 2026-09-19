@@ -9,6 +9,8 @@ on:
     paths:
       - .github/workflows/genesis-agentic-terminal-reconciler.yml
       - genesis/issue_lifecycle.py
+      - tests/test_structured_output_schema.py
+      - genesis/learned_capabilities.py
       - tests/test_core_processor.py
       - tests/test_unsolved_issue_reactivation.py
       - tests/test_autonomy_heartbeat.py
