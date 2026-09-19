@@ -11,7 +11,12 @@ on:
       - genesis/issue_lifecycle.py
       - genesis/selfdev.py
       - scripts/issue_lifecycle_reconcile.py
+      - scripts/unsolved_issue_reactivation.py
+      - scripts/agentic_lab_recovery_dispatch.py
+      - scripts/recovery_solver_dispatch.py
+      - scripts/deepseek_agentic_selector.py
       - tests/test_issue_lifecycle.py
+      - tests/test_selfdev_policy.py
 
 permissions:
   issues: write
