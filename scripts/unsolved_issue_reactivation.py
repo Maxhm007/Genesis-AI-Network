@@ -7,8 +7,6 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from genesis.issue_lifecycle import lifecycle_decision
-
 
 AGENTIC_LABEL = "agentic-lab"
 EXHAUSTED_LABEL = "genesis-solver-exhausted"
@@ -59,20 +57,6 @@ def request(repository: str, token: str, method: str, path: str, payload: dict |
         detail = exc.read().decode("utf-8", errors="replace")[:1000]
         raise RuntimeError(f"GitHub HTTP {exc.code} for {method} {path}: {detail}") from exc
 
-
-
-def all_issues(repository: str, token: str) -> list[dict]:
-    rows: list[dict] = []
-    page = 1
-    while True:
-        batch = request(repository, token, "GET", f"/issues?state=all&per_page=100&page={page}") or []
-        rows.extend(row for row in batch if isinstance(row, dict) and not row.get("pull_request"))
-        if len(batch) < 100:
-            break
-        page += 1
-        if page > 20:
-            break
-    return rows
 
 
 def labels(issue: dict) -> set[str]:
@@ -132,15 +116,6 @@ def reactivate(repository: str, token: str, issue_number: int) -> dict:
     if state != "closed":
         return {"status": "ignored", "issue_number": number, "reason": "issue_not_closed"}
 
-    current = all_issues(repository, token)
-    by_number = {int(row.get("number") or 0): row for row in current if int(row.get("number") or 0) > 0}
-    decision = lifecycle_decision(issue, by_number)
-    if decision.action != "reopen":
-        return {
-            "status": "ignored",
-            "issue_number": number,
-            "reason": f"lifecycle_{decision.reason}",
-        }
     if VERIFIED_LABEL in issue_labels:
         return {"status": "ignored", "issue_number": number, "reason": "verified_closure"}
     if SUPERSEDED_LABEL in issue_labels:
