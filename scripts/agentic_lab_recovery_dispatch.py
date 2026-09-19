@@ -196,7 +196,11 @@ def ensure_anti_stuck_epoch(
     target: str,
 ) -> tuple[str, list[dict]]:
     state_token = material_state_token(issue, target, comments, root=ROOT)
-    if not has_state_marker(comments, state_token):
+    has_any_epoch = any(
+        "<!-- genesis-anti-stuck-state:" in str(row.get("body") or "")
+        for row in comments
+    )
+    if not has_state_marker(comments, state_token) and has_any_epoch:
         request(
             repository,
             token,
@@ -670,6 +674,21 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             f"/issues/{number}/labels",
             {"labels": ["genesis-repair-in-progress", "genesis-autonomous", AGENTIC_LABEL]},
         )
+
+        if not has_state_marker(comments, state_token):
+            request(
+                repository,
+                token,
+                "POST",
+                f"/issues/{number}/comments",
+                {
+                    "body": (
+                        f"{state_marker(state_token)}\n"
+                        "Genesis Anti-Stuck Controller established the initial material-state epoch "
+                        "after preserving prior lane-local attempt history."
+                    )
+                },
+            )
 
         strategy_marker = f"{STRATEGY_MARKER_PREFIX}{strategy} -->"
         request(
