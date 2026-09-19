@@ -5,6 +5,7 @@ import json
 from pathlib import Path
 
 from .gene_compute import GeneComputeFabric
+from .gene_lifecycle import GeneLifecycleManager, GeneNeed
 from .modules.task_queue import GenesisTask, PersistentTaskQueue
 from .resource import ResourceModule, ResourceSnapshot
 from .task_router import TaskRouterModule
@@ -78,7 +79,11 @@ class GenesisCoreProcessor:
             "snapshot": snapshot.as_dict(),
         }
 
-    def cycle(self, resource_snapshot: ResourceSnapshot | None = None) -> dict:
+    def cycle(
+        self,
+        resource_snapshot: ResourceSnapshot | None = None,
+        gene_needs: tuple[GeneNeed, ...] = (),
+    ) -> dict:
         """Run one central scheduling/coordination cycle.
 
         The processor decides whether scheduling is permitted, delegates durable
@@ -88,6 +93,21 @@ class GenesisCoreProcessor:
         """
         before = self._state_summary()
         resource = self._resource_policy(resource_snapshot)
+
+        lifecycle = {
+            "status": "idle",
+            "reason": "no_gene_demand_evidence",
+            "decisions": [],
+        }
+        registry_path = self.root / "GENE_REGISTRY.json"
+        if gene_needs and registry_path.is_file():
+            manager = GeneLifecycleManager(registry_path)
+            decisions = manager.evaluate_cycle(gene_needs)
+            lifecycle = {
+                "status": "evaluated",
+                "authority": "Gene 0",
+                "decisions": decisions,
+            }
         if resource["dispatch_allowed"]:
             routing = self.router.assign_next()
         else:
@@ -131,6 +151,7 @@ class GenesisCoreProcessor:
                 "worker_role": worker.role if worker else None,
             },
             "gene_topology": self.gene_fabric.topology(),
+            "gene_lifecycle": lifecycle,
             "system_state_before": before,
             "system_state_after": self._state_summary(),
             "principle": "Gene 0 coordinates; Gene workers provide model-backed intelligence; Security and validators retain independent authority.",
