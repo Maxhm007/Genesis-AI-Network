@@ -59,6 +59,50 @@ def trusted_memory_comment(comment: dict) -> bool:
     return association in TRUSTED_ASSOCIATIONS or login in TRUSTED_BOT_LOGINS
 
 
+def hydrate_payloads(memory: GenesisMemory, payloads: list[dict]) -> dict:
+    ordered = sorted(
+        [payload for payload in payloads if isinstance(payload, dict)],
+        key=lambda payload: str((payload.get("record") or {}).get("created_at") or ""),
+        reverse=True,
+    )
+    imported = 0
+    ignored = 0
+    current_by_key: dict[str, str] = {}
+    for payload in ordered:
+        try:
+            before = memory.store.stats()["total"]
+            item = memory.store.import_portable(payload)
+            if memory.store.stats()["total"] > before:
+                imported += 1
+            key = str(item.metadata.get("knowledge_key") or "").strip()
+            if not key:
+                continue
+            winner = current_by_key.get(key)
+            if winner is None:
+                current_by_key[key] = item.memory_id
+                memory.store.supersede_knowledge_key(
+                    key,
+                    keep_memory_id=item.memory_id,
+                    evidence={
+                        "reason": "newest durable memory hydrated for knowledge key",
+                        "replacement_memory_id": item.memory_id,
+                    },
+                )
+            elif item.memory_id != winner and item.state == "validated":
+                memory.store.transition(
+                    item.memory_id,
+                    "superseded",
+                    evidence={
+                        "reason": "newer durable memory already hydrated",
+                        "replacement_memory_id": winner,
+                    },
+                )
+        except (KeyError, TypeError, ValueError):
+            ignored += 1
+    memory.store.prune()
+    return {"imported": imported, "ignored": ignored}
+
+
 def sync(repository: str, token: str, *, root: Path = ROOT, max_issues: int = 100) -> dict:
     limit = max(1, min(int(max_issues), 200))
     query = urllib.parse.quote(f"repo:{repository} is:issue is:closed label:genesis-verified label:genesis-memory")
@@ -76,8 +120,7 @@ def sync(repository: str, token: str, *, root: Path = ROOT, max_issues: int = 10
         search = json.loads(response.read().decode("utf-8"))
 
     memory = GenesisMemory(root)
-    imported = 0
-    ignored = 0
+    payloads: list[dict] = []
     issues_seen = 0
     for issue in list(search.get("items") or [])[:limit]:
         number = int(issue.get("number") or 0)
@@ -89,21 +132,14 @@ def sync(repository: str, token: str, *, root: Path = ROOT, max_issues: int = 10
             if not isinstance(comment, dict) or not trusted_memory_comment(comment):
                 continue
             payload = decode_memory_marker(str(comment.get("body") or ""))
-            if payload is None:
-                continue
-            try:
-                before = memory.store.stats()["total"]
-                memory.store.import_portable(payload)
-                if memory.store.stats()["total"] > before:
-                    imported += 1
-            except (KeyError, TypeError, ValueError):
-                ignored += 1
-    memory.store.prune()
+            if payload is not None:
+                payloads.append(payload)
+
+    hydrated = hydrate_payloads(memory, payloads)
     return {
         "status": "ok",
         "issues_seen": issues_seen,
-        "imported": imported,
-        "ignored": ignored,
+        **hydrated,
         **memory.store.stats(),
     }
 
