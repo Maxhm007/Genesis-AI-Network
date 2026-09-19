@@ -157,3 +157,27 @@ def test_memory_retention_is_bounded_and_prefers_discarding_rejected(tmp_path: P
     assert removed == 5
     assert store.stats()["total"] == 100
     assert all(store.get(memory_id) is None for memory_id in rejected_ids[:5])
+
+
+
+def test_verified_architecture_decision_supersedes_prior_rationale(tmp_path: Path):
+    memory = GenesisMemory(tmp_path)
+    first = memory.remember_verified_decision(
+        decision_id="issue-authority",
+        topic="Issue authority",
+        rationale="Use successor issues as retry authority.",
+        source_ref="issue:#865:v1",
+        evidence={"issue": 865, "version": 1},
+    )
+    second = memory.remember_verified_decision(
+        decision_id="issue-authority",
+        topic="Issue authority",
+        rationale="Keep one authoritative root issue across retries.",
+        source_ref="issue:#865:v2",
+        evidence={"issue": 865, "version": 2},
+    )
+
+    assert memory.store.get(first.memory_id).state == "superseded"
+    recalled = memory.recall("authoritative root issue retries")
+    assert any(row["memory_id"] == second.memory_id for row in recalled)
+    assert all(row["memory_id"] != first.memory_id for row in recalled)
