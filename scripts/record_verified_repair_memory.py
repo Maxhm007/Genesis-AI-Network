@@ -3,10 +3,11 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import urllib.error
 import urllib.request
 from pathlib import Path
 
-from genesis.memory import GenesisMemory
+from genesis.memory import GenesisMemory, contains_sensitive_material
 from scripts.github_memory_sync import decode_memory_marker, encode_memory_marker
 
 
@@ -30,6 +31,31 @@ def _api(repository: str, token: str, method: str, path: str, payload: dict | No
     with urllib.request.urlopen(request, timeout=30) as response:
         raw = response.read().decode("utf-8")
     return json.loads(raw) if raw.strip() else None
+
+
+def _ensure_memory_label(repository: str, token: str, issue_number: int) -> None:
+    try:
+        _api(
+            repository,
+            token,
+            "POST",
+            "/labels",
+            {
+                "name": "genesis-memory",
+                "color": "0e8a16",
+                "description": "Issue carries durable verified Genesis memory",
+            },
+        )
+    except urllib.error.HTTPError as exc:
+        if exc.code != 422:
+            raise
+    _api(
+        repository,
+        token,
+        "POST",
+        f"/issues/{int(issue_number)}/labels",
+        {"labels": ["genesis-memory"]},
+    )
 
 
 def _failure_summary(evidence: dict) -> list[dict]:
@@ -75,12 +101,17 @@ def record(
     diagnosis = evidence.get("diagnosis") if isinstance(evidence.get("diagnosis"), dict) else {}
     problem_class = str(diagnosis.get("category") or "github_reported_issue")
     root_cause = str(diagnosis.get("summary") or issue.get("title") or "verified repository defect")
+    issue_title = str(issue.get("title") or f"Issue #{int(issue_number)}")
+    if contains_sensitive_material(root_cause):
+        root_cause = "Sensitive diagnosis details were redacted from durable memory."
+    if contains_sensitive_material(issue_title):
+        issue_title = f"Issue #{int(issue_number)}"
     provider = str(evidence.get("provider") or "genesis-bounded-repair")
 
     memory = GenesisMemory(root)
     item = memory.remember_verified_repair(
         issue_number=int(issue_number),
-        issue_title=str(issue.get("title") or f"Issue #{int(issue_number)}"),
+        issue_title=issue_title,
         target=target,
         problem_class=problem_class,
         root_cause=root_cause,
@@ -104,6 +135,7 @@ def record(
             return {"status": "already_recorded", "memory_id": item.memory_id}
 
     marker = encode_memory_marker(portable)
+    _ensure_memory_label(repository, token, int(issue_number))
     _api(
         repository,
         token,
