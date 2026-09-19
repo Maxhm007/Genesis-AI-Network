@@ -96,8 +96,8 @@ jobs:
               if 'persistent github-native reporting channel' in lower_body:
                   continue
 
-              match = re.search(r'^- \*\*Target:\*\* `([^`]+)`', body, re.MULTILINE)
-              target = match.group(1).strip() if match else ''
+              from genesis.issue_target import extract_issue_target
+              target = extract_issue_target(body)
               if not target.startswith('genesis/') or not target.endswith('.py'):
                   continue
               if '..' in target or target in protected or not Path(target).is_file():
