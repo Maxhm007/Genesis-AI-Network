@@ -332,6 +332,55 @@ class GeneLifecycleManager:
                 return {"action": "none", "reason": "critical_memory_requires_core_replica", "gene": gene}
         return self.transition(serial, "active", "descriptor/configuration and resource budget validated")
 
+    def record_recommendation(self, recommender: str, need: GeneNeed, recommendation: str) -> dict:
+        recommender = str(recommender or "").strip()
+        if recommender not in {"Gene 002", "Gene 003"}:
+            raise ValueError("only Gene 002 or Gene 003 may submit support recommendations")
+        registry = self._load()
+        score = self.need_score(need)
+        self._record_decision(
+            registry,
+            "support_recommendation",
+            recommendation,
+            recommender=recommender,
+            need_key=self._need_key(need),
+            score=score,
+        )
+        self._atomic_write(registry)
+        return {
+            "action": "recommendation_recorded",
+            "recommender": recommender,
+            "score": score,
+            "registry_mutated": False,
+        }
+
+    def monitor_gene(
+        self,
+        serial: int,
+        *,
+        health_score: float,
+        resource_ok: bool = True,
+        retire_requested: bool = False,
+    ) -> dict:
+        registry = self._load()
+        gene = next((row for row in registry["genes"] if row.get("serial") == serial), None)
+        if gene is None:
+            raise KeyError(f"unknown Gene serial: {serial}")
+        current = str(gene.get("status") or "")
+        if current == "candidate":
+            return {"action": "none", "reason": "candidate_requires_explicit_validation", "gene": gene}
+        if current == "retired":
+            return {"action": "none", "reason": "already_retired", "gene": gene}
+        if retire_requested and current in {"active", "degraded", "suspended"}:
+            return self.transition(serial, "retiring", "monitor requested bounded retirement")
+        if not resource_ok and current in {"active", "degraded"}:
+            return self.transition(serial, "suspended", "resource health outside configured operating budget")
+        if health_score < 0.4 and current == "active":
+            return self.transition(serial, "degraded", "health score below degradation threshold")
+        if health_score >= 0.7 and current == "degraded":
+            return self.transition(serial, "active", "health score recovered")
+        return {"action": "unchanged", "gene": gene}
+
     def evaluate_cycle(self, needs: Iterable[GeneNeed]) -> list[dict]:
         results: list[dict] = []
         created = 0
