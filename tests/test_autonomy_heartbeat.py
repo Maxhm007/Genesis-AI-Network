@@ -42,11 +42,15 @@ def test_bounded_worker_cannot_overlap_same_issue() -> None:
     assert "genesis-repair-in-progress" in text
 
 
-def test_action_failure_watcher_remains_issue_creation_only() -> None:
+def test_action_failure_watcher_is_scheduled_detection_retry_and_routing_only() -> None:
     text = WATCHER.read_text(encoding="utf-8")
 
-    assert "workflow_run:" in text
+    assert "schedule:" in text
+    assert "cron: '*/10 * * * *'" in text
+    assert "actions: write" in text
     assert "issues: write" in text
-    assert "gh issue create" in text
-    assert "The watcher does not repair or close issues" in text
+    assert "python scripts/action_failure_watchdog.py" in text
+    assert "--retry-once" in text
+    assert "gh workflow run genesis-sequential-issue-controller.yml" in text
     assert "github_issue_autorepair.py" not in text
+    assert "gh issue close" not in text
