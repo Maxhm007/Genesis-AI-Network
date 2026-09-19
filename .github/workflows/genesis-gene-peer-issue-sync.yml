@@ -24,6 +24,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install repository dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
       - name: Validate peer issue sync policy
         run: python -m pytest tests/test_gene_peer_issue_sync.py -q
 
