@@ -111,6 +111,11 @@ jobs:
       - name: Verify discovery and publication boundaries
         run: python -m pytest -q tests/test_issue_governor.py tests/test_issue_discovery_engine.py tests/test_github_issue_discovery.py tests/test_issue_discovery_workflows.py
 
+      - name: Hydrate validated Genesis memory
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/github_memory_sync.py --repository "$GITHUB_REPOSITORY" --max-issues 100 || echo "Verified memory sync unavailable; discovery continues without hydrated memory."
+
       - name: Install free local discovery intelligence
         run: |
           python -m pip install --upgrade pip
