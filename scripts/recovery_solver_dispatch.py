@@ -3,6 +3,8 @@ from __future__ import annotations
 import json
 import os
 
+from genesis.issue_lifecycle import local_claim_block_reason
+
 from agentic_lab_recovery_dispatch import (
     ACTIVE_LABELS,
     AGENTIC_LABEL,
@@ -190,6 +192,20 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             continue
 
         comments = issue_comments(repository, token, number)
+        lifecycle_block = local_claim_block_reason(issue, comments)
+        if lifecycle_block:
+            for stale_label in (
+                RECOVERY_LABEL,
+                "genesis-repair-in-progress",
+                "genesis-validating",
+                "genesis-working",
+                "genesis-verifying",
+                AGENTIC_LABEL,
+                RECOVERY_ESCALATED_LABEL,
+            ):
+                _remove_label(repository, token, number, stale_label)
+            continue
+
         if any(INFRA_QUARANTINE_MARKER in str(row.get("body") or "") for row in comments):
             # Infrastructure-quarantined Issues must not be reclaimed by the
             # Recovery Solver. Otherwise this lane simply re-adds Agentic labels
