@@ -132,6 +132,13 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
         "genesis/file_self_review.py",
         "genesis/file_self_review_policy.py",
     }
+    PROTECTED_CAPABILITY_BLOCKED_TARGETS = PROTECTED_DETECTED_TARGETS | {
+        "scripts/secret_guard.py",
+        "scripts/privileged_change_gate.py",
+        "scripts/verify_validator_votes.py",
+        "scripts/action_repair_guard.py",
+        "scripts/issue_acceptance_guard.py",
+    }
     GENERIC_STOPWORDS = {
         "acceptance",
         "capability",
@@ -391,6 +398,16 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
         return EvidenceFirstRepairFollowupProvider(Path(root).resolve(), target_path, delegate)
 
     @classmethod
+    def _repairable_capability_blocked_target(cls, target_path: str) -> bool:
+        normalized = str(target_path or "").replace("\\", "/").lstrip("./")
+        return (
+            normalized.startswith(("genesis/", "scripts/"))
+            and normalized.endswith(".py")
+            and ".." not in Path(normalized).parts
+            and normalized not in cls.PROTECTED_CAPABILITY_BLOCKED_TARGETS
+        )
+
+    @classmethod
     def _capability_growth_provider(
         cls,
         root: Path,
@@ -423,11 +440,7 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
         blocked_target = blocked_match.group(1).replace("\\", "/").lstrip("./")
         if target_path != cls.CAPABILITY_BUILDER_TARGET:
             return None
-        if (
-            not blocked_target.startswith(("genesis/", "scripts/"))
-            or not blocked_target.endswith(".py")
-            or ".." in Path(blocked_target).parts
-        ):
+        if not cls._repairable_capability_blocked_target(blocked_target):
             return None
 
         coding.executor._validate_paths([target_path])
