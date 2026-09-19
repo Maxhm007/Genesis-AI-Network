@@ -395,6 +395,8 @@ class MemoryStore:
                     "promoted_sha",
                     "worker_run",
                     "failed_approaches",
+                    "problem_class",
+                    "provider_performance",
                     "decision_id",
                 )
                 if key in item.metadata
@@ -577,11 +579,21 @@ class GenesisMemory:
                 "knowledge_key": knowledge_key,
                 "issue_number": int(issue_number),
                 "target": target,
+                "problem_class": problem_class,
                 "provider": provider,
                 "worker_run": worker_run,
                 "candidate_sha": candidate_sha,
                 "promoted_sha": promoted_sha,
                 "failed_approaches": failed,
+                "provider_performance": {
+                    "successful_provider": provider,
+                    "failed_attempt_count": len(failed),
+                    "failed_providers": sorted({
+                        str(row.get("provider") or "unknown")
+                        for row in failed
+                        if isinstance(row, dict) and row.get("provider")
+                    }),
+                },
             },
         )
         if candidate.state == "candidate":
