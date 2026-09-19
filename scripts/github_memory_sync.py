@@ -61,7 +61,7 @@ def trusted_memory_comment(comment: dict) -> bool:
 
 def sync(repository: str, token: str, *, root: Path = ROOT, max_issues: int = 100) -> dict:
     limit = max(1, min(int(max_issues), 200))
-    query = urllib.parse.quote(f"repo:{repository} is:issue is:closed label:genesis-verified")
+    query = urllib.parse.quote(f"repo:{repository} is:issue is:closed label:genesis-verified label:genesis-memory")
     url = f"https://api.github.com/search/issues?q={query}&sort=updated&order=desc&per_page=100"
     req = urllib.request.Request(
         url,
