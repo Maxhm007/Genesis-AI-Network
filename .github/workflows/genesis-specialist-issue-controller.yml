@@ -67,6 +67,7 @@ jobs:
           excluded_labels = {
               'genesis-persistent', 'genesis-control', 'duplicate', 'invalid', 'wontfix',
               'genesis-solver-exhausted', 'genesis-deferred', 'genesis-superseded', 'genesis-verified',
+              'genesis-waiting-capability', 'genesis-needs-human', 'genesis-blocked',
           }
 
           for issue in issues:
@@ -135,7 +136,10 @@ jobs:
               'genesis-claimed', 'genesis-working', 'genesis-verifying',
               'genesis-repair-in-progress', 'genesis-validating', 'genesis-priority-claim',
           }
-          terminal = {'genesis-solver-exhausted', 'genesis-deferred', 'genesis-superseded', 'genesis-verified'}
+          terminal = {
+              'genesis-solver-exhausted', 'genesis-deferred', 'genesis-superseded', 'genesis-verified',
+              'genesis-waiting-capability', 'genesis-needs-human', 'genesis-blocked',
+          }
           protected_scripts = {
               'scripts/secret_guard.py',
               'scripts/privileged_change_gate.py',
