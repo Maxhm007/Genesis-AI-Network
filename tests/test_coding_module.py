@@ -242,3 +242,43 @@ def test_coding_context_is_bounded_to_allowed_paths(tmp_path: Path):
     module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
     context = module.read_context(["genesis/example.py"])
     assert context["genesis/example.py"] == "VALUE = 7\n"
+
+
+
+def test_coding_prompt_reuses_validated_memory_but_not_superseded_fix(tmp_path: Path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "genesis" / "example.py").write_text("VALUE = 7\n", encoding="utf-8")
+    provider = PromptCaptureProvider()
+    module = CodingModule(tmp_path, ProviderRegistry(include_bootstrap=False))
+
+    old = module.memory.store.add(
+        memory_type="repair",
+        topic="tune parser value",
+        content="Old repair said to force VALUE to 3.",
+        source_type="verified_github_repair",
+        source_ref="issue:1:commit:old",
+        metadata={"knowledge_key": "repair:example"},
+    )
+    old = module.memory.store.transition(old.memory_id, "validated", evidence={"full_suite_passed": True})
+
+    current = module.memory.store.add(
+        memory_type="repair",
+        topic="tune parser value",
+        content="Newer repair says preserve current syntax and change only the verified value.",
+        source_type="verified_github_repair",
+        source_ref="issue:2:commit:new",
+        metadata={"knowledge_key": "repair:example"},
+    )
+    current = module.memory.store.transition(current.memory_id, "validated", evidence={"full_suite_passed": True})
+    module.memory.store.supersede_knowledge_key(
+        "repair:example",
+        keep_memory_id=current.memory_id,
+        evidence={"replacement_memory_id": current.memory_id},
+    )
+
+    module.propose("Tune parser value safely", ["genesis/example.py"], provider=provider)
+
+    assert "VALIDATED_LONG_TERM_MEMORY_POLICY" in provider.prompt
+    assert "current repository evidence conflicts" in provider.prompt
+    assert "Newer repair says preserve current syntax" in provider.prompt
+    assert "Old repair said to force VALUE to 3" not in provider.prompt
