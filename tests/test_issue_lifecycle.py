@@ -1,6 +1,6 @@
 from __future__ import annotations
 
-from genesis.issue_lifecycle import lifecycle_decision, local_claim_block_reason
+from genesis.issue_lifecycle import family_ids_for_issue, family_status, lifecycle_decision, local_claim_block_reason
 
 
 def issue(
@@ -140,3 +140,80 @@ def test_fresh_post_fix_regression_is_not_suppressed():
     decision = lifecycle_decision(regression, {10: solved, 11: regression})
 
     assert decision.action == "keep_open"
+
+
+def test_open_legacy_successor_is_superseded_while_root_unresolved():
+    root = issue(802, labels=("genesis-task", "genesis-autonomous"))
+    successor = issue(
+        809,
+        labels=("genesis-task", "agentic-lab"),
+        body="<!-- genesis-unsolved-root:802 -->\n<!-- genesis-unsolved-successor-of:802 -->",
+    )
+
+    decision = lifecycle_decision(successor, {802: root, 809: successor})
+
+    assert decision.action == "close_superseded"
+    assert decision.reason == "authoritative_root_unresolved"
+    assert decision.reference_issue == 802
+
+
+def test_family_status_keeps_unresolved_root_as_only_authority():
+    root = issue(802, labels=("genesis-task",))
+    successor = issue(
+        809,
+        body="<!-- genesis-unsolved-root:802 -->\n<!-- genesis-unsolved-successor-of:802 -->",
+    )
+
+    status = family_status(802, {802: root, 809: successor})
+
+    assert status["family_id"] == "genesis-family:802"
+    assert status["root"] == 802
+    assert status["current_authority"] == 802
+    assert status["members"] == (802, 809)
+    assert status["successors"] == (809,)
+
+
+def test_shared_capability_issue_belongs_to_multiple_root_families():
+    root_a = issue(100, labels=("genesis-task",))
+    root_b = issue(200, labels=("genesis-task",))
+    capability = issue(
+        300,
+        body=(
+            "<!-- genesis-capability-work:abc -->\n"
+            "<!-- genesis-capability-parent:100 -->\n"
+            "- **Task type:** `capability_growth`"
+        ),
+    )
+    comments = [{"body": "<!-- genesis-capability-parent:200 -->"}]
+
+    families = family_ids_for_issue(
+        capability,
+        {100: root_a, 200: root_b, 300: capability},
+        comments=comments,
+    )
+
+    assert families == ("genesis-family:100", "genesis-family:200")
+
+
+def test_family_status_shows_capability_dependency_and_release():
+    root = issue(400, labels=("genesis-task",))
+    capability = issue(
+        500,
+        body=(
+            "<!-- genesis-capability-work:xyz -->\n"
+            "<!-- genesis-capability-parent:400 -->"
+        ),
+    )
+    comments = {
+        400: [
+            {"body": "<!-- genesis-agentic-capability-dependency:500 -->"},
+        ],
+        500: [],
+    }
+
+    status = family_status(400, {400: root, 500: capability}, comments_by_number=comments)
+    assert status["capability_dependencies"] == (500,)
+
+    comments[400].append({"body": "<!-- genesis-agentic-capability-release:500 -->"})
+    released = family_status(400, {400: root, 500: capability}, comments_by_number=comments)
+    assert released["capability_dependencies"] == (500,)
