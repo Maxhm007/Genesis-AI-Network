@@ -117,7 +117,9 @@ def reconcile(repository: str, token: str, *, issue_number: int | None = None, m
 
         state = str(issue.get("state") or "").lower()
         issue_labels = labels(issue)
-        comments = issue_comments(repository, token, int(number))
+        body = str(issue.get("body") or "")
+        needs_comments = VERIFIED_LABEL in issue_labels or "<!-- genesis-capability-work:" in body
+        comments = issue_comments(repository, token, int(number)) if needs_comments else []
         decision = lifecycle_decision(issue, by_number, comments=comments)
 
         if state == "open" and decision.action in {"close_superseded", "close_duplicate"}:
