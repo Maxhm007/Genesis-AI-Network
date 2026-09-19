@@ -36,7 +36,7 @@ env:
   GENESIS_PROVIDER_URL: http://127.0.0.1:8767
   GENESIS_PROVIDER_NAME: qwen3-1.7b-github-issue-discovery
   GENESIS_PROVIDER_TIMEOUT_SECONDS: '90'
-  GENESIS_PROVIDER_MAX_NEW_TOKENS: '128'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '128'\n  GENESIS_DISCOVERY_BATCH_SIZE: '5'
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
   GH_TOKEN: ${{ github.token }}
@@ -46,8 +46,8 @@ env:
 # key, discovery invocations are serialized so a long evidence scan reaches a
 # publication decision instead of being cancelled by the next push or schedule.
 concurrency:
-  group: genesis-github-issue-discovery-v2
-  cancel-in-progress: false
+  group: genesis-github-issue-discovery-v3
+  cancel-in-progress: true
 
 jobs:
   policy-tests:
@@ -71,7 +71,7 @@ jobs:
   discover:
     if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
-    timeout-minutes: 120
+    timeout-minutes: 35
     steps:
       - name: Checkout current main
         uses: actions/checkout@v4
@@ -83,13 +83,16 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Restore deferred issue candidate queue
-        id: deferred-queue
+      - name: Restore discovery state
+        id: discovery-state
         uses: actions/cache/restore@v4
         with:
-          path: runtime/deferred_issue_candidates.json
-          key: genesis-deferred-issues-${{ github.run_id }}
+          path: |
+            runtime/deferred_issue_candidates.json
+            runtime/github_issue_discovery_cursor.json
+          key: genesis-issue-discovery-state-${{ github.run_id }}
           restore-keys: |
+            genesis-issue-discovery-state-
             genesis-deferred-issues-
 
       - name: Release one deferred candidate when backlog health allows
@@ -170,12 +173,14 @@ jobs:
             echo 'No new grounded issue was opened; solver wake is unnecessary.'
           fi
 
-      - name: Save deferred issue candidate queue
+      - name: Save discovery state
         if: always()
         uses: actions/cache/save@v4
         with:
-          path: runtime/deferred_issue_candidates.json
-          key: genesis-deferred-issues-${{ github.run_id }}
+          path: |
+            runtime/deferred_issue_candidates.json
+            runtime/github_issue_discovery_cursor.json
+          key: genesis-issue-discovery-state-${{ github.run_id }}
 
       - name: Preserve discovery evidence
         if: always()
@@ -185,7 +190,7 @@ jobs:
           path: |
             runtime/github_issue_discovery.json
             runtime/deferred_issue_candidates.json
-            runtime/deferred_issue_release.json
+            runtime/deferred_issue_release.json\n            runtime/github_issue_discovery_cursor.json
             runtime/discovery/last_result.json
             runtime/discovery/history.jsonl
             /tmp/genesis-github-issue-discovery.log
