@@ -9,6 +9,14 @@ on:
     paths:
       - .github/workflows/genesis-agentic-terminal-reconciler.yml
       - genesis/issue_lifecycle.py
+      - .github/workflows/genesis-throughput-issue-controller.yml
+      - .github/workflows/genesis-specialist-issue-controller.yml
+      - .github/workflows/genesis-sequential-issue-controller.yml
+      - .github/workflows/genesis-deepseek-agentic-solver.yml
+      - tests/test_deepseek_agentic_selector.py
+      - tests/test_agentic_lab_recovery_dispatch.py
+      - tests/test_anti_stuck.py
+      - genesis/anti_stuck.py
       - tests/test_issue_governor.py
       - genesis/issue_governor.py
       - tests/test_structured_output_schema.py
