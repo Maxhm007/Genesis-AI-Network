@@ -3,13 +3,24 @@ from __future__ import annotations
 from genesis.issue_lifecycle import lifecycle_decision, local_claim_block_reason
 
 
-def issue(number: int, *, state: str = "open", labels=(), body: str = "", state_reason: str = "") -> dict:
+def issue(
+    number: int,
+    *,
+    state: str = "open",
+    labels=(),
+    body: str = "",
+    state_reason: str = "",
+    created_at: str = "",
+    closed_at: str = "",
+) -> dict:
     return {
         "number": number,
         "state": state,
         "state_reason": state_reason,
         "labels": [{"name": label} for label in labels],
         "body": body,
+        "created_at": created_at,
+        "closed_at": closed_at,
     }
 
 
@@ -32,12 +43,18 @@ def test_verified_equivalent_problem_closes_duplicate():
         760,
         state="closed",
         labels=("genesis-task", "genesis-verified"),
-        body="Genesis-Problem-Fingerprint: dashboard-review:abc",
+        body=(
+            "Genesis-Problem-Fingerprint: dashboard-review:abc\n"
+            "Genesis-Occurrence-Fingerprint: dashboard-occurrence:one"
+        ),
     )
     duplicate = issue(
         806,
         labels=("genesis-task", "agentic-lab"),
-        body="Genesis-Problem-Fingerprint: dashboard-review:abc",
+        body=(
+            "Genesis-Problem-Fingerprint: dashboard-review:abc\n"
+            "Genesis-Occurrence-Fingerprint: dashboard-occurrence:one"
+        ),
     )
 
     decision = lifecycle_decision(duplicate, {760: solved, 806: duplicate})
@@ -96,3 +113,30 @@ def test_infrastructure_quarantine_blocks_claim():
     comments = [{"body": "<!-- genesis-agentic-infrastructure-quarantine -->"}]
 
     assert local_claim_block_reason(current, comments) == "infrastructure_quarantine"
+
+
+def test_fresh_post_fix_regression_is_not_suppressed():
+    solved = issue(
+        10,
+        state="closed",
+        labels=("genesis-task", "genesis-verified"),
+        body=(
+            "Genesis-Problem-Fingerprint: genesis-problem:abc\n"
+            "Genesis-Occurrence-Fingerprint: genesis-occurrence:old"
+        ),
+        created_at="2026-09-01T00:00:00Z",
+        closed_at="2026-09-02T00:00:00Z",
+    )
+    regression = issue(
+        11,
+        labels=("genesis-task",),
+        body=(
+            "Genesis-Problem-Fingerprint: genesis-problem:abc\n"
+            "Genesis-Occurrence-Fingerprint: genesis-occurrence:new"
+        ),
+        created_at="2026-09-03T00:00:00Z",
+    )
+
+    decision = lifecycle_decision(regression, {10: solved, 11: regression})
+
+    assert decision.action == "keep_open"
