@@ -3,7 +3,10 @@ from __future__ import annotations
 from dataclasses import dataclass
 import json
 import math
+from pathlib import Path
 from typing import Callable
+
+from .memory import MemoryStore
 
 
 INCUBATION_MARKER = "genesis-learning-new-capability-v1"
@@ -2528,5 +2531,90 @@ register_capability(
     _tool_call_planning,
 )
 
+
+
+
+def _persistent_memory(
+    action: str,
+    *,
+    root,
+    memory_id: str = "",
+    memory_type: str = "",
+    topic: str = "",
+    content: str = "",
+    source_type: str = "",
+    source_ref: str = "",
+    confidence: float = 0.5,
+    importance: float = 0.5,
+    metadata: dict | None = None,
+    evidence: dict | None = None,
+    query: str = "",
+    limit: int = 6,
+):
+    """Bounded persistent agent memory backed by Genesis' trusted SQLite store."""
+    root_path = Path(root).resolve()
+    if not root_path.exists() or not root_path.is_dir():
+        raise ValueError("root must be an existing Genesis directory")
+    store = MemoryStore(root_path / "runtime" / "memory.sqlite3")
+    mode = str(action or "").strip().lower()
+
+    if mode == "store":
+        item = store.add(
+            memory_type=str(memory_type).strip(),
+            topic=str(topic).strip(),
+            content=str(content).strip(),
+            source_type=str(source_type).strip(),
+            source_ref=str(source_ref).strip(),
+            confidence=float(confidence),
+            importance=float(importance),
+            state="candidate",
+            metadata=dict(metadata or {}),
+        )
+        return asdict(item)
+
+    if mode == "validate":
+        if not str(memory_id).strip():
+            raise ValueError("memory_id is required")
+        item = store.transition(str(memory_id).strip(), "validated", evidence=dict(evidence or {}))
+        return asdict(item)
+
+    if mode in {"reject", "expire"}:
+        if not str(memory_id).strip():
+            raise ValueError("memory_id is required")
+        new_state = "rejected" if mode == "reject" else "expired"
+        item = store.transition(str(memory_id).strip(), new_state, evidence=dict(evidence or {}) or None)
+        return asdict(item)
+
+    if mode == "recall":
+        q = str(query).strip()
+        if not q:
+            raise ValueError("query is required")
+        bounded_limit = int(limit)
+        if bounded_limit < 1 or bounded_limit > 20:
+            raise ValueError("recall limit is out of bounds")
+        return [asdict(item) for item in store.retrieve(q, limit=bounded_limit)]
+
+    if mode == "stats":
+        return store.stats()
+
+    raise ValueError("unsupported persistent memory action")
+
+
+register_capability(
+    "persistent_memory",
+    (
+        "Store bounded long-lived Genesis knowledge across runs with provenance, "
+        "candidate-to-validated lifecycle controls, validated-only recall, and "
+        "local runtime persistence for semantic, episodic, procedural, policy, "
+        "decision, and repair knowledge."
+    ),
+    (
+        "Issue #819 requires persistent agent memory for the Qwen-based Genesis "
+        "baseline. This capability integrates the existing Genesis MemoryStore "
+        "instead of introducing a second memory database. Security, provenance, "
+        "validation, and owner-control boundaries remain unchanged."
+    ),
+    _persistent_memory,
+)
 
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
