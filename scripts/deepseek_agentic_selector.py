@@ -5,8 +5,21 @@ import json
 import re
 from pathlib import Path
 
+from genesis.anti_stuck import (
+    Attempt,
+    attempt_history,
+    attempt_marker,
+    has_state_marker,
+    material_state_token,
+    materially_equivalent_attempt,
+    next_lane_strategy,
+    state_marker,
+)
 from genesis.issue_lifecycle import local_claim_block_reason
 
+
+ROOT = Path(__file__).resolve().parents[1]
+DEEPSEEK_STRATEGIES = ("evidence_first", "alternative_implementation", "diagnostic_reframe")
 
 CONFLICT_LABELS = {
     "genesis-repair-in-progress",
@@ -137,10 +150,69 @@ def select(issues: list[dict]) -> dict | None:
     }
 
 
+def plan_deepseek_attempt(issue: dict, comments: list[dict], target: str) -> dict:
+    token = material_state_token(issue, target, comments, root=ROOT)
+    history = attempt_history(comments, token, target)
+    strategy = next_lane_strategy(
+        history,
+        provider="deepseek",
+        gene="Gene 003",
+        target=target,
+        strategies=DEEPSEEK_STRATEGIES,
+    )
+    if not strategy:
+        return {
+            "eligible": False,
+            "reason": "deepseek_strategy_epoch_exhausted",
+            "state_token": token,
+            "needs_state_marker": not has_state_marker(comments, token),
+        }
+
+    candidate = Attempt(
+        strategy=strategy,
+        provider="deepseek",
+        gene="Gene 003",
+        target=target,
+    )
+    if materially_equivalent_attempt(history, candidate):
+        return {
+            "eligible": False,
+            "reason": "materially_equivalent_attempt",
+            "state_token": token,
+            "needs_state_marker": not has_state_marker(comments, token),
+        }
+
+    return {
+        "eligible": True,
+        "strategy": strategy,
+        "provider": "deepseek",
+        "gene": "Gene 003",
+        "state_token": token,
+        "needs_state_marker": not has_state_marker(comments, token),
+        "state_marker": state_marker(token),
+        "attempt_marker": attempt_marker(candidate),
+        "attempt_number": len([row for row in history if row.provider.lower() == "deepseek"]) + 1,
+    }
+
+
 def main() -> None:
-    parser = argparse.ArgumentParser(description="Select the best open issue for the DeepSeek agentic solver")
-    parser.add_argument("--issues-json", type=Path, required=True)
+    parser = argparse.ArgumentParser(description="Select or plan work for the DeepSeek agentic solver")
+    parser.add_argument("--issues-json", type=Path)
+    parser.add_argument("--issue-json", type=Path)
+    parser.add_argument("--comments-json", type=Path)
+    parser.add_argument("--target", default="")
     args = parser.parse_args()
+
+    if args.issue_json and args.comments_json:
+        issue_payload = json.loads(args.issue_json.read_text(encoding="utf-8"))
+        comments_payload = json.loads(args.comments_json.read_text(encoding="utf-8"))
+        if not isinstance(issue_payload, dict) or not isinstance(comments_payload, list):
+            raise SystemExit("issue JSON must be an object and comments JSON must be a list")
+        print(json.dumps(plan_deepseek_attempt(issue_payload, comments_payload, args.target), sort_keys=True))
+        return
+
+    if not args.issues_json:
+        raise SystemExit("--issues-json is required for selection mode")
     payload = json.loads(args.issues_json.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
         raise SystemExit("issues JSON must be a list")
