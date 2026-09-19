@@ -148,6 +148,15 @@ def family_ids_for_issue(
     return tuple(f"genesis-family:{root}" for root in roots)
 
 
+def released_dependency_numbers(issue: dict, comments: Iterable[dict] = ()) -> tuple[int, ...]:
+    text = str(issue.get("body") or "") + "\n" + "\n".join(str(row.get("body") or "") for row in comments)
+    return tuple(
+        int(match.group(1))
+        for line in text.splitlines()
+        if (match := CAPABILITY_RELEASE_RE.search(line))
+    )
+
+
 def dependency_numbers(issue: dict, comments: Iterable[dict] = ()) -> tuple[int, ...]:
     text = str(issue.get("body") or "") + "\n" + "\n".join(str(row.get("body") or "") for row in comments)
     dependencies: list[int] = []
@@ -178,12 +187,23 @@ def family_status(
     members: list[int] = []
     successors: list[int] = []
     capabilities: set[int] = set()
+    relationships: list[dict] = []
 
     for number, issue in issues_by_number.items():
-        if _root_for_number(number, issues_by_number) == root_number:
+        resolved_root = _root_for_number(number, issues_by_number)
+        if resolved_root == root_number:
             members.append(number)
-            if number != root_number and root_issue_number(issue) is not None:
+            parent = root_issue_number(issue)
+            if number == root_number:
+                relationships.append({"issue": number, "kind": "root"})
+            elif parent is not None:
                 successors.append(number)
+                relationships.append({
+                    "issue": number,
+                    "kind": "successor",
+                    "predecessor": int(parent),
+                    "root": root_number,
+                })
         if "<!-- genesis-capability-work:" in str(issue.get("body") or ""):
             families = family_ids_for_issue(
                 issue,
@@ -192,14 +212,41 @@ def family_status(
             )
             if f"genesis-family:{root_number}" in families:
                 capabilities.add(number)
+                relationships.append({
+                    "issue": number,
+                    "kind": "shared_capability",
+                    "families": families,
+                })
 
     current_authority = None
-    if root is not None and not (is_closed(root) and is_verified(root)):
-        current_authority = root_number
-
-    dependencies = ()
+    dependencies: tuple[int, ...] = ()
+    released: tuple[int, ...] = ()
     if root is not None:
-        dependencies = dependency_numbers(root, comments_by_number.get(root_number, ()))
+        if not (is_closed(root) and is_verified(root)):
+            current_authority = root_number
+        root_comments = comments_by_number.get(root_number, ())
+        dependencies = dependency_numbers(root, root_comments)
+        released = released_dependency_numbers(root, root_comments)
+        for dependency in dependencies:
+            relationships.append({
+                "issue": dependency,
+                "kind": "capability_dependency",
+                "parent": root_number,
+                "status": "active",
+            })
+        for dependency in released:
+            relationships.append({
+                "issue": dependency,
+                "kind": "capability_dependency",
+                "parent": root_number,
+                "status": "released",
+            })
+
+    chain: list[str] = [f"root:{root_number}"]
+    for dependency in dependencies:
+        chain.append(f"capability:{dependency}")
+    if released:
+        chain.append(f"resumed:{root_number}")
 
     return {
         "family_id": f"genesis-family:{root_number}",
@@ -207,7 +254,11 @@ def family_status(
         "current_authority": current_authority,
         "members": tuple(sorted(set(members))),
         "successors": tuple(sorted(set(successors))),
-        "capability_dependencies": tuple(sorted(set(dependencies) | capabilities)),
+        "capability_dependencies": tuple(sorted(set(dependencies))),
+        "shared_capabilities": tuple(sorted(capabilities)),
+        "released_capabilities": tuple(sorted(set(released))),
+        "relationships": tuple(relationships),
+        "chain": tuple(chain),
     }
 
 
