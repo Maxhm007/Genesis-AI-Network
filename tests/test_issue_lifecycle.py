@@ -213,7 +213,12 @@ def test_family_status_shows_capability_dependency_and_release():
 
     status = family_status(400, {400: root, 500: capability}, comments_by_number=comments)
     assert status["capability_dependencies"] == (500,)
+    assert status["shared_capabilities"] == (500,)
+    assert status["chain"] == ("root:400", "capability:500")
 
     comments[400].append({"body": "<!-- genesis-agentic-capability-release:500 -->"})
     released = family_status(400, {400: root, 500: capability}, comments_by_number=comments)
-    assert released["capability_dependencies"] == (500,)
+    assert released["capability_dependencies"] == ()
+    assert released["shared_capabilities"] == (500,)
+    assert released["released_capabilities"] == (500,)
+    assert released["chain"] == ("root:400", "resumed:400")
