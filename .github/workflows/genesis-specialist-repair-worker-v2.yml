@@ -106,6 +106,12 @@ jobs:
         if: steps.eligibility.outputs.eligible == 'true'
         run: python -m pytest -q
 
+      - name: Hydrate validated Genesis memory
+        if: steps.eligibility.outputs.eligible == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/github_memory_sync.py --repository "$GITHUB_REPOSITORY" --max-issues 100
+
       - name: Restore open-model cache
         if: steps.eligibility.outputs.eligible == 'true'
         uses: actions/cache@v4
@@ -218,6 +224,15 @@ jobs:
           python -m py_compile "$TARGET"
           [[ ! -f "$target_test" ]] || python -m pytest -q "$target_test"
           python -m pytest -q
+          python scripts/record_verified_repair_memory.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --issue-number "$ISSUE_NUMBER" \
+            --target "$TARGET" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --promoted-sha "$promoted" \
+            --worker-run "$GITHUB_RUN_ID" \
+            --evidence-file runtime/github_issue_autorepair.json
+
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body "Genesis grounded specialist repair was independently validated and promoted. Candidate: \`${CANDIDATE_SHA}\`. Main: \`${promoted}\`. Target: \`${TARGET}\`. Full validation passed. Worker run: ${GITHUB_RUN_ID}."
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-verified >/dev/null
           for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-specialist genesis-blocked genesis-solver-exhausted genesis-deferred genesis-specialist-repair-attempt-1 genesis-specialist-repair-attempt-2 genesis-specialist-repair-attempt-3; do
