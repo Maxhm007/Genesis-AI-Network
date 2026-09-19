@@ -73,7 +73,11 @@ def test_verified_repair_record_is_portable_and_importable(tmp_path: Path, monke
     )
 
     assert result["status"] == "recorded"
-    posted = [payload["body"] for method, path, payload in calls if method == "POST"][0]
+    posted = [
+        payload["body"]
+        for method, path, payload in calls
+        if method == "POST" and path == "/issues/829/comments"
+    ][0]
     portable = github_memory_sync.decode_memory_marker(posted)
     assert portable is not None
 
@@ -174,7 +178,11 @@ def test_verified_architecture_decision_is_recorded_as_portable_memory(tmp_path:
     )
 
     assert result["status"] == "recorded"
-    posted = [payload["body"] for method, path, payload in calls if method == "POST"][0]
+    posted = [
+        payload["body"]
+        for method, path, payload in calls
+        if method == "POST" and path == "/issues/865/comments"
+    ][0]
     portable = github_memory_sync.decode_memory_marker(posted)
     assert portable["record"]["memory_type"] == "decision"
     assert portable["record"]["metadata"]["decision_id"] == "one-root-authority"
