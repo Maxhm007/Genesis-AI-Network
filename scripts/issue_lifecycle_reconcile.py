@@ -112,8 +112,8 @@ def close_issue(repository: str, token: str, number: int, *, reason: str, refere
         token,
         number,
         (
-            f"{RECONCILE_MARKER}\\n"
-            f"Genesis Issue Lifecycle Manager closed this Issue because \`{reason}\`.{reference_text} "
+            f"{RECONCILE_MARKER}\n"
+            f"Genesis Issue Lifecycle Manager closed this Issue because `{reason}`.{reference_text} "
             "Current repository authority/dependency state overrides stale retry history. "
             "No implementation acceptance criterion was waived."
         ),
@@ -128,7 +128,7 @@ def reopen_issue(repository: str, token: str, number: int) -> None:
         token,
         number,
         (
-            f"{RECONCILE_MARKER}\\n"
+            f"{RECONCILE_MARKER}\n"
             "Genesis Issue Lifecycle Manager reopened this Issue because it is still an authoritative, unverified root task. "
             "The decision is based on current repository authority state rather than stale solver labels."
         ),
