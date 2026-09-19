@@ -177,3 +177,66 @@ def test_value_score_is_deterministic_and_explainable():
         "success_probability",
         "retry_penalty",
     }
+
+
+def test_equivalent_issue_resolves_open_successor_to_root():
+    problem = "genesis-problem:abc"
+    occurrence = "genesis-occurrence:one"
+    root = {
+        "number": 10,
+        "state": "open",
+        "labels": [{"name": "genesis-task"}],
+        "body": f"{PROBLEM_MARKER} {problem}\n{OCCURRENCE_MARKER} {occurrence}",
+    }
+    successor = {
+        "number": 11,
+        "state": "open",
+        "labels": [{"name": "genesis-task"}],
+        "body": (
+            "<!-- genesis-unsolved-root:10 -->\n"
+            "<!-- genesis-unsolved-successor-of:10 -->\n"
+            f"{PROBLEM_MARKER} {problem}\n"
+            f"{OCCURRENCE_MARKER} {occurrence}"
+        ),
+    }
+
+    relation, issue = equivalent_issue(
+        [successor, root],
+        problem_fp=problem,
+        occurrence_fp=occurrence,
+    )
+
+    assert relation == "reuse_open_root"
+    assert issue["number"] == 10
+
+
+def test_stale_successor_of_verified_root_does_not_suppress_fresh_recurrence():
+    problem = "genesis-problem:abc"
+    old_occurrence = "genesis-occurrence:old"
+    fresh_occurrence = "genesis-occurrence:fresh"
+    root = {
+        "number": 20,
+        "state": "closed",
+        "state_reason": "completed",
+        "labels": [{"name": "genesis-task"}, {"name": "genesis-verified"}],
+        "body": f"{PROBLEM_MARKER} {problem}\n{OCCURRENCE_MARKER} {old_occurrence}",
+    }
+    stale_successor = {
+        "number": 21,
+        "state": "open",
+        "labels": [{"name": "genesis-task"}],
+        "body": (
+            "<!-- genesis-unsolved-root:20 -->\n"
+            f"{PROBLEM_MARKER} {problem}\n"
+            f"{OCCURRENCE_MARKER} {old_occurrence}"
+        ),
+    }
+
+    relation, issue = equivalent_issue(
+        [stale_successor, root],
+        problem_fp=problem,
+        occurrence_fp=fresh_occurrence,
+    )
+
+    assert relation == "new"
+    assert issue is None
