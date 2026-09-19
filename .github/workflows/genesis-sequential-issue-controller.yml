@@ -337,7 +337,7 @@ jobs:
                   remove_label "$issue_number" genesis-working
                   add_label "$issue_number" genesis-verifying
                   gh_retry gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
-                    --body "Genesis verification evidence: the Action failure recorded in run `${failed_run_id}` for `${workflow_path}` is superseded by newer successful main run `${recovered_run}` at SHA `${recovered_sha}`. The same workflow recovered after the recorded failure. Controller run: ${GITHUB_RUN_ID}, attempt: ${attempt}/${max_attempts}." >/dev/null
+                    --body "Genesis verification evidence: the Action failure recorded in run ${failed_run_id} for ${workflow_path} is superseded by newer successful main run ${recovered_run} at SHA ${recovered_sha}. The same workflow recovered after the recorded failure. Controller run: ${GITHUB_RUN_ID}, attempt: ${attempt}/${max_attempts}." >/dev/null
                   add_label "$issue_number" genesis-verified
                   remove_label "$issue_number" genesis-blocked
                   remove_label "$issue_number" genesis-solver-exhausted
