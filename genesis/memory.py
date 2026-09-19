@@ -11,7 +11,7 @@ from pathlib import Path
 from typing import Any
 
 
-MEMORY_TYPES = {"semantic", "episodic", "procedural", "policy_context"}
+MEMORY_TYPES = {"semantic", "episodic", "procedural", "policy_context", "decision", "repair"}
 MEMORY_STATES = {"candidate", "validated", "rejected", "expired"}
 
 
