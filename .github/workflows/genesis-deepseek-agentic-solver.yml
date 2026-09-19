@@ -305,7 +305,7 @@ jobs:
           for label in genesis-deepseek-working genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying genesis-blocked genesis-solver-exhausted genesis-deferred; do
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
           done
-          gh api "repos/${GITHUB_REPOSITORY}/issues/${ISSUE_NUMBER}" --method PATCH -f state=closed -f state_reason=completed >/dev/null
+          echo "Verified evidence recorded; Genesis Issue Closure Manager owns the final close/seal decision."
           git push origin --delete "$CANDIDATE_BRANCH" >/dev/null 2>&1 || true
 
       - name: Comment failure and release for retry
@@ -320,8 +320,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          state=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state --jq '.state')
-          if [[ "$state" == CLOSED ]]; then exit 0; fi
+          issue_json=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels)
+          state=$(jq -r '.state' <<<"$issue_json")
+          verified=$(jq -r '([.labels[].name] | index("genesis-verified")) != null' <<<"$issue_json")
+          if [[ "$state" == CLOSED || "$verified" == "true" ]]; then exit 0; fi
           repair_status="${REASON:-${STATUS:-worker_failed_before_evidence}}"
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deepseek-working >/dev/null 2>&1 || true
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-deepseek-agentic --add-label genesis-autonomous >/dev/null 2>&1 || true
