@@ -138,6 +138,12 @@ jobs:
         if: steps.select.outputs.selected == 'true'
         run: python -m pytest -q
 
+      - name: Hydrate validated Genesis memory
+        if: steps.select.outputs.selected == 'true'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/github_memory_sync.py --repository "$GITHUB_REPOSITORY" --max-issues 100
+
       - name: Restore DeepSeek model cache
         if: steps.select.outputs.selected == 'true'
         uses: actions/cache@v4
@@ -277,6 +283,15 @@ jobs:
           python -m py_compile "$TARGET"
           if [[ -f "$target_test" ]]; then python -m pytest -q "$target_test"; fi
           python -m pytest -q
+
+          python scripts/record_verified_repair_memory.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --issue-number "$ISSUE_NUMBER" \
+            --target "$TARGET" \
+            --candidate-sha "$CANDIDATE_SHA" \
+            --promoted-sha "$promoted_sha" \
+            --worker-run "$GITHUB_RUN_ID" \
+            --evidence-file runtime/github_issue_autorepair.json
 
           printf '%s\n%s\n' \
             "<!-- genesis-deepseek-result:solved -->" \
