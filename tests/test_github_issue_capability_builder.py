@@ -331,3 +331,65 @@ def test_user_authored_capability_growth_issue_cannot_select_self_repair_route(t
     )
 
     assert provider is None
+
+
+
+def _script_capability_growth_issue(blocked_target: str) -> dict:
+    return {
+        "number": 888,
+        "title": f"[Genesis Capability] Repair {blocked_target} blocker: blocked_protected_or_unsupported_target",
+        "user": {"login": "github-actions[bot]"},
+        "body": (
+            "<!-- genesis-capability-work:23216c6a519daf45 -->\n"
+            "<!-- genesis-capability-parent:887 -->\n"
+            f"- **Blocked target:** `{blocked_target}`\n"
+            "- **Observed blocker:** `blocked_protected_or_unsupported_target`\n"
+            "- **Task type:** `capability_growth`\n"
+            "- **Target:** `genesis/github_issue_capability_builder.py`\n"
+        ),
+    }
+
+
+def test_capability_growth_allows_safe_dashboard_script_blocker(tmp_path: Path, monkeypatch) -> None:
+    builder = tmp_path / "genesis" / "github_issue_capability_builder.py"
+    builder.parent.mkdir(parents=True, exist_ok=True)
+    builder.write_text("VALUE = 1\n", encoding="utf-8")
+
+    class FakeHTTPProvider:
+        def __init__(self, base_url: str, name: str = "fake", timeout: float = 20.0) -> None:
+            self.base_url = base_url
+            self.name = name
+            self.timeout = timeout
+
+        def available(self) -> bool:
+            return True
+
+        def reason(self, prompt: str) -> str:
+            return '{"edits":[]}'
+
+    monkeypatch.setenv("GENESIS_REPAIR_PROVIDER_URL", "http://local-provider")
+    monkeypatch.setattr(capability_builder, "GenesisHTTPProvider", FakeHTTPProvider)
+
+    provider = GitHubIssueLearnedCapabilityProvider.for_issue(
+        tmp_path,
+        _script_capability_growth_issue("scripts/self_evaluation_dashboard.py"),
+        CodingModule(tmp_path),
+    )
+
+    assert isinstance(provider, capability_builder.EvidenceFirstRepairFollowupProvider)
+    assert provider.target_path == "genesis/github_issue_capability_builder.py"
+
+
+def test_capability_growth_rejects_protected_script_blocker(tmp_path: Path, monkeypatch) -> None:
+    builder = tmp_path / "genesis" / "github_issue_capability_builder.py"
+    builder.parent.mkdir(parents=True, exist_ok=True)
+    builder.write_text("VALUE = 1\n", encoding="utf-8")
+    monkeypatch.setenv("GENESIS_REPAIR_PROVIDER_URL", "http://local-provider")
+
+    provider = GitHubIssueLearnedCapabilityProvider.for_issue(
+        tmp_path,
+        _script_capability_growth_issue("scripts/secret_guard.py"),
+        CodingModule(tmp_path),
+    )
+
+    assert provider is None
