@@ -409,10 +409,8 @@ jobs:
               remove_label "$issue_number" genesis-blocked
               remove_label "$issue_number" genesis-solver-exhausted
               clear_reservation_labels "$issue_number"
-              gh_retry gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --method PATCH \
-                -f state=closed -f state_reason=not_planned >/dev/null
               resolved=true
-              echo "Verified and closed stale Action failure #${issue_number}."
+              echo "Verified stale Action failure #${issue_number}; Closure Manager owns the final close/seal decision."
             fi
           fi
 
@@ -428,10 +426,8 @@ jobs:
                 remove_label "$issue_number" genesis-blocked
                 remove_label "$issue_number" genesis-solver-exhausted
                 clear_reservation_labels "$issue_number"
-                gh_retry gh api "repos/${GITHUB_REPOSITORY}/issues/${issue_number}" --method PATCH \
-                  -f state=closed -f state_reason=completed >/dev/null
                 resolved=true
-                echo "Verified and closed satisfied syntax issue #${issue_number}."
+                echo "Verified satisfied syntax issue #${issue_number}; Closure Manager owns the final close/seal decision."
               fi
             fi
           fi
@@ -454,7 +450,7 @@ jobs:
               remove_label "$issue_number" genesis-blocked
               remove_label "$issue_number" genesis-solver-exhausted
               clear_transient_labels "$issue_number"
-              dispatched_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Sequential Issue Controller — bounded repair dispatched**\n\n- Issue: #%s — %s\n- Dispatched (UTC): %s\n- Controller run: %s\n- Attempt: **%s/%s**\n- Target: `%s`\n- State: **the only active bounded repair reservation**\n\nThe existing worker may close only after fresh full validation on current main.' \
+              dispatched_body=$(printf '%s\n<!-- genesis-solver-attempt:%s -->\n**Genesis Sequential Issue Controller — bounded repair dispatched**\n\n- Issue: #%s — %s\n- Dispatched (UTC): %s\n- Controller run: %s\n- Attempt: **%s/%s**\n- Target: `%s`\n- State: **the only active bounded repair reservation**\n\nThe existing worker may mark verified only after fresh full validation on current main; the Closure Manager owns final close/seal authority.' \
                 "$marker" "$attempt" "$issue_number" "$title" "$checked_at" "$GITHUB_RUN_ID" "$attempt" "$max_attempts" "$target")
               upsert_status "$issue_number" "$dispatched_body"
               if gh_retry gh workflow run genesis-bounded-repair-worker.yml --repo "$GITHUB_REPOSITORY" --ref main \
