@@ -9,6 +9,7 @@ on:
     paths:
       - .github/workflows/genesis-agentic-terminal-reconciler.yml
       - genesis/issue_lifecycle.py
+      - genesis/selfdev.py
       - scripts/issue_lifecycle_reconcile.py
       - tests/test_issue_lifecycle.py
 
@@ -34,7 +35,7 @@ jobs:
         run: python -m pip install --disable-pip-version-check pytest
 
       - name: Validate Issue lifecycle policy
-        run: python -m pytest -q tests/test_issue_lifecycle.py tests/test_issue_governor.py
+        run: python -m pytest -q tests/test_issue_lifecycle.py tests/test_issue_governor.py tests/test_selfdev_policy.py
 
       - name: Reconcile authoritative Issue lifecycle
         env:
