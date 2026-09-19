@@ -3,11 +3,18 @@ from __future__ import annotations
 from genesis.learned_capabilities import run_capability
 
 
+def _genesis_root(tmp_path):
+    (tmp_path / "genesis").mkdir(exist_ok=True)
+    (tmp_path / "GENESIS_BLOCK.json").write_text("{}", encoding="utf-8")
+    (tmp_path / "GENESIS_CONSTITUTION.md").write_text("# Genesis\n", encoding="utf-8")
+    return tmp_path
+
+
 def test_persistent_memory_store_is_candidate_until_validated(tmp_path):
     stored = run_capability(
         "persistent_memory",
         "store",
-        root=tmp_path,
+        root=_genesis_root(tmp_path),
         memory_type="repair",
         topic="issue-829",
         content="Rebase autonomous candidates onto current main before publication.",
@@ -25,14 +32,14 @@ def test_persistent_memory_store_is_candidate_until_validated(tmp_path):
     assert run_capability(
         "persistent_memory",
         "recall",
-        root=tmp_path,
+        root=_genesis_root(tmp_path),
         query="rebase autonomous candidates",
     ) == []
 
     validated = run_capability(
         "persistent_memory",
         "validate",
-        root=tmp_path,
+        root=_genesis_root(tmp_path),
         memory_id=stored["memory_id"],
         evidence={"worker_run": 35439082677, "full_suite_passed": True},
     )
@@ -44,7 +51,7 @@ def test_persistent_memory_survives_new_capability_invocation(tmp_path):
     stored = run_capability(
         "persistent_memory",
         "store",
-        root=tmp_path,
+        root=_genesis_root(tmp_path),
         memory_type="decision",
         topic="issue-family-authority",
         content="Keep one authoritative root issue across retries.",
@@ -54,7 +61,7 @@ def test_persistent_memory_survives_new_capability_invocation(tmp_path):
     run_capability(
         "persistent_memory",
         "validate",
-        root=tmp_path,
+        root=_genesis_root(tmp_path),
         memory_id=stored["memory_id"],
         evidence={"issue": 865, "verified": True},
     )
@@ -62,7 +69,7 @@ def test_persistent_memory_survives_new_capability_invocation(tmp_path):
     recalled = run_capability(
         "persistent_memory",
         "recall",
-        root=tmp_path,
+        root=_genesis_root(tmp_path),
         query="authoritative root issue retries",
     )
 
@@ -75,7 +82,7 @@ def test_persistent_memory_reject_and_expire_remove_from_normal_recall(tmp_path)
     rejected = run_capability(
         "persistent_memory",
         "store",
-        root=tmp_path,
+        root=_genesis_root(tmp_path),
         memory_type="semantic",
         topic="bad-fact",
         content="Temporary unverified claim about dashboard behavior.",
@@ -85,7 +92,7 @@ def test_persistent_memory_reject_and_expire_remove_from_normal_recall(tmp_path)
     run_capability(
         "persistent_memory",
         "reject",
-        root=tmp_path,
+        root=_genesis_root(tmp_path),
         memory_id=rejected["memory_id"],
         evidence={"reason": "contradicted by current repository state"},
     )
@@ -93,14 +100,14 @@ def test_persistent_memory_reject_and_expire_remove_from_normal_recall(tmp_path)
     assert run_capability(
         "persistent_memory",
         "recall",
-        root=tmp_path,
+        root=_genesis_root(tmp_path),
         query="dashboard behavior",
     ) == []
 
 
 def test_persistent_memory_is_idempotent_for_same_provenance_and_content(tmp_path):
     kwargs = dict(
-        root=tmp_path,
+        root=_genesis_root(tmp_path),
         memory_type="episodic",
         topic="repair-run",
         content="Worker validated current main successfully.",
@@ -120,7 +127,7 @@ def test_persistent_memory_recall_is_bounded(tmp_path):
         run_capability(
             "persistent_memory",
             "recall",
-            root=tmp_path,
+            root=_genesis_root(tmp_path),
             query="anything",
             limit=21,
         )
@@ -128,5 +135,6 @@ def test_persistent_memory_recall_is_bounded(tmp_path):
 
 def test_persistent_memory_requires_existing_root(tmp_path):
     missing = tmp_path / "missing"
-    with __import__("pytest").raises(ValueError, match="existing Genesis directory"):
+    missing.mkdir()
+    with __import__("pytest").raises(ValueError, match="verified Genesis repository root"):
         run_capability("persistent_memory", "stats", root=missing)
