@@ -1,0 +1,41 @@
+name: Genesis Issue Tag Manager
+
+on:
+  issues:
+    types: [opened, reopened, closed, labeled, unlabeled, edited]
+  workflow_dispatch:
+  schedule:
+    - cron: '*/10 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - genesis/issue_tag_manager.py
+      - scripts/issue_tag_manager.py
+      - tests/test_issue_tag_manager.py
+      - .github/workflows/genesis-issue-tag-manager.yml
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-issue-tag-manager
+  cancel-in-progress: false
+
+jobs:
+  reconcile:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Reconcile Genesis-owned issue tags
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          EVENT_ISSUE: ${{ github.event.issue.number }}
+        run: python scripts/issue_tag_manager.py
