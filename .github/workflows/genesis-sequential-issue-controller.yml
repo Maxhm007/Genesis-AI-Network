@@ -154,6 +154,7 @@ jobs:
           ensure_label agentic-lab 8250df 'Normal bounded solver exhausted; Agentic Lab recovery owns this Issue'
           ensure_label genesis-agentic-escalated 8250df 'Solver exhausted; same authoritative Issue remains open with Agentic Lab'
           ensure_label genesis-deferred 8c959f 'Legacy deferred-state label; unsolved Issues remain open under Agentic Lab'
+          ensure_label genesis-architecture-route 6f42c1 'Architecture/control-plane issue routed to Agentic Lab'
 
           echo 'Stopping legacy long-running dispatch loops so this controller is the single queue scheduler.'
           for workflow in genesis-oldest-issue-solver.yml genesis-priority-issue-solver.yml; do
@@ -321,7 +322,20 @@ jobs:
           resolved=false
           dispatched=false
 
-          if [[ "$title" == Genesis\ Action\ failure:* || "$title" == \[Genesis\ Action\ Failure\]* ]]; then
+          if [[ "$selected_kind" == "architecture" ]]; then
+            clear_transient_labels "$issue_number"
+            add_label "$issue_number" genesis-autonomous
+            add_label "$issue_number" agentic-lab
+            add_label "$issue_number" genesis-agentic-escalated
+            add_label "$issue_number" genesis-architecture-route
+            gh_retry gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
+              --body "Genesis Sequential Issue Controller routed this architecture/control-plane Issue to Agentic Lab. Score: ${selected_score}. The same authoritative Issue remains open; architecture work must be solved and verified before Closure Manager may close it. Controller run: ${GITHUB_RUN_ID}." >/dev/null
+            gh_retry gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null
+            dispatched=true
+            echo "Routed architecture issue #${issue_number} to Agentic Lab with score ${selected_score}."
+          fi
+
+          if [[ "$dispatched" != true && ( "$title" == Genesis\ Action\ failure:* || "$title" == \[Genesis\ Action\ Failure\]* ) ]]; then
             workflow_path=$(printf '%s' "$body_text" | grep -oE '\.github/workflows/[A-Za-z0-9._-]+\.(yml|yaml)' | head -n1 || true)
             failed_run_id=$(printf '%s' "$body_text" | sed -nE 's/.*Run: `([0-9]+)`.*/\1/p' | head -n1)
 
