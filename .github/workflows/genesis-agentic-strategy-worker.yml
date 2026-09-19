@@ -71,7 +71,7 @@ jobs:
           agentic=$(jq -r '([.labels[].name] | index("agentic-lab")) != null' <<<"$issue_json")
           title=$(jq -r '.title // ""' <<<"$issue_json")
           body=$(jq -r '.body // ""' <<<"$issue_json")
-          target=$(printf '%s\n' "$body" | sed -nE 's/^- \*\*Target:\*\* `([^`]+)`.*/\1/p' | head -n1)
+          target=$(printf '%s\n' "$body" | python -m genesis.issue_target)
           task_type=$(printf '%s\n' "$body" | sed -nE 's/^- \*\*Task type:\*\* `([^`]+)`.*/\1/p' | head -n1)
 
           actionable=true
