@@ -19,7 +19,7 @@ permissions:
 
 concurrency:
   group: genesis-deepseek-selfdev-discovery
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 env:
   PYTHONPATH: ${{ github.workspace }}
@@ -28,13 +28,13 @@ env:
   GENESIS_DEEPSEEK_DISCOVERY_URL: http://127.0.0.1:8768
   GENESIS_DEEPSEEK_DISCOVERY_OPEN_CAP: '3'
   GENESIS_DEEPSEEK_DISCOVERY_FILES: '4'
-  GENESIS_PROVIDER_MAX_NEW_TOKENS: '320'
-  GENESIS_DEEPSEEK_DISCOVERY_TIMEOUT: '360'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '192'
+  GENESIS_DEEPSEEK_DISCOVERY_TIMEOUT: '150'
 
 jobs:
   discover-one-self-development-issue:
     runs-on: ubuntu-latest
-    timeout-minutes: 75
+    timeout-minutes: 35
     steps:
       - name: Checkout current main
         uses: actions/checkout@v4
@@ -81,7 +81,7 @@ jobs:
             --max-new-tokens "$GENESIS_PROVIDER_MAX_NEW_TOKENS" \
             > runtime/deepseek_selfdev_provider.log 2>&1 &
           ready=false
-          for i in {1..180}; do
+          for i in {1..90}; do
             if python - <<'PY'
           import urllib.request
           try:
