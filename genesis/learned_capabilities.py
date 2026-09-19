@@ -6,7 +6,7 @@ import math
 from pathlib import Path
 from typing import Callable
 
-from .memory import MemoryStore
+from .memory import MemoryStore, is_genesis_root
 
 
 INCUBATION_MARKER = "genesis-learning-new-capability-v1"
@@ -2553,8 +2553,8 @@ def _persistent_memory(
 ):
     """Bounded persistent agent memory backed by Genesis' trusted SQLite store."""
     root_path = Path(root).resolve()
-    if not root_path.exists() or not root_path.is_dir():
-        raise ValueError("root must be an existing Genesis directory")
+    if not is_genesis_root(root_path):
+        raise ValueError("root must be a verified Genesis repository root")
     store = MemoryStore(root_path / "runtime" / "memory.sqlite3")
     mode = str(action or "").strip().lower()
 
