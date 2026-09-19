@@ -202,7 +202,7 @@ def enrich_status(history: list[dict], authored_main: list[dict]) -> None:
         "recent_improvements": history[:30],
         "recent_genesis_authored_main": authored_main[:30],
         "definition": (
-            "Strict verified cycle means Genesis initiated the work and the autonomy-proof ledger confirms independent validation and promotion on main. "
+            # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
             "Genesis-authored on main is historical source-control proof that Genesis AI authored self-development now present in default-branch history, "
             "but it is shown separately because older commits may predate complete ledger provenance. Assisted and owner work never increase autonomous credit."
         ),
