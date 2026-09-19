@@ -13,6 +13,8 @@ INFRA_QUARANTINE_MARKER = "<!-- genesis-agentic-infrastructure-quarantine -->"
 SUCCESSOR_ROOT_RE = re.compile(r"<!-- genesis-unsolved-root:(\d+) -->")
 SUCCESSOR_PARENT_RE = re.compile(r"<!-- genesis-unsolved-successor-of:(\d+) -->")
 CAPABILITY_PARENT_RE = re.compile(r"<!-- genesis-capability-parent:(\d+) -->")
+CAPABILITY_DEPENDENCY_RE = re.compile(r"<!-- genesis-agentic-capability-dependency:(\d+) -->")
+CAPABILITY_RELEASE_RE = re.compile(r"<!-- genesis-agentic-capability-release:(\d+) -->")
 PROBLEM_FP_RE = re.compile(r"^Genesis-Problem-Fingerprint:\s*([^\n]+)$", re.MULTILINE | re.IGNORECASE)
 OCCURRENCE_FP_RE = re.compile(r"^Genesis-Occurrence-Fingerprint:\s*([^\n]+)$", re.MULTILINE | re.IGNORECASE)
 
@@ -99,6 +101,116 @@ def capability_parent_numbers(issue: dict, comments: Iterable[dict] = ()) -> set
     return {int(value) for value in CAPABILITY_PARENT_RE.findall(text)}
 
 
+
+def authoritative_root_number(issue: dict) -> int:
+    root = root_issue_number(issue)
+    return int(root if root is not None else issue.get("number") or 0)
+
+
+def family_id(issue: dict) -> str:
+    root = authoritative_root_number(issue)
+    return f"genesis-family:{root}" if root > 0 else ""
+
+
+def _root_for_number(number: int, issues_by_number: dict[int, dict]) -> int:
+    seen: set[int] = set()
+    current = int(number)
+    while current > 0 and current not in seen:
+        seen.add(current)
+        issue = issues_by_number.get(current)
+        if issue is None:
+            return current
+        parent = root_issue_number(issue)
+        if parent is None:
+            return current
+        current = int(parent)
+    return int(number)
+
+
+def family_ids_for_issue(
+    issue: dict,
+    issues_by_number: dict[int, dict],
+    *,
+    comments: Iterable[dict] = (),
+) -> tuple[str, ...]:
+    """Return every root family this record belongs to.
+
+    Normal work belongs to one root family. Shared capability Issues may belong
+    to several families through repeated genesis-capability-parent markers.
+    """
+    body = str(issue.get("body") or "")
+    if "<!-- genesis-capability-work:" not in body:
+        root = _root_for_number(authoritative_root_number(issue), issues_by_number)
+        return (f"genesis-family:{root}",) if root > 0 else ()
+
+    parents = capability_parent_numbers(issue, comments)
+    roots = sorted({_root_for_number(parent, issues_by_number) for parent in parents if parent > 0})
+    return tuple(f"genesis-family:{root}" for root in roots)
+
+
+def dependency_numbers(issue: dict, comments: Iterable[dict] = ()) -> tuple[int, ...]:
+    text = str(issue.get("body") or "") + "\n" + "\n".join(str(row.get("body") or "") for row in comments)
+    dependencies: list[int] = []
+    active: set[int] = set()
+    for line in text.splitlines():
+        dep = CAPABILITY_DEPENDENCY_RE.search(line)
+        if dep:
+            number = int(dep.group(1))
+            active.add(number)
+            dependencies.append(number)
+            continue
+        release = CAPABILITY_RELEASE_RE.search(line)
+        if release:
+            active.discard(int(release.group(1)))
+    return tuple(number for number in dependencies if number in active)
+
+
+def family_status(
+    root_number: int,
+    issues_by_number: dict[int, dict],
+    *,
+    comments_by_number: dict[int, Iterable[dict]] | None = None,
+) -> dict:
+    """Build machine-readable authority/dependency status for one issue family."""
+    comments_by_number = comments_by_number or {}
+    root_number = _root_for_number(root_number, issues_by_number)
+    root = issues_by_number.get(root_number)
+    members: list[int] = []
+    successors: list[int] = []
+    capabilities: set[int] = set()
+
+    for number, issue in issues_by_number.items():
+        if _root_for_number(number, issues_by_number) == root_number:
+            members.append(number)
+            if number != root_number and root_issue_number(issue) is not None:
+                successors.append(number)
+        if "<!-- genesis-capability-work:" in str(issue.get("body") or ""):
+            families = family_ids_for_issue(
+                issue,
+                issues_by_number,
+                comments=comments_by_number.get(number, ()),
+            )
+            if f"genesis-family:{root_number}" in families:
+                capabilities.add(number)
+
+    current_authority = None
+    if root is not None and not (is_closed(root) and is_verified(root)):
+        current_authority = root_number
+
+    dependencies = ()
+    if root is not None:
+        dependencies = dependency_numbers(root, comments_by_number.get(root_number, ()))
+
+    return {
+        "family_id": f"genesis-family:{root_number}",
+        "root": root_number,
+        "current_authority": current_authority,
+        "members": tuple(sorted(set(members))),
+        "successors": tuple(sorted(set(successors))),
+        "capability_dependencies": tuple(sorted(set(dependencies) | capabilities)),
+    }
+
+
 def local_claim_block_reason(issue: dict, comments: Iterable[dict] = ()) -> str:
     if is_closed(issue):
         return "closed"
@@ -133,10 +245,18 @@ def lifecycle_decision(
     root = root_issue_number(issue)
     if root:
         root_issue = issues_by_number.get(root)
-        if root_issue and is_closed(root_issue) and is_verified(root_issue):
+        if root_issue is not None:
+            if is_closed(root_issue) and is_verified(root_issue):
+                return LifecycleDecision(
+                    "close_superseded" if not is_closed(issue) else "keep_closed",
+                    "verified_root_completed",
+                    root,
+                )
+            # The root remains the single authority while unresolved. Legacy
+            # successor/follow-up generations are historical evidence only.
             return LifecycleDecision(
                 "close_superseded" if not is_closed(issue) else "keep_closed",
-                "verified_root_completed",
+                "authoritative_root_unresolved",
                 root,
             )
 
