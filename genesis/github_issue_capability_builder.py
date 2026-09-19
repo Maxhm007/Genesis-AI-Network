@@ -115,6 +115,9 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
     TASK_MARKER = "<!-- genesis-task-id:task-"
     TASK_TYPE_LINE = "- **Task type:** `new_capability`"
     REPAIR_FOLLOWUP_TASK_LINE = "- **Task type:** `repair_followup`"
+    CAPABILITY_GROWTH_TASK_LINE = "- **Task type:** `capability_growth`"
+    CAPABILITY_WORK_MARKER = "<!-- genesis-capability-work:"
+    CAPABILITY_BUILDER_TARGET = "genesis/github_issue_capability_builder.py"
     SOURCE_LINE = "- **Source:** `genesis.evolution_learning`"
     TARGET_LINE = "- **Target:** `genesis/learned_capabilities.py`"
     MAX_GENERIC_TERMS = 16
@@ -388,6 +391,64 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
         return EvidenceFirstRepairFollowupProvider(Path(root).resolve(), target_path, delegate)
 
     @classmethod
+    def _capability_growth_provider(
+        cls,
+        root: Path,
+        issue: dict,
+        coding: CodingModule,
+    ) -> IntelligenceProvider | None:
+        """Route machine-authored capability-growth work through bounded evidence-first repair.
+
+        Capability-growth Issues target the capability builder itself. Without this
+        route they fall through the normal new-capability/repair-followup adapters
+        and can exhaust Agentic strategies without ever reaching a coding provider.
+        """
+        author = str(dict(issue.get("user") or {}).get("login") or "")
+        title = str(issue.get("title") or "").strip()
+        body = str(issue.get("body") or "")
+        if (
+            author != cls.MACHINE_AUTHOR
+            or not title.startswith("[Genesis Capability]")
+            or cls.CAPABILITY_WORK_MARKER not in body
+            or cls.CAPABILITY_GROWTH_TASK_LINE not in body
+        ):
+            return None
+
+        target_match = re.search(r"^- \*\*Target:\*\* `([^`]+)`", body, re.M)
+        blocked_match = re.search(r"^- \*\*Blocked target:\*\* `([^`]+)`", body, re.M)
+        if target_match is None or blocked_match is None:
+            return None
+
+        target_path = target_match.group(1).replace("\\", "/").lstrip("./")
+        blocked_target = blocked_match.group(1).replace("\\", "/").lstrip("./")
+        if target_path != cls.CAPABILITY_BUILDER_TARGET:
+            return None
+        if (
+            not blocked_target.startswith(("genesis/", "scripts/"))
+            or not blocked_target.endswith(".py")
+            or ".." in Path(blocked_target).parts
+        ):
+            return None
+
+        coding.executor._validate_paths([target_path])
+        if not (Path(root).resolve() / target_path).is_file():
+            return None
+
+        provider_url = os.environ.get("GENESIS_REPAIR_PROVIDER_URL", "").strip()
+        if not provider_url:
+            return None
+        try:
+            timeout = max(5.0, min(float(os.environ.get("GENESIS_PROVIDER_TIMEOUT_SECONDS", "240")), 360.0))
+        except (TypeError, ValueError):
+            timeout = 240.0
+        delegate = GenesisHTTPProvider(
+            provider_url,
+            name=os.environ.get("GENESIS_PROVIDER_NAME", "genesis-github-capability-repair"),
+            timeout=timeout,
+        )
+        return EvidenceFirstRepairFollowupProvider(Path(root).resolve(), target_path, delegate)
+
+    @classmethod
     def for_issue(
         cls,
         root: Path,
@@ -401,6 +462,10 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
         repair_followup = cls._repair_followup_provider(Path(root).resolve(), issue, coding)
         if repair_followup is not None:
             return repair_followup
+
+        capability_growth = cls._capability_growth_provider(Path(root).resolve(), issue, coding)
+        if capability_growth is not None:
+            return capability_growth
 
         author = str(dict(issue.get("user") or {}).get("login") or "")
         title = str(issue.get("title") or "").strip()
