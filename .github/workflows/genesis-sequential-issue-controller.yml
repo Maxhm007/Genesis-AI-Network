@@ -321,6 +321,8 @@ jobs:
                   continue
               if 'genesis-solver-exhausted' in labels:
                   continue
+              if labels & {'genesis-superseded', 'genesis-verified'}:
+                  continue
 
               is_action_failure = lower_title.startswith('genesis action failure:') or lower_title.startswith('[genesis action failure]')
               is_syntax_report = 'syntax error' in lower_body
