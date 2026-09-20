@@ -25,4 +25,5 @@ def test_prless_promotion_is_non_force_and_evidence_gated() -> None:
     assert "git push origin HEAD:main" in WORKFLOW
     assert "--force" not in WORKFLOW
     assert "genesis-verified" in WORKFLOW
-    assert "state=closed" in WORKFLOW
+    assert "genesis-issue-closure-manager.yml" in WORKFLOW
+    assert "state=closed" not in WORKFLOW
