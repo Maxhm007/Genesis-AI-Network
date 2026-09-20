@@ -37,6 +37,8 @@ def test_bounded_worker_does_not_use_legacy_markdown_only_target_parser():
 
 def test_sequential_selector_does_not_use_legacy_markdown_only_target_regex():
     root = Path(__file__).resolve().parents[1]
-    text = (root / ".github/workflows/genesis-sequential-issue-controller.yml").read_text(encoding="utf-8")
-    assert "from genesis.issue_target import extract_issue_target" in text
-    assert "target = extract_issue_target(body)" in text
+    workflow = (root / ".github/workflows/genesis-sequential-issue-controller.yml").read_text(encoding="utf-8")
+    selector = (root / "scripts/sequential_issue_selector.py").read_text(encoding="utf-8")
+    assert "scripts/sequential_issue_selector.py" in workflow
+    assert "from genesis.issue_target import extract_issue_target" in selector
+    assert "target = extract_issue_target(body)" in selector
