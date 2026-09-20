@@ -16,29 +16,29 @@ def test_sequential_controller_fetches_all_open_issue_pages():
 
 
 def test_sequential_controller_preserves_safety_boundaries_without_skipping_work_classes():
-    text = CONTROLLER.read_text(encoding="utf-8")
+    workflow = CONTROLLER.read_text(encoding="utf-8")
+    selector = (ROOT / "scripts" / "sequential_issue_selector.py").read_text(encoding="utf-8")
 
-    assert "genesis-solver-exhausted" in text
-    assert "genesis-deferred" in text
-    assert "lower_title.startswith(('genesis chat:', '[genesis hourly report]', '[genesis gene chat]'))" in text
-    assert "'persistent github-native reporting channel' in lower_body" in text
-    assert "protected_targets" in text
-    assert "python -m genesis.github_issue_cleanup" in text
-    assert "requires_measurement" not in text
-    assert "external-authority / independent-secret provisioning blocker" not in text
+    assert "genesis-solver-exhausted" in selector
+    assert "genesis-deferred" in workflow
+    assert 'lower_title.startswith(("genesis chat:", "[genesis hourly report]", "[genesis gene chat]"))' in selector
+    assert '"persistent github-native reporting channel" in lower_body' in selector
+    assert "PROTECTED_TARGETS" in selector
+    assert "python -m genesis.github_issue_cleanup" in workflow
+    assert "requires_measurement" not in selector
+    assert "external-authority / independent-secret provisioning blocker" not in selector
 
 
 def test_sequential_controller_prioritizes_concrete_repairs_before_general_work():
-    text = CONTROLLER.read_text(encoding="utf-8")
+    text = (ROOT / "scripts" / "sequential_issue_selector.py").read_text(encoding="utf-8")
 
-    assert "urgent_candidates = []" in text
-    assert "repair_candidates = []" in text
-    assert "general_candidates = []" in text
-    assert "lower_title.startswith(('[genesis detected]', '[genesis repair]'))" in text
-    assert "'genesis-repair'" in text
-    assert "'task3-failed-autonomy'" in text
-    assert "for candidates in (urgent_candidates, repair_candidates, general_candidates):" in text
-    assert "print(candidates[0])" in text
+    assert "issue_value_score" in text
+    assert "lane_bonus" in text
+    assert 'lower_title.startswith(("[genesis detected]", "[genesis repair]"))' in text
+    assert '"genesis-repair"' in text
+    assert '"task3-failed-autonomy"' in text
+    assert "ranked.sort" in text
+    assert '"selected": ranked[0] if ranked else None' in text
 
 
 def test_legacy_solver_entrypoints_are_retired():
