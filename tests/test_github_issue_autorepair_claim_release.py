@@ -61,5 +61,5 @@ def test_successful_promotion_releases_active_labels_only_after_verification() -
     verify_at = text.index("python -m pytest -q", text.index("git reset --hard origin/main"))
     label_at = text.index("genesis-verified", verify_at)
     release_at = text.index("genesis-repair-in-progress", label_at)
-    close_at = text.index("state=closed", release_at)
+    close_at = text.index("genesis-issue-closure-manager.yml", release_at)
     assert verify_at < label_at < release_at < close_at
