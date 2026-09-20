@@ -22,7 +22,7 @@ def test_all_verified_repair_lanes_record_memory_before_issue_close():
         text = path.read_text(encoding="utf-8")
         record_at = text.index("python scripts/record_verified_repair_memory.py")
         verified_at = text.index("--add-label genesis-verified", record_at)
-        close_at = text.index("state=closed", verified_at)
+        close_at = text.index("genesis-issue-closure-manager.yml", verified_at)
         assert record_at < verified_at < close_at, path.name
 
 
