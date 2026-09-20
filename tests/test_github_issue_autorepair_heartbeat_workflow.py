@@ -108,5 +108,5 @@ def test_worker_closes_only_after_exact_post_promotion_tests_pass() -> None:
     promotion = text.index("Independently validate and promote exact candidate")
     reset = text.index("git reset --hard origin/main", promotion)
     full_test = text.index("python -m pytest -q", reset)
-    close = text.index("state=closed", full_test)
+    close = text.index("genesis-issue-closure-manager.yml", full_test)
     assert promotion < reset < full_test < close
