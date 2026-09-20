@@ -71,7 +71,8 @@ def test_specialist_worker_uses_grounded_guarded_repair_engine_and_exact_scope()
     assert "python -m pytest -q" in worker
     assert "git push origin HEAD:main" in worker
     assert "Genesis grounded specialist repair attempt" in worker
-    assert "state=closed -f state_reason=completed" in worker
+    assert "genesis-issue-closure-manager.yml" in worker
+    assert "state=closed -f state_reason=completed" not in worker
     assert "The Issue remains open and unresolved; it was not falsely closed." in worker
 
 
