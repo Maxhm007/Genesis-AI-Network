@@ -37,5 +37,6 @@ def test_agentic_strategy_and_safety_gates_are_preserved() -> None:
     assert "python -m pytest -q" in text
     assert "python -m genesis.learned_capability_acceptance" in text
     assert "git push origin HEAD:main" in text
-    assert "state=closed -f state_reason=completed" in text
+    assert "genesis-issue-closure-manager.yml" in text
+    assert "state=closed -f state_reason=completed" not in text
     assert "Release unsuccessful Agentic reservation without closing Issue" in text
