@@ -19,7 +19,8 @@ def test_agentic_strategy_worker_only_closes_after_verified_promotion() -> None:
 
     assert "python -m pytest -q" in promotion
     assert "genesis-verified" in promotion
-    assert "state=closed -f state_reason=completed" in promotion
+    assert "genesis-issue-closure-manager.yml" in promotion
+    assert "state=closed -f state_reason=completed" not in promotion
 
 
 def test_agentic_strategy_worker_uses_explicit_strategy_input() -> None:
