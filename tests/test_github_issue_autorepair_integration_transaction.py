@@ -41,6 +41,6 @@ def test_exact_candidate_is_promoted_only_after_validation() -> None:
     tests_at = text.index("python -m pytest -q", candidate_at)
     push_at = text.index("git push origin HEAD:main", tests_at)
     post_reset_at = text.index("git reset --hard origin/main", push_at)
-    close_at = text.index("state=closed", post_reset_at)
+    close_at = text.index("genesis-issue-closure-manager.yml", post_reset_at)
 
     assert candidate_at < tests_at < push_at < post_reset_at < close_at
