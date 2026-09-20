@@ -147,7 +147,7 @@ def test_waiting_capability_releases_worker_capacity():
 
 def test_scheduled_selectors_release_capability_waiting_work():
     root = Path(__file__).resolve().parents[1]
-    sequential = (root / ".github/workflows/genesis-sequential-issue-controller.yml").read_text(encoding="utf-8")
+    sequential = (root / "scripts/sequential_issue_selector.py").read_text(encoding="utf-8")
     specialist = (root / ".github/workflows/genesis-specialist-issue-controller.yml").read_text(encoding="utf-8")
     throughput = (root / ".github/workflows/genesis-throughput-issue-controller.yml").read_text(encoding="utf-8")
 
