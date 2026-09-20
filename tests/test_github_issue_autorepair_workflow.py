@@ -96,6 +96,6 @@ def test_issue_closes_only_after_post_promotion_verification() -> None:
     reset_at = text.index("git reset --hard origin/main")
     final_tests_at = text.index("python -m pytest -q", reset_at)
     verified_at = text.index("--add-label genesis-verified", final_tests_at)
-    close_at = text.index("state=closed", verified_at)
+    close_at = text.index("genesis-issue-closure-manager.yml", verified_at)
 
     assert reset_at < final_tests_at < verified_at < close_at
