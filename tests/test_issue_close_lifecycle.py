@@ -39,11 +39,11 @@ def test_failed_workers_keep_issue_open_for_retry() -> None:
     assert "State: **OPEN; escalated" in controller_retry
 
 
-def test_successful_workers_verify_then_close() -> None:
+def test_successful_workers_verify_then_delegate_close() -> None:
     bounded = BOUNDED.read_text(encoding="utf-8")
     specialist = SPECIALIST.read_text(encoding="utf-8")
 
     for text in (bounded, specialist):
         verified_at = text.index("genesis-verified")
-        close_at = text.index("state=closed", verified_at)
+        close_at = text.index("genesis-issue-closure-manager.yml", verified_at)
         assert verified_at < close_at
