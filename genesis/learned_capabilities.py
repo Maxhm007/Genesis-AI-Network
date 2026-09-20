@@ -2617,4 +2617,39 @@ register_capability(
     _persistent_memory,
 )
 
+def _learned_cb81d81be918(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('agent', 'loops', 'died', 'reasoning-only', 'turns', 'ggml-org', 'llama.cpp', 'b11057', 'published', 'https', 'github.com', 'releases')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_cb81d81be918',
+    'Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: agent loops died as reasoning-only turns.',
+    "ggml-org/llama.cpp release 'b11057', published 2026-09-19T23:58:52Z: agent loops died as reasoning-only turns. Source: https://github.com/ggml-org/llama.cpp/releases/tag/b11057",
+    _learned_cb81d81be918,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
