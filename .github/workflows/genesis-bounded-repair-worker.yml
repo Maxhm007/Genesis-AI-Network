@@ -86,9 +86,45 @@ jobs:
         if: steps.eligibility.outputs.eligible == 'true'
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
+      - name: Initialize pre-repair evidence
+        if: steps.eligibility.outputs.eligible == 'true'
+        env:
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        run: |
+          mkdir -p runtime
+          python - <<'PY'
+          import json, os
+          from pathlib import Path
+          Path("runtime/github_issue_autorepair.json").write_text(
+              json.dumps({
+                  "status": "preflight_baseline",
+                  "issue_number": int(os.environ["ISSUE_NUMBER"]),
+                  "phase": "baseline_validation",
+              }, sort_keys=True) + "\n",
+              encoding="utf-8",
+          )
+          PY
+
       - name: Verify clean repository baseline
         if: steps.eligibility.outputs.eligible == 'true'
-        run: python -m pytest -q
+        shell: bash
+        run: |
+          set -euo pipefail
+          if ! python -m pytest -q; then
+            python - <<'PY'
+          import json
+          from pathlib import Path
+          path = Path("runtime/github_issue_autorepair.json")
+          payload = json.loads(path.read_text(encoding="utf-8")) if path.exists() else {}
+          payload.update({
+              "status": "blocked_baseline_regression",
+              "phase": "baseline_validation",
+              "reason": "repository_test_baseline_failed_before_repair",
+          })
+          path.write_text(json.dumps(payload, sort_keys=True) + "\n", encoding="utf-8")
+          PY
+            exit 1
+          fi
 
       - name: Hydrate validated Genesis memory
         if: steps.eligibility.outputs.eligible == 'true'
