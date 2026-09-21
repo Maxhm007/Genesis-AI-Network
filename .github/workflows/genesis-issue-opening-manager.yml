@@ -39,6 +39,9 @@ jobs:
         with:
           python-version: '3.12'
 
+      - name: Install validator dependency
+        run: python -m pip install --disable-pip-version-check pytest
+
       - name: Validate shared opening policy
         run: python -m pytest -q tests/test_issue_opening_manager.py
 
