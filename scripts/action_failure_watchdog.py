@@ -10,6 +10,8 @@ import subprocess
 from pathlib import Path
 from typing import Callable
 
+from genesis.issue_opening_manager import annotate_body, decide as opening_decision
+
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE_PATH = ROOT / "runtime" / "action_failure_watchdog.json"
 MARKER_NAME = "genesis-action-failure"
@@ -423,6 +425,34 @@ def open_new_failure(repository: str, *, runner: Runner = _default_runner) -> di
         if root in known_roots:
             continue
         metadata["fingerprint"] = root
+        title = f"Genesis Action failure: {metadata['workflow_name']} / {metadata['failed_step']}"[:240]
+        body = annotate_body(issue_body(metadata), "action-failure-watcher")
+        all_issues = _run_json(
+            runner,
+            [
+                "gh", "issue", "list",
+                "--repo", repository,
+                "--state", "all",
+                "--limit", "1000",
+                "--json", "number,title,body,state,labels,url,createdAt,closedAt",
+            ],
+        )
+        manager = opening_decision(
+            lane="action-failure-watcher",
+            title=title,
+            body=body,
+            issues=list(all_issues) if isinstance(all_issues, list) else [],
+            severity="critical",
+            value_score=100.0,
+            bypass_backlog=True,
+        )
+        if manager.action == "duplicate":
+            return {
+                "status": "duplicate_existing_issue",
+                "issue_number": manager.duplicate_issue_number,
+                "url": manager.duplicate_issue_url,
+                "metadata": _compact_metadata(metadata),
+            }
         created = runner(
             [
                 "gh",
@@ -431,9 +461,9 @@ def open_new_failure(repository: str, *, runner: Runner = _default_runner) -> di
                 "--repo",
                 repository,
                 "--title",
-                f"Genesis Action failure: {metadata['workflow_name']} / {metadata['failed_step']}"[:240],
+                title,
                 "--body",
-                issue_body(metadata),
+                body,
                 "--label",
                 "genesis-action-failure",
                 "--label",
