@@ -1,0 +1,55 @@
+name: Genesis Issue Opening Manager
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '12 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - genesis/issue_opening_manager.py
+      - tests/test_issue_opening_manager.py
+      - scripts/github_issue_discovery.py
+      - scripts/deepseek_selfdev_issue_opener.py
+      - scripts/discover_recent_ai_capability.py
+      - scripts/discover_missing_qwen_capability.py
+      - scripts/gene_peer_issue_sync.py
+      - scripts/action_failure_watchdog.py
+      - scripts/discovery_silence_watchdog.py
+      - .github/workflows/genesis-issue-opening-manager.yml
+
+permissions:
+  contents: read
+
+concurrency:
+  group: genesis-issue-opening-manager
+  cancel-in-progress: true
+
+jobs:
+  validate-opening-governance:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Validate shared opening policy
+        run: python -m pytest -q tests/test_issue_opening_manager.py
+
+      - name: Verify every opener is attached to the manager
+        shell: bash
+        run: |
+          set -euo pipefail
+          for file in             scripts/github_issue_discovery.py             scripts/deepseek_selfdev_issue_opener.py             scripts/discover_recent_ai_capability.py             scripts/discover_missing_qwen_capability.py             scripts/gene_peer_issue_sync.py             scripts/action_failure_watchdog.py             scripts/discovery_silence_watchdog.py
+          do
+            if ! grep -q 'issue_opening_manager' "$file"; then
+              echo "::error file=$file::Issue opener bypasses Genesis Issue Opening Manager"
+              exit 1
+            fi
+          done
