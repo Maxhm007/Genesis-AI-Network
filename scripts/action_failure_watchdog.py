@@ -230,14 +230,30 @@ def _list_action_issues(repository: str, *, state: str, runner: Runner) -> list[
 
 
 def _edit_issue_labels(repository: str, issue_number: int, *, add: list[str] = [], remove: list[str] = [], runner: Runner) -> None:
-    args = ["gh", "issue", "edit", str(issue_number), "--repo", repository]
+    # Apply labels independently so the operation is idempotent. GitHub CLI
+    # returns a failure when asked to remove a label that is already absent;
+    # that state is already the desired outcome and must not break recovery.
     for label in add:
-        args += ["--add-label", label]
+        result = runner(
+            ["gh", "issue", "edit", str(issue_number), "--repo", repository, "--add-label", label],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "issue label add failed")[-1200:])
     for label in remove:
-        args += ["--remove-label", label]
-    result = runner(args, text=True, capture_output=True, check=False)
-    if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout or "issue label update failed")[-1200:])
+        result = runner(
+            ["gh", "issue", "edit", str(issue_number), "--repo", repository, "--remove-label", label],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode != 0:
+            message = (result.stderr or result.stdout or "").lower()
+            if "not found" in message or "does not have label" in message:
+                continue
+            raise RuntimeError((result.stderr or result.stdout or "issue label remove failed")[-1200:])
 
 
 def _close_issue(repository: str, issue_number: int, *, comment: str, runner: Runner) -> None:
