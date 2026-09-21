@@ -12,7 +12,7 @@ on:
       - 'tests/test_issue_governor.py'
       - 'tests/test_github_issue_discovery.py'
   schedule:
-    - cron: '19 * * * *'
+    - cron: '19,49 * * * *'
   push:
     branches: [main]
     paths:
@@ -37,16 +37,13 @@ env:
   GENESIS_PROVIDER_NAME: qwen3-1.7b-github-issue-discovery
   GENESIS_PROVIDER_TIMEOUT_SECONDS: '90'
   GENESIS_PROVIDER_MAX_NEW_TOKENS: '128'
-  GENESIS_DISCOVERY_BATCH_SIZE: '5'
+  GENESIS_DISCOVERY_BATCH_SIZE: '8'
   HF_HOME: ~/.cache/huggingface
   PIP_CACHE_DIR: ~/.cache/pip
   GH_TOKEN: ${{ github.token }}
 
-# Bounded rotating discovery uses a fresh concurrency generation. Newer runs
-# may replace stale executions because each invocation reviews only a small,
-# persisted batch and advances the cursor for the next cycle.
 concurrency:
-  group: genesis-github-issue-discovery-v3
+  group: genesis-github-issue-discovery-v4
   cancel-in-progress: true
 
 jobs:
@@ -129,12 +126,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          nohup python scripts/local_reasoning_provider.py \
-            --model Qwen/Qwen3-1.7B \
-            --host 127.0.0.1 \
-            --port 8767 \
-            --max-new-tokens 128 \
-            > /tmp/genesis-github-issue-discovery.log 2>&1 &
+          nohup python scripts/local_reasoning_provider.py             --model Qwen/Qwen3-1.7B             --host 127.0.0.1             --port 8767             --max-new-tokens 128             > /tmp/genesis-github-issue-discovery.log 2>&1 &
           ready=false
           for i in {1..120}; do
             if python - <<'PY'
@@ -164,11 +156,8 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          if [[ -f runtime/github_issue_discovery.json ]] && \
-             jq -e '.status == "issue_opened"' runtime/github_issue_discovery.json >/dev/null; then
-            gh workflow run genesis-sequential-issue-controller.yml \
-              --repo "$GITHUB_REPOSITORY" \
-              --ref main || true
+          if [[ -f runtime/github_issue_discovery.json ]] &&              jq -e '.status == "issue_opened"' runtime/github_issue_discovery.json >/dev/null; then
+            gh workflow run genesis-sequential-issue-controller.yml               --repo "$GITHUB_REPOSITORY"               --ref main || true
           else
             echo 'No new grounded issue was opened; solver wake is unnecessary.'
           fi
