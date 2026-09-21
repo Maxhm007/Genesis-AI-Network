@@ -8,6 +8,8 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
+from genesis.issue_opening_manager import annotate_body, gate_remote
+
 
 PEER_REPOS = (
     ("Gene 002", "Maxhm007/Genesis-Node-2"),
@@ -125,13 +127,28 @@ def choose_new_peer_issue(peers: list[PeerIssue], canonical_bodies: list[str]) -
 
 def create_canonical_issue(peer: PeerIssue, token: str) -> dict:
     url = f"https://api.github.com/repos/{CANONICAL_REPO}/issues"
+    title = canonical_title(peer)
+    body = annotate_body(canonical_body(peer), "gene-peer-issue-sync")
+    decision = gate_remote(
+        CANONICAL_REPO,
+        token,
+        lane="gene-peer-issue-sync",
+        title=title,
+        body=body,
+        severity="medium",
+        value_score=58.0,
+    )
+    if decision.action == "duplicate":
+        return {"number": decision.duplicate_issue_number, "html_url": decision.duplicate_issue_url, "manager_status": "duplicate"}
+    if decision.action == "defer":
+        return {"number": None, "html_url": "", "manager_status": "deferred"}
     return _request(
         "POST",
         url,
         token,
         {
-            "title": canonical_title(peer),
-            "body": canonical_body(peer),
+            "title": title,
+            "body": body,
             "labels": ["genesis-autonomous", "gene-peer-sync"],
         },
     )
