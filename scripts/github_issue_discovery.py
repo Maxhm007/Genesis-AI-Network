@@ -23,6 +23,7 @@ from genesis.issue_governor import (
     publication_decision,
 )
 from genesis.modules.task_queue import PersistentTaskQueue
+from genesis.issue_opening_manager import annotate_body, decide as opening_decision
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -299,6 +300,55 @@ def publish_discovery(
         occurrence_fp=occurrence_fp,
         value={"score": value.score, "breakdown": value.breakdown},
     )
+    body = annotate_body(body, "github-issue-discovery")
+    manager = opening_decision(
+        lane="github-issue-discovery",
+        title=issue_title(discovery),
+        body=body,
+        issues=entries,
+        severity=severity,
+        value_score=value.score,
+    )
+    if manager.action == "duplicate":
+        return {
+            "status": "duplicate_existing_issue",
+            "dedupe_relation": "shared_opening_manager",
+            "fingerprint": fingerprint,
+            "problem_fingerprint": problem_fp,
+            "occurrence_fingerprint": occurrence_fp,
+            "issue_number": manager.duplicate_issue_number,
+            "issue_url": manager.duplicate_issue_url,
+        }
+    if manager.action == "defer":
+        queued = persist_deferred_candidate(
+            deferred_path,
+            {
+                "source": "github_issue_discovery",
+                "repository": repository,
+                "title": issue_title(discovery),
+                "target": discovery["target"],
+                "summary": discovery["summary"],
+                "acceptance": discovery["acceptance"],
+                "evidence": discovery["evidence"],
+                "source_sha": discovery["source_sha"],
+                "problem_fingerprint": problem_fp,
+                "occurrence_fingerprint": occurrence_fp,
+                "value_score": value.score,
+                "value_breakdown": value.breakdown,
+                "backlog_state": "shared_manager",
+                "severity": severity,
+                "body": body,
+                "labels": ["genesis-autonomous"],
+            },
+        )
+        return {
+            "status": "deferred_backlog",
+            "fingerprint": fingerprint,
+            "problem_fingerprint": problem_fp,
+            "occurrence_fingerprint": occurrence_fp,
+            "value_score": value.score,
+            "queued_candidates": queued,
+        }
     created = runner(
         [
             "gh",
