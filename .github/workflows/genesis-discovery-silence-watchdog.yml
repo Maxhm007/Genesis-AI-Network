@@ -1,0 +1,38 @@
+name: Genesis Discovery Silence Watchdog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '4,34 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - scripts/discovery_silence_watchdog.py
+      - .github/workflows/genesis-discovery-silence-watchdog.yml
+
+permissions:
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-discovery-silence-watchdog
+  cancel-in-progress: true
+
+jobs:
+  detect-silent-opener:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - name: Detect prolonged issue-opening silence
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          GENESIS_DISCOVERY_SILENCE_HOURS: '6'
+        run: python scripts/discovery_silence_watchdog.py --repository "$GITHUB_REPOSITORY"
+
