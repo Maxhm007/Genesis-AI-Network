@@ -7,6 +7,7 @@ from scripts.deepseek_selfdev_issue_opener import (
     extract_json_object,
     fingerprint,
     normalize_proposal,
+    parse_model_response,
 )
 
 
@@ -75,3 +76,25 @@ def test_fingerprint_changes_when_grounding_changes():
     }
     changed = dict(base, evidence="return 1")
     assert fingerprint(base) != fingerprint(changed)
+
+
+def test_parse_model_response_repairs_non_json_once():
+    calls = []
+
+    def reasoner(prompt: str) -> str:
+        calls.append(prompt)
+        return '{"action":"none","reason":"no grounded issue"}'
+
+    parsed, evidence = parse_model_response(reasoner, "review prompt", "thinking without json")
+    assert parsed == {"action": "none", "reason": "no grounded issue"}
+    assert evidence["parse_status"] == "parsed_after_repair"
+    assert len(calls) == 1
+
+
+def test_parse_model_response_fails_soft_after_bad_repair():
+    def reasoner(prompt: str) -> str:
+        return "still not json"
+
+    parsed, evidence = parse_model_response(reasoner, "review prompt", "not json")
+    assert parsed is None
+    assert evidence["parse_status"] == "malformed_after_repair"
