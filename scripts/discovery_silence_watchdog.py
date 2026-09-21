@@ -6,6 +6,8 @@ import os
 import subprocess
 from datetime import datetime, timezone
 
+from genesis.issue_opening_manager import annotate_body, gate_remote
+
 MARKER = "<!-- genesis-discovery-silence-watchdog -->"
 TITLE = "[Genesis Discovery] Issue-opening lanes are silent"
 LABEL = "genesis-discovery-watchdog"
@@ -106,6 +108,24 @@ Diagnose why Genesis discovery lanes are not producing fresh grounded issues eve
 - Keep this same issue authoritative until verified.
 - Do not weaken security, issue-governance, protected-file, validation, or owner-control boundaries.
 """
+    body = annotate_body(body, "discovery-silence-watchdog")
+    token = os.environ.get("GITHUB_TOKEN", "").strip() or os.environ.get("GH_TOKEN", "").strip()
+    decision = gate_remote(
+        repository,
+        token,
+        lane="discovery-silence-watchdog",
+        title=TITLE,
+        body=body,
+        severity="critical",
+        value_score=100.0,
+        bypass_backlog=True,
+    )
+    if decision.action == "duplicate":
+        return {
+            "status": "watchdog_issue_already_open",
+            "issue_number": decision.duplicate_issue_number,
+            "issue_url": decision.duplicate_issue_url,
+        }
     created = _run([
         "gh", "issue", "create",
         "--repo", repository,
