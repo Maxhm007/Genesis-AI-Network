@@ -241,7 +241,29 @@ def _edit_issue_labels(repository: str, issue_number: int, *, add: list[str] = [
             check=False,
         )
         if result.returncode != 0:
-            raise RuntimeError((result.stderr or result.stdout or "issue label add failed")[-1200:])
+            message = (result.stderr or result.stdout or "").lower()
+            if "not found" in message:
+                created = runner(
+                    [
+                        "gh", "label", "create", label,
+                        "--repo", repository,
+                        "--color", "6e7781",
+                        "--description", "Genesis Action lifecycle label",
+                        "--force",
+                    ],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+                if created.returncode == 0:
+                    result = runner(
+                        ["gh", "issue", "edit", str(issue_number), "--repo", repository, "--add-label", label],
+                        text=True,
+                        capture_output=True,
+                        check=False,
+                    )
+            if result.returncode != 0:
+                raise RuntimeError((result.stderr or result.stdout or "issue label add failed")[-1200:])
     for label in remove:
         result = runner(
             ["gh", "issue", "edit", str(issue_number), "--repo", repository, "--remove-label", label],
