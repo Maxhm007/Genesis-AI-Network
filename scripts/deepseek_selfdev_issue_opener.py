@@ -103,6 +103,60 @@ def extract_json_object(text: str) -> dict:
     raise ValueError("DeepSeek response did not contain a JSON object")
 
 
+def _json_repair_prompt(original_prompt: str, malformed_response: str) -> str:
+    return f"""ROLE: genesis_deepseek_json_repair
+Your previous response to the bounded Genesis discovery review was not valid JSON.
+Return exactly ONE JSON object and nothing else.
+Allowed shapes only:
+{{"action":"none","reason":"short reason"}}
+or
+{{"action":"open_issue","target":"genesis/example.py","title":"short problem title","finding":"specific current problem and why it matters","evidence":"exact source substring","acceptance":"specific verifiable outcome and focused test expectation","priority":70}}
+
+Do not add markdown fences, reasoning, commentary, XML, or prose outside the JSON object.
+Do not invent a new finding. Convert only the previous response into one allowed JSON shape consistent with the original review request.
+
+ORIGINAL REVIEW REQUEST:
+{original_prompt}
+
+PREVIOUS MALFORMED RESPONSE:
+{malformed_response[:6000]}
+"""
+
+
+def parse_model_response(reasoner, prompt: str, response: str) -> tuple[dict | None, dict]:
+    try:
+        return extract_json_object(response), {
+            "parse_status": "parsed_first_response",
+            "initial_response_excerpt": response[:1200],
+        }
+    except ValueError:
+        pass
+
+    try:
+        repaired_response = reasoner(_json_repair_prompt(prompt, response))
+    except (TimeoutError, urllib.error.URLError, RuntimeError) as exc:
+        return None, {
+            "parse_status": "repair_provider_unavailable",
+            "initial_response_excerpt": response[:1200],
+            "repair_error": f"{type(exc).__name__}: {exc}",
+        }
+
+    try:
+        parsed = extract_json_object(repaired_response)
+    except ValueError:
+        return None, {
+            "parse_status": "malformed_after_repair",
+            "initial_response_excerpt": response[:1200],
+            "repair_response_excerpt": repaired_response[:1200],
+        }
+
+    return parsed, {
+        "parse_status": "parsed_after_repair",
+        "initial_response_excerpt": response[:1200],
+        "repair_response_excerpt": repaired_response[:1200],
+    }
+
+
 def safe_targets(root: Path = ROOT) -> list[str]:
     rows: list[str] = []
     for base in (root / "genesis", root / "scripts"):
@@ -264,8 +318,9 @@ def run(root: Path = ROOT, *, reasoner=_provider_reason) -> dict:
         result.update(status="no_targets")
         return result
 
+    prompt = discovery_prompt(root, targets)
     try:
-        response = reasoner(discovery_prompt(root, targets))
+        response = reasoner(prompt)
     except (TimeoutError, urllib.error.URLError, RuntimeError) as exc:
         result.update(
             status="provider_unavailable",
@@ -273,8 +328,27 @@ def run(root: Path = ROOT, *, reasoner=_provider_reason) -> dict:
             retryable=True,
         )
         return result
-    raw = extract_json_object(response)
-    proposal = normalize_proposal(raw, root, set(targets))
+
+    raw, parse_evidence = parse_model_response(reasoner, prompt, response)
+    result["parse_evidence"] = parse_evidence
+    if raw is None:
+        result.update(
+            status="no_issue",
+            reason="DeepSeek returned malformed output after one bounded JSON-repair attempt",
+            retryable=False,
+        )
+        return result
+
+    try:
+        proposal = normalize_proposal(raw, root, set(targets))
+    except ValueError as exc:
+        result.update(
+            status="no_issue",
+            reason=f"DeepSeek proposal rejected by validator: {exc}",
+            model_response=raw,
+            retryable=False,
+        )
+        return result
     if proposal is None:
         result.update(status="no_issue", model_response=raw)
         return result
