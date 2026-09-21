@@ -9,6 +9,8 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+from genesis.issue_opening_manager import annotate_body, gate_remote
+
 ROOT = Path(__file__).resolve().parents[1]
 PROVIDER_URL = os.environ.get("GENESIS_DEEPSEEK_DISCOVERY_URL", "http://127.0.0.1:8768").rstrip("/")
 MODEL_ID = "deepseek-ai/DeepSeek-R1-Distill-Qwen-1.5B"
@@ -287,12 +289,35 @@ def run(root: Path = ROOT, *, reasoner=_provider_reason) -> dict:
             return result
 
     title = f"[Genesis DeepSeek Self Development] {proposal['title']}"[:240]
+    body = annotate_body(issue_body(proposal, fp), "deepseek-selfdev-discovery")
+    token = os.environ.get("GITHUB_TOKEN", "").strip()
+    repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
+    decision = gate_remote(
+        repo,
+        token,
+        lane="deepseek-selfdev-discovery",
+        title=title,
+        body=body,
+        severity="high" if proposal["priority"] >= 80 else "medium",
+        value_score=float(proposal["priority"]),
+    )
+    if decision.action == "duplicate":
+        result.update(
+            status="duplicate_suppressed",
+            duplicate_issue=decision.duplicate_issue_number,
+            duplicate_url=decision.duplicate_issue_url,
+            fingerprint=fp,
+        )
+        return result
+    if decision.action == "defer":
+        result.update(status="deferred_by_opening_manager", reason=decision.reason, fingerprint=fp)
+        return result
     created = _github(
         "POST",
         "/issues",
         {
             "title": title,
-            "body": issue_body(proposal, fp),
+            "body": body,
             "labels": [DISCOVERY_LABEL, SELFDEV_LABEL, AUTONOMOUS_LABEL],
         },
     )
