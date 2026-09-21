@@ -15,6 +15,8 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Iterable
 
+from genesis.issue_opening_manager import annotate_body, gate_remote
+
 SOURCES: tuple[str, ...] = (
     "huggingface/transformers",
     "vllm-project/vllm",
@@ -388,9 +390,24 @@ The Capability Discovery task only creates this issue. It must not implement, re
 
 
 def create_issue(repo: str, token: str, candidate: Candidate) -> str:
+    title = f"[Genesis Task] new capability — {candidate.capability_name}"
+    body = annotate_body(_issue_body(candidate), "recent-ai-capability-discovery")
+    decision = gate_remote(
+        repo,
+        token,
+        lane="recent-ai-capability-discovery",
+        title=title,
+        body=body,
+        severity="medium",
+        value_score=max(50.0, min(90.0, float(candidate.score) * 6.0)),
+    )
+    if decision.action == "duplicate":
+        return decision.duplicate_issue_url or f"duplicate:{decision.duplicate_issue_number}"
+    if decision.action == "defer":
+        return f"deferred:{decision.reason}"
     payload = {
-        "title": f"[Genesis Task] new capability — {candidate.capability_name}",
-        "body": _issue_body(candidate),
+        "title": title,
+        "body": body,
         "labels": ["genesis-task", "genesis-capability-discovery"],
     }
     response = _post_json(f"https://api.github.com/repos/{repo}/issues", payload, token)
