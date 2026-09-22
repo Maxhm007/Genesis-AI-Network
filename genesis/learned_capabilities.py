@@ -2652,4 +2652,39 @@ register_capability(
 )
 
 
+def _learned_8f4a4d9cf656(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('speculative', 'decoding', 'models', 'eagle3', 'sarvam', 'nemotron-h', 'with', 'separate', 'possibly', 'quantiz', 'vllm-project', 'vllm', 'v0.30.0', 'published', 'quantized', 'lm_head')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_8f4a4d9cf656',
+    'Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: **Speculative decoding for models**: EAGLE3 for Sarvam MLA (#53052), Nemotron-H MTP with a separate, possibly quantiz....',
+    "vllm-project/vllm release 'v0.30.0', published 2026-09-22T05:20:54Z: **Speculative decoding for models**: EAGLE3 for Sarvam MLA (#53052), Nemotron-H MTP with a separate, possibly quantized lm_head (#54574), NVFP4 DSpark gathered top-k projection for quantized Markov heads (#55713), Qwen3.5/3.6 multimodal MTP resolving `n_predict` from the text config (#55369), Qwen3 DSpark padded-vocab drafts (#55133), and GLM-OCR MTP weight loading (#49869) and position masking under CUDA graphs (#56447). Source: https://github.com/vllm-project/vllm/releases/tag/v0.30.0",
+    _learned_8f4a4d9cf656,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
