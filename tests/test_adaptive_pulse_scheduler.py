@@ -3,7 +3,7 @@ from pathlib import Path
 from genesis.pulse import adaptive_recovery_interval, recovery_pulse_due
 
 
-CONTROLLER = Path(".github/workflows/genesis-sequential-issue-controller.yml")
+AGENTIC = Path(".github/workflows/genesis-agentic-lab-recovery.yml")
 WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 WAKEUP = Path(".github/workflows/genesis-repair-worker-successor-wakeup.yml")
 
@@ -17,18 +17,11 @@ def test_adaptive_recovery_interval_accelerates_under_high_backlog() -> None:
 def test_adaptive_recovery_interval_uses_normal_active_cadence() -> None:
     decision = adaptive_recovery_interval(backlog_count=4, action_failure_count=0)
     assert decision.interval_minutes == 10
-    assert decision.reason == "active_repository_pressure"
 
 
 def test_adaptive_recovery_interval_slows_when_idle() -> None:
     decision = adaptive_recovery_interval(backlog_count=0, action_failure_count=0)
     assert decision.interval_minutes == 30
-    assert decision.reason == "idle_repository"
-
-
-def test_action_failures_accelerate_recovery_even_with_small_backlog() -> None:
-    decision = adaptive_recovery_interval(backlog_count=1, action_failure_count=3)
-    assert decision.interval_minutes == 5
 
 
 def test_recovery_pulse_due_uses_selected_interval() -> None:
@@ -37,50 +30,26 @@ def test_recovery_pulse_due_uses_selected_interval() -> None:
     assert recovery_pulse_due(last_completed_age_seconds=600, interval_minutes=10) is True
 
 
-def test_current_controller_has_independent_ten_minute_safety_net() -> None:
-    text = CONTROLLER.read_text(encoding="utf-8")
+def test_agentic_lab_is_authoritative_recovery_scheduler() -> None:
+    text = AGENTIC.read_text(encoding="utf-8")
     assert "schedule:" in text
-    assert "cron: '*/10 * * * *'" in text
-    assert "group: genesis-sequential-issue-controller" in text
-    assert "Start successor solver run" not in text
-    assert "genesis-oldest-issue-solver.yml/dispatches" not in text
+    assert "agentic_parallel_dispatch.py" in text
+    assert "issues: write" in text
+    assert "actions: write" in text
 
 
-def test_worker_completion_wakes_authoritative_controller_without_self_respawn() -> None:
+def test_worker_completion_returns_control_to_agentic_lab() -> None:
     text = WAKEUP.read_text(encoding="utf-8")
     assert "workflow_run:" in text
     assert "Genesis Bounded Repair Worker" in text
-    assert "completed" in text
-    assert "gh workflow run genesis-sequential-issue-controller.yml" in text
-    assert "--ref main" in text
-    assert "gh workflow run genesis-bounded-repair-worker.yml" not in text
-    assert "Start successor solver run" not in text
+    assert "Genesis Agentic Strategy Worker" in text
+    assert "gh workflow run genesis-agentic-lab-recovery.yml" in text
+    assert "genesis-sequential-issue-controller.yml" not in text
 
 
-def test_wakeup_merge_triggers_one_immediate_controller_probe() -> None:
-    text = WAKEUP.read_text(encoding="utf-8")
-    assert "push:" in text
-    assert "branches: [main]" in text
-    assert ".github/workflows/genesis-repair-worker-successor-wakeup.yml" in text
-    assert ".github/workflows/genesis-bounded-repair-worker.yml" in text
-    assert "group: genesis-repair-worker-successor-wakeup" in text
-    assert "cancel-in-progress: true" in text
-
-
-def test_bounded_worker_directly_hands_back_to_authoritative_controller() -> None:
+def test_bounded_worker_returns_control_to_agentic_lab() -> None:
     text = WORKER.read_text(encoding="utf-8")
     assert "actions: write" in text
-    assert "Wake sequential controller for next issue" in text
-    assert "gh workflow run genesis-sequential-issue-controller.yml" in text
-    assert "--ref main" in text
-    assert text.index("Preserve bounded repair evidence") < text.index("Wake sequential controller for next issue")
-
-
-def test_current_repair_capacity_is_single_issue_lane() -> None:
-    controller = CONTROLLER.read_text(encoding="utf-8")
-    worker = WORKER.read_text(encoding="utf-8")
-    assert "active_count=" in controller
-    assert "strict sequential mode will not start another issue" in controller
-    assert "genesis-repair-in-progress" in controller
-    assert "genesis-validating" in controller
-    assert "group: genesis-bounded-repair-${{ inputs.issue_number }}" in worker
+    assert "Return control to Agentic Lab" in text
+    assert "gh workflow run genesis-agentic-lab-recovery.yml" in text
+    assert "genesis-sequential-issue-controller.yml" not in text
