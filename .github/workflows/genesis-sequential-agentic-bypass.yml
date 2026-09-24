@@ -2,14 +2,9 @@ name: Genesis Sequential Agentic Bypass
 
 # Compatibility feeder only.
 # There is no independent bypass lane; Agentic Lab owns all issue scheduling.
+# Compatibility/manual trigger only; automatic continuity is owned by Agentic Lab + Idle Repair Watchdog.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-sequential-agentic-bypass.yml
-      - .github/workflows/genesis-agentic-lab-recovery.yml
-      - scripts/agentic_parallel_dispatch.py
 
 permissions:
   contents: read
