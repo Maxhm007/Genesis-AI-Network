@@ -23,6 +23,6 @@ def test_integration_router_preserves_validation_boundaries() -> None:
 
 def test_integration_router_wakes_existing_controller_without_new_close_lane() -> None:
     text = WORKFLOW.read_text(encoding="utf-8")
-    assert "gh workflow run genesis-sequential-issue-controller.yml" in text
+    assert "gh workflow run genesis-agentic-lab-recovery.yml" in text
     assert "state=closed" not in text
     assert "state_reason" not in text
