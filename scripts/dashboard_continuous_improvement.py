@@ -206,18 +206,19 @@ def review_dashboard(root: Path = Path(".")) -> tuple[list[base.Finding], list[s
 
 
 def create_issue(repo: str, token: str, finding: base.Finding, views: list[str], files: list[Path]) -> str:
-    response = base._post_json(
-        f"https://api.github.com/repos/{repo}/issues",
-        {
-            "title": f"[Genesis Task] Dashboard improvement — {finding.title}",
-            "body": base.issue_body(finding, views, files),
-            "labels": ["genesis-task", base.LABEL, "genesis-autonomous"],
-        },
+    title = f"[Genesis Task] Dashboard improvement — {finding.title}"
+    body = base.annotate_body(base.issue_body(finding, views, files), "dashboard-continuous-improvement")
+    decision = base.submit_agentic_candidate(
+        repo,
         token,
+        lane="dashboard-continuous-improvement",
+        title=title,
+        body=body,
+        labels=["genesis-task", base.LABEL, "genesis-autonomous"],
+        severity="high" if finding.priority >= 80 else "medium",
+        value_score=float(finding.priority),
     )
-    if not isinstance(response, dict):
-        raise RuntimeError("GitHub returned an invalid issue response")
-    return str(response.get("html_url") or response.get("url") or "")
+    return f"agentic-pending:{decision.reason}"
 
 
 def main() -> int:
