@@ -28,7 +28,7 @@ on:
 
 permissions:
   contents: read
-  issues: write
+  issues: read
   actions: write
 
 env:
