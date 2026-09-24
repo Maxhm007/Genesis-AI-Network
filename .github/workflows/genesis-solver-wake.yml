@@ -1,10 +1,8 @@
 name: Genesis Solver Wake
 
+# Compatibility/manual trigger only; automatic continuity is owned by Agentic Lab + Idle Repair Watchdog.
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-solver-wake.yml
+  workflow_dispatch:
 
 permissions:
   actions: write
