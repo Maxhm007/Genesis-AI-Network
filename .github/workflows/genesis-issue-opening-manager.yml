@@ -73,4 +73,20 @@ jobs:
               echo "::error file=$file::Producer directly creates GitHub Issues; delegate to Genesis Agentic Issue Opening Authority"
               exit 1
             fi
+
+            workflow=""
+            case "$file" in
+              scripts/github_issue_discovery.py) workflow=".github/workflows/github-issue-discovery.yml" ;;
+              scripts/deepseek_selfdev_issue_opener.py) workflow=".github/workflows/genesis-deepseek-selfdev-discovery.yml" ;;
+              scripts/discover_recent_ai_capability.py) workflow=".github/workflows/genesis-recent-ai-capability-discovery.yml" ;;
+              scripts/discover_missing_qwen_capability.py) workflow=".github/workflows/genesis-missing-qwen-capability-discovery.yml" ;;
+              scripts/gene_peer_issue_sync.py) workflow=".github/workflows/genesis-gene-peer-issue-sync.yml" ;;
+              scripts/discovery_silence_watchdog.py) workflow=".github/workflows/genesis-discovery-silence-watchdog.yml" ;;
+              scripts/dashboard_hourly_review.py|scripts/dashboard_continuous_improvement.py) workflow=".github/workflows/genesis-hourly-dashboard-review.yml" ;;
+            esac
+            if [[ -n "$workflow" && -f "$workflow" ]] && grep -Eq '^[[:space:]]+issues:[[:space:]]*write[[:space:]]*          done
+ "$workflow"; then
+              echo "::error file=$workflow::Discovery producer must not have issues: write; central Agentic opener owns issue creation"
+              exit 1
+            fi
           done
