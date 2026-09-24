@@ -2,22 +2,9 @@ name: Genesis Self Healing
 
 # Compatibility failure-signal feeder only.
 # Generalized Action Failure Watcher + Agentic Lab own diagnosis, retry, repair, verification and closure.
+# Compatibility/manual dispatch only; automatic failure detection is owned by Genesis Action Failure Watcher.
 on:
   workflow_dispatch:
-  workflow_run:
-    workflows:
-      - Genesis Independent Validator Gate
-      - Genesis Candidate PR Gate
-      - Genesis Secret Guard
-      - Genesis Proactive Development
-    types:
-      - completed
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/self-healing.yml
-      - .github/workflows/genesis-action-failure-watcher.yml
-      - scripts/action_failure_watchdog.py
 
 permissions:
   contents: read
@@ -29,7 +16,6 @@ concurrency:
 
 jobs:
   handoff:
-    if: github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure'
     runs-on: ubuntu-latest
     timeout-minutes: 3
     steps:
