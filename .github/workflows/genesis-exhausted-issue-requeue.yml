@@ -2,18 +2,9 @@ name: Genesis Exhausted Issue Requeue
 
 # Compatibility trigger only.
 # Agentic Lab owns exhausted-issue re-arm and recovery state.
+# Compatibility/manual trigger only; automatic continuity is owned by Agentic Lab + Idle Repair Watchdog.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - genesis/coding.py
-      - genesis/learned_capabilities.py
-      - genesis/github_issue_capability_builder.py
-      - scripts/agentic_lab_recovery_dispatch.py
-      - scripts/agentic_parallel_dispatch.py
-      - .github/workflows/genesis-agentic-lab-recovery.yml
-      - .github/workflows/genesis-exhausted-issue-requeue.yml
 
 permissions:
   contents: read
