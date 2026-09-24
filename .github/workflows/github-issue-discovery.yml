@@ -157,7 +157,7 @@ jobs:
         run: |
           set -euo pipefail
           if [[ -f runtime/github_issue_discovery.json ]] &&              jq -e '.status == "issue_opened"' runtime/github_issue_discovery.json >/dev/null; then
-            gh workflow run genesis-sequential-issue-controller.yml               --repo "$GITHUB_REPOSITORY"               --ref main || true
+            gh workflow run genesis-agentic-lab-recovery.yml               --repo "$GITHUB_REPOSITORY"               --ref main || true
           else
             echo 'No new grounded issue was opened; solver wake is unnecessary.'
           fi
