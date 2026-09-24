@@ -222,3 +222,17 @@ def test_family_status_shows_capability_dependency_and_release():
     assert released["shared_capabilities"] == (500,)
     assert released["released_capabilities"] == (500,)
     assert released["chain"] == ("root:400", "resumed:400")
+
+
+def test_closed_duplicate_label_is_terminal_and_never_reopened():
+    duplicate = issue(
+        911,
+        state="closed",
+        state_reason="not_planned",
+        labels=("genesis-task", "duplicate", "genesis-autonomous"),
+    )
+
+    decision = lifecycle_decision(duplicate, {911: duplicate})
+
+    assert decision.action == "keep_closed"
+    assert decision.reason == "explicitly_superseded"
