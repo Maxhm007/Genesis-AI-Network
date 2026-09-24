@@ -315,3 +315,28 @@ def test_current_material_state_epoch_reads_only_fresh_result():
         {"body": "<!-- genesis-agentic-strategy-result:diagnostic_reframe -->\nrepair status: `worker_failed_before_evidence`"},
     ]
     assert module.latest_result_status(comments, token) == "worker_failed_before_evidence"
+
+
+def test_recovery_engine_generation_changes_when_engine_changes(tmp_path):
+    for relative in module.RECOVERY_ENGINE_PATHS:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("baseline\n", encoding="utf-8")
+    before = module.recovery_engine_generation(tmp_path)
+    target = tmp_path / "scripts/agentic_lab_recovery_dispatch.py"
+    target.write_text("improved\n", encoding="utf-8")
+    after = module.recovery_engine_generation(tmp_path)
+    assert after != before
+
+
+def test_recovery_material_state_token_rearms_on_engine_change(tmp_path):
+    for relative in module.RECOVERY_ENGINE_PATHS:
+        path = tmp_path / relative
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("baseline\n", encoding="utf-8")
+    issue = {"body": "task", "number": 99}
+    comments = []
+    before = module.recovery_material_state_token(issue, "", comments, root=tmp_path)
+    (tmp_path / "genesis/coding.py").write_text("new engine\n", encoding="utf-8")
+    after = module.recovery_material_state_token(issue, "", comments, root=tmp_path)
+    assert after != before
