@@ -2,15 +2,9 @@ name: Genesis Throughput Issue Controller
 
 # Compatibility feeder only.
 # Agentic Lab is the single issue scheduling, reservation, and worker-dispatch authority.
+# Compatibility/manual trigger only; automatic continuity is owned by Agentic Lab + Idle Repair Watchdog.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-throughput-issue-controller.yml
-      - .github/workflows/genesis-agentic-lab-recovery.yml
-      - scripts/agentic_parallel_dispatch.py
-      - scripts/agentic_lab_recovery_dispatch.py
 
 permissions:
   contents: read
