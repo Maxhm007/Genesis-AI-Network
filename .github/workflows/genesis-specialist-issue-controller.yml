@@ -4,8 +4,6 @@ name: Genesis Specialist Issue Controller
 # Agentic Lab owns specialist classification, reservation, and worker dispatch.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '5,15,25,35,45,55 * * * *'
   push:
     branches: [main]
     paths:
