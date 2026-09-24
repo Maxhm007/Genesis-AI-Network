@@ -2,15 +2,9 @@ name: Genesis Recovery Solver
 
 # Compatibility trigger only.
 # Agentic Lab owns recovery strategy and worker selection.
+# Compatibility/manual trigger only; automatic continuity is owned by Agentic Lab + Idle Repair Watchdog.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-recovery-solver.yml
-      - scripts/agentic_lab_recovery_dispatch.py
-      - scripts/agentic_parallel_dispatch.py
-      - .github/workflows/genesis-agentic-lab-recovery.yml
 
 permissions:
   actions: write
