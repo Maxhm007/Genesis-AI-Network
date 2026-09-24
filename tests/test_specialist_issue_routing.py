@@ -14,48 +14,16 @@ def test_evidence_first_builder_changes_repair_engine_generation() -> None:
     assert "genesis/github_issue_capability_builder.py" in ENGINE_PATHS
 
 
-def test_specialist_controller_serializes_with_generic_queue_and_routes_only_safe_scripts() -> None:
+def test_specialist_controller_is_feeder_only_and_agentic_lab_owns_routing() -> None:
     specialist = SPECIALIST_CONTROLLER.read_text(encoding="utf-8")
-    generic = GENERIC_CONTROLLER.read_text(encoding="utf-8")
+    agentic = (ROOT / "scripts/agentic_lab_recovery_dispatch.py").read_text(encoding="utf-8")
 
-    assert "group: genesis-sequential-issue-controller" in specialist
-    assert "group: genesis-sequential-issue-controller" in generic
-    assert "target.startswith('scripts/')" in specialist
-    assert "target.endswith('.py')" in specialist
-    assert "scripts/secret_guard.py" in specialist
-    assert "scripts/privileged_change_gate.py" in specialist
-    assert "scripts/verify_validator_votes.py" in specialist
-    assert "scripts/action_repair_guard.py" in specialist
-    assert "scripts/issue_acceptance_guard.py" in specialist
-    assert "genesis-repair-in-progress" in specialist
-    assert "genesis-specialist-repair-worker-v2.yml" in specialist
-
-
-def test_specialist_controller_surfaces_actionable_no_target_work_once() -> None:
-    specialist = SPECIALIST_CONTROLLER.read_text(encoding="utf-8")
-
-    assert "genesis-needs-routing" in specialist
-    assert "[Genesis Task]" in specialist
-    assert "[Genesis Repair]" in specialist
-    assert "[Genesis Self Improvement]" in specialist
-    assert "application_development_requires_application_lane" in specialist
-    assert "workflow_control_plane_requires_privileged_decomposition" in specialist
-    assert "multi_file_or_new_file_gene_lifecycle_requires_decomposition" in specialist
-    assert "missing_deterministic_single_target_requires_decomposition" in specialist
-    assert "<!-- genesis-specialist-routing -->" in specialist
-    assert "if 'genesis-needs-routing' in labels" in specialist
-    assert "not being closed without completion evidence" in specialist
-    assert "[genesis ops]" in specialist.lower()
-    assert "[genesis gene chat]" in specialist.lower()
-
-
-def test_specialist_classification_does_not_break_active_repair_serialization() -> None:
-    specialist = SPECIALIST_CONTROLLER.read_text(encoding="utf-8")
-
-    classification_index = specialist.index("/tmp/genesis-needs-routing.txt")
-    reservation_index = specialist.index("active_count=$(jq")
-    dispatch_index = specialist.index("gh workflow run genesis-specialist-repair-worker-v2.yml")
-    assert classification_index < reservation_index < dispatch_index
+    assert "Agentic Lab owns specialist classification, reservation, and worker dispatch" in specialist
+    assert "gh workflow run genesis-agentic-lab-recovery.yml" in specialist
+    assert "issues: write" not in specialist
+    assert 'target.startswith("scripts/")' in agentic
+    assert 'target.endswith(".py")' in agentic
+    assert "PROTECTED_TARGETS" in agentic
 
 
 def test_specialist_worker_uses_grounded_guarded_repair_engine_and_exact_scope() -> None:
