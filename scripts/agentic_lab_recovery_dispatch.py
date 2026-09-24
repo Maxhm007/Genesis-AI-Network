@@ -14,6 +14,7 @@ from genesis.anti_stuck import (
     anti_stuck_decision,
     attempt_history,
     attempt_marker,
+    current_epoch_comments,
     has_state_marker,
     material_state_token,
     materially_equivalent_attempt,
@@ -274,9 +275,9 @@ def next_strategy(comments: list[dict]) -> str:
     return ""
 
 
-def latest_result_status(comments: list[dict]) -> str:
-    release_index = _latest_release_index(comments)
-    for row in reversed(comments[release_index + 1 :]):
+def latest_result_status(comments: list[dict], state_token: str = "") -> str:
+    scoped = current_epoch_comments(comments, state_token) if state_token else comments[_latest_release_index(comments) + 1 :]
+    for row in reversed(scoped):
         body = str(row.get("body") or "")
         if not body.startswith(RESULT_MARKER_PREFIX):
             continue
@@ -593,7 +594,7 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         )
         history = attempt_history(comments, state_token, target)
         policy = anti_stuck_decision(history)
-        status = latest_result_status(comments)
+        status = latest_result_status(comments, state_token)
 
         if capability_gap_status(status) or policy.action == "capability":
             result = pause_for_capability(
