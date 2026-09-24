@@ -79,12 +79,29 @@ def find_fresh_success(repository: str, metadata: dict) -> dict | None:
 
 
 def _close_verified(repository: str, issue_number: int, evidence: dict) -> None:
-    edit = ["gh", "issue", "edit", str(issue_number), "--repo", repository, "--add-label", SOLVED_LABEL]
-    for label in REMOVE_LABELS:
-        edit += ["--remove-label", label]
-    result = subprocess.run(edit, text=True, capture_output=True, check=False)
+    result = subprocess.run(
+        ["gh", "issue", "edit", str(issue_number), "--repo", repository, "--add-label", SOLVED_LABEL],
+        text=True,
+        capture_output=True,
+        check=False,
+    )
     if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout or "label update failed")[-1200:])
+        raise RuntimeError((result.stderr or result.stdout or "solved label update failed")[-1200:])
+
+    for label in REMOVE_LABELS:
+        result = subprocess.run(
+            ["gh", "issue", "edit", str(issue_number), "--repo", repository, "--remove-label", label],
+            text=True,
+            capture_output=True,
+            check=False,
+        )
+        if result.returncode == 0:
+            continue
+        message = (result.stderr or result.stdout or "").lower()
+        if "not found" in message or "does not have label" in message:
+            continue
+        raise RuntimeError((result.stderr or result.stdout or "label cleanup failed")[-1200:])
+
     failed_job = str(evidence.get("failed_job") or "")
     proof = (
         "the whole workflow completed successfully"
