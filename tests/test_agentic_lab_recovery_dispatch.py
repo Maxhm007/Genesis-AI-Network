@@ -292,3 +292,26 @@ def test_unresolved_capability_blocks_even_without_waiting_label(monkeypatch):
 
     assert result == {"status": "idle", "reason": "no_safely_routable_agentic_issue"}
     assert not any("/actions/workflows/" in path for _, path, _ in calls)
+
+
+def test_new_material_state_epoch_ignores_stale_capability_failure():
+    old = "oldstate123"
+    new = "newstate456"
+    comments = [
+        {"body": f"<!-- genesis-anti-stuck-state:{old} -->"},
+        {"body": "<!-- genesis-agentic-strategy:evidence_first -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `retry_pending_capability`"},
+        {"body": f"<!-- genesis-anti-stuck-state:{new} -->\nGenesis Anti-Stuck Controller started a new attempt epoch because repository state materially changed."},
+    ]
+    assert module.latest_result_status(comments, new) == ""
+
+
+def test_current_material_state_epoch_reads_only_fresh_result():
+    token = "currentstate789"
+    comments = [
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `retry_pending_capability`"},
+        {"body": f"<!-- genesis-anti-stuck-state:{token} -->"},
+        {"body": "<!-- genesis-agentic-strategy:diagnostic_reframe -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:diagnostic_reframe -->\nrepair status: `worker_failed_before_evidence`"},
+    ]
+    assert module.latest_result_status(comments, token) == "worker_failed_before_evidence"
