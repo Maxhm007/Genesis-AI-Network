@@ -86,7 +86,29 @@ def _close_verified(repository: str, issue_number: int, evidence: dict) -> None:
         check=False,
     )
     if result.returncode != 0:
-        raise RuntimeError((result.stderr or result.stdout or "solved label update failed")[-1200:])
+        message = (result.stderr or result.stdout or "").lower()
+        if "not found" in message:
+            created = subprocess.run(
+                [
+                    "gh", "label", "create", SOLVED_LABEL,
+                    "--repo", repository,
+                    "--color", "2da44e",
+                    "--description", "Genesis verified Action failure resolved by fresh successful run",
+                    "--force",
+                ],
+                text=True,
+                capture_output=True,
+                check=False,
+            )
+            if created.returncode == 0:
+                result = subprocess.run(
+                    ["gh", "issue", "edit", str(issue_number), "--repo", repository, "--add-label", SOLVED_LABEL],
+                    text=True,
+                    capture_output=True,
+                    check=False,
+                )
+        if result.returncode != 0:
+            raise RuntimeError((result.stderr or result.stdout or "solved label update failed")[-1200:])
 
     for label in REMOVE_LABELS:
         result = subprocess.run(
