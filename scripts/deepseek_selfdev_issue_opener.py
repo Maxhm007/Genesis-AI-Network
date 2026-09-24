@@ -253,15 +253,12 @@ def _labels() -> list[dict]:
 
 
 def ensure_labels() -> None:
-    existing = {str(row.get("name") or "") for row in _labels() if isinstance(row, dict)}
-    definitions = {
-        DISCOVERY_LABEL: ("6f42c1", "Self-development issue autonomously discovered by Gene 0 DeepSeek"),
-        SELFDEV_LABEL: ("1d76db", "Genesis self-improvement work controlled through GitHub Issues"),
-        AUTONOMOUS_LABEL: ("0e8a16", "Genesis autonomous issue lifecycle"),
-    }
-    for name, (color, description) in definitions.items():
-        if name not in existing:
-            _github("POST", "/labels", {"name": name, "color": color, "description": description})
+    """Producer-side compatibility no-op.
+
+    Label existence is owned by the central Agentic Issue Opening Authority so
+    discovery producers can remain read-only with respect to GitHub Issues.
+    """
+    return None
 
 
 def open_discovery_issues() -> list[dict]:
