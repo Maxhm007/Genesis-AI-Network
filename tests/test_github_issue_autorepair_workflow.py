@@ -1,31 +1,17 @@
 from pathlib import Path
 
 
-CONTROLLER = Path(".github/workflows/genesis-sequential-issue-controller.yml")
+CONTROLLER = Path(".github/workflows/genesis-agentic-lab-recovery.yml")
 WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 REPAIR_ENGINE = Path("scripts/github_issue_autorepair.py")
 
 
-def test_controller_keeps_issue_selection_single_lane() -> None:
+def test_agentic_lab_is_single_recovery_scheduler() -> None:
     text = CONTROLLER.read_text(encoding="utf-8")
-
-    assert "group: genesis-sequential-issue-controller" in text
-    assert "cancel-in-progress: false" in text
-    assert "max_attempts=3" in text
-    assert "cron: '*/10 * * * *'" in text
-    assert "Claiming exactly one issue" in text
-
-
-def test_controller_retries_github_api_and_label_initialization_is_idempotent() -> None:
-    text = CONTROLLER.read_text(encoding="utf-8")
-
-    assert "gh_retry()" in text
-    assert "Transient GitHub command failure" in text
-    assert "gh label create" in text
-    assert "--force" in text
-    assert "gh label list" not in text
-    assert "gh_retry gh issue edit" in text
-    assert "gh_retry gh api --paginate" in text
+    assert "group: genesis-agentic-lab-recovery" in text
+    assert "agentic_parallel_dispatch.py" in text
+    assert "issues: write" in text
+    assert "actions: write" in text
 
 
 def test_worker_is_per_issue_serialized_and_bounded() -> None:
