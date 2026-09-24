@@ -208,6 +208,46 @@ def fingerprint(lane: str, title: str, body: str) -> str:
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:20]
 
 
+def build_agentic_candidate(
+    *,
+    lane: str,
+    title: str,
+    body: str,
+    labels: Iterable[str] = (),
+    severity: str = "medium",
+    value_score: float = 60.0,
+    bypass_backlog: bool = False,
+) -> dict:
+    lane = _norm(lane)
+    if not re.fullmatch(r"[a-z0-9._-]{1,80}", lane):
+        raise ValueError("invalid issue-opening lane")
+    title = str(title or "").strip()
+    body = str(body or "").strip()
+    if not title or len(title) > 240:
+        raise ValueError("candidate title must be 1..240 characters")
+    if not body or len(body.encode("utf-8")) > 60_000:
+        raise ValueError("candidate body must be non-empty and <= 60000 bytes")
+    clean_labels: list[str] = []
+    for raw in labels:
+        label = str(raw or "").strip()
+        if not label or len(label) > 100 or label in clean_labels:
+            continue
+        clean_labels.append(label)
+        if len(clean_labels) >= 20:
+            break
+    return {
+        "schema": "genesis.agentic-issue-candidate.v1",
+        "lane": lane,
+        "title": title,
+        "body": body,
+        "labels": clean_labels,
+        "severity": _norm(severity) or "medium",
+        "value_score": max(0.0, min(100.0, float(value_score))),
+        "bypass_backlog": bool(bypass_backlog),
+        "candidate_fingerprint": fingerprint(lane, title, body),
+    }
+
+
 def submit_agentic_candidate(
     repository: str,
     token: str,
@@ -226,37 +266,18 @@ def submit_agentic_candidate(
     they do not create GitHub Issues directly. The repository_dispatch event is
     intentionally the only handoff from producer workflows to the central opener.
     """
-    lane = _norm(lane)
     if not repository or not token:
         raise ValueError("repository and token are required")
-    if not re.fullmatch(r"[a-z0-9._-]{1,80}", lane):
-        raise ValueError("invalid issue-opening lane")
-    title = str(title or "").strip()
-    body = str(body or "").strip()
-    if not title or len(title) > 240:
-        raise ValueError("candidate title must be 1..240 characters")
-    if not body or len(body.encode("utf-8")) > 60_000:
-        raise ValueError("candidate body must be non-empty and <= 60000 bytes")
-    clean_labels = []
-    for raw in labels:
-        label = str(raw or "").strip()
-        if not label or len(label) > 100 or label in clean_labels:
-            continue
-        clean_labels.append(label)
-        if len(clean_labels) >= 20:
-            break
-
-    candidate = {
-        "schema": "genesis.agentic-issue-candidate.v1",
-        "lane": lane,
-        "title": title,
-        "body": body,
-        "labels": clean_labels,
-        "severity": _norm(severity) or "medium",
-        "value_score": max(0.0, min(100.0, float(value_score))),
-        "bypass_backlog": bool(bypass_backlog),
-        "candidate_fingerprint": fingerprint(lane, title, body),
-    }
+    candidate = build_agentic_candidate(
+        lane=lane,
+        title=title,
+        body=body,
+        labels=labels,
+        severity=severity,
+        value_score=value_score,
+        bypass_backlog=bypass_backlog,
+    )
+    lane = candidate["lane"]
     payload = {
         "ref": "main",
         "inputs": {"candidate_json": json.dumps(candidate, separators=(",", ":"))},
