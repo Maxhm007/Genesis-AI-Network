@@ -5,13 +5,15 @@ on:
   workflow_run:
     workflows:
       - Genesis Bounded Repair Worker
+      - Genesis Specialist Repair Worker v2
+      - Genesis Agentic Strategy Worker
+      - Genesis DeepSeek Agentic Solver
     types:
       - completed
   push:
     branches: [main]
     paths:
       - .github/workflows/genesis-repair-worker-successor-wakeup.yml
-      - .github/workflows/genesis-bounded-repair-worker.yml
 
 permissions:
   contents: read
@@ -22,16 +24,11 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  wake-sequential-controller:
+  wake-agentic-lab:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
-      - name: Wake the authoritative sequential issue controller
+      - name: Wake Agentic Lab after worker completion
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh workflow run genesis-sequential-issue-controller.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main
+        run: gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
