@@ -554,7 +554,7 @@ def pause_for_capability(
             repository,
             token,
             "POST",
-            "/actions/workflows/genesis-sequential-issue-controller.yml/dispatches",
+            "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
             {"ref": "main"},
         )
     except Exception:
