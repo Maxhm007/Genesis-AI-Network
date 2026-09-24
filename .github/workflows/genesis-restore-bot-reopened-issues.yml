@@ -1,10 +1,7 @@
 name: Genesis Restore Bot-Reopened Issues
 
+# Manual legacy recovery only. Closed Issue Seal + Closure Manager own automatic reopen/restore policy.
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-restore-bot-reopened-issues.yml
   workflow_dispatch:
 
 permissions:
