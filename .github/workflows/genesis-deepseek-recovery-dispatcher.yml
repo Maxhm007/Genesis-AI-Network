@@ -3,8 +3,6 @@ name: Genesis DeepSeek Recovery Dispatcher
 # Compatibility feeder only. Agentic Lab chooses DeepSeek when appropriate.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '2,12,22,32,42,52 * * * *'
   push:
     branches: [main]
     paths:
