@@ -1,0 +1,46 @@
+name: Genesis Agentic Issue Opening Authority
+
+on:
+  repository_dispatch:
+    types: [genesis-issue-candidate]
+  workflow_dispatch:
+    inputs:
+      candidate_json:
+        description: Optional JSON candidate for manual validation
+        required: false
+        type: string
+
+permissions:
+  contents: read
+  issues: write
+  actions: write
+
+concurrency:
+  group: genesis-agentic-issue-opening
+  cancel-in-progress: false
+
+jobs:
+  decide-and-open:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install validation dependency
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Validate Agentic issue-opening authority
+        run: python -m pytest -q tests/test_issue_opening_manager.py tests/test_agentic_issue_opening_authority.py
+
+      - name: Decide and publish at most one candidate
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GENESIS_ISSUE_CANDIDATE: ${{ github.event_name == 'repository_dispatch' && toJson(github.event.client_payload) || inputs.candidate_json }}
+        run: python scripts/agentic_issue_opening_authority.py
