@@ -55,9 +55,10 @@ def test_recent_capability_discovery_is_native_and_bounded() -> None:
     assert "git push origin HEAD:main" not in text
 
 
-def test_capability_discovery_label_setup_is_idempotent() -> None:
+def test_capability_discovery_delegates_label_and_issue_authority() -> None:
     text = _text(CAPABILITY)
 
-    assert "gh label create genesis-task" in text
-    assert "gh label create genesis-capability-discovery" in text
-    assert text.count("--force") >= 2
+    assert "issues: read" in text
+    assert "issues: write" not in text
+    assert "gh label create" not in text
+    assert "python scripts/discover_recent_ai_capability.py" in text
