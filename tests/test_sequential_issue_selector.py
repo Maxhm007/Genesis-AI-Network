@@ -75,3 +75,22 @@ def test_system_wide_architecture_outranks_narrower_older_architecture():
     assert selected['number'] == 81
     assert selected['breakdown']['architecture_impact'] > 0
     assert selected['architecture_breakdown']
+
+
+def test_control_plane_issue_prefixes_route_as_architecture():
+    prefixes = (
+        "[Genesis Governance]",
+        "[Genesis Scheduling]",
+        "[Genesis Observability]",
+        "[Genesis Maintenance]",
+        "[Genesis Routing]",
+        "[Genesis Recovery]",
+        "[Genesis Safety]",
+        "[Genesis Metrics]",
+        "[Genesis Autonomy]",
+    )
+    for offset, prefix in enumerate(prefixes, start=100):
+        row = candidate(issue(offset, f"{prefix} autonomous control-plane improvement", "No concrete file target yet"), now=NOW)
+        assert row is not None
+        assert row["kind"] == "architecture"
+        assert row["target"] == ""
