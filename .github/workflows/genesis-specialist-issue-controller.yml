@@ -2,15 +2,9 @@ name: Genesis Specialist Issue Controller
 
 # Compatibility feeder only.
 # Agentic Lab owns specialist classification, reservation, and worker dispatch.
+# Compatibility/manual trigger only; automatic continuity is owned by Agentic Lab + Idle Repair Watchdog.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-specialist-issue-controller.yml
-      - .github/workflows/genesis-specialist-repair-worker-v2.yml
-      - scripts/agentic_lab_recovery_dispatch.py
-      - scripts/agentic_parallel_dispatch.py
 
 permissions:
   contents: read
