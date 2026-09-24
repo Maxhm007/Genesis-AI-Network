@@ -1,7 +1,4 @@
 name: Genesis Idle Repair Watchdog
-# workflow-governor credential wake
-# workflow-governor token-precedence wake
-# workflow-governor pr-token wake
 
 on:
   push:
@@ -19,12 +16,12 @@ permissions:
 
 concurrency:
   group: genesis-idle-repair-watchdog
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
   wake-if-idle:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 4
     steps:
       - name: Wake Agentic Lab when autonomous backlog is idle
         env:
@@ -33,20 +30,10 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-
           open_count=$(gh api "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-autonomous&per_page=1" --jq '.total_count')
           active_count=$(gh api "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-repair-in-progress&per_page=1" --jq '.total_count')
           validating_count=$(gh api "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-validating&per_page=1" --jq '.total_count')
-
-          echo "autonomous_open=${open_count} repair_in_progress=${active_count} validating=${validating_count}"
-
-          if [[ "${open_count}" -gt 0 && "${active_count}" -eq 0 && "${validating_count}" -eq 0 ]]; then
-            echo "Autonomous backlog is idle; waking Agentic Lab Recovery and Sequential Issue Controller."
-            gh workflow run genesis-agentic-lab-recovery.yml --repo "${REPO}"
-            gh workflow run genesis-sequential-issue-controller.yml --repo "${REPO}"
-          else
-            echo "No wake required."
+          if [[ "$open_count" -gt 0 && "$active_count" -eq 0 && "$validating_count" -eq 0 ]]; then
+            gh workflow run genesis-agentic-lab-recovery.yml --repo "$REPO" --ref main
           fi
-
-          echo "Waking Workflow Governor as an independent governance heartbeat."
-          gh workflow run genesis-workflow-governor.yml --repo "${REPO}" -f apply=true
+          gh workflow run genesis-workflow-governor.yml --repo "$REPO" -f apply=true
