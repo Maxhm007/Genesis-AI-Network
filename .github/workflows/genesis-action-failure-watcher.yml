@@ -40,6 +40,13 @@ jobs:
       - name: Install repository dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
+      - name: Close stale Action failures proven healthy by newer main runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/action_failure_fresh_reconcile.py --repository "$GITHUB_REPOSITORY"
+
       - name: Detect and reconcile Action failures across all main workflows
         env:
           GH_TOKEN: ${{ github.token }}
