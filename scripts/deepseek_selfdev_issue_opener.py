@@ -9,7 +9,7 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
-from genesis.issue_opening_manager import annotate_body, gate_remote
+from genesis.issue_opening_manager import annotate_body, submit_agentic_candidate
 
 ROOT = Path(__file__).resolve().parents[1]
 PROVIDER_URL = os.environ.get("GENESIS_DEEPSEEK_DISCOVERY_URL", "http://127.0.0.1:8768").rstrip("/")
@@ -366,7 +366,7 @@ def run(root: Path = ROOT, *, reasoner=_provider_reason) -> dict:
     body = annotate_body(issue_body(proposal, fp), "deepseek-selfdev-discovery")
     token = os.environ.get("GITHUB_TOKEN", "").strip()
     repo = os.environ.get("GITHUB_REPOSITORY", "").strip()
-    decision = gate_remote(
+    decision = submit_agentic_candidate(
         repo,
         token,
         lane="deepseek-selfdev-discovery",
@@ -374,35 +374,14 @@ def run(root: Path = ROOT, *, reasoner=_provider_reason) -> dict:
         body=body,
         severity="high" if proposal["priority"] >= 80 else "medium",
         value_score=float(proposal["priority"]),
+        labels=[DISCOVERY_LABEL, SELFDEV_LABEL, AUTONOMOUS_LABEL],
     )
-    if decision.action == "duplicate":
-        result.update(
-            status="duplicate_suppressed",
-            duplicate_issue=decision.duplicate_issue_number,
-            duplicate_url=decision.duplicate_issue_url,
-            fingerprint=fp,
-        )
-        return result
-    if decision.action == "defer":
-        result.update(status="deferred_by_opening_manager", reason=decision.reason, fingerprint=fp)
-        return result
-    created = _github(
-        "POST",
-        "/issues",
-        {
-            "title": title,
-            "body": body,
-            "labels": [DISCOVERY_LABEL, SELFDEV_LABEL, AUTONOMOUS_LABEL],
-        },
+    result.update(
+        status="agentic_opening_pending",
+        opening_authority=decision.reason,
+        fingerprint=fp,
+        target=proposal["target"],
     )
-    if not isinstance(created, dict) or int(created.get("number") or 0) <= 0:
-        raise RuntimeError("GitHub did not create DeepSeek self-development issue")
-    result["created"] = {
-        "number": int(created["number"]),
-        "url": str(created.get("html_url") or ""),
-        "target": proposal["target"],
-        "fingerprint": fp,
-    }
     return result
 
 
