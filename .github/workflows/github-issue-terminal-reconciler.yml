@@ -1,18 +1,9 @@
 name: Genesis Terminal Issue Reconciler
 
+# Manual legacy-maintenance tool only.
+# Automatic lifecycle authority belongs to Genesis Issue Closure Manager + Closed Issue Seal.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '*/5 * * * *'
-  push:
-    branches:
-      - main
-    paths:
-      - .github/workflows/github-issue-terminal-reconciler.yml
-      - genesis/github_issue_cleanup.py
-      - genesis/github_issue_legacy_cleanup.py
-      - genesis/github_issue_terminal_reconciler.py
-      - genesis/github_issue_detected_reconciler.py
 
 permissions:
   contents: read
