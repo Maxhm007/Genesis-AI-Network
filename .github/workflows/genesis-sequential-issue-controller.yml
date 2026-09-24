@@ -4,8 +4,6 @@ name: Genesis Sequential Issue Controller
 # Agentic Lab is the single issue-routing and strategy authority.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '*/10 * * * *'
   push:
     branches: [main]
     paths:
