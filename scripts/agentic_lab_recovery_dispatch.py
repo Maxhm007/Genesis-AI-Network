@@ -485,6 +485,25 @@ def pause_for_capability(
 
     capability = ensure_capability_issue(repository, token, issue, target, reason)
     capability_number = int(capability.get("number") or 0)
+
+    # A previously created capability dependency may already be verified.
+    # Never recreate a waiting loop around a satisfied dependency.
+    if capability_number and capability_ready(repository, token, capability_number):
+        refreshed = _release_waiting_issue(
+            repository,
+            token,
+            issue,
+            comments,
+            capability_number,
+        )
+        return {
+            "status": "capability_already_ready",
+            "issue_number": number,
+            "capability_issue": capability_number,
+            "reason": reason,
+            "released": True,
+        }
+
     ensure_label(
         repository,
         token,
