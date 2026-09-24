@@ -1,5 +1,6 @@
 name: Genesis DeepSeek Recovery Dispatcher
 
+# Compatibility feeder only. Agentic Lab chooses DeepSeek when appropriate.
 on:
   workflow_dispatch:
   schedule:
@@ -8,31 +9,24 @@ on:
     branches: [main]
     paths:
       - .github/workflows/genesis-deepseek-recovery-dispatcher.yml
+      - .github/workflows/genesis-agentic-lab-recovery.yml
 
 permissions:
   actions: write
-  issues: read
   contents: read
 
 concurrency:
   group: genesis-deepseek-recovery-dispatcher
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  dispatch:
+  handoff:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 3
     steps:
-      - name: Start DeepSeek recovery when idle
+      - name: Wake Agentic Lab
         env:
           GH_TOKEN: ${{ github.token }}
-        shell: bash
         run: |
-          set -euo pipefail
-          active=$(gh api "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=genesis-deepseek-working&per_page=20" --jq 'length')
-          if [ "$active" -gt 0 ]; then
-            echo "DeepSeek already owns ${active} issue(s); no duplicate dispatch."
-            exit 0
-          fi
-          gh workflow run genesis-deepseek-agentic-solver.yml --repo "$GITHUB_REPOSITORY" --ref main
-          echo 'Dispatched DeepSeek Agentic Solver for autonomous best-fit issue selection.'
+          echo "DeepSeek dispatcher is feeder-only; Agentic Lab selects the provider."
+          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
