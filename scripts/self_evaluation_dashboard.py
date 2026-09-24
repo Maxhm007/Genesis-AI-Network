@@ -217,7 +217,13 @@ def patch_dashboard() -> None:
     html = DASHBOARD.read_text(encoding="utf-8")
     html = html.replace('<nav class="nav">', '<nav class="nav" aria-label="Dashboard navigation">', 1)
 
-    if 'class="skip-link"' not in html:
+    main_match = re.search(r'<main(?P<attrs>[^>]*)>', html, re.I)
+    if main_match is not None and 'id="main-content"' not in html:
+        attrs = main_match.group("attrs")
+        replacement_main = f'<main id="main-content" tabindex="-1"{attrs}>'
+        html = html[:main_match.start()] + replacement_main + html[main_match.end():]
+
+    if 'id="main-content"' in html and 'class="skip-link"' not in html:
         skip_style = (
             '<style id="genesis-skip-link-style">'
             '.skip-link{position:fixed;left:12px;top:8px;z-index:10000;padding:8px 12px;'
@@ -232,14 +238,6 @@ def patch_dashboard() -> None:
             raise RuntimeError("Command Center v2 body marker not found; refusing blind dashboard patch")
         skip_link = '<a class="skip-link" href="#main-content">Skip to main content</a>'
         html = html[:body_match.end()] + skip_link + html[body_match.end():]
-
-    if 'id="main-content"' not in html:
-        main_match = re.search(r'<main(?P<attrs>[^>]*)>', html, re.I)
-        if main_match is None:
-            raise RuntimeError("Command Center v2 main marker not found; refusing blind dashboard patch")
-        attrs = main_match.group("attrs")
-        replacement_main = f'<main id="main-content" tabindex="-1"{attrs}>'
-        html = html[:main_match.start()] + replacement_main + html[main_match.end():]
 
     nav_anchor = '<button data-view="evolution">Capability Evolution</button>'
     if 'data-view="autonomy"' not in html:
