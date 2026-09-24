@@ -107,3 +107,33 @@ def test_close_verified_tolerates_already_absent_lifecycle_labels(monkeypatch):
 
     assert any("--add-label" in call and reconcile.SOLVED_LABEL in call for call in calls)
     assert any(call[:3] == ["gh", "issue", "close"] for call in calls)
+
+
+def test_close_verified_creates_missing_solved_label_then_closes(monkeypatch):
+    calls = []
+    attempts = {"add": 0}
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(args, **_kwargs):
+        calls.append(args)
+        if "--add-label" in args and reconcile.SOLVED_LABEL in args:
+            attempts["add"] += 1
+            if attempts["add"] == 1:
+                return Result(returncode=1, stderr=f"'{reconcile.SOLVED_LABEL}' not found")
+        return Result()
+
+    monkeypatch.setattr(reconcile.subprocess, "run", fake_run)
+    reconcile._close_verified(
+        "owner/repo",
+        910,
+        {"run_id": 201, "head_sha": "c" * 40, "failed_job": "failover-next-issue"},
+    )
+
+    assert any(call[:3] == ["gh", "label", "create"] and reconcile.SOLVED_LABEL in call for call in calls)
+    assert attempts["add"] == 2
+    assert any(call[:3] == ["gh", "issue", "close"] for call in calls)
