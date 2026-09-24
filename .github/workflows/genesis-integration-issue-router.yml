@@ -134,5 +134,5 @@ jobs:
           done < /tmp/integration-routes.tsv
 
           if (( routed > 0 )); then
-            gh workflow run genesis-sequential-issue-controller.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+            gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
           fi
