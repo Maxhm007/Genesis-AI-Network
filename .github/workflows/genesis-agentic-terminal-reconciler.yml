@@ -3,19 +3,9 @@ name: Genesis Agentic Terminal Reconciler
 # Safety/compatibility trigger only.
 # Agentic Lab owns unresolved issue lifecycle state.
 # Closure Manager owns final verified close/seal.
+# Manual safety/compatibility trigger only; automatic lifecycle is owned by Agentic Lab + Closure Manager.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '7,17,27,37,47,57 * * * *'
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-agentic-terminal-reconciler.yml
-      - .github/workflows/genesis-agentic-lab-recovery.yml
-      - .github/workflows/genesis-issue-closure-manager.yml
-      - scripts/agentic_lab_recovery_dispatch.py
-      - scripts/issue_closure_manager.py
-      - genesis/issue_lifecycle.py
 
 permissions:
   contents: read
