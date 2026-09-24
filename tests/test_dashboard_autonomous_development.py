@@ -126,3 +126,32 @@ function render(){const auto={assisted_promotions:0,owner_promotions:0};$('#auto
     second = page.read_text(encoding="utf-8")
     assert second.count('data-view="autonomy"') == 1
     assert second.count('id="view-autonomy"') == 1
+
+
+def test_patch_dashboard_adds_accessible_nav_and_keyboard_skip_link(tmp_path, monkeypatch):
+    page = tmp_path / "index.html"
+    page.write_text(
+        """<html><head></head><body>
+<nav class="nav"><button data-view="evolution">Capability Evolution</button><button data-view="issues">Issues</button></nav>
+<main class="content"><section class="view" id="view-evolution"></section><section class="view" id="view-issues"></section></main>
+<script>
+const names={overview:['Overview','x'],evolution:['Capability Evolution','Benchmark-driven learning and measured improvement'],issues:['Issues','y']};
+function render(){const auto={assisted_promotions:0,owner_promotions:0};$('#autonomyCap').textContent=`Assisted ${auto.assisted_promotions??0} · Owner ${auto.owner_promotions??0}`;}
+</script></body></html>""",
+        encoding="utf-8",
+    )
+    monkeypatch.setattr(dashboard, "DASHBOARD", page)
+
+    dashboard.patch_dashboard()
+    html = page.read_text(encoding="utf-8")
+
+    assert '<nav class="nav" aria-label="Dashboard navigation">' in html
+    assert '<a class="skip-link" href="#main-content">Skip to main content</a>' in html
+    assert '<main id="main-content" tabindex="-1" class="content">' in html
+    assert ".skip-link:focus{transform:translateY(0);}" in html
+
+    dashboard.patch_dashboard()
+    html = page.read_text(encoding="utf-8")
+    assert html.count('class="skip-link"') == 1
+    assert html.count('id="main-content"') == 1
+    assert html.count('aria-label="Dashboard navigation"') == 1
