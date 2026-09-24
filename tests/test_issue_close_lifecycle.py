@@ -5,7 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 SEAL = ROOT / ".github/workflows/genesis-closed-issue-seal.yml"
 BOUNDED = ROOT / ".github/workflows/genesis-bounded-repair-worker.yml"
 SPECIALIST = ROOT / ".github/workflows/genesis-specialist-repair-worker-v2.yml"
-CONTROLLER = ROOT / ".github/workflows/genesis-sequential-issue-controller.yml"
+CONTROLLER = ROOT / "scripts/agentic_lab_recovery_dispatch.py"
 
 
 def test_global_closure_guard_requires_verification_for_bot_closure() -> None:
@@ -29,14 +29,13 @@ def test_failed_workers_keep_issue_open_for_retry() -> None:
     controller = CONTROLLER.read_text(encoding="utf-8")
 
     bounded_release = bounded[bounded.index("Release unsuccessful reservation safely"):]
-    specialist_release = specialist[specialist.index("Release unsuccessful reservation without false closure"): ]
-    controller_retry = controller[controller.index("mark_retry_or_blocked()") : controller.index("ensure_label genesis-claimed")]
+    specialist_release = specialist[specialist.index("Release unsuccessful reservation without false closure"):]
 
     assert "state=closed -f state_reason=not_planned" not in bounded_release
     assert "state=closed -f state_reason=not_planned" not in specialist_release
-    assert "state=closed -f state_reason=not_planned" not in controller_retry
+    assert "state=closed" not in controller
     assert "Issue remains OPEN" in bounded_release
-    assert "State: **OPEN; escalated" in controller_retry
+    assert "pause_for_capability" in controller
 
 
 def test_successful_workers_verify_then_delegate_close() -> None:
