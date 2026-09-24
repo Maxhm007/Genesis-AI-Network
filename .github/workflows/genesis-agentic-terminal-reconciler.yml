@@ -1,5 +1,8 @@
 name: Genesis Agentic Terminal Reconciler
 
+# Safety/compatibility trigger only.
+# Agentic Lab owns unresolved issue lifecycle state.
+# Closure Manager owns final verified close/seal.
 on:
   workflow_dispatch:
   schedule:
@@ -8,135 +11,33 @@ on:
     branches: [main]
     paths:
       - .github/workflows/genesis-agentic-terminal-reconciler.yml
-      - genesis/issue_lifecycle.py
-      - .github/workflows/genesis-throughput-issue-controller.yml
-      - .github/workflows/genesis-specialist-issue-controller.yml
-      - .github/workflows/genesis-sequential-issue-controller.yml
-      - .github/workflows/genesis-deepseek-agentic-solver.yml
-      - tests/test_deepseek_agentic_selector.py
-      - tests/test_agentic_lab_recovery_dispatch.py
-      - tests/test_anti_stuck.py
-      - genesis/anti_stuck.py
-      - tests/test_issue_governor.py
-      - genesis/issue_governor.py
-      - tests/test_structured_output_schema.py
-      - tests/test_tool_call_planning.py
-      - genesis/learned_capabilities.py
-      - tests/test_persistent_memory_capability.py
-      - genesis/memory.py
-      - tests/test_systemwide_memory_attachment.py
-      - scripts/memory_sync.py
-      - .github/workflows/gene-pulse.yml
-      - .github/workflows/self-healing.yml
-      - .github/workflows/github-issue-discovery.yml
-      - genesis/issue_solver.py
-      - genesis/issue_discovery.py
-      - tests/test_durable_memory_workflows.py
-      - tests/test_github_memory_sync.py
-      - tests/test_coding_module.py
-      - tests/test_memory.py
-      - .github/workflows/genesis-specialist-repair-worker-v2.yml
-      - .github/workflows/genesis-agentic-strategy-worker.yml
-      - .github/workflows/genesis-bounded-repair-worker.yml
-      - scripts/record_verified_repair_memory.py
-      - scripts/record_verified_decision_memory.py
-      - scripts/github_memory_sync.py
-      - genesis/coding.py
-      - tests/test_core_processor.py
-      - tests/test_unsolved_issue_reactivation.py
-      - tests/test_autonomy_heartbeat.py
-      - tests/test_benchmark_execution.py
-      - tests/test_gene_lifecycle.py
-      - genesis/core_processor.py
-      - genesis/gene_lifecycle.py
-      - genesis/selfdev.py
-      - scripts/issue_lifecycle_reconcile.py
-      - scripts/unsolved_issue_reactivation.py
+      - .github/workflows/genesis-agentic-lab-recovery.yml
+      - .github/workflows/genesis-issue-closure-manager.yml
       - scripts/agentic_lab_recovery_dispatch.py
-      - scripts/recovery_solver_dispatch.py
-      - scripts/deepseek_agentic_selector.py
-      - tests/test_issue_lifecycle.py
-      - tests/test_selfdev_policy.py
+      - scripts/issue_closure_manager.py
+      - genesis/issue_lifecycle.py
 
 permissions:
-  issues: write
-  actions: write
   contents: read
+  actions: write
 
 concurrency:
   group: genesis-agentic-terminal-reconciler
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  close-exhausted-agentic-issues:
+  reconcile-by-authority:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 3
     steps:
-      - uses: actions/checkout@v4
-        with:
-          fetch-depth: 0
-
-      - name: Install validation dependencies
-        run: python -m pip install --disable-pip-version-check -r requirements.txt
-
-      - name: Validate focused closure policy
-        run: python -m pytest -q tests/test_issue_lifecycle.py tests/test_issue_closure_manager.py
-
-      - name: Reconcile through authoritative Closure Manager
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/issue_closure_manager.py --max-changes 50
-
-      - name: Reconcile terminal Agentic Lab issues
+      - name: Wake authoritative lifecycle owners
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-
-          strategies='["evidence_first","alternative_implementation","diagnostic_reframe","dependency_diagnosis"]'
-          closed=0
-
-          gh api --method POST "repos/${GITHUB_REPOSITORY}/labels" \
-            -f name='genesis-agentic-escalated' \
-            -f color='8250df' \
-            -f description='Solver exhausted; same authoritative Issue remains open with Agentic Lab' >/dev/null 2>&1 || true
-
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&labels=agentic-lab&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/agentic-open.json
-          mapfile -t issues < <(jq -r '.[] | select(.pull_request == null) | .number' /tmp/agentic-open.json)
-
-          for issue_number in "${issues[@]}"; do
-            [ "$closed" -ge 10 ] && break
-            issue_json=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json state,labels,title)
-            state=$(jq -r '.state' <<<"$issue_json")
-            [ "$state" != "OPEN" ] && continue
-
-            superseded=$(jq -r '([.labels[].name] | index("genesis-superseded")) != null' <<<"$issue_json")
-            [ "$superseded" == "true" ] && continue
-
-            active=$(jq -r '([.labels[].name] | any(. == "genesis-repair-in-progress" or . == "genesis-validating" or . == "genesis-working" or . == "genesis-verifying"))' <<<"$issue_json")
-            [ "$active" == "true" ] && continue
-
-            gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${issue_number}/comments?per_page=100" --jq '.[]' | jq -s '.' > /tmp/comments.json
-            attempted=$(jq -c '[.[] | (.body // "") | select(startswith("<!-- genesis-agentic-strategy:")) | capture("^<!-- genesis-agentic-strategy:(?<s>[^ ]+) -->").s] | unique' /tmp/comments.json)
-            complete=$(jq -n --argjson required "$strategies" --argjson attempted "$attempted" '$required - $attempted | length == 0')
-            [ "$complete" != "true" ] && continue
-
-            title=$(jq -r '.title' <<<"$issue_json")
-            comment=$(printf '%s\n%s\n\n%s\n\n%s\n%s\n%s\n\n%s' '<!-- genesis-agentic-terminal-reconcile -->' '**Genesis Agentic Lab — bounded strategy set exhausted**' 'All four current bounded Agentic strategies have been attempted without a verified promotion. This Issue remains open because unsolved Genesis tasks must never be closed merely because attempts were exhausted.' "- Issue: #${issue_number} — ${title}" '- State: OPEN and still authoritative' '- Next step: retain Agentic Lab ownership for a materially different future recovery method' "Reconciler run: ${GITHUB_RUN_ID}.")
-            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" --body "$comment" >/dev/null
-
-            for label in genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying genesis-terminal genesis-deferred genesis-recovery-terminal; do
-              gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
-            done
-            gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --add-label genesis-agentic-escalated --add-label genesis-solver-exhausted --add-label agentic-lab >/dev/null
-            echo "Kept exhausted unsolved Agentic Lab issue #${issue_number} open."
-            closed=$((closed + 1))
-          done
-
-          # Closed-Issue reopening is owned exclusively by the Issue Lifecycle Manager.
-          # The terminal reconciler must never infer authority from stale recovery labels.
-
-          echo "Exhausted Agentic issues kept open: ${closed}."
-          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
-          gh workflow run genesis-sequential-issue-controller.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+          echo "Agentic Terminal Reconciler is safety-only."
+          echo "Unresolved issue authority: Agentic Lab."
+          echo "Verified terminal authority: Closure Manager."
+          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
+          gh workflow run genesis-issue-closure-manager.yml --repo "$GITHUB_REPOSITORY" --ref main
