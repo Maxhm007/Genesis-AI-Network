@@ -346,7 +346,7 @@ def test_release_ready_capability_dependencies_preflight(monkeypatch):
     parent = _issue(817, extra_labels=(module.AGENTIC_LABEL, module.WAITING_CAPABILITY_LABEL))
     comments = [{"body": "<!-- genesis-capability-dependency:792 -->\nwaiting"}]
     released = []
-    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [parent])
+    monkeypatch.setattr(module, "_all_issues", lambda repository, token: [parent])
     monkeypatch.setattr(module, "issue_comments", lambda repository, token, number: comments)
     monkeypatch.setattr(module, "capability_ready", lambda repository, token, number: number == 792)
     monkeypatch.setattr(module, "_release_waiting_issue", lambda repository, token, issue, rows, dependency: released.append((issue["number"], dependency)) or rows)
