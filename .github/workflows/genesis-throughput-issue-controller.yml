@@ -1,161 +1,35 @@
 name: Genesis Throughput Issue Controller
 
+# Compatibility feeder only.
+# Agentic Lab is the single issue scheduling, reservation, and worker-dispatch authority.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '5,15,25,35,45,55 * * * *'
   push:
     branches: [main]
     paths:
       - .github/workflows/genesis-throughput-issue-controller.yml
+      - .github/workflows/genesis-agentic-lab-recovery.yml
+      - scripts/agentic_parallel_dispatch.py
+      - scripts/agentic_lab_recovery_dispatch.py
 
 permissions:
   contents: read
-  issues: write
   actions: write
 
 concurrency:
   group: genesis-throughput-issue-controller
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  keep-main-queue-moving:
+  handoff-to-agentic-lab:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 3
     steps:
-      - name: Checkout current main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 1
-
-      - name: Dispatch one non-Agentic bounded issue when main lane is free
+      - name: Wake Agentic Lab for throughput work
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-
-          ensure_label() {
-            gh label create "$1" --repo "$GITHUB_REPOSITORY" --color "$2" --description "$3" --force >/dev/null 2>&1 || true
-          }
-
-          ensure_label genesis-repair-in-progress b60205 'Reserved for one bounded Genesis repair worker'
-          ensure_label genesis-autonomous 1f883d 'Authorized for Genesis autonomous repair'
-          ensure_label genesis-throughput-lane 5319e7 'Selected by the non-blocking Genesis throughput controller'
-
-          gh api --paginate "repos/${GITHUB_REPOSITORY}/issues?state=open&sort=created&direction=asc&per_page=100" --jq '.[]' | jq -s '.' > /tmp/open.json
-
-          normal_active=$(python - <<'PY'
-          import json
-          from pathlib import Path
-          rows = json.loads(Path('/tmp/open.json').read_text())
-          count = 0
-          for issue in rows:
-              if issue.get('pull_request'):
-                  continue
-              labels = {str(x.get('name') or '') for x in issue.get('labels') or [] if isinstance(x, dict)}
-              if 'genesis-repair-in-progress' not in labels:
-                  continue
-              # Agentic/DeepSeek recovery must not freeze the ordinary close queue.
-              if labels & {'agentic-lab', 'genesis-agentic-escalated', 'genesis-deepseek-working'}:
-                  continue
-              count += 1
-          print(count)
-          PY
-          )
-
-          if [ "$normal_active" -gt 0 ]; then
-            echo "A normal bounded repair is already active (${normal_active}); no additional throughput worker will start."
-            exit 0
-          fi
-
-          issue_number=$(python - <<'PY'
-          import json
-          from pathlib import Path
-
-          from genesis.issue_target import extract_issue_target
-
-          rows = json.loads(Path('/tmp/open.json').read_text())
-          protected = {
-              'genesis/autonomy_guard.py', 'genesis/autonomy_proof.py', 'genesis/blockchain.py',
-              'genesis/ephemeral_validator.py', 'genesis/security.py', 'genesis/selfdev.py',
-              'genesis/issue_solver.py', 'genesis/file_self_review.py', 'genesis/file_self_review_policy.py',
-          }
-          busy = {
-              'genesis-repair-in-progress', 'genesis-validating', 'genesis-claimed',
-              'genesis-working', 'genesis-verifying', 'genesis-deepseek-working',
-          }
-          excluded = {
-              'genesis-solver-exhausted', 'agentic-lab', 'genesis-agentic-escalated',
-              'genesis-needs-human', 'genesis-waiting-capability', 'genesis-blocked',
-              'genesis-superseded', 'genesis-verified',
-          }
-
-          candidates = []
-          for issue in rows:
-              if issue.get('pull_request'):
-                  continue
-              number = int(issue.get('number') or 0)
-              if number <= 1:
-                  continue
-              title = str(issue.get('title') or '')
-              body = str(issue.get('body') or '')
-              labels = {str(x.get('name') or '') for x in issue.get('labels') or [] if isinstance(x, dict)}
-              lower = title.lower()
-              if lower.startswith(('genesis chat:', '[genesis hourly report]', '[genesis gene chat]')):
-                  continue
-              if labels & busy or labels & excluded:
-                  continue
-              target = extract_issue_target(body)
-              if not target.startswith('genesis/') or not target.endswith('.py'):
-                  continue
-              if '..' in target or target in protected or not Path(target).is_file():
-                  continue
-              # Prefer concrete repairs, then bounded tasks, then oldest issue number.
-              score = 0
-              text = f'{title}\n{body}'.lower()
-              if any(word in text for word in ('bug', 'repair', 'fails', 'failure', 'incorrect', 'reliability')):
-                  score += 30
-              if 'acceptance' in text:
-                  score += 10
-              if 'test' in text:
-                  score += 8
-              candidates.append((-score, number))
-
-          if candidates:
-              candidates.sort()
-              print(candidates[0][1])
-          PY
-          )
-
-          if [ -z "$issue_number" ]; then
-            echo 'No non-Agentic bounded issue is currently eligible for throughput dispatch.'
-            exit 0
-          fi
-
-          issue_json=$(gh issue view "$issue_number" --repo "$GITHUB_REPOSITORY" --json state,labels,title,body)
-          state=$(jq -r '.state' <<<"$issue_json")
-          already_owned=$(jq -r '([.labels[].name] | any(. == "genesis-repair-in-progress" or . == "genesis-validating" or . == "genesis-deepseek-working"))' <<<"$issue_json")
-          if [[ "$state" != "OPEN" || "$already_owned" == "true" ]]; then
-            echo "Issue #${issue_number} became unavailable before claim; exiting safely."
-            exit 0
-          fi
-
-          gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" \
-            --add-label genesis-repair-in-progress \
-            --add-label genesis-autonomous \
-            --add-label genesis-throughput-lane >/dev/null
-
-          gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
-            --body "Genesis throughput controller selected this Issue because Agentic/DeepSeek recovery on another exhausted Issue must not freeze the ordinary solve/verify/close queue. Exactly one normal bounded worker is being dispatched. Controller run: ${GITHUB_RUN_ID}." >/dev/null
-
-          if gh workflow run genesis-bounded-repair-worker.yml --repo "$GITHUB_REPOSITORY" --ref main -f issue_number="$issue_number"; then
-            echo "Dispatched bounded repair worker for issue #${issue_number}."
-          else
-            gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --remove-label genesis-repair-in-progress >/dev/null 2>&1 || true
-            gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY" --remove-label genesis-throughput-lane >/dev/null 2>&1 || true
-            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY" \
-              --body "Genesis throughput dispatch failed before a worker started. Reservation released; Issue remains open. Controller run: ${GITHUB_RUN_ID}." >/dev/null 2>&1 || true
-            exit 1
-          fi
+          echo "Throughput Controller is feeder-only. Agentic Lab owns queue selection, reservation, and worker dispatch."
+          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
