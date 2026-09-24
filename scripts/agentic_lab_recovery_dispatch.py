@@ -72,6 +72,16 @@ NON_ACTIONABLE_TASK_TYPES = {
 }
 NON_ACTIONABLE_MARKER = "<!-- genesis-performance-indicator -->"
 
+RECOVERY_ENGINE_PATHS = (
+    "scripts/agentic_lab_recovery_dispatch.py",
+    "genesis/anti_stuck.py",
+    "genesis/coding.py",
+    "genesis/github_issue_capability_builder.py",
+    ".github/workflows/genesis-agentic-lab-recovery.yml",
+    ".github/workflows/genesis-agentic-strategy-worker.yml",
+    ".github/workflows/genesis-bounded-repair-worker.yml",
+)
+
 
 def request(repository: str, token: str, method: str, path: str, payload: dict | None = None):
     data = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -189,6 +199,35 @@ def issue_comments(repository: str, token: str, number: int) -> list[dict]:
     return [row for row in rows if isinstance(row, dict)]
 
 
+def recovery_engine_generation(root: Path = ROOT) -> str:
+    digest = hashlib.sha256()
+    for relative in RECOVERY_ENGINE_PATHS:
+        path = Path(root) / relative
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            digest.update(b"<missing>")
+        digest.update(b"\0")
+    return digest.hexdigest()[:20]
+
+
+def recovery_material_state_token(
+    issue: dict,
+    target: str,
+    comments: list[dict],
+    *,
+    root: Path = ROOT,
+) -> str:
+    base = material_state_token(issue, target, comments, root=root)
+    digest = hashlib.sha256()
+    digest.update(base.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(recovery_engine_generation(root).encode("utf-8"))
+    return digest.hexdigest()[:20]
+
+
 def ensure_anti_stuck_epoch(
     repository: str,
     token: str,
@@ -196,7 +235,7 @@ def ensure_anti_stuck_epoch(
     comments: list[dict],
     target: str,
 ) -> tuple[str, list[dict]]:
-    state_token = material_state_token(issue, target, comments, root=ROOT)
+    state_token = recovery_material_state_token(issue, target, comments, root=ROOT)
     has_any_epoch = any(
         "<!-- genesis-anti-stuck-state:" in str(row.get("body") or "")
         for row in comments
