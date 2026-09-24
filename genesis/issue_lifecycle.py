@@ -53,7 +53,11 @@ def is_sealed(issue: dict) -> bool:
 
 def is_superseded(issue: dict) -> bool:
     issue_labels = labels(issue)
-    return SUPERSEDED_LABEL in issue_labels or str(issue.get("state_reason") or "").lower() == "duplicate"
+    return (
+        SUPERSEDED_LABEL in issue_labels
+        or "duplicate" in issue_labels
+        or str(issue.get("state_reason") or "").lower() == "duplicate"
+    )
 
 
 def problem_fingerprint(issue: dict) -> str:
