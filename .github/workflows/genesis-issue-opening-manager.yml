@@ -19,6 +19,8 @@ on:
       - scripts/gene_peer_issue_sync.py
       - scripts/action_failure_watchdog.py
       - scripts/discovery_silence_watchdog.py
+      - scripts/dashboard_hourly_review.py
+      - scripts/dashboard_continuous_improvement.py
       - .github/workflows/genesis-issue-opening-manager.yml
 
 permissions:
@@ -59,7 +61,9 @@ jobs:
             scripts/discover_missing_qwen_capability.py \
             scripts/gene_peer_issue_sync.py \
             scripts/action_failure_watchdog.py \
-            scripts/discovery_silence_watchdog.py
+            scripts/discovery_silence_watchdog.py \
+            scripts/dashboard_hourly_review.py \
+            scripts/dashboard_continuous_improvement.py
           do
             if ! grep -q 'issue_opening_manager' "$file"; then
               echo "::error file=$file::Issue opener bypasses Genesis Issue Opening Manager"
