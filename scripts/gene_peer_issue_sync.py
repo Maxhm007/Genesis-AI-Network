@@ -8,7 +8,7 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-from genesis.issue_opening_manager import annotate_body, gate_remote
+from genesis.issue_opening_manager import annotate_body, submit_agentic_candidate
 
 
 PEER_REPOS = (
@@ -129,7 +129,7 @@ def create_canonical_issue(peer: PeerIssue, token: str) -> dict:
     url = f"https://api.github.com/repos/{CANONICAL_REPO}/issues"
     title = canonical_title(peer)
     body = annotate_body(canonical_body(peer), "gene-peer-issue-sync")
-    decision = gate_remote(
+    decision = submit_agentic_candidate(
         CANONICAL_REPO,
         token,
         lane="gene-peer-issue-sync",
@@ -137,21 +137,9 @@ def create_canonical_issue(peer: PeerIssue, token: str) -> dict:
         body=body,
         severity="medium",
         value_score=58.0,
+        labels=["genesis-autonomous", "gene-peer-sync"],
     )
-    if decision.action == "duplicate":
-        return {"number": decision.duplicate_issue_number, "html_url": decision.duplicate_issue_url, "manager_status": "duplicate"}
-    if decision.action == "defer":
-        return {"number": None, "html_url": "", "manager_status": "deferred"}
-    return _request(
-        "POST",
-        url,
-        token,
-        {
-            "title": title,
-            "body": body,
-            "labels": ["genesis-autonomous", "gene-peer-sync"],
-        },
-    )
+    return {"number": None, "html_url": "", "manager_status": decision.action}
 
 
 def run(token: str) -> dict:
