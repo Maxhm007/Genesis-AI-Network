@@ -38,6 +38,36 @@ def _request(repository: str, token: str, method: str, path: str, payload: dict 
         raise RuntimeError(f"GitHub HTTP {exc.code} for {method} {path}: {detail}") from exc
 
 
+LABEL_STYLE = {
+    "genesis-task": ("0e8a16", "Authoritative GitHub Issue backing for Genesis autonomous tasks"),
+    "genesis-autonomous": ("1d76db", "Autonomous Genesis work item"),
+    "agentic-lab": ("8250df", "Agentic Lab owns strategy selection for this open Issue"),
+    "genesis-capability-discovery": ("5319e7", "Created by Genesis capability discovery"),
+    "genesis-missing-capability": ("b60205", "Capability missing from the current Genesis baseline"),
+    "genesis-dashboard-review": ("1d76db", "Created by Genesis dashboard review"),
+    "genesis-action-failure": ("b60205", "Reproducible GitHub Actions failure on main"),
+    "genesis-action-retry": ("fbca04", "Genesis Action failure eligible for one bounded retry"),
+}
+
+
+def _ensure_label(repository: str, token: str, label: str) -> None:
+    color, description = LABEL_STYLE.get(
+        label,
+        ("6f42c1", "Genesis Agentic issue-opening label"),
+    )
+    try:
+        _request(
+            repository,
+            token,
+            "POST",
+            "/labels",
+            {"name": label, "color": color, "description": description},
+        )
+    except RuntimeError as exc:
+        if "HTTP 422" not in str(exc):
+            raise
+
+
 def normalize_candidate(payload: dict) -> dict:
     if str(payload.get("schema") or "") != "genesis.agentic-issue-candidate.v1":
         raise ValueError("unsupported candidate schema")
@@ -119,6 +149,9 @@ def run(repository: str, token: str, payload: dict) -> dict:
             "opened_24h": decision.opened_24h,
             "closed_24h": decision.closed_24h,
         }
+
+    for label in candidate["labels"]:
+        _ensure_label(repository, token, label)
 
     created = _request(
         repository,
