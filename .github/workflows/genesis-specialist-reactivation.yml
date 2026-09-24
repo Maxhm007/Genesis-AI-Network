@@ -1,14 +1,9 @@
 name: Genesis Specialist Reactivation
 
 # Compatibility feeder only. Agentic Lab owns reactivation.
+# Compatibility/manual trigger only; automatic continuity is owned by Agentic Lab + Idle Repair Watchdog.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-specialist-reactivation.yml
-      - .github/workflows/genesis-specialist-repair-worker-v2.yml
-      - scripts/agentic_lab_recovery_dispatch.py
 
 permissions:
   contents: read
