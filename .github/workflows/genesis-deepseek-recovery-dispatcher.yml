@@ -1,13 +1,9 @@
 name: Genesis DeepSeek Recovery Dispatcher
 
 # Compatibility feeder only. Agentic Lab chooses DeepSeek when appropriate.
+# Compatibility/manual trigger only; automatic continuity is owned by Agentic Lab + Idle Repair Watchdog.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-deepseek-recovery-dispatcher.yml
-      - .github/workflows/genesis-agentic-lab-recovery.yml
 
 permissions:
   actions: write
