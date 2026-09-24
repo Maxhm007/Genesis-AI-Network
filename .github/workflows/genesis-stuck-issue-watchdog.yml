@@ -1,14 +1,9 @@
 name: Genesis Stuck Issue Watchdog
 
 # Detection heartbeat only. Agentic Lab owns anti-stuck strategy and failover.
+# Compatibility/manual trigger only; automatic continuity is owned by Agentic Lab + Idle Repair Watchdog.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-stuck-issue-watchdog.yml
-      - genesis/anti_stuck.py
-      - scripts/agentic_lab_recovery_dispatch.py
 
 permissions:
   actions: write
