@@ -4,8 +4,6 @@ name: Genesis Sequential Agentic Bypass
 # There is no independent bypass lane; Agentic Lab owns all issue scheduling.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '5,15,25,35,45,55 * * * *'
   push:
     branches: [main]
     paths:
