@@ -1,5 +1,8 @@
+from datetime import datetime, timezone
+
 from scripts.action_failure_watchdog import (
     actionable_run,
+    failure_is_recent,
     decode_metadata,
     encode_metadata,
     failure_fingerprint,
@@ -94,3 +97,18 @@ def test_sanitize_log_excerpt_redacts_token_like_values():
     assert "abcdefghijklmnopqrstuvwxyz" not in cleaned
     assert "super-secret-value" not in cleaned
     assert "REDACTED" in cleaned
+
+
+def test_failure_discovery_ignores_historical_runs_outside_recent_horizon():
+    now = datetime(2026, 9, 24, 14, 0, tzinfo=timezone.utc)
+    assert failure_is_recent(
+        {"updated_at": "2026-09-24T13:30:00Z"},
+        now=now,
+        max_age_hours=24,
+    )
+    assert not failure_is_recent(
+        {"updated_at": "2026-09-16T23:44:19Z"},
+        now=now,
+        max_age_hours=24,
+    )
+    assert not failure_is_recent({}, now=now, max_age_hours=24)
