@@ -43,15 +43,16 @@ def test_bounded_worker_cannot_overlap_same_issue() -> None:
     assert "genesis-repair-in-progress" in text
 
 
-def test_action_failure_watcher_is_scheduled_detection_retry_and_routing_only() -> None:
+def test_action_failure_watcher_reconciles_fresh_success_before_detection_retry() -> None:
     text = WATCHER.read_text(encoding="utf-8")
 
     assert "schedule:" in text
     assert "cron: '*/10 * * * *'" in text
     assert "actions: write" in text
     assert "issues: write" in text
-    assert "python scripts/action_failure_watchdog.py" in text
-    assert "--retry-once" in text
+    fresh = text.index("python scripts/action_failure_fresh_reconcile.py")
+    scan = text.index("python scripts/action_failure_watchdog.py --repository")
+    retry = text.index("--retry-once")
+    assert fresh < scan < retry
     assert "gh issue close" not in text
     assert "github_issue_autorepair.py" not in text
-    assert "gh issue close" not in text
