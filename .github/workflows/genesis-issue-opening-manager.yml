@@ -8,7 +8,10 @@ on:
     branches: [main]
     paths:
       - genesis/issue_opening_manager.py
+      - scripts/agentic_issue_opening_authority.py
       - tests/test_issue_opening_manager.py
+      - tests/test_agentic_issue_opening_authority.py
+      - .github/workflows/genesis-agentic-issue-opening.yml
       - scripts/github_issue_discovery.py
       - scripts/deepseek_selfdev_issue_opener.py
       - scripts/discover_recent_ai_capability.py
@@ -43,16 +46,27 @@ jobs:
         run: python -m pip install --disable-pip-version-check pytest
 
       - name: Validate shared opening policy
-        run: python -m pytest -q tests/test_issue_opening_manager.py
+        run: python -m pytest -q tests/test_issue_opening_manager.py tests/test_agentic_issue_opening_authority.py
 
       - name: Verify every opener is attached to the manager
         shell: bash
         run: |
           set -euo pipefail
-          for file in             scripts/github_issue_discovery.py             scripts/deepseek_selfdev_issue_opener.py             scripts/discover_recent_ai_capability.py             scripts/discover_missing_qwen_capability.py             scripts/gene_peer_issue_sync.py             scripts/action_failure_watchdog.py             scripts/discovery_silence_watchdog.py
+          for file in \
+            scripts/github_issue_discovery.py \
+            scripts/deepseek_selfdev_issue_opener.py \
+            scripts/discover_recent_ai_capability.py \
+            scripts/discover_missing_qwen_capability.py \
+            scripts/gene_peer_issue_sync.py \
+            scripts/action_failure_watchdog.py \
+            scripts/discovery_silence_watchdog.py
           do
             if ! grep -q 'issue_opening_manager' "$file"; then
               echo "::error file=$file::Issue opener bypasses Genesis Issue Opening Manager"
+              exit 1
+            fi
+            if grep -Eq 'gh["'"'"', ]+issue["'"'"', ]+create|POST["'"'"', ]*,?[[:space:]]*["'"'"']/issues["'"'"']' "$file"; then
+              echo "::error file=$file::Producer directly creates GitHub Issues; delegate to Genesis Agentic Issue Opening Authority"
               exit 1
             fi
           done
