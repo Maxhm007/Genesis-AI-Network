@@ -54,6 +54,13 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/action_failure_watchdog.py --repository "$GITHUB_REPOSITORY"
 
+      - name: Reconcile newly opened failures against newer successful main runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/action_failure_fresh_reconcile.py --repository "$GITHUB_REPOSITORY"
+
       - name: Retry one newly detected or pending failure once
         env:
           GH_TOKEN: ${{ github.token }}
