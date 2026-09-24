@@ -20,7 +20,7 @@ def test_general_issue_discovery_has_native_schedule_and_solver_handoff() -> Non
     assert "group: genesis-github-issue-discovery-v4" in text
     assert "cancel-in-progress: true" in text
     assert "python scripts/github_issue_discovery_resilient.py" in text
-    assert "gh workflow run genesis-sequential-issue-controller.yml" in text
+    assert "gh workflow run genesis-agentic-lab-recovery.yml" in text
 
     # Discovery is bounded per run and persists its rotating cursor.
     assert "timeout-minutes: 35" in text
