@@ -35,7 +35,7 @@ jobs:
           set -euo pipefail
           echo "Genesis handoff event: ${GITHUB_EVENT_NAME}"
 
-          gh workflow run genesis-sequential-issue-controller.yml \
+          gh workflow run genesis-agentic-lab-recovery.yml \
             --repo "$GITHUB_REPOSITORY" \
             --ref main
           echo 'Sequential FIFO controller dispatched.'
