@@ -42,23 +42,6 @@ jobs:
       - name: Verify discovery contract
         run: python -m pytest -q tests/test_recent_ai_capability_discovery.py tests/test_issue_discovery_workflows.py
 
-      - name: Ensure discovery labels idempotently
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh label create genesis-task \
-            --repo "$GITHUB_REPOSITORY" \
-            --color 0e8a16 \
-            --description 'Authoritative GitHub Issue backing for Genesis autonomous tasks' \
-            --force
-          gh label create genesis-capability-discovery \
-            --repo "$GITHUB_REPOSITORY" \
-            --color 5319e7 \
-            --description 'Created by the independent recent AI capability discovery task' \
-            --force
-
       - name: Discover one recent required AI capability
         env:
           GITHUB_TOKEN: ${{ github.token }}
