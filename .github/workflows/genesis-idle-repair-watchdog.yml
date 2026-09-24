@@ -36,4 +36,3 @@ jobs:
           if [[ "$open_count" -gt 0 && "$active_count" -eq 0 && "$validating_count" -eq 0 ]]; then
             gh workflow run genesis-agentic-lab-recovery.yml --repo "$REPO" --ref main
           fi
-          gh workflow run genesis-workflow-governor.yml --repo "$REPO" -f apply=true
