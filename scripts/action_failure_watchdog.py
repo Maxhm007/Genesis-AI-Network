@@ -11,7 +11,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
-from genesis.issue_opening_manager import annotate_body, decide as opening_decision
+from genesis.issue_opening_manager import annotate_body, build_agentic_candidate
 
 ROOT = Path(__file__).resolve().parents[1]
 EVIDENCE_PATH = ROOT / "runtime" / "action_failure_watchdog.json"
@@ -483,55 +483,37 @@ def open_new_failure(repository: str, *, runner: Runner = _default_runner) -> di
         metadata["fingerprint"] = root
         title = f"Genesis Action failure: {metadata['workflow_name']} / {metadata['failed_step']}"[:240]
         body = annotate_body(issue_body(metadata), "action-failure-watcher")
-        all_issues = _run_json(
-            runner,
-            [
-                "gh", "issue", "list",
-                "--repo", repository,
-                "--state", "all",
-                "--limit", "1000",
-                "--json", "number,title,body,state,labels,url,createdAt,closedAt",
-            ],
-        )
-        manager = opening_decision(
+        candidate = build_agentic_candidate(
             lane="action-failure-watcher",
             title=title,
             body=body,
-            issues=list(all_issues) if isinstance(all_issues, list) else [],
+            labels=["genesis-action-failure", "genesis-action-retry"],
             severity="critical",
             value_score=100.0,
             bypass_backlog=True,
         )
-        if manager.action == "duplicate":
-            return {
-                "status": "duplicate_existing_issue",
-                "issue_number": manager.duplicate_issue_number,
-                "url": manager.duplicate_issue_url,
-                "metadata": _compact_metadata(metadata),
-            }
-        created = runner(
+        dispatched = runner(
             [
                 "gh",
-                "issue",
-                "create",
+                "workflow",
+                "run",
+                "genesis-agentic-issue-opening.yml",
                 "--repo",
                 repository,
-                "--title",
-                title,
-                "--body",
-                body,
-                "--label",
-                "genesis-action-failure",
-                "--label",
-                "genesis-action-retry",
+                "-f",
+                "candidate_json=" + json.dumps(candidate, separators=(",", ":")),
             ],
             text=True,
             capture_output=True,
             check=False,
         )
-        if created.returncode != 0:
-            raise RuntimeError((created.stderr or created.stdout or "issue creation failed")[-1500:])
-        return {"status": "issue_opened", "url": created.stdout.strip().splitlines()[-1], "metadata": _compact_metadata(metadata)}
+        if dispatched.returncode != 0:
+            raise RuntimeError((dispatched.stderr or dispatched.stdout or "Agentic issue-opening dispatch failed")[-1500:])
+        return {
+            "status": "agentic_opening_pending",
+            "metadata": _compact_metadata(metadata),
+            "candidate_fingerprint": candidate["candidate_fingerprint"],
+        }
     return {"status": "no_new_failure"}
 
 
