@@ -2,16 +2,9 @@ name: Genesis Sequential Issue Controller
 
 # Compatibility feeder only.
 # Agentic Lab is the single issue-routing and strategy authority.
+# Compatibility/manual trigger only; automatic continuity is owned by Agentic Lab + Idle Repair Watchdog.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-sequential-issue-controller.yml
-      - .github/workflows/genesis-agentic-lab-recovery.yml
-      - scripts/agentic_lab_recovery_dispatch.py
-      - scripts/agentic_parallel_dispatch.py
-      - genesis/anti_stuck.py
 
 permissions:
   contents: read
