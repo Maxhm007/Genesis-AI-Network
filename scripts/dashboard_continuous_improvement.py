@@ -6,6 +6,7 @@ import re
 from pathlib import Path
 
 from scripts import dashboard_hourly_review as base
+from genesis.issue_opening_manager import annotate_body, submit_agentic_candidate
 
 
 DASHBOARD = Path("docs/status/index.html")
@@ -207,8 +208,8 @@ def review_dashboard(root: Path = Path(".")) -> tuple[list[base.Finding], list[s
 
 def create_issue(repo: str, token: str, finding: base.Finding, views: list[str], files: list[Path]) -> str:
     title = f"[Genesis Task] Dashboard improvement — {finding.title}"
-    body = base.annotate_body(base.issue_body(finding, views, files), "dashboard-continuous-improvement")
-    decision = base.submit_agentic_candidate(
+    body = annotate_body(base.issue_body(finding, views, files), "dashboard-continuous-improvement")
+    decision = submit_agentic_candidate(
         repo,
         token,
         lane="dashboard-continuous-improvement",
