@@ -142,9 +142,12 @@ def test_publish_discovery_opens_authorized_issue_when_new():
 
     result = publish_discovery(discovery, repository="owner/repo", runner=runner)
 
-    assert result["status"] == "issue_opened"
-    assert result["issue_number"] == 28
+    assert result["status"] == "agentic_opening_pending"
+    assert result["candidate_fingerprint"]
     assert len(calls) == 2
-    create_args = calls[1]
-    assert "genesis-autonomous" in create_args
-    assert any(str(arg).startswith("Genesis discovered:") for arg in create_args)
+    dispatch_args = calls[1]
+    assert dispatch_args[:3] == ["gh", "workflow", "run"]
+    assert "genesis-agentic-issue-opening.yml" in dispatch_args
+    candidate_arg = next(str(arg) for arg in dispatch_args if str(arg).startswith("candidate_json="))
+    assert "genesis-autonomous" in candidate_arg
+    assert "github-issue-discovery" in candidate_arg
