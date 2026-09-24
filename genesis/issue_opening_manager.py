@@ -12,6 +12,8 @@ from typing import Iterable
 
 LANE_MARKER = "Genesis-Opening-Lane:"
 MANAGER_MARKER = "<!-- genesis-issue-opening-manager -->"
+AGENTIC_AUTHORITY_MARKER = "<!-- genesis-agentic-opening-authority -->"
+AGENTIC_CANDIDATE_EVENT = "genesis-issue-candidate"
 
 
 def _norm(value: object) -> str:
@@ -204,3 +206,77 @@ def gate_remote(
 def fingerprint(lane: str, title: str, body: str) -> str:
     material = f"{_norm(lane)}\n{_norm(title)}\n{_target(body)}\n{_marker(body, 'Genesis-Problem-Fingerprint:')}"
     return hashlib.sha256(material.encode("utf-8")).hexdigest()[:20]
+
+
+def submit_agentic_candidate(
+    repository: str,
+    token: str,
+    *,
+    lane: str,
+    title: str,
+    body: str,
+    labels: Iterable[str] = (),
+    severity: str = "medium",
+    value_score: float = 60.0,
+    bypass_backlog: bool = False,
+) -> OpeningDecision:
+    """Submit one validated candidate to Agentic Lab's sole opening authority.
+
+    Discovery lanes remain evidence producers. They do not decide publication and
+    they do not create GitHub Issues directly. The repository_dispatch event is
+    intentionally the only handoff from producer workflows to the central opener.
+    """
+    lane = _norm(lane)
+    if not repository or not token:
+        raise ValueError("repository and token are required")
+    if not re.fullmatch(r"[a-z0-9._-]{1,80}", lane):
+        raise ValueError("invalid issue-opening lane")
+    title = str(title or "").strip()
+    body = str(body or "").strip()
+    if not title or len(title) > 240:
+        raise ValueError("candidate title must be 1..240 characters")
+    if not body or len(body.encode("utf-8")) > 60_000:
+        raise ValueError("candidate body must be non-empty and <= 60000 bytes")
+    clean_labels = []
+    for raw in labels:
+        label = str(raw or "").strip()
+        if not label or len(label) > 100 or label in clean_labels:
+            continue
+        clean_labels.append(label)
+        if len(clean_labels) >= 20:
+            break
+
+    payload = {
+        "event_type": AGENTIC_CANDIDATE_EVENT,
+        "client_payload": {
+            "schema": "genesis.agentic-issue-candidate.v1",
+            "lane": lane,
+            "title": title,
+            "body": body,
+            "labels": clean_labels,
+            "severity": _norm(severity) or "medium",
+            "value_score": max(0.0, min(100.0, float(value_score))),
+            "bypass_backlog": bool(bypass_backlog),
+            "candidate_fingerprint": fingerprint(lane, title, body),
+        },
+    }
+    data = json.dumps(payload).encode("utf-8")
+    request = urllib.request.Request(
+        f"https://api.github.com/repos/{repository}/dispatches",
+        data=data,
+        method="POST",
+        headers={
+            "Authorization": f"Bearer {token}",
+            "Accept": "application/vnd.github+json",
+            "X-GitHub-Api-Version": "2022-11-28",
+            "Content-Type": "application/json",
+            "User-Agent": "Genesis-AI-Network/agentic-issue-candidate",
+        },
+    )
+    with urllib.request.urlopen(request, timeout=30):
+        pass
+    return OpeningDecision(
+        "agentic_pending",
+        "delegated to Agentic Lab opening authority",
+        lane,
+    )
