@@ -169,6 +169,7 @@ def classify(issue: dict) -> str:
         "[genesis safety]",
         "[genesis metrics]",
         "[genesis autonomy]",
+        "[genesis discovery]",
     )
     if lower_title.startswith(control_plane_prefixes) or "genesis-architecture" in labels:
         return "architecture"
