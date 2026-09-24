@@ -14,10 +14,7 @@ jobs:
   wake:
     runs-on: ubuntu-latest
     steps:
-      - name: Dispatch current issue solver
+      - name: Dispatch Agentic Lab
         env:
           GH_TOKEN: ${{ github.token }}
-        run: |
-          gh api --method POST \
-            "repos/${GITHUB_REPOSITORY}/actions/workflows/genesis-sequential-issue-controller.yml/dispatches" \
-            -f ref=main
+        run: gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
