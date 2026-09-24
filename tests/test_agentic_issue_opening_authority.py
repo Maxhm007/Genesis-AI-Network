@@ -82,3 +82,36 @@ def test_publish_candidate_is_created_only_by_authority_and_wakes_agentic_lab(mo
         path == "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches"
         for _method, path, _payload in calls
     )
+
+
+def test_terminal_same_problem_without_fresh_occurrence_is_suppressed(monkeypatch):
+    payload = candidate(
+        body=(
+            "Genesis-Problem-Fingerprint: dashboard-review:abc\n"
+            "- **Target:** `scripts/self_evaluation_dashboard.py`\n"
+            "### Objective\nAdd a keyboard skip link."
+        )
+    )
+    monkeypatch.setattr(
+        authority,
+        "fetch_issues",
+        lambda *_args, **_kwargs: [{
+            "number": 840,
+            "state": "closed",
+            "state_reason": "completed",
+            "labels": [{"name": "genesis-verified"}],
+            "body": (
+                "Genesis-Problem-Fingerprint: dashboard-review:abc\n"
+                "- **Target:** `scripts/self_evaluation_dashboard.py`"
+            ),
+            "html_url": "https://example.test/issues/840",
+        }],
+    )
+    calls = []
+    monkeypatch.setattr(authority, "_request", lambda *args, **kwargs: calls.append((args, kwargs)) or {})
+
+    result = authority.run("owner/repo", "token", payload)
+
+    assert result["status"] == "closed_equivalent"
+    assert result["issue_number"] == 840
+    assert calls == []
