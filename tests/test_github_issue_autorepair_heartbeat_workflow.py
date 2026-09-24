@@ -4,7 +4,7 @@ from genesis.issue_worker_pool import select_issue_repair_batch
 from scripts.reconcile_satisfied_issue import reconciliation_plan
 
 
-CONTROLLER = Path(".github/workflows/genesis-sequential-issue-controller.yml")
+CONTROLLER = Path(".github/workflows/genesis-agentic-lab-recovery.yml")
 WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 
 
@@ -18,12 +18,13 @@ def _issue(number: int, *labels: str, title: str = "") -> dict:
     }
 
 
-def test_controller_is_the_only_queue_admission_lane_for_bounded_worker() -> None:
+def test_agentic_lab_is_the_queue_admission_authority() -> None:
     controller = CONTROLLER.read_text(encoding="utf-8")
     worker = WORKER.read_text(encoding="utf-8")
 
-    assert "genesis-bounded-repair-worker.yml" in controller
-    assert "genesis-repair-in-progress" in controller
+    assert "agentic_parallel_dispatch.py" in controller
+    assert "issues: write" in controller
+    assert "actions: write" in controller
     assert "workflow_dispatch:" in worker
     assert "issue_number:" in worker
     assert "issues:" not in worker.split("on:", 1)[1].split("permissions:", 1)[0]
