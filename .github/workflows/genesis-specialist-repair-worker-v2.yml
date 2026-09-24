@@ -280,8 +280,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      - name: Wake specialist controller
+      - name: Return control to Agentic Lab
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run genesis-specialist-issue-controller.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+        run: gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
