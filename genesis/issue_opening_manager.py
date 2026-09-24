@@ -246,23 +246,24 @@ def submit_agentic_candidate(
         if len(clean_labels) >= 20:
             break
 
+    candidate = {
+        "schema": "genesis.agentic-issue-candidate.v1",
+        "lane": lane,
+        "title": title,
+        "body": body,
+        "labels": clean_labels,
+        "severity": _norm(severity) or "medium",
+        "value_score": max(0.0, min(100.0, float(value_score))),
+        "bypass_backlog": bool(bypass_backlog),
+        "candidate_fingerprint": fingerprint(lane, title, body),
+    }
     payload = {
-        "event_type": AGENTIC_CANDIDATE_EVENT,
-        "client_payload": {
-            "schema": "genesis.agentic-issue-candidate.v1",
-            "lane": lane,
-            "title": title,
-            "body": body,
-            "labels": clean_labels,
-            "severity": _norm(severity) or "medium",
-            "value_score": max(0.0, min(100.0, float(value_score))),
-            "bypass_backlog": bool(bypass_backlog),
-            "candidate_fingerprint": fingerprint(lane, title, body),
-        },
+        "ref": "main",
+        "inputs": {"candidate_json": json.dumps(candidate, separators=(",", ":"))},
     }
     data = json.dumps(payload).encode("utf-8")
     request = urllib.request.Request(
-        f"https://api.github.com/repos/{repository}/dispatches",
+        f"https://api.github.com/repos/{repository}/actions/workflows/genesis-agentic-issue-opening.yml/dispatches",
         data=data,
         method="POST",
         headers={
