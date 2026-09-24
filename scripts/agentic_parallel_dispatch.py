@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+from datetime import datetime, timezone
 import json
 import os
+import re
 
 import agentic_lab_capability_first_dispatch as policy
 import agentic_lab_recovery_dispatch as agentic
+from genesis.issue_governor import issue_value_score
 
 
 MAX_PARALLEL = int(os.environ.get("GENESIS_AGENTIC_MAX_PARALLEL", "4"))
@@ -13,10 +16,97 @@ if "qwen3_fallback" not in agentic.STRATEGIES:
     agentic.STRATEGIES = (*agentic.STRATEGIES, "qwen3_fallback")
 
 
+def _created_at(issue: dict) -> datetime:
+    raw = str(issue.get("created_at") or issue.get("createdAt") or "").strip()
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _severity(issue_labels: set[str]) -> str:
+    lowered = {label.lower() for label in issue_labels}
+    if lowered & {"critical", "severity-critical", "security-critical"}:
+        return "critical"
+    if lowered & {"high", "severity-high", "priority-high"}:
+        return "high"
+    if lowered & {"low", "severity-low", "priority-low"}:
+        return "low"
+    return "medium"
+
+
+def _retry_depth(comments: list[dict]) -> int:
+    markers = 0
+    for row in comments:
+        text = str(row.get("body") or "").lower()
+        if (
+            "genesis-agentic-strategy-result:" in text
+            or "genesis-requeue-engine:" in text
+            or "repair attempt" in text
+            or "retry" in text
+        ):
+            markers += 1
+    return markers
+
+
+def _dependency_unlock_counts(
+    issues: list[dict],
+    comments_by_issue: dict[int, list[dict]],
+) -> dict[int, int]:
+    counts: dict[int, set[int]] = {}
+    pattern = re.compile(r"genesis-capability-dependency:(\d+)")
+    for issue in issues:
+        parent = int(issue.get("number") or 0)
+        corpus = [str(issue.get("body") or "")]
+        corpus.extend(str(row.get("body") or "") for row in comments_by_issue.get(parent, []))
+        for text in corpus:
+            for match in pattern.finditer(text):
+                dependency = int(match.group(1))
+                if dependency > 0 and dependency != parent:
+                    counts.setdefault(dependency, set()).add(parent)
+    return {number: len(parents) for number, parents in counts.items()}
+
+
+def _score_issue(
+    issue: dict,
+    comments: list[dict],
+    *,
+    unlock_count: int,
+    now: datetime,
+) -> dict:
+    labels = agentic.labels(issue)
+    age_hours = max(0.0, (now - _created_at(issue).astimezone(timezone.utc)).total_seconds() / 3600.0)
+    retry_depth = _retry_depth(comments)
+    owner_priority = 1.0 if labels & {"owner-priority", "owner_priority", "user-priority"} else 0.0
+    is_capability = "genesis-capability-gap" in labels or "<!-- genesis-capability-work:" in str(issue.get("body") or "")
+    reuse_value = 0.95 if is_capability else (0.85 if labels & {"genesis-capability", "capability-blocker"} else 0.65)
+    success_probability = max(0.25, 0.9 - 0.07 * retry_depth)
+    value = issue_value_score(
+        severity=_severity(labels),
+        blocked_issues=unlock_count,
+        age_hours=age_hours,
+        reuse_value=reuse_value,
+        owner_priority=owner_priority,
+        retry_depth=retry_depth,
+        success_probability=success_probability,
+    )
+    return {
+        "number": int(issue.get("number") or 0),
+        "score": value.score,
+        "breakdown": value.breakdown,
+        "unlock_count": unlock_count,
+        "retry_depth": retry_depth,
+        "created_at": _created_at(issue).isoformat(),
+    }
+
+
 def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
-    """Return all safely routable issues; per-issue labels prevent duplicates."""
+    """Return safely routable issues ordered by deterministic operational value."""
+    all_open = policy._all_open_issues_fifo(repository, token)
     eligible: list[dict] = []
-    for issue in policy._all_open_issues_fifo(repository, token):
+    comments_by_issue: dict[int, list[dict]] = {}
+    for issue in all_open:
         if not policy._actionable(issue):
             continue
         number = int(issue.get("number") or 0)
@@ -26,13 +116,38 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
         if not agentic.safe_lane(target):
             continue
         eligible.append(issue)
+        comments_by_issue[number] = policy._all_issue_comments(repository, token, number)
+
+    unlock_counts = _dependency_unlock_counts(all_open, comments_by_issue)
+    now = datetime.now(timezone.utc)
+    scored = [
+        (
+            issue,
+            _score_issue(
+                issue,
+                comments_by_issue.get(int(issue.get("number") or 0), []),
+                unlock_count=unlock_counts.get(int(issue.get("number") or 0), 0),
+                now=now,
+            ),
+        )
+        for issue in eligible
+    ]
+    scored.sort(
+        key=lambda row: (
+            -float(row[1]["score"]),
+            row[1]["created_at"],
+            int(row[1]["number"]),
+        )
+    )
+    ordered = [row[0] for row in scored]
     print(json.dumps({
-        "selector": "bounded_parallel_autonomous",
-        "eligible": [int(row.get("number") or 0) for row in eligible],
+        "selector": "bounded_parallel_value_priority",
+        "eligible": [int(row.get("number") or 0) for row in ordered],
+        "ranked_candidates": [row[1] for row in scored[:10]],
         "max_parallel": MAX_PARALLEL,
         "strategies": list(agentic.STRATEGIES),
     }, sort_keys=True))
-    return eligible
+    return ordered
 
 
 def _active_issue_numbers(repository: str, token: str) -> list[int]:
