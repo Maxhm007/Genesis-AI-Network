@@ -1,10 +1,8 @@
 name: Genesis Worker Safety Cancel
 
+# Manual legacy cleanup only; no automatic control-plane authority.
 on:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-worker-safety-cancel.yml
+  workflow_dispatch:
 
 permissions:
   actions: write
