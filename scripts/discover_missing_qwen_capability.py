@@ -9,7 +9,7 @@ import urllib.parse
 import urllib.request
 from dataclasses import dataclass
 
-from genesis.issue_opening_manager import annotate_body, gate_remote
+from genesis.issue_opening_manager import annotate_body, submit_agentic_candidate
 from pathlib import Path
 from typing import Iterable
 
@@ -163,7 +163,7 @@ def issue_payload(gap: CapabilityGap) -> dict:
 def create_issue(repo: str, token: str, gap: CapabilityGap) -> str:
     payload = issue_payload(gap)
     payload["body"] = annotate_body(payload["body"], "missing-qwen-capability-discovery")
-    decision = gate_remote(
+    decision = submit_agentic_candidate(
         repo,
         token,
         lane="missing-qwen-capability-discovery",
@@ -171,15 +171,9 @@ def create_issue(repo: str, token: str, gap: CapabilityGap) -> str:
         body=payload["body"],
         severity="high" if gap.priority >= 80 else "medium",
         value_score=float(gap.priority),
+        labels=payload["labels"],
     )
-    if decision.action == "duplicate":
-        return decision.duplicate_issue_url or f"duplicate:{decision.duplicate_issue_number}"
-    if decision.action == "defer":
-        return f"deferred:{decision.reason}"
-    result = _post_json(f"https://api.github.com/repos/{repo}/issues", token, payload)
-    if not isinstance(result, dict):
-        raise RuntimeError("invalid GitHub issue response")
-    return str(result.get("html_url") or result.get("url") or "")
+    return f"agentic-pending:{decision.reason}"
 
 
 def main() -> int:
