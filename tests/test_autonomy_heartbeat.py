@@ -50,9 +50,10 @@ def test_action_failure_watcher_reconciles_fresh_success_before_detection_retry(
     assert "cron: '*/10 * * * *'" in text
     assert "actions: write" in text
     assert "issues: write" in text
-    fresh = text.index("python scripts/action_failure_fresh_reconcile.py")
+    first_fresh = text.index("python scripts/action_failure_fresh_reconcile.py")
     scan = text.index("python scripts/action_failure_watchdog.py --repository")
+    second_fresh = text.index("python scripts/action_failure_fresh_reconcile.py", first_fresh + 1)
     retry = text.index("--retry-once")
-    assert fresh < scan < retry
+    assert first_fresh < scan < second_fresh < retry
     assert "gh issue close" not in text
     assert "github_issue_autorepair.py" not in text
