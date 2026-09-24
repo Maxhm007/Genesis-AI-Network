@@ -7,6 +7,7 @@ import json
 import os
 import re
 import subprocess
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from typing import Callable
 
@@ -18,6 +19,7 @@ MARKER_NAME = "genesis-action-failure"
 FAILURE_CONCLUSIONS = {"failure", "timed_out", "startup_failure", "action_required"}
 MAX_LOG_CHARS = 2400
 MAX_REPAIR_CYCLES = 3
+FAILURE_DISCOVERY_MAX_AGE_HOURS = 24
 ACTION_QUEUE_LABELS = (
     "genesis-action-verifying",
     "genesis-action-autonomous",
@@ -111,6 +113,20 @@ def failure_fingerprint(metadata: dict) -> str:
 
 def failure_root_fingerprint(metadata: dict) -> str:
     return failure_fingerprint(metadata)
+
+
+def failure_is_recent(run: dict, *, now: datetime | None = None, max_age_hours: int = FAILURE_DISCOVERY_MAX_AGE_HOURS) -> bool:
+    stamp = str(run.get("updated_at") or run.get("created_at") or "").strip()
+    if not stamp:
+        return False
+    try:
+        observed = datetime.fromisoformat(stamp.replace("Z", "+00:00"))
+    except ValueError:
+        return False
+    if observed.tzinfo is None:
+        observed = observed.replace(tzinfo=timezone.utc)
+    current = now or datetime.now(timezone.utc)
+    return observed >= current - timedelta(hours=max_age_hours)
 
 
 def actionable_run(run: dict, *, current_run_id: int | None = None) -> bool:
@@ -457,6 +473,8 @@ def open_new_failure(repository: str, *, runner: Runner = _default_runner) -> di
     current_run_id = int(os.environ.get("GITHUB_RUN_ID", "0") or 0) or None
     for run in sorted(runs, key=lambda row: int(row.get("id") or 0)):
         if not actionable_run(run, current_run_id=current_run_id):
+            continue
+        if not failure_is_recent(run):
             continue
         metadata = inspect_failure(repository, run, runner=runner)
         root = failure_root_fingerprint(metadata)
