@@ -81,3 +81,29 @@ def test_workflow_level_failure_requires_newer_successful_main_run(monkeypatch):
     )
     assert evidence == {"run_id": 130, "head_sha": "c" * 40, "failed_job": "workflow"}
     assert responses == []
+
+
+def test_close_verified_tolerates_already_absent_lifecycle_labels(monkeypatch):
+    calls = []
+
+    class Result:
+        def __init__(self, returncode=0, stdout="", stderr=""):
+            self.returncode = returncode
+            self.stdout = stdout
+            self.stderr = stderr
+
+    def fake_run(args, **_kwargs):
+        calls.append(args)
+        if "--remove-label" in args and args[-1] == "genesis-action-autonomous":
+            return Result(returncode=1, stderr="'genesis-action-autonomous' not found")
+        return Result()
+
+    monkeypatch.setattr(reconcile.subprocess, "run", fake_run)
+    reconcile._close_verified(
+        "owner/repo",
+        909,
+        {"run_id": 200, "head_sha": "b" * 40, "failed_job": "repair-and-promote"},
+    )
+
+    assert any("--add-label" in call and reconcile.SOLVED_LABEL in call for call in calls)
+    assert any(call[:3] == ["gh", "issue", "close"] for call in calls)
