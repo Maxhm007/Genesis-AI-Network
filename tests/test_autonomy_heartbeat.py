@@ -3,6 +3,7 @@ from pathlib import Path
 
 CREATOR = Path(".github/workflows/genesis-basic-loop-test.yml")
 CONTROLLER = Path(".github/workflows/genesis-sequential-issue-controller.yml")
+AGENTIC = Path(".github/workflows/genesis-agentic-lab-recovery.yml")
 LEGACY_OLDEST = Path(".github/workflows/genesis-oldest-issue-solver.yml")
 WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 WATCHER = Path(".github/workflows/genesis-action-failure-watcher.yml")
@@ -19,15 +20,15 @@ def test_issue_creator_is_intentionally_manual_only_and_inert() -> None:
     assert "Genesis Tiny Problem Detection Test is disabled." in text
 
 
-def test_issue_controller_has_independent_scheduled_continuity() -> None:
-    text = CONTROLLER.read_text(encoding="utf-8")
+def test_agentic_lab_has_scheduled_continuity_and_sequential_is_feeder_only() -> None:
+    agentic = AGENTIC.read_text(encoding="utf-8")
+    controller = CONTROLLER.read_text(encoding="utf-8")
 
-    assert "schedule:" in text
-    assert "cron: '*/10 * * * *'" in text
-    assert "group: genesis-sequential-issue-controller" in text
-    assert "cancel-in-progress: false" in text
-    assert "strict sequential mode will not start another issue" in text
-    assert "genesis-bounded-repair-worker.yml" in text
+    assert "schedule:" in agentic
+    assert "agentic_parallel_dispatch.py" in agentic
+    assert "Agentic Lab is the single issue-routing and strategy authority" in controller
+    assert "gh workflow run genesis-agentic-lab-recovery.yml" in controller
+    assert "issues: write" not in controller
 
 
 def test_legacy_oldest_solver_is_retired() -> None:
@@ -51,6 +52,6 @@ def test_action_failure_watcher_is_scheduled_detection_retry_and_routing_only() 
     assert "issues: write" in text
     assert "python scripts/action_failure_watchdog.py" in text
     assert "--retry-once" in text
-    assert "gh workflow run genesis-sequential-issue-controller.yml" in text
+    assert "gh issue close" not in text
     assert "github_issue_autorepair.py" not in text
     assert "gh issue close" not in text
