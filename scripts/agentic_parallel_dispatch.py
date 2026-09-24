@@ -105,7 +105,13 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
     """Return safely routable issues ordered by deterministic operational value."""
     all_open = policy._all_open_issues_fifo(repository, token)
     eligible: list[dict] = []
-    comments_by_issue: dict[int, list[dict]] = {}
+    comments_by_issue: dict[int, list[dict]] = {
+        int(issue.get("number") or 0): policy._all_issue_comments(
+            repository, token, int(issue.get("number") or 0)
+        )
+        for issue in all_open
+        if int(issue.get("number") or 0) > 0
+    }
     for issue in all_open:
         if not policy._actionable(issue):
             continue
@@ -116,7 +122,6 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
         if not agentic.safe_lane(target):
             continue
         eligible.append(issue)
-        comments_by_issue[number] = policy._all_issue_comments(repository, token, number)
 
     unlock_counts = _dependency_unlock_counts(all_open, comments_by_issue)
     now = datetime.now(timezone.utc)
