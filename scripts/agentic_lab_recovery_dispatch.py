@@ -581,6 +581,24 @@ def _release_waiting_issue(
     return issue_comments(repository, token, number)
 
 
+def release_ready_capability_dependencies(repository: str, token: str) -> list[int]:
+    released: list[int] = []
+    for issue in open_agentic_issues(repository, token):
+        issue_labels = labels(issue)
+        if WAITING_CAPABILITY_LABEL not in issue_labels:
+            continue
+        number = int(issue.get("number") or 0)
+        if number <= 0:
+            continue
+        comments = issue_comments(repository, token, number)
+        dependency = unresolved_capability_dependency(comments)
+        if not dependency or not capability_ready(repository, token, dependency):
+            continue
+        _release_waiting_issue(repository, token, issue, comments, dependency)
+        released.append(number)
+    return released
+
+
 def reserve_and_dispatch(repository: str, token: str) -> dict:
     for issue in open_agentic_issues(repository, token):
         if str(issue.get("state") or "").lower() == "closed":
