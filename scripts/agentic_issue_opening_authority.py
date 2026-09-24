@@ -11,6 +11,8 @@ from genesis.issue_opening_manager import (
     decide,
     fetch_issues,
 )
+from genesis.issue_governor import OCCURRENCE_MARKER, PROBLEM_MARKER, extract_marker
+from genesis.issue_lifecycle import is_sealed, is_superseded, is_verified
 
 
 def _request(repository: str, token: str, method: str, path: str, payload: dict | None = None):
@@ -70,6 +72,25 @@ def run(repository: str, token: str, payload: dict) -> dict:
     candidate = normalize_candidate(payload)
     issues = fetch_issues(repository, token, limit=500)
     body = candidate["body"]
+
+    problem_fp = extract_marker(body, PROBLEM_MARKER)
+    occurrence_fp = extract_marker(body, OCCURRENCE_MARKER)
+    if problem_fp and not occurrence_fp:
+        for issue in issues:
+            if str(issue.get("state") or "").lower() != "closed":
+                continue
+            existing_problem = extract_marker(str(issue.get("body") or ""), PROBLEM_MARKER)
+            if existing_problem != problem_fp:
+                continue
+            if is_verified(issue) or is_superseded(issue) or is_sealed(issue):
+                return {
+                    "status": "closed_equivalent",
+                    "reason": "same problem already terminal; producer supplied no fresh occurrence fingerprint",
+                    "issue_number": int(issue.get("number") or 0) or None,
+                    "issue_url": str(issue.get("html_url") or issue.get("url") or "") or None,
+                    "lane": candidate["lane"],
+                }
+
     if AGENTIC_AUTHORITY_MARKER not in body:
         body = f"{AGENTIC_AUTHORITY_MARKER}\n{body}"
     decision = decide(
