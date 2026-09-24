@@ -84,7 +84,7 @@ jobs:
               scripts/discovery_silence_watchdog.py) workflow=".github/workflows/genesis-discovery-silence-watchdog.yml" ;;
               scripts/dashboard_hourly_review.py|scripts/dashboard_continuous_improvement.py) workflow=".github/workflows/genesis-hourly-dashboard-review.yml" ;;
             esac
-            if [[ -n "$workflow" && -f "$workflow" ]] && grep -Eq '^[[:space:]]+issues:[[:space:]]*write[[:space:]]* "$workflow"; then
+            if [[ -n "$workflow" && -f "$workflow" ]] && grep -Eq "^[[:space:]]+issues:[[:space:]]*write[[:space:]]*$" "$workflow"; then
               echo "::error file=$workflow::Discovery producer must not have issues: write; central Agentic opener owns issue creation"
               exit 1
             fi
