@@ -6,7 +6,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 
-from genesis.issue_opening_manager import annotate_body, gate_remote
+from genesis.issue_opening_manager import annotate_body, submit_agentic_candidate
 
 MARKER = "<!-- genesis-discovery-silence-watchdog -->"
 TITLE = "[Genesis Discovery] Issue-opening lanes are silent"
@@ -110,7 +110,7 @@ Diagnose why Genesis discovery lanes are not producing fresh grounded issues eve
 """
     body = annotate_body(body, "discovery-silence-watchdog")
     token = os.environ.get("GITHUB_TOKEN", "").strip() or os.environ.get("GH_TOKEN", "").strip()
-    decision = gate_remote(
+    decision = submit_agentic_candidate(
         repository,
         token,
         lane="discovery-silence-watchdog",
@@ -119,26 +119,11 @@ Diagnose why Genesis discovery lanes are not producing fresh grounded issues eve
         severity="critical",
         value_score=100.0,
         bypass_backlog=True,
+        labels=[LABEL, "genesis-autonomous"],
     )
-    if decision.action == "duplicate":
-        return {
-            "status": "watchdog_issue_already_open",
-            "issue_number": decision.duplicate_issue_number,
-            "issue_url": decision.duplicate_issue_url,
-        }
-    created = _run([
-        "gh", "issue", "create",
-        "--repo", repository,
-        "--title", TITLE,
-        "--body", body,
-        "--label", f"{LABEL},genesis-autonomous",
-    ])
-    if created.returncode != 0:
-        raise RuntimeError(f"watchdog issue creation failed: {created.stderr[-1200:]}")
-    url = created.stdout.strip().splitlines()[-1] if created.stdout.strip() else ""
     return {
-        "status": "watchdog_issue_opened",
-        "issue_url": url,
+        "status": "agentic_opening_pending",
+        "manager_status": decision.action,
         "silence_hours": round(age_hours, 3),
         "threshold_hours": silence_hours,
     }
