@@ -1,20 +1,13 @@
 name: Genesis Capability Priority
 
+# Manual compatibility/advisory tool only; Agentic Lab owns live priority ordering.
 on:
-  schedule:
-    - cron: '2,7,12,17,22,27,32,37,42,47,52,57 * * * *'
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-capability-priority.yml
-      - scripts/capability_issue_priority_dispatch.py
-      - scripts/agentic_lab_recovery_dispatch.py
 
 permissions:
   actions: write
   contents: read
-  issues: write
+  issues: read
 
 concurrency:
   group: genesis-capability-priority
