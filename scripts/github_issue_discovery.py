@@ -23,7 +23,7 @@ from genesis.issue_governor import (
     publication_decision,
 )
 from genesis.modules.task_queue import PersistentTaskQueue
-from genesis.issue_opening_manager import annotate_body, decide as opening_decision
+from genesis.issue_opening_manager import annotate_body, build_agentic_candidate
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -301,86 +301,40 @@ def publish_discovery(
         value={"score": value.score, "breakdown": value.breakdown},
     )
     body = annotate_body(body, "github-issue-discovery")
-    manager = opening_decision(
+    candidate = build_agentic_candidate(
         lane="github-issue-discovery",
         title=issue_title(discovery),
         body=body,
-        issues=entries,
+        labels=["genesis-autonomous"],
         severity=severity,
         value_score=value.score,
     )
-    if manager.action == "duplicate":
-        return {
-            "status": "duplicate_existing_issue",
-            "dedupe_relation": "shared_opening_manager",
-            "fingerprint": fingerprint,
-            "problem_fingerprint": problem_fp,
-            "occurrence_fingerprint": occurrence_fp,
-            "issue_number": manager.duplicate_issue_number,
-            "issue_url": manager.duplicate_issue_url,
-        }
-    if manager.action == "defer":
-        queued = persist_deferred_candidate(
-            deferred_path,
-            {
-                "source": "github_issue_discovery",
-                "repository": repository,
-                "title": issue_title(discovery),
-                "target": discovery["target"],
-                "summary": discovery["summary"],
-                "acceptance": discovery["acceptance"],
-                "evidence": discovery["evidence"],
-                "source_sha": discovery["source_sha"],
-                "problem_fingerprint": problem_fp,
-                "occurrence_fingerprint": occurrence_fp,
-                "value_score": value.score,
-                "value_breakdown": value.breakdown,
-                "backlog_state": "shared_manager",
-                "severity": severity,
-                "body": body,
-                "labels": ["genesis-autonomous"],
-            },
-        )
-        return {
-            "status": "deferred_backlog",
-            "fingerprint": fingerprint,
-            "problem_fingerprint": problem_fp,
-            "occurrence_fingerprint": occurrence_fp,
-            "value_score": value.score,
-            "queued_candidates": queued,
-        }
-    created = runner(
+    dispatched = runner(
         [
             "gh",
-            "issue",
-            "create",
+            "workflow",
+            "run",
+            "genesis-agentic-issue-opening.yml",
             "--repo",
             repository,
-            "--title",
-            issue_title(discovery),
-            "--body",
-            body,
-            "--label",
-            "genesis-autonomous",
+            "-f",
+            "candidate_json=" + json.dumps(candidate, separators=(",", ":")),
         ],
         text=True,
         capture_output=True,
         check=False,
     )
-    if created.returncode != 0:
-        raise RuntimeError(f"GitHub issue creation failed: {created.stderr[-1200:]}")
-    output = created.stdout.strip()
-    match = re.search(r"/issues/(\d+)", output)
+    if dispatched.returncode != 0:
+        raise RuntimeError(f"Agentic issue-opening dispatch failed: {dispatched.stderr[-1200:]}")
     return {
-        "status": "issue_opened",
+        "status": "agentic_opening_pending",
         "fingerprint": fingerprint,
         "problem_fingerprint": problem_fp,
         "occurrence_fingerprint": occurrence_fp,
         "value_score": value.score,
         "value_breakdown": value.breakdown,
         "backlog": health.__dict__,
-        "issue_number": int(match.group(1)) if match else None,
-        "issue_url": output.splitlines()[-1] if output else None,
+        "candidate_fingerprint": candidate["candidate_fingerprint"],
     }
 
 
@@ -410,8 +364,8 @@ def run(root: Path = ROOT, *, repository: str | None = None, provider=None) -> d
             deferred_path=root / "runtime" / "deferred_issue_candidates.json",
         )
         publication_status = result["publication"]["status"]
-        if publication_status == "issue_opened":
-            result["status"] = "issue_opened"
+        if publication_status == "agentic_opening_pending":
+            result["status"] = "agentic_opening_pending"
         elif publication_status == "deferred_backlog":
             result["status"] = "deferred_backlog"
         else:
