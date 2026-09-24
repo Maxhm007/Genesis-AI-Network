@@ -61,7 +61,7 @@ def main() -> int:
     # The former same-Issue override forced endless retries and could never converge.
     all_open = policy._all_open_issues_fifo(repository, token)
     restored = policy._restore_agentic_visibility(repository, token, all_open)
-    released: list[int] = []
+    released = agentic.release_ready_capability_dependencies(repository, token)
 
     active_before = _active_issue_numbers(repository, token)
     free_slots = max(0, MAX_PARALLEL - len(active_before))
