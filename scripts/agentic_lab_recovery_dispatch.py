@@ -583,7 +583,9 @@ def _release_waiting_issue(
 
 def release_ready_capability_dependencies(repository: str, token: str) -> list[int]:
     released: list[int] = []
-    for issue in open_agentic_issues(repository, token):
+    for issue in _all_issues(repository, token):
+        if str(issue.get("state") or "").lower() != "open":
+            continue
         issue_labels = labels(issue)
         if WAITING_CAPABILITY_LABEL not in issue_labels:
             continue
