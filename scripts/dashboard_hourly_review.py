@@ -11,6 +11,8 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Iterable
 
+from genesis.issue_opening_manager import annotate_body, submit_agentic_candidate
+
 DASHBOARD = Path("docs/status/index.html")
 LABEL = "genesis-dashboard-review"
 MARKER_PREFIX = "genesis-dashboard-review"
@@ -421,18 +423,19 @@ The hourly dashboard review creates at most one new actionable Issue per run. An
 
 
 def create_issue(repo: str, token: str, finding: Finding, views: list[str], files: list[Path]) -> str:
-    response = _post_json(
-        f"https://api.github.com/repos/{repo}/issues",
-        {
-            "title": f"[Genesis Task] Dashboard improvement — {finding.title}",
-            "body": issue_body(finding, views, files),
-            "labels": ["genesis-task", LABEL],
-        },
+    title = f"[Genesis Task] Dashboard improvement — {finding.title}"
+    body = annotate_body(issue_body(finding, views, files), "dashboard-hourly-review")
+    decision = submit_agentic_candidate(
+        repo,
         token,
+        lane="dashboard-hourly-review",
+        title=title,
+        body=body,
+        labels=["genesis-task", LABEL, "genesis-autonomous"],
+        severity="high" if finding.priority >= 80 else "medium",
+        value_score=float(finding.priority),
     )
-    if not isinstance(response, dict):
-        raise RuntimeError("GitHub returned an invalid issue response")
-    return str(response.get("html_url") or response.get("url") or "")
+    return f"agentic-pending:{decision.reason}"
 
 
 def main() -> int:
