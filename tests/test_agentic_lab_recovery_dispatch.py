@@ -340,3 +340,16 @@ def test_recovery_material_state_token_rearms_on_engine_change(tmp_path):
     (tmp_path / "genesis/coding.py").write_text("new engine\n", encoding="utf-8")
     after = module.recovery_material_state_token(issue, "", comments, root=tmp_path)
     assert after != before
+
+
+def test_release_ready_capability_dependencies_preflight(monkeypatch):
+    parent = _issue(817, extra_labels=(module.AGENTIC_LABEL, module.WAITING_CAPABILITY_LABEL))
+    comments = [{"body": "<!-- genesis-capability-dependency:792 -->\nwaiting"}]
+    released = []
+    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [parent])
+    monkeypatch.setattr(module, "issue_comments", lambda repository, token, number: comments)
+    monkeypatch.setattr(module, "capability_ready", lambda repository, token, number: number == 792)
+    monkeypatch.setattr(module, "_release_waiting_issue", lambda repository, token, issue, rows, dependency: released.append((issue["number"], dependency)) or rows)
+    result = module.release_ready_capability_dependencies("owner/repo", "token")
+    assert result == [817]
+    assert released == [(817, 792)]
