@@ -145,16 +145,15 @@ def test_waiting_capability_releases_worker_capacity():
 
 
 
-def test_scheduled_selectors_release_capability_waiting_work():
+def test_agentic_lab_owns_capability_waiting_release():
     root = Path(__file__).resolve().parents[1]
-    sequential = (root / "scripts/sequential_issue_selector.py").read_text(encoding="utf-8")
-    specialist = (root / ".github/workflows/genesis-specialist-issue-controller.yml").read_text(encoding="utf-8")
-    throughput = (root / ".github/workflows/genesis-throughput-issue-controller.yml").read_text(encoding="utf-8")
+    source = (root / "scripts/agentic_lab_recovery_dispatch.py").read_text(encoding="utf-8")
 
-    for text in (sequential, specialist, throughput):
-        assert "genesis-waiting-capability" in text
-        assert "genesis-needs-human" in text
-        assert "genesis-blocked" in text
+    assert "genesis-waiting-capability" in source
+    assert "genesis-needs-human" in source
+    assert "genesis-blocked" in source
+    assert "release_ready_capability_dependencies" in source
+    assert "capability_ready" in source
 
 
 def test_deepseek_workflow_uses_state_scoped_anti_stuck_planner():
