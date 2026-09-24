@@ -158,7 +158,19 @@ def classify(issue: dict) -> str:
         or "syntax error" in lower_body
     ):
         return "urgent"
-    if lower_title.startswith("[genesis architecture]") or "genesis-architecture" in labels:
+    control_plane_prefixes = (
+        "[genesis architecture]",
+        "[genesis governance]",
+        "[genesis scheduling]",
+        "[genesis observability]",
+        "[genesis maintenance]",
+        "[genesis routing]",
+        "[genesis recovery]",
+        "[genesis safety]",
+        "[genesis metrics]",
+        "[genesis autonomy]",
+    )
+    if lower_title.startswith(control_plane_prefixes) or "genesis-architecture" in labels:
         return "architecture"
     if lower_title.startswith(("[genesis detected]", "[genesis repair]")) or labels & CONCRETE_REPAIR_LABELS:
         return "repair"
