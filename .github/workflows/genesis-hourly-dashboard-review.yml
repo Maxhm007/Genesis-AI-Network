@@ -46,28 +46,6 @@ jobs:
       - name: Preserve structural reviewer as a dry-run precheck
         run: python scripts/dashboard_hourly_review.py --dry-run
 
-      - name: Ensure dashboard review labels idempotently
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          gh label create genesis-task \
-            --repo "$GITHUB_REPOSITORY" \
-            --color 0e8a16 \
-            --description 'Authoritative GitHub Issue backing for Genesis autonomous tasks' \
-            --force
-          gh label create genesis-dashboard-review \
-            --repo "$GITHUB_REPOSITORY" \
-            --color 1d76db \
-            --description 'Created by the hourly whole-dashboard development and improvement review' \
-            --force
-          gh label create genesis-autonomous \
-            --repo "$GITHUB_REPOSITORY" \
-            --color 1d76db \
-            --description 'Autonomous Genesis work item' \
-            --force
-
       - name: Review dashboard structure and continuous improvement opportunities
         env:
           GITHUB_TOKEN: ${{ github.token }}
