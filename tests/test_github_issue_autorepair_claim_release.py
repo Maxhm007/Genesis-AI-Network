@@ -1,25 +1,21 @@
 from pathlib import Path
 
 
-CONTROLLER = Path(".github/workflows/genesis-sequential-issue-controller.yml")
+CONTROLLER = Path("scripts/agentic_lab_recovery_dispatch.py")
 WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 
 
-def test_controller_reserves_issue_before_dispatching_repair_worker() -> None:
+def test_agentic_lab_reserves_issue_before_dispatching_worker() -> None:
     text = CONTROLLER.read_text(encoding="utf-8")
+    reserve_at = text.index('claim_labels = ["genesis-autonomous", AGENTIC_LABEL]')
+    dispatch_at = text.index('"/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches"')
+    assert reserve_at < dispatch_at
+    assert 'claim_labels.insert(0, "genesis-repair-in-progress")' in text
 
-    assert "genesis-repair-in-progress" in text
-    assert "genesis-bounded-repair-worker.yml" in text
-    assert "gh workflow run" in text
-    assert '-f issue_number="$issue_number"' in text
 
-
-def test_controller_does_not_start_second_active_repair_reservation() -> None:
+def test_agentic_lab_respects_active_reservations() -> None:
     text = CONTROLLER.read_text(encoding="utf-8")
-
-    assert "active = {'genesis-repair-in-progress', 'genesis-validating'}" in text
-    assert 'if [ "$active_count" -gt 0 ]; then' in text
-    assert "strict sequential mode will not start another issue" in text
+    assert "if issue_labels & ACTIVE_LABELS:" in text
 
 
 def test_worker_requires_exact_reservation_before_code_work() -> None:
