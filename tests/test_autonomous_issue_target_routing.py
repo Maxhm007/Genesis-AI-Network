@@ -17,10 +17,7 @@ def test_discovery_issue_target_is_routable():
 def test_autonomous_controllers_share_canonical_target_parser():
     root = Path(__file__).resolve().parents[1]
     required = (
-        ".github/workflows/genesis-sequential-issue-controller.yml",
         ".github/workflows/genesis-bounded-repair-worker.yml",
-        ".github/workflows/genesis-throughput-issue-controller.yml",
-        ".github/workflows/genesis-sequential-agentic-bypass.yml",
         ".github/workflows/genesis-agentic-strategy-worker.yml",
     )
     for relative in required:
@@ -35,10 +32,10 @@ def test_bounded_worker_does_not_use_legacy_markdown_only_target_parser():
     assert "s/^- \\*\\*Target:" not in text
 
 
-def test_sequential_selector_does_not_use_legacy_markdown_only_target_regex():
+def test_agentic_dispatch_owns_safe_target_lane_selection():
     root = Path(__file__).resolve().parents[1]
-    workflow = (root / ".github/workflows/genesis-sequential-issue-controller.yml").read_text(encoding="utf-8")
-    selector = (root / "scripts/sequential_issue_selector.py").read_text(encoding="utf-8")
-    assert "scripts/sequential_issue_selector.py" in workflow
-    assert "from genesis.issue_target import extract_issue_target" in selector
-    assert "target = extract_issue_target(body)" in selector
+    source = (root / "scripts/agentic_lab_recovery_dispatch.py").read_text(encoding="utf-8")
+    assert "def explicit_target" in source
+    assert "def safe_lane" in source
+    assert 'target.startswith("genesis/")' in source
+    assert 'target.startswith("scripts/")' in source
