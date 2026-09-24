@@ -1,5 +1,7 @@
 name: Genesis Exhausted Issue Requeue
 
+# Compatibility trigger only.
+# Agentic Lab owns exhausted-issue re-arm and recovery state.
 on:
   workflow_dispatch:
   push:
@@ -8,66 +10,29 @@ on:
       - genesis/coding.py
       - genesis/learned_capabilities.py
       - genesis/github_issue_capability_builder.py
-      - genesis/github_issue_cleanup.py
-      - scripts/github_issue_autorepair.py
-      - scripts/requeue_exhausted_issues.py
-      - .github/workflows/genesis-bounded-repair-worker.yml
-      - .github/workflows/genesis-sequential-issue-controller.yml
+      - scripts/agentic_lab_recovery_dispatch.py
+      - scripts/agentic_parallel_dispatch.py
+      - .github/workflows/genesis-agentic-lab-recovery.yml
       - .github/workflows/genesis-exhausted-issue-requeue.yml
 
 permissions:
   contents: read
-  issues: write
   actions: write
 
 concurrency:
   group: genesis-exhausted-issue-requeue
-  cancel-in-progress: false
+  cancel-in-progress: true
 
 jobs:
-  release-new-generation:
+  handoff-to-agentic-lab:
     runs-on: ubuntu-latest
-    timeout-minutes: 10
+    timeout-minutes: 3
     steps:
-      - name: Checkout current main
-        uses: actions/checkout@v4
-        with:
-          ref: main
-          fetch-depth: 0
-
-      - name: Set up Python
-        uses: actions/setup-python@v5
-        with:
-          python-version: '3.12'
-
-      - name: Release eligible exhausted Issues for this repair generation
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-          GENESIS_EXHAUSTED_REQUEUE_LIMIT: '5'
-        run: |
-          set -euo pipefail
-          python scripts/requeue_exhausted_issues.py
-          cat runtime/exhausted_issue_requeue.json
-
-      - name: Wake authoritative Sequential Issue Controller only when idle
+      - name: Wake Agentic Lab for new repair-engine generation
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
-          released=$(jq '.released | length' runtime/exhausted_issue_requeue.json)
-          if [ "$released" -eq 0 ]; then
-            echo 'No exhausted Issues released.'
-            exit 0
-          fi
-
-          running=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-sequential-issue-controller.yml \
-            --status in_progress --limit 1 --json databaseId --jq 'length')
-          queued=$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-sequential-issue-controller.yml \
-            --status queued --limit 1 --json databaseId --jq 'length')
-          if [ "$running" -eq 0 ] && [ "$queued" -eq 0 ]; then
-            gh workflow run genesis-sequential-issue-controller.yml --repo "$GITHUB_REPOSITORY" --ref main
-            echo 'Woke the authoritative Sequential Issue Controller.'
-          else
-            echo 'Sequential Issue Controller is already active or queued; no duplicate wake dispatched.'
-          fi
+          echo "Exhausted Issue Requeue is feeder-only. Agentic Lab owns re-arm decisions."
+          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
