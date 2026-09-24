@@ -353,3 +353,16 @@ def test_release_ready_capability_dependencies_preflight(monkeypatch):
     result = module.release_ready_capability_dependencies("owner/repo", "token")
     assert result == [817]
     assert released == [(817, 792)]
+
+
+def test_pause_for_capability_reuses_verified_dependency_without_waiting(monkeypatch):
+    parent = _issue(817, extra_labels=(module.AGENTIC_LABEL,))
+    comments = []
+    monkeypatch.setattr(module, "ensure_capability_issue", lambda repository, token, issue, target, reason: {"number": 792})
+    monkeypatch.setattr(module, "capability_ready", lambda repository, token, number: number == 792)
+    released = []
+    monkeypatch.setattr(module, "_release_waiting_issue", lambda repository, token, issue, rows, dependency: released.append((issue["number"], dependency)) or rows)
+    result = module.pause_for_capability("owner/repo", "token", parent, comments, "genesis/learned_capabilities.py", "retry_pending_capability")
+    assert result["status"] == "capability_already_ready"
+    assert result["released"] is True
+    assert released == [(817, 792)]
