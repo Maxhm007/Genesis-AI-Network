@@ -2687,4 +2687,93 @@ register_capability(
 )
 
 
+def _audio_understanding(
+    segments,
+    *,
+    source: str = "audio",
+    language: str | None = None,
+    max_segments: int = 64,
+    max_chars: int = 12_000,
+) -> dict[str, object]:
+    """Normalize bounded speech-recognition output into structured Genesis evidence."""
+    max_segments_i = int(max_segments)
+    max_chars_i = int(max_chars)
+    if max_segments_i < 1 or max_segments_i > 128:
+        raise ValueError("audio segment limit is out of bounds")
+    if max_chars_i < 1 or max_chars_i > 32_000:
+        raise ValueError("audio transcript character limit is out of bounds")
+
+    source_name = str(source).strip()
+    if not source_name or len(source_name) > 256:
+        raise ValueError("audio evidence source is required and must be bounded")
+    language_name = str(language).strip() if language is not None else None
+    if language_name is not None and len(language_name) > 64:
+        raise ValueError("audio language label is out of bounds")
+
+    if isinstance(segments, bytes):
+        raise TypeError("raw audio bytes require an upstream bounded speech recognizer")
+    rows = (segments,) if isinstance(segments, str) else segments
+
+    normalized: list[dict[str, object]] = []
+    total_chars = 0
+    for index, item in enumerate(rows):
+        if index >= max_segments_i:
+            raise ValueError("audio segment count exceeds bounded limit")
+
+        if isinstance(item, str):
+            text = item.strip()
+            start = end = confidence = None
+        elif isinstance(item, dict):
+            text = str(item.get("text") or "").strip()
+            start = item.get("start")
+            end = item.get("end")
+            confidence = item.get("confidence")
+        else:
+            raise TypeError("audio segments must be text or mapping records")
+
+        if not text:
+            continue
+        total_chars += len(text)
+        if total_chars > max_chars_i:
+            raise ValueError("audio transcript exceeds bounded character limit")
+
+        record: dict[str, object] = {"text": text}
+        if start is not None or end is not None:
+            if start is None or end is None:
+                raise ValueError("audio timing requires both start and end")
+            start_f = float(start)
+            end_f = float(end)
+            if not math.isfinite(start_f) or not math.isfinite(end_f) or start_f < 0 or end_f < start_f:
+                raise ValueError("audio timing is invalid")
+            record["start"] = start_f
+            record["end"] = end_f
+        if confidence is not None:
+            confidence_f = float(confidence)
+            if not math.isfinite(confidence_f) or confidence_f < 0 or confidence_f > 1:
+                raise ValueError("audio confidence must be between 0 and 1")
+            record["confidence"] = confidence_f
+        normalized.append(record)
+
+    if not normalized:
+        raise ValueError("audio evidence contains no usable speech content")
+
+    transcript = " ".join(str(row["text"]) for row in normalized)
+    return {
+        "kind": "audio_understanding",
+        "source": source_name,
+        "language": language_name,
+        "segment_count": len(normalized),
+        "transcript": transcript,
+        "segments": tuple(normalized),
+    }
+
+
+register_capability(
+    "audio_understanding",
+    "Normalize bounded speech-recognition output into structured, provenance-bearing evidence for Genesis while rejecting raw or unbounded inputs.",
+    "Qwen/Transformers speech and audio model outputs can be integrated through a bounded adapter; raw audio decoding remains delegated to an upstream approved recognizer.",
+    _audio_understanding,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
