@@ -88,6 +88,7 @@ def test_control_plane_issue_prefixes_route_as_architecture():
         "[Genesis Safety]",
         "[Genesis Metrics]",
         "[Genesis Autonomy]",
+        "[Genesis Discovery]",
     )
     for offset, prefix in enumerate(prefixes, start=100):
         row = candidate(issue(offset, f"{prefix} autonomous control-plane improvement", "No concrete file target yet"), now=NOW)
