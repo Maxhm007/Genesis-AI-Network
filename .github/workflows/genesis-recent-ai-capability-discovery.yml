@@ -1,16 +1,8 @@
 name: Genesis Recent AI Capability Discovery
 
+# Discovery producer only; Genesis Issue Opening Manager owns automatic scheduling.
 on:
   workflow_dispatch:
-  schedule:
-    - cron: '7,37 * * * *'
-  push:
-    branches: [main]
-    paths:
-      - .github/workflows/genesis-recent-ai-capability-discovery.yml
-      - scripts/discover_recent_ai_capability.py
-      - tests/test_recent_ai_capability_discovery.py
-      - tests/test_issue_discovery_workflows.py
 
 permissions:
   contents: read
