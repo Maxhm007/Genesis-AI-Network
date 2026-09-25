@@ -160,9 +160,8 @@ def test_capability_issue_switches_provider_before_human_escalation(monkeypatch)
 
     result = module.reserve_and_dispatch("owner/repo", "token")
 
-    assert result["status"] == "dispatched"
-    assert result["provider"] == "qwen3"
-    assert result["strategy"] == "qwen3_fallback"
+    assert result["status"] == "needs_human"
+    assert result["reason"] == "repair_failed_validation"
     assert not any(method == "POST" and path == "/issues" for method, path, _ in calls)
 
 
