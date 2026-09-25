@@ -49,12 +49,29 @@ def validate(path: Path = DASHBOARD) -> None:
         if not _inner(html, element_id):
             raise RuntimeError(f"Generated dashboard section #{element_id} has no static content")
 
+    tab_targets = set(re.findall(r'id="view-([^"]+)"', html))
+    if not tab_targets:
+        raise RuntimeError("Generated dashboard does not expose any tab targets")
+
     links = re.findall(r'<a[^>]*data-view="([^"]+)"[^>]*href="#view-([^"]+)"', html)
-    if len(links) < 8:
-        raise RuntimeError("Generated dashboard does not expose the expected tab navigation")
+    controls: set[str] = set()
     for view, target in links:
-        if view != target or f'id="view-{target}"' not in html:
+        if view != target:
             raise RuntimeError(f"Generated dashboard contains a broken tab target: {view} -> {target}")
+        controls.add(target)
+
+    missing_controls = sorted(tab_targets - controls)
+    if missing_controls:
+        raise RuntimeError(
+            "Generated dashboard has tab targets without navigable controls: "
+            + ", ".join(missing_controls)
+        )
+    orphan_controls = sorted(controls - tab_targets)
+    if orphan_controls:
+        raise RuntimeError(
+            "Generated dashboard has tab controls without matching targets: "
+            + ", ".join(orphan_controls)
+        )
 
     if "genesis-no-js-navigation" not in html:
         raise RuntimeError("Generated dashboard lost no-JavaScript navigation fallback")
