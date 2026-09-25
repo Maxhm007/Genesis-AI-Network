@@ -71,6 +71,20 @@ NON_ACTIONABLE_TASK_TYPES = {
     "metric_measurement",
 }
 NON_ACTIONABLE_MARKER = "<!-- genesis-performance-indicator -->"
+INTEGRATION_ROUTE_LABEL = "genesis-integration-route"
+INTEGRATION_ROUTE_MARKER = "<!-- genesis-integration-route -->"
+INTEGRATION_TASK_TYPES = {
+    "benchmark_runner_integration",
+    "frontier_benchmark_measurement",
+    "competitive_ai_improvement",
+    "integration_repair",
+}
+INTEGRATION_TARGETS = {
+    "genesis/benchmark_execution.py",
+    "genesis/benchmark_evidence.py",
+    "genesis/competitive_benchmarks.py",
+    "genesis/evaluation.py",
+}
 
 RECOVERY_ENGINE_PATHS = (
     "scripts/agentic_lab_recovery_dispatch.py",
@@ -159,6 +173,52 @@ def safe_lane(target: str) -> str:
         return "specialist"
     return ""
 
+
+def integration_sensitive(issue: dict, target: str) -> bool:
+    body = str(issue.get("body") or "")
+    title = str(issue.get("title") or "")
+    task_type = issue_task_type(body)
+    text = f"{title}\n{body}".lower()
+    target_sensitive = target in INTEGRATION_TARGETS
+    language_sensitive = (
+        ("benchmark" in text and ("integration" in text or "runner" in text or "swe-bench" in text or "swe_bench" in text))
+        or ("integration" in text and target.startswith("genesis/"))
+    )
+    return task_type in INTEGRATION_TASK_TYPES or target_sensitive or language_sensitive
+
+
+def apply_integration_route(repository: str, token: str, issue: dict, target: str) -> None:
+    if not integration_sensitive(issue, target):
+        return
+    number = int(issue.get("number") or 0)
+    if number <= 0:
+        return
+    body = str(issue.get("body") or "")
+    issue_labels = labels(issue)
+    if INTEGRATION_ROUTE_MARKER in body and INTEGRATION_ROUTE_LABEL in issue_labels:
+        return
+    ensure_label(
+        repository,
+        token,
+        INTEGRATION_ROUTE_LABEL,
+        "5319e7",
+        "Integration-sensitive repair route selected by Agentic Lab",
+    )
+    guidance = (
+        f"{INTEGRATION_ROUTE_MARKER}\n\n"
+        "### Genesis integration repair route\n"
+        "- **Routing class:** `integration_sensitive`\n"
+        + (f"- **Integration target:** `{target}`\n" if target else "")
+        + "\nTreat this as integration-sensitive work, not a blind generic retry. Preserve existing public behavior and test ordering first. "
+        "Add or isolate the new integration path behind the narrowest condition possible. Use existing validation failures as contracts: "
+        "do not reorder unrelated context, weaken tests, or replace working benchmark paths. Prefer an adapter/branch specific to the requested integration. "
+        "Add focused regression coverage when allowed, then require the full repository suite before promotion.\n\n"
+        "This routing narrows repair strategy only. Security, protected-file boundaries, exact candidate promotion, independent validation, "
+        "and verified closure remain mandatory.\n"
+    )
+    new_body = body.rstrip() + "\n\n" + guidance
+    request(repository, token, "PATCH", f"/issues/{number}", {"body": new_body})
+    request(repository, token, "POST", f"/issues/{number}/labels", {"labels": [INTEGRATION_ROUTE_LABEL]})
 
 def open_agentic_issues(repository: str, token: str) -> list[dict]:
     encoded = urllib.parse.quote(AGENTIC_LABEL)
@@ -666,6 +726,10 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         lane = safe_lane(target)
         if not lane:
             continue
+
+        # Agentic Lab owns integration-sensitive classification and guidance.
+        # Legacy integration workflow is now only a manual compatibility wake-up.
+        apply_integration_route(repository, token, issue, target)
 
         state_token, comments = ensure_anti_stuck_epoch(
             repository, token, issue, comments, target
