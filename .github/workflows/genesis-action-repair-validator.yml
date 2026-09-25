@@ -44,34 +44,28 @@ jobs:
 
       - uses: actions/setup-python@v5
         if: steps.eligibility.outputs.eligible == 'true'
-        if: steps.eligibility.outputs.eligible == 'true'
         with:
           python-version: '3.12'
 
       - name: Install repository dependencies
         if: steps.eligibility.outputs.eligible == 'true'
-        if: steps.eligibility.outputs.eligible == 'true'
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
       - name: Fetch authoritative main
-        if: steps.eligibility.outputs.eligible == 'true'
         if: steps.eligibility.outputs.eligible == 'true'
         run: git fetch origin main
 
       - name: Independently guard privileged Action change
         if: steps.eligibility.outputs.eligible == 'true'
-        if: steps.eligibility.outputs.eligible == 'true'
         run: python scripts/action_repair_guard.py origin/main
 
       - name: Validate candidate repository
-        if: steps.eligibility.outputs.eligible == 'true'
         if: steps.eligibility.outputs.eligible == 'true'
         run: |
           python -m compileall -q genesis scripts
           python -m pytest -q
 
       - name: Promote exact candidate only on unchanged main
-        if: steps.eligibility.outputs.eligible == 'true'
         if: steps.eligibility.outputs.eligible == 'true'
         id: promote
         env:
