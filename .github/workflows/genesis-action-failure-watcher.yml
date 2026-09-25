@@ -68,6 +68,11 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/action_failure_watchdog.py --repository "$GITHUB_REPOSITORY" --retry-once
 
+      - name: Dispatch autonomous Action repair lane
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run genesis-action-repair-worker.yml --repo "$GITHUB_REPOSITORY" --ref main || true
+
       - name: Wake authoritative issue controller
         env:
           GH_TOKEN: ${{ github.token }}
