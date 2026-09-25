@@ -98,14 +98,12 @@ def test_discovery_workflow_hydrates_memory_fail_soft() -> None:
     )
 
 
-def test_self_healing_workflow_hydrates_memory_before_diagnosis() -> None:
+def test_self_healing_workflow_is_manual_feeder_to_authoritative_repair() -> None:
     text = (ROOT / ".github/workflows/self-healing.yml").read_text(encoding="utf-8")
-    assert "Hydrate validated Genesis memory" in text
-    assert "python scripts/github_memory_sync.py" in text
-    assert "self-healing continues without hydrated memory" in text
-    assert text.index("Hydrate validated Genesis memory") < text.index(
-        "Diagnose and autonomously repair"
-    )
+    assert "workflow_dispatch:" in text
+    assert "schedule:" not in text
+    assert "gh workflow run genesis-action-failure-watcher.yml" in text
+    assert "issues: write" not in text
 
 
 def test_gene_pulse_hydrates_and_synchronizes_memory() -> None:
@@ -129,6 +127,6 @@ def test_memory_attachment_does_not_replace_existing_validation_or_authority() -
 
     assert "Verify discovery and publication boundaries" in discovery
     assert "github_issue_autorepair.py" not in discovery
-    assert "Check tests and core vitality" in healing
-    assert "python -m pytest -q" in healing
+    assert "gh workflow run genesis-action-failure-watcher.yml" in healing
+    assert "issues: write" not in healing
     assert "Save Gene persistent pulse state" in pulse
