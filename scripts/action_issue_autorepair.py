@@ -31,6 +31,8 @@ PROTECTED_ACTION_CONTROL_PATHS = {
     ".github/workflows/action-repair-candidate.yml",
     ".github/workflows/action-repair-recovery.yml",
     ".github/workflows/action-repair-status.yml",
+    ".github/workflows/genesis-action-repair-worker.yml",
+    ".github/workflows/genesis-action-repair-validator.yml",
 }
 
 
