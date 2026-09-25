@@ -9,6 +9,10 @@ on:
       - scripts/agentic_lab_capability_first_dispatch.py
       - scripts/agentic_lab_recovery_dispatch.py
       - tests/test_agentic_parallel_dispatch.py
+      - tests/test_agentic_lab_recovery_dispatch.py
+      - tests/test_agentic_strategy_sequence.py
+      - tests/test_systemwide_memory_attachment.py
+      - tests/test_terminal_issue_reconciler_workflow.py
   workflow_dispatch:
     inputs:
       issue_number:
