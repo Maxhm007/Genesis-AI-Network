@@ -6,7 +6,11 @@ import os
 from pathlib import Path
 import re
 
-import agentic_lab_recovery_dispatch as agentic
+try:
+    from scripts import agentic_lab_recovery_dispatch as agentic
+except ModuleNotFoundError:
+    # Direct execution from scripts/ keeps only that directory on sys.path.
+    import agentic_lab_recovery_dispatch as agentic
 
 
 STALE_RESERVATION_MINUTES = 135
