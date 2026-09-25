@@ -12,6 +12,13 @@ on:
       - tests/test_issue_opening_manager.py
       - tests/test_agentic_issue_opening_authority.py
       - .github/workflows/genesis-agentic-issue-opening.yml
+      - .github/workflows/github-issue-discovery.yml
+      - .github/workflows/genesis-deepseek-selfdev-discovery.yml
+      - .github/workflows/genesis-recent-ai-capability-discovery.yml
+      - .github/workflows/genesis-missing-qwen-capability-discovery.yml
+      - .github/workflows/genesis-gene-peer-issue-sync.yml
+      - .github/workflows/genesis-discovery-silence-watchdog.yml
+      - tests/test_issue_discovery_workflows.py
       - scripts/github_issue_discovery.py
       - scripts/deepseek_selfdev_issue_opener.py
       - scripts/discover_recent_ai_capability.py
