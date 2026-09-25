@@ -3,7 +3,7 @@ name: Genesis Issue Opening Manager
 on:
   workflow_dispatch:
   schedule:
-    - cron: '12 * * * *'
+    - cron: '12,42 * * * *'
   push:
     branches: [main]
     paths:
@@ -25,6 +25,7 @@ on:
 
 permissions:
   contents: read
+  actions: write
 
 concurrency:
   group: genesis-issue-opening-manager
@@ -88,4 +89,22 @@ jobs:
               echo "::error file=$workflow::Discovery producer must not have issues: write; central Agentic opener owns issue creation"
               exit 1
             fi
+          done
+
+      - name: Dispatch bounded discovery producers
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          for workflow in \
+            github-issue-discovery.yml \
+            genesis-deepseek-selfdev-discovery.yml \
+            genesis-recent-ai-capability-discovery.yml \
+            genesis-missing-qwen-capability-discovery.yml \
+            genesis-gene-peer-issue-sync.yml \
+            genesis-discovery-silence-watchdog.yml
+          do
+            echo "Dispatching $workflow under Genesis Issue Opening Manager."
+            gh workflow run "$workflow" --repo "$GITHUB_REPOSITORY" --ref main
           done
