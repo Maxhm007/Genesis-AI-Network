@@ -132,7 +132,8 @@ def test_hourly_workflow_contract():
     assert "cron: '17 * * * *'" in workflow
     assert "workflow_dispatch:" in workflow
     assert "contents: read" in workflow
-    assert "issues: write" in workflow
+    assert "issues: read" in workflow
+    assert "issues: write" not in workflow
     assert "contents: write" not in workflow
     assert "python -m pytest -q tests/test_dashboard_hourly_review.py" in workflow
     assert "python scripts/dashboard_hourly_review.py" in workflow
