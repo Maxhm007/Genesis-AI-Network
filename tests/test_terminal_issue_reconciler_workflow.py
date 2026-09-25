@@ -5,11 +5,11 @@ ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW = ROOT / ".github" / "workflows" / "github-issue-terminal-reconciler.yml"
 
 
-def test_terminal_issue_reconciler_workflow_is_continuous_and_safe():
+def test_terminal_issue_reconciler_workflow_is_manual_legacy_and_safe():
     text = WORKFLOW.read_text(encoding="utf-8")
 
     assert "name: Genesis Terminal Issue Reconciler" in text
-    assert "cron: '*/5 * * * *'" in text
+    assert "schedule:" not in text
     assert "workflow_dispatch:" in text
     assert "issues: write" in text
     assert "contents: read" in text
