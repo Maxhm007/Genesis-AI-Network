@@ -188,4 +188,4 @@ jobs:
           retention-days: 30
 
 # Discovery only detects, validates, deduplicates and publishes. It never repairs,
-# promotes or closes an Issue; Genesis Sequential Issue Controller owns execution.
+# promotes or closes an Issue; Genesis Agentic Lab owns execution.
