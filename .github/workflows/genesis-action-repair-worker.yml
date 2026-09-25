@@ -150,8 +150,8 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      - name: Continue failure lifecycle
-        if: always()
+      - name: Continue failure lifecycle after selected work
+        if: always() && steps.select.outputs.issue_number != ''
         env:
           GH_TOKEN: ${{ github.token }}
         run: gh workflow run genesis-action-failure-watcher.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
