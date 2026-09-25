@@ -5,6 +5,10 @@ on:
     branches: [main]
     paths:
       - .github/workflows/genesis-agentic-strategy-worker.yml
+      - scripts/agentic_parallel_dispatch.py
+      - scripts/agentic_lab_capability_first_dispatch.py
+      - scripts/agentic_lab_recovery_dispatch.py
+      - tests/test_agentic_parallel_dispatch.py
   workflow_dispatch:
     inputs:
       issue_number:
