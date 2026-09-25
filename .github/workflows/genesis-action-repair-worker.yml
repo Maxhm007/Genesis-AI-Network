@@ -1,0 +1,157 @@
+name: Genesis Action Repair Worker
+
+on:
+  workflow_dispatch:
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: genesis-action-repair-worker
+  cancel-in-progress: false
+
+env:
+  PYTHONPATH: ${{ github.workspace }}
+  GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
+  GENESIS_PROVIDER_NAME: genesis-action-repair
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '420'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '640'
+  HF_HOME: ~/.cache/huggingface
+  PIP_CACHE_DIR: ~/.cache/pip
+
+jobs:
+  repair-one-action-failure:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install repository and local repair dependencies
+        run: |
+          python -m pip install --disable-pip-version-check -r requirements.txt
+          python -m pip install torch --index-url https://download.pytorch.org/whl/cpu
+          python -m pip install 'transformers>=4.51,<5' safetensors accelerate
+
+      - name: Select one authorized Action failure
+        id: select
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_number="$(python scripts/action_repair_selector.py --repository "$GITHUB_REPOSITORY")"
+          echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
+          if [[ -z "$issue_number" ]]; then
+            echo "No authorized Action failure is waiting for repair."
+            exit 0
+          fi
+          gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY"             --add-label genesis-action-verifying >/dev/null 2>&1 || true
+
+      - name: Start bounded local coding provider
+        if: steps.select.outputs.issue_number != ''
+        shell: bash
+        run: |
+          set -euo pipefail
+          nohup python scripts/pulse_coding_provider.py             --model Qwen/Qwen2.5-Coder-0.5B-Instruct             --escalation-model Qwen/Qwen2.5-Coder-1.5B-Instruct             --host 127.0.0.1             --port 8766             --max-new-tokens 640             --escalation-max-new-tokens 192             > /tmp/genesis-action-repair-provider.log 2>&1 &
+          ready=false
+          for i in {1..180}; do
+            if python - <<'PY'
+          import urllib.request
+          try:
+              with urllib.request.urlopen('http://127.0.0.1:8766/health', timeout=2) as response:
+                  raise SystemExit(0 if response.status == 200 else 1)
+          except Exception:
+              raise SystemExit(1)
+          PY
+            then
+              ready=true
+              break
+            fi
+            sleep 2
+          done
+          if [[ "$ready" != true ]]; then
+            cat /tmp/genesis-action-repair-provider.log || true
+            exit 1
+          fi
+
+      - name: Build one privileged Action repair candidate
+        if: steps.select.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.select.outputs.issue_number }}
+          GENESIS_CANDIDATE_LANE: privileged
+        run: python scripts/action_issue_autorepair.py --repository "$GITHUB_REPOSITORY" --issue-number "$ISSUE_NUMBER"
+
+      - name: Open independent validation PR
+        if: steps.select.outputs.issue_number != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ steps.select.outputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          status="$(jq -r '.status // ""' runtime/action_repair_candidate.json)"
+          if [[ "$status" != "candidate_created" ]]; then
+            reason="$(jq -r '.reason // .error // .status // "no candidate"' runtime/action_repair_candidate.json)"
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"               --body "Genesis Action Repair Worker produced no promotable candidate: `$reason`. The same failure Issue remains authoritative for a later bounded method."
+            gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"               --remove-label genesis-action-verifying --add-label genesis-action-autonomous >/dev/null 2>&1 || true
+            exit 0
+          fi
+
+          branch="$(jq -r '.candidate_branch' runtime/action_repair_candidate.json)"
+          sha="$(jq -r '.candidate_sha' runtime/action_repair_candidate.json)"
+          workflow_path="$(jq -r '.workflow_path' runtime/action_repair_candidate.json)"
+          test "$branch" != "null" && test -n "$branch"
+          test "$sha" != "null" && test -n "$sha"
+
+          gh label create genesis-action-repair --repo "$GITHUB_REPOSITORY"             --color 5319e7 --description "Privileged Action repair awaiting independent validation" --force >/dev/null
+
+          existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$branch" --json number --jq '.[0].number // empty')"
+          if [[ -z "$existing" ]]; then
+            cat > /tmp/action-repair-pr.md <<EOF
+          <!-- genesis-action-repair-candidate -->
+          Repairs authoritative Action failure #$ISSUE_NUMBER.
+
+          Candidate SHA: `$sha`
+          Failed workflow: `$workflow_path`
+
+          Promotion requires Genesis Action Repair Validator. The repair worker cannot approve its own candidate.
+          EOF
+            pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch"               --title "Genesis Action repair #$ISSUE_NUMBER"               --body-file /tmp/action-repair-pr.md)"
+            pr_number="${pr_url##*/}"
+            gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label genesis-action-repair >/dev/null
+          else
+            pr_number="$existing"
+          fi
+
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "Genesis created privileged Action repair candidate `$sha` in PR #$pr_number. Independent Action Repair Validator now owns validation and promotion."
+
+      - name: Preserve repair evidence
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-action-repair-${{ github.run_id }}
+          path: |
+            runtime/action_repair_candidate.json
+            /tmp/genesis-action-repair-provider.log
+          if-no-files-found: ignore
+          retention-days: 30
+
+      - name: Continue failure lifecycle
+        if: always()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: gh workflow run genesis-action-failure-watcher.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
