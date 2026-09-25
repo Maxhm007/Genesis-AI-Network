@@ -5,8 +5,14 @@ import json
 import os
 import re
 
-from scripts import agentic_lab_capability_first_dispatch as policy
-from scripts import agentic_lab_recovery_dispatch as agentic
+try:
+    from scripts import agentic_lab_capability_first_dispatch as policy
+    from scripts import agentic_lab_recovery_dispatch as agentic
+except ModuleNotFoundError:
+    # Direct execution via "python scripts/agentic_parallel_dispatch.py" places
+    # scripts/ itself on sys.path; package-style imports are then unavailable.
+    import agentic_lab_capability_first_dispatch as policy
+    import agentic_lab_recovery_dispatch as agentic
 from genesis.issue_governor import issue_value_score
 
 
