@@ -12,6 +12,7 @@ on:
       - scripts/action_issue_autorepair.py
       - scripts/action_repair_selector.py
       - .github/workflows/genesis-action-failure-watcher.yml
+      - .github/workflows/genesis-action-repair-validator.yml
 
 permissions:
   contents: read
