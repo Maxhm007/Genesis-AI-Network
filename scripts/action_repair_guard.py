@@ -19,6 +19,8 @@ PROTECTED_ACTION_CONTROL_PATHS = {
     ".github/workflows/action-repair-candidate.yml",
     ".github/workflows/action-repair-recovery.yml",
     ".github/workflows/action-repair-status.yml",
+    ".github/workflows/genesis-action-repair-worker.yml",
+    ".github/workflows/genesis-action-repair-validator.yml",
     "scripts/action_repair_guard.py",
 }
 PERMISSION_LINE = re.compile(r"^\s*(permissions:|(?:actions|contents|issues|pull-requests|id-token|packages|deployments|security-events):\s*(?:read|write|none))\s*$", re.I)
