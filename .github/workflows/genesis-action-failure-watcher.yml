@@ -68,10 +68,18 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/action_failure_watchdog.py --repository "$GITHUB_REPOSITORY" --retry-once
 
-      - name: Dispatch autonomous Action repair lane
+      - name: Dispatch autonomous Action repair lane when authorized work exists
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run genesis-action-repair-worker.yml --repo "$GITHUB_REPOSITORY" --ref main || true
+        shell: bash
+        run: |
+          set -euo pipefail
+          issue_number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label genesis-action-autonomous --limit 1 --json number --jq '.[0].number // empty')"
+          if [[ -n "$issue_number" ]]; then
+            gh workflow run genesis-action-repair-worker.yml --repo "$GITHUB_REPOSITORY" --ref main
+          else
+            echo "No authorized Action repair issue; worker dispatch skipped."
+          fi
 
       - name: Wake authoritative issue controller
         env:
