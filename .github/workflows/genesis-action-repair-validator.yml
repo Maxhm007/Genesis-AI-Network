@@ -1,0 +1,95 @@
+name: Genesis Action Repair Validator
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled]
+    branches: [main]
+
+permissions:
+  contents: write
+  issues: write
+  pull-requests: write
+  actions: write
+
+concurrency:
+  group: genesis-action-repair-validator-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  validate-and-promote:
+    if: >-
+      github.event.pull_request.head.repo.full_name == github.repository &&
+      startsWith(github.event.pull_request.head.ref, 'genesis/privileged-candidate-') &&
+      contains(github.event.pull_request.labels.*.name, 'genesis-action-repair')
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    steps:
+      - name: Checkout exact candidate
+        uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.pull_request.head.sha }}
+          fetch-depth: 0
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install repository dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+
+      - name: Fetch authoritative main
+        run: git fetch origin main
+
+      - name: Independently guard privileged Action change
+        run: python scripts/action_repair_guard.py origin/main
+
+      - name: Validate candidate repository
+        run: |
+          python -m compileall -q genesis scripts
+          python -m pytest -q
+
+      - name: Promote exact candidate only on unchanged main
+        id: promote
+        env:
+          GH_TOKEN: ${{ github.token }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          git fetch origin main
+          current_main="$(git rev-parse origin/main)"
+          if [[ "$current_main" != "$BASE_SHA" ]]; then
+            echo "Main moved since candidate creation; refusing stale privileged promotion."
+            gh pr comment "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"               --body "Genesis Action Repair Validator rejected stale promotion because main moved. The failure watcher will generate a fresh candidate if still needed."
+            exit 1
+          fi
+          git cat-file -e "${HEAD_SHA}^{commit}"
+          git checkout -B genesis/action-repair-integration origin/main
+          git cherry-pick "$HEAD_SHA"
+          python scripts/action_repair_guard.py "$BASE_SHA"
+          python -m compileall -q genesis scripts
+          python -m pytest -q
+          promoted_sha="$(git rev-parse HEAD)"
+          git push origin HEAD:main
+          echo "promoted_sha=$promoted_sha" >> "$GITHUB_OUTPUT"
+
+      - name: Resolve authoritative failure issue
+        if: steps.promote.outputs.promoted_sha != ''
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PROMOTED_SHA: ${{ steps.promote.outputs.promoted_sha }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          body="$(gh pr view "$PR_NUMBER" --repo "$GITHUB_REPOSITORY" --json body --jq '.body')"
+          issue_number="$(printf '%s
+' "$body" | sed -nE 's/.*failure #([0-9]+).*/\1/p' | head -n1)"
+          if [[ -n "$issue_number" ]]; then
+            gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY"               --add-label genesis-action-verifying --remove-label genesis-action-autonomous >/dev/null 2>&1 || true
+            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY"               --body "Genesis independently validated and promoted Action repair `$PROMOTED_SHA`. Fresh workflow verification is now required before this failure Issue closes."
+          fi
+          gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"             --comment "Exact candidate independently validated and promoted to main as `$PROMOTED_SHA`." >/dev/null || true
+          gh workflow run genesis-action-failure-watcher.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
