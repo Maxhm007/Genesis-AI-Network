@@ -7,4 +7,5 @@ def test_agentic_strategy_order_is_materially_distinct_and_dependency_last() -> 
         "alternative_implementation",
         "diagnostic_reframe",
         "dependency_diagnosis",
+        "qwen3_fallback",
     )
