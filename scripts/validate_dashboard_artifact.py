@@ -51,7 +51,15 @@ def validate(path: Path = DASHBOARD) -> None:
 
     links = re.findall(r'<a[^>]*data-view="([^"]+)"[^>]*href="#view-([^"]+)"', html)
     if len(links) < 8:
-        raise RuntimeError("Generated dashboard does not expose the expected tab navigation")
+        if len(links) < 8:
+            raise RuntimeError("Generated dashboard does not expose the expected tab navigation")
+        for view, target in links:
+            if view != target or f'id="view-{target}"' not in html:
+                raise RuntimeError(f"Generated dashboard contains a broken tab target: {view} -> {target}")
+        if "genesis-no-js-navigation" not in html:
+            raise RuntimeError("Generated dashboard lost no-JavaScript navigation fallback")
+        if "genesis-dashboard-v3" not in html:
+            raise RuntimeError("Generated dashboard lost the v3 reliability shell")
     for view, target in links:
         if view != target or f'id="view-{target}"' not in html:
             raise RuntimeError(f"Generated dashboard contains a broken tab target: {view} -> {target}")
