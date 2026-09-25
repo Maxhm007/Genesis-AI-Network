@@ -5,8 +5,8 @@ import json
 import os
 import re
 
-import agentic_lab_capability_first_dispatch as policy
-import agentic_lab_recovery_dispatch as agentic
+from scripts import agentic_lab_capability_first_dispatch as policy
+from scripts import agentic_lab_recovery_dispatch as agentic
 from genesis.issue_governor import issue_value_score
 
 
