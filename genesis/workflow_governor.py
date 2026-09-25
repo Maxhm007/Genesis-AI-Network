@@ -20,6 +20,8 @@ PROTECTED_WORKFLOWS = {
     "genesis-agentic-lab-recovery.yml",
     "github-issue-terminal-reconciler.yml",
     "genesis-action-failure-watcher.yml",
+    "genesis-action-repair-worker.yml",
+    "genesis-action-repair-validator.yml",
     "genesis-closed-issue-seal.yml",
     "secret-guard.yml",
     "candidate-pr-gate.yml",
