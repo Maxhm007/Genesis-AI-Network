@@ -44,7 +44,6 @@ jobs:
           git fetch origin main
           git reset --hard origin/main
 
-          # One bounded discovery cycle per workflow run. GitHub's native
-          # schedule starts the next cycle 30 minutes later, so this runner
-          # never sleeps or recursively starts another workflow run.
+          # One bounded discovery cycle per dispatch. Genesis Issue Opening
+          # Manager owns recurrence; this producer never self-recurses.
           python scripts/discover_recent_ai_capability.py
