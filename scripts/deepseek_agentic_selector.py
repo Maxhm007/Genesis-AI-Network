@@ -78,13 +78,16 @@ def target_from(issue: dict) -> str:
     return ""
 
 
-def score(issue: dict) -> tuple[int, dict]:
+def score(issue: dict, *, allow_agentic_handoff: bool = False) -> tuple[int, dict]:
     lifecycle_block = local_claim_block_reason(issue)
     if lifecycle_block:
         return (-10_000, {"reason": f"lifecycle_{lifecycle_block}"})
 
     labels = _labels(issue)
-    if labels & CONFLICT_LABELS or labels & UNSUITABLE_LABELS:
+    conflicts = labels & CONFLICT_LABELS
+    if allow_agentic_handoff:
+        conflicts -= {"genesis-repair-in-progress"}
+    if conflicts or labels & UNSUITABLE_LABELS:
         return (-10_000, {"reason": "conflicting_or_unsuitable_label"})
 
     title = str(issue.get("title") or "")
@@ -131,10 +134,10 @@ def score(issue: dict) -> tuple[int, dict]:
     return value, {"target": target, "reasons": reasons}
 
 
-def select(issues: list[dict]) -> dict | None:
+def select(issues: list[dict], *, allow_agentic_handoff: bool = False) -> dict | None:
     ranked: list[tuple[int, int, dict, dict]] = []
     for issue in issues:
-        value, detail = score(issue)
+        value, detail = score(issue, allow_agentic_handoff=allow_agentic_handoff)
         if value < 0:
             continue
         number = int(issue.get("number") or issue.get("issue_number") or 0)
@@ -202,6 +205,7 @@ def main() -> None:
     parser.add_argument("--issue-json", type=Path)
     parser.add_argument("--comments-json", type=Path)
     parser.add_argument("--target", default="")
+    parser.add_argument("--allow-agentic-handoff", action="store_true")
     args = parser.parse_args()
 
     if args.issue_json and args.comments_json:
@@ -217,7 +221,7 @@ def main() -> None:
     payload = json.loads(args.issues_json.read_text(encoding="utf-8"))
     if not isinstance(payload, list):
         raise SystemExit("issues JSON must be a list")
-    result = select(payload)
+    result = select(payload, allow_agentic_handoff=args.allow_agentic_handoff)
     print(json.dumps(result or {}, sort_keys=True))
 
 
