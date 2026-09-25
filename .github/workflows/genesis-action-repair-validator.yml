@@ -1,6 +1,7 @@
 name: Genesis Action Repair Validator
 
 on:
+  workflow_dispatch:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
     branches: [main]
