@@ -1,16 +1,8 @@
 name: Genesis Gene Peer Issue Sync
 
+# Discovery producer only; Genesis Issue Opening Manager owns automatic scheduling.
 on:
   workflow_dispatch:
-  push:
-    branches: [main]
-    paths:
-      - '.github/workflows/genesis-gene-peer-issue-sync.yml'
-      - 'scripts/gene_peer_issue_sync.py'
-      - 'tests/test_gene_peer_issue_sync.py'
-      - 'requirements.txt'
-  schedule:
-    - cron: '7,37 * * * *'
 
 permissions:
   contents: read
