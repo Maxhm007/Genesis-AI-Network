@@ -62,7 +62,11 @@ jobs:
             gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title,body,labels > /tmp/deepseek-open.json
           fi
 
-          selection=$(python scripts/deepseek_agentic_selector.py --issues-json /tmp/deepseek-open.json)
+          if [[ -n "$REQUESTED_ISSUE" ]]; then
+            selection=$(python scripts/deepseek_agentic_selector.py --issues-json /tmp/deepseek-open.json --allow-agentic-handoff)
+          else
+            selection=$(python scripts/deepseek_agentic_selector.py --issues-json /tmp/deepseek-open.json)
+          fi
           number=$(jq -r '.number // empty' <<<"$selection")
           target=$(jq -r '.target // empty' <<<"$selection")
           score=$(jq -r '.score // empty' <<<"$selection")
@@ -75,7 +79,11 @@ jobs:
           gh issue view "$number" --repo "$GITHUB_REPOSITORY" --json number,title,body,state,labels > /tmp/deepseek-issue.json
           current=$(cat /tmp/deepseek-issue.json)
           state=$(jq -r '.state' <<<"$current")
-          conflict=$(jq -r '[.labels[].name] | any(. == "genesis-repair-in-progress" or . == "genesis-claimed" or . == "genesis-working" or . == "genesis-validating" or . == "genesis-verifying" or . == "genesis-deepseek-working")' <<<"$current")
+          if [[ -n "$REQUESTED_ISSUE" ]]; then
+            conflict=$(jq -r '[.labels[].name] | any(. == "genesis-claimed" or . == "genesis-working" or . == "genesis-validating" or . == "genesis-verifying" or . == "genesis-deepseek-working")' <<<"$current")
+          else
+            conflict=$(jq -r '[.labels[].name] | any(. == "genesis-repair-in-progress" or . == "genesis-claimed" or . == "genesis-working" or . == "genesis-validating" or . == "genesis-verifying" or . == "genesis-deepseek-working")' <<<"$current")
+          fi
           if [[ "$state" != OPEN || "$conflict" == true ]]; then
             echo 'selected=false' >> "$GITHUB_OUTPUT"
             echo 'Candidate became unavailable before reservation.'
