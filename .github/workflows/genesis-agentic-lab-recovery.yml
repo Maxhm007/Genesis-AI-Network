@@ -12,6 +12,8 @@ on:
       - scripts/agentic_lab_capability_first_dispatch.py
       - scripts/agentic_lab_fifo_router.py
       - scripts/agentic_parallel_dispatch.py
+      - scripts/deepseek_agentic_selector.py
+      - .github/workflows/genesis-deepseek-agentic-solver.yml
       - scripts/park_exhausted_agentic_issues.py
       - scripts/android_issue_repair.py
       - scripts/capability_issue_priority_dispatch.py
