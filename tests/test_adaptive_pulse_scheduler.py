@@ -6,6 +6,7 @@ from genesis.pulse import adaptive_recovery_interval, recovery_pulse_due
 AGENTIC = Path(".github/workflows/genesis-agentic-lab-recovery.yml")
 WORKER = Path(".github/workflows/genesis-bounded-repair-worker.yml")
 WAKEUP = Path(".github/workflows/genesis-repair-worker-successor-wakeup.yml")
+FIFO = Path(".github/workflows/genesis-fifo-handoff.yml")
 
 
 def test_adaptive_recovery_interval_accelerates_under_high_backlog() -> None:
@@ -39,17 +40,17 @@ def test_agentic_lab_is_authoritative_recovery_scheduler() -> None:
 
 
 def test_worker_completion_returns_control_to_agentic_lab() -> None:
-    text = WAKEUP.read_text(encoding="utf-8")
-    assert "workflow_run:" in text
-    assert "Genesis Bounded Repair Worker" in text
-    assert "Genesis Agentic Strategy Worker" in text
-    assert "gh workflow run genesis-agentic-lab-recovery.yml" in text
-    assert "genesis-sequential-issue-controller.yml" not in text
+    fifo = FIFO.read_text(encoding="utf-8")
+    successor = WAKEUP.read_text(encoding="utf-8")
+    assert "workflow_run:" in fifo
+    assert "Genesis Bounded Repair Worker" in fifo
+    assert "Genesis Agentic Strategy Worker" in fifo
+    assert "gh workflow run genesis-agentic-lab-recovery.yml" in fifo
+    assert "Genesis Bounded Repair Worker" not in successor
+    assert "Genesis Agentic Strategy Worker" not in successor
 
 
-def test_bounded_worker_returns_control_to_agentic_lab() -> None:
+def test_bounded_worker_does_not_duplicate_fifo_handoff_wake() -> None:
     text = WORKER.read_text(encoding="utf-8")
-    assert "actions: write" in text
-    assert "Return control to Agentic Lab" in text
-    assert "gh workflow run genesis-agentic-lab-recovery.yml" in text
-    assert "genesis-sequential-issue-controller.yml" not in text
+    assert "Return control to Agentic Lab" not in text
+    assert "gh workflow run genesis-agentic-lab-recovery.yml" not in text
