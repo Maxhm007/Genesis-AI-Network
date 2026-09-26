@@ -127,6 +127,62 @@ def evaluate(
     }
 
 
+def _dispatch_workflow(repository: str, workflow_file: str) -> bool:
+    result = _run([
+        "gh", "workflow", "run", workflow_file,
+        "--repo", repository,
+        "--ref", "main",
+    ])
+    return result.returncode == 0
+
+
+def _heal_actions(assessment: dict, repository: str) -> dict:
+    faults = list(assessment.get("faults") or [])
+    dispatched: list[str] = []
+    failed: list[str] = []
+
+    opening_fault = any(fault.startswith("opening_manager_") for fault in faults)
+    closing_fault = any(fault.startswith("closing_manager_") for fault in faults)
+    verified_stuck = any(fault.startswith("verified_issues_not_auto_closed:") for fault in faults)
+
+    for needed, workflow in (
+        (opening_fault, "genesis-issue-opening-manager.yml"),
+        (closing_fault or verified_stuck, "genesis-issue-closure-manager.yml"),
+    ):
+        if not needed:
+            continue
+        if _dispatch_workflow(repository, workflow):
+            dispatched.append(workflow)
+        else:
+            failed.append(workflow)
+    return {"dispatched": dispatched, "failed": failed}
+
+
+def _persistent_fault(assessment: dict, *, opening_max_age_minutes: int, closure_max_age_minutes: int, verified_open_grace_minutes: int) -> bool:
+    evidence = assessment.get("evidence") or {}
+    opening = evidence.get("opening_run") or {}
+    closing = evidence.get("closing_run") or {}
+    try:
+        if float(opening.get("age_minutes") or 0) > opening_max_age_minutes * 2:
+            return True
+    except (TypeError, ValueError):
+        pass
+    try:
+        if float(closing.get("age_minutes") or 0) > closure_max_age_minutes * 2:
+            return True
+    except (TypeError, ValueError):
+        pass
+    if evidence.get("verified_open_issues_past_grace"):
+        # These are already beyond one grace period. Treat them as persistent only
+        # when the closure manager itself is stale/failed; otherwise one direct
+        # closure-manager wakeup is enough for this pass.
+        return any(fault.startswith("closing_manager_") for fault in assessment.get("faults") or [])
+    return any(
+        "_latest_run_failure" in fault or "_latest_run_cancelled" in fault or "_latest_run_timed_out" in fault
+        for fault in assessment.get("faults") or []
+    )
+
+
 def _existing_open_watchdog(issues: list[dict]) -> dict | None:
     for issue in issues:
         if str(issue.get("state") or "").lower() != "open":
@@ -158,12 +214,23 @@ def check(
     if assessment["healthy"]:
         return {"status": "healthy", **assessment}
 
+    healing = _heal_actions(assessment, repository)
+    persistent = _persistent_fault(
+        assessment,
+        opening_max_age_minutes=opening_max_age_minutes,
+        closure_max_age_minutes=closure_max_age_minutes,
+        verified_open_grace_minutes=verified_open_grace_minutes,
+    )
+    if not persistent and not healing["failed"]:
+        return {"status": "self_heal_dispatched", "healing": healing, **assessment}
+
     existing = _existing_open_watchdog(issues)
     if existing is not None:
         return {
             "status": "health_issue_already_open",
             "issue_number": existing.get("number"),
             "issue_url": existing.get("html_url"),
+            "healing": healing,
             **assessment,
         }
 
@@ -205,6 +272,7 @@ Restore autonomous issue opening and issue closing so Genesis can continuously v
     return {
         "status": "agentic_opening_pending",
         "manager_status": decision.action,
+        "healing": healing,
         **assessment,
     }
 
