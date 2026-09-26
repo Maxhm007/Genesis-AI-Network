@@ -59,8 +59,7 @@ def _all_open_issues_fifo(repository: str, token: str) -> list[dict]:
 
 def _actionable(issue: dict) -> bool:
     issue_labels = agentic.labels(issue)
-    autonomous_or_agentic = "genesis-autonomous" in issue_labels or agentic.AGENTIC_LABEL in issue_labels
-    if not autonomous_or_agentic or "genesis-verified" in issue_labels:
+    if "genesis-verified" in issue_labels:
         return False
     if issue_labels & {"genesis-persistent", "duplicate", "invalid", "wontfix", "genesis-superseded"}:
         return False
@@ -79,25 +78,21 @@ def _actionable(issue: dict) -> bool:
 def _restore_agentic_visibility(repository: str, token: str, issues: list[dict]) -> list[int]:
     restored: list[int] = []
     for issue in issues:
-        labels = agentic.labels(issue)
-        if agentic.AGENTIC_LABEL not in labels or "genesis-autonomous" in labels:
-            continue
-        if "genesis-verified" in labels or "genesis-superseded" in labels:
+        if not _actionable(issue):
             continue
         number = int(issue.get("number") or 0)
-        if number <= 1:
+        if number <= 1 or _infra_quarantined(repository, token, number):
             continue
-        if _infra_quarantined(repository, token, number):
-            continue
-        title = str(issue.get("title") or "").strip().lower()
-        body = str(issue.get("body") or "").lower()
-        if title.startswith(("[genesis gene chat]", "genesis chat:", "[genesis hourly report]", "[genesis ops]")):
-            continue
-        if "persistent github-native reporting channel" in body:
-            continue
-        agentic.request(repository, token, "POST", f"/issues/{number}/labels", {"labels": ["genesis-autonomous"]})
+        labels = agentic.labels(issue)
+        missing = []
+        if agentic.AGENTIC_LABEL not in labels:
+            missing.append(agentic.AGENTIC_LABEL)
+        if "genesis-autonomous" not in labels:
+            missing.append("genesis-autonomous")
+        if missing:
+            agentic.request(repository, token, "POST", f"/issues/{number}/labels", {"labels": missing})
+            restored.append(number)
         agentic.remove_label(repository, token, number, "genesis-deferred")
-        restored.append(number)
     return restored
 
 
