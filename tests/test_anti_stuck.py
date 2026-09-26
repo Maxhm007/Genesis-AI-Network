@@ -13,6 +13,7 @@ from genesis.anti_stuck import (
     next_lane_strategy,
     should_release_worker,
     state_marker,
+    target_attempt_history,
 )
 
 
@@ -206,3 +207,32 @@ def test_agentic_dispatch_uses_cross_provider_anti_stuck_policy():
     assert 'provider == "deepseek"' in source
     assert "genesis-deepseek-agentic-solver.yml" in source
     assert "materially_equivalent_attempt(history, candidate)" in source
+
+
+
+def test_target_attempt_history_recovers_failures_across_legacy_reset_epochs():
+    comments = [
+        {"body": state_marker("old-one")},
+        {"body": attempt_marker(Attempt("evidence_first", "agentic-default", "Gene 0", "genesis/example.py"))},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `strategy_requires_more_methods`"},
+        {"body": state_marker("old-two")},
+        {"body": attempt_marker(Attempt("evidence_first", "agentic-default", "Gene 0", "genesis/example.py"))},
+    ]
+    history = target_attempt_history(comments, "genesis/example.py")
+    assert len(history) == 2
+    assert history[0].result == "strategy_requires_more_methods"
+    decision = anti_stuck_decision(history)
+    assert decision.action == "switch_lane"
+    assert decision.provider == "qwen3"
+
+
+def test_target_attempt_history_does_not_mix_other_targets():
+    comments = [
+        {"body": attempt_marker(Attempt("evidence_first", "agentic-default", "Gene 0", "genesis/old.py"))},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `worker_failed_before_evidence`"},
+        {"body": attempt_marker(Attempt("evidence_first", "agentic-default", "Gene 0", "genesis/new.py"))},
+    ]
+    history = target_attempt_history(comments, "genesis/new.py")
+    assert len(history) == 1
+    assert history[0].target == "genesis/new.py"
+    assert history[0].result == ""
