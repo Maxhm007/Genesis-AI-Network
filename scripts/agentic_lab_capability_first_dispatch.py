@@ -258,6 +258,24 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
                         agentic.remove_label(repository, token, number, label)
                     agentic.request(repository, token, "POST", f"/issues/{number}/labels", {"labels": [agentic.AGENTIC_LABEL, "genesis-autonomous"]})
                     return {"status": "retargeted", "issue_number": number, "target": inferred, "previous_target": explicit}
+                if not inferred:
+                    new_body = re.sub(
+                        r"(?m)^- \*\*Target:\*\* `[^`]+`\n?",
+                        "",
+                        body,
+                        count=1,
+                    )
+                    agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": new_body})
+                    agentic.request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
+                        "<!-- genesis-fifo-target-revoked -->\n"
+                        f"Genesis revoked stale inferred target `{explicit}` because current semantic routing found no confident safe implementation target. "
+                        f"Top score: {score}; concepts: {', '.join(hits) or 'none'}. "
+                        "The Issue remains open for safer new-file/multi-file decomposition instead of dispatching a weak match."
+                    )})
+                    for label in agentic.ACTIVE_LABELS | {agentic.EXHAUSTED_LABEL, "genesis-blocked", "genesis-deferred"}:
+                        agentic.remove_label(repository, token, number, label)
+                    agentic.request(repository, token, "POST", f"/issues/{number}/labels", {"labels": [agentic.AGENTIC_LABEL, "genesis-autonomous", "genesis-needs-routing"]})
+                    return {"status": "target_revoked", "issue_number": number, "previous_target": explicit, "score": score}
             continue
 
         target = _derived_safe_target(body)
