@@ -486,3 +486,20 @@ def test_same_fallback_target_releases_routing_without_noop_retarget(monkeypatch
     patch = next(payload for method, path, payload in calls if method == "PATCH" and path == "/issues/858")
     assert "- **Task type:** `architecture_expansion`" in patch["body"]
     assert f"- **Architecture new target:** `{fallback}`" in patch["body"]
+
+
+def test_existing_architecture_extension_target_self_heals_metadata(monkeypatch):
+    issue = _issue(875)
+    target = "genesis/architecture_extensions/observability_build_unified_autonomous_health_dashboard.py"
+    issue["body"] += f"\n\n### Genesis FIFO decomposition\n- **Target:** `{target}`\n"
+    calls = []
+    monkeypatch.setattr(module, "_infra_quarantined", lambda *args: False)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda value: "generic" if value else "")
+    monkeypatch.setattr(module.agentic, "issue_comments", lambda *args: [{"body": "<!-- genesis-agentic-rerouted -->"}])
+    monkeypatch.setattr(module.agentic, "request", lambda repository, token, method, path, payload=None: calls.append((method, path, payload)) or {})
+
+    module._decompose_oldest_issue("owner/repo", "token", [issue])
+
+    patch = next(payload for method, path, payload in calls if method == "PATCH" and path == "/issues/875")
+    assert "- **Task type:** `architecture_expansion`" in patch["body"]
+    assert f"- **Architecture new target:** `{target}`" in patch["body"]

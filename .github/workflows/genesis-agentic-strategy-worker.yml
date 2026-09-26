@@ -107,6 +107,7 @@ jobs:
           body=$(jq -r '.body // ""' <<<"$issue_json")
           target=$(printf '%s\n' "$body" | python -m genesis.issue_target)
           task_type=$(printf '%s\n' "$body" | sed -nE 's/^- \*\*Task type:\*\* `([^`]+)`.*/\1/p' | head -n1)
+          architecture_new_target=$(printf '%s\n' "$body" | sed -nE 's/^- \*\*Architecture new target:\*\* `([^`]+)`.*/\1/p' | head -n1)
 
           actionable=true
           title_lc=$(printf '%s' "$title" | tr '[:upper:]' '[:lower:]')
@@ -120,7 +121,12 @@ jobs:
           safe=true
           if [[ "$actionable" != "true" ]]; then safe=false; fi
           if [[ "$state" != "OPEN" || "$reserved" != "true" || "$agentic" != "true" ]]; then safe=false; fi
-          if [[ -z "$target" || "$target" == *".."* || ! -f "$target" ]]; then safe=false; fi
+          if [[ -z "$target" || "$target" == *".."* ]]; then safe=false; fi
+          if [[ ! -f "$target" ]]; then
+            if [[ "$task_type" != "architecture_expansion" || "$architecture_new_target" != "$target" || "$target" != genesis/architecture_extensions/*.py ]]; then
+              safe=false
+            fi
+          fi
           if [[ "$target" != genesis/*.py && "$target" != scripts/*.py ]]; then safe=false; fi
           case "$target" in
             genesis/autonomy_guard.py|genesis/autonomy_proof.py|genesis/blockchain.py|genesis/ephemeral_validator.py|genesis/security.py|genesis/selfdev.py|genesis/issue_solver.py|genesis/file_self_review.py|genesis/file_self_review_policy.py|scripts/secret_guard.py|scripts/privileged_change_gate.py|scripts/verify_validator_votes.py|scripts/action_repair_guard.py|scripts/issue_acceptance_guard.py)
