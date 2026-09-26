@@ -170,7 +170,7 @@ def restricted_issue_targets(text: str) -> list[str]:
 def candidate_context_paths(issue_text: str, root: Path = ROOT, limit: int = MAX_CONTEXT_FILES) -> list[str]:
     explicit = [
         path
-        for path in _explicit_genesis_paths(issue_text)
+        for path in explicit_safe_repair_paths(issue_text)
         if (root / path).is_file()
     ]
     if explicit:
