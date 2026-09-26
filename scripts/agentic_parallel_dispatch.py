@@ -189,6 +189,14 @@ def main() -> int:
     restored = policy._restore_agentic_visibility(repository, token, all_open)
     released = agentic.release_ready_capability_dependencies(repository, token)
 
+    # Convert the oldest targetless autonomous/architecture Issue into one safe,
+    # concrete same-Issue repair step before value scoring. Without this handoff,
+    # architecture Issues can be labeled for Agentic Lab yet remain permanently
+    # invisible to the parallel router because no explicit Python target exists.
+    decomposition = policy._decompose_oldest_issue(repository, token, all_open)
+    if decomposition.get("status") == "decomposed":
+        all_open = policy._all_open_issues_fifo(repository, token)
+
     active_before = _active_issue_numbers(repository, token)
     free_slots = max(0, MAX_PARALLEL - len(active_before))
     dispatched: list[dict] = []
@@ -208,6 +216,7 @@ def main() -> int:
         "legacy_dependencies_released": released,
         "capability_escalation": "enabled",
         "agentic_visibility_restored": restored,
+        "decomposition": decomposition,
         "strategies": list(agentic.STRATEGIES),
     }
     print(json.dumps(result, sort_keys=True))
