@@ -470,3 +470,68 @@ def test_stable_epoch_changes_only_when_material_base_changes(monkeypatch):
 
     assert state_token == "base-new"
     assert any("genesis-anti-stuck-state:base-new" in body for body in posted)
+
+
+
+def test_ready_capability_release_continues_to_dispatch_in_same_pass(monkeypatch):
+    issue = _issue(868, extra_labels=(module.AGENTIC_LABEL,))
+    issue["body"] = "- **Target:** `genesis/workflow_governor.py`\n"
+    comments = [{"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `retry_pending_capability`"}]
+    calls: list[tuple[str, str, dict | None]] = []
+
+    class Decision:
+        action = "capability"
+        reason = "strategy_set_exhausted"
+        provider = ""
+        gene = ""
+
+    class FreshDecision:
+        action = "continue"
+        reason = ""
+        provider = ""
+        gene = ""
+
+    decisions = iter([Decision(), FreshDecision()])
+
+    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [issue])
+    monkeypatch.setattr(module, "issue_comments", lambda repository, token, number: list(comments))
+    monkeypatch.setattr(module, "local_claim_block_reason", lambda issue, comments: "")
+    monkeypatch.setattr(module, "unresolved_capability_dependency", lambda comments: None)
+    monkeypatch.setattr(module, "safe_lane", lambda target: "generic")
+    monkeypatch.setattr(module, "apply_integration_route", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "ensure_anti_stuck_epoch", lambda repository, token, issue, rows, target: ("fresh", list(rows)))
+    monkeypatch.setattr(module, "attempt_history", lambda comments, state_token, target: [])
+    monkeypatch.setattr(module, "target_attempt_history", lambda comments, target: [])
+    monkeypatch.setattr(module, "anti_stuck_decision", lambda history: next(decisions))
+    monkeypatch.setattr(module, "latest_result_status", lambda comments, state_token="": "retry_pending_capability" if len(calls) == 0 else "")
+    monkeypatch.setattr(
+        module,
+        "pause_for_capability",
+        lambda *args, **kwargs: {
+            "status": "capability_already_ready",
+            "issue_number": 868,
+            "capability_issue": 951,
+            "released": True,
+        },
+    )
+    monkeypatch.setattr(module, "next_lane_strategy", lambda *args, **kwargs: "evidence_first")
+    monkeypatch.setattr(module, "materially_equivalent_attempt", lambda history, candidate: False)
+    monkeypatch.setattr(module, "has_state_marker", lambda comments, state_token: True)
+    monkeypatch.setattr(module, "ensure_label", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "remove_label", lambda *args, **kwargs: None)
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+
+    result = module.reserve_and_dispatch("owner/repo", "token")
+
+    assert result["status"] == "dispatched"
+    assert result["issue_number"] == 868
+    assert any(
+        method == "POST"
+        and path == "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches"
+        for method, path, payload in calls
+    )
