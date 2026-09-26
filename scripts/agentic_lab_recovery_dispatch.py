@@ -88,6 +88,7 @@ INTEGRATION_TARGETS = {
 
 RECOVERY_ENGINE_PATHS = (
     "scripts/agentic_lab_recovery_dispatch.py",
+    "scripts/agentic_strategy_repair.py",
     "genesis/anti_stuck.py",
     "genesis/coding.py",
     "genesis/github_issue_capability_builder.py",
