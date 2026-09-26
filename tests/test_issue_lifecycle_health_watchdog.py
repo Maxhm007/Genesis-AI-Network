@@ -79,3 +79,53 @@ def test_recent_verified_issue_gets_grace_period():
         verified_open_grace_minutes=20,
     )
     assert result["healthy"] is True
+
+
+def test_heal_actions_dispatches_stale_opening_and_closing_managers(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "_dispatch_workflow",
+        lambda repository, workflow: calls.append(workflow) or True,
+    )
+    assessment = {
+        "faults": [
+            "opening_manager_stale:90.0m>75m",
+            "closing_manager_stale:45.0m>30m",
+            "verified_issues_not_auto_closed:857",
+        ],
+        "evidence": {},
+    }
+
+    result = module._heal_actions(assessment, "owner/repo")
+
+    assert result["failed"] == []
+    assert result["dispatched"] == [
+        "genesis-issue-opening-manager.yml",
+        "genesis-issue-closure-manager.yml",
+    ]
+    assert calls == result["dispatched"]
+
+
+def test_persistent_fault_requires_more_than_one_stale_window():
+    transient = {
+        "faults": ["closing_manager_stale:35.0m>30m"],
+        "evidence": {"closing_run": {"age_minutes": 35.0}},
+    }
+    persistent = {
+        "faults": ["closing_manager_stale:75.0m>30m"],
+        "evidence": {"closing_run": {"age_minutes": 75.0}},
+    }
+
+    assert module._persistent_fault(
+        transient,
+        opening_max_age_minutes=75,
+        closure_max_age_minutes=30,
+        verified_open_grace_minutes=20,
+    ) is False
+    assert module._persistent_fault(
+        persistent,
+        opening_max_age_minutes=75,
+        closure_max_age_minutes=30,
+        verified_open_grace_minutes=20,
+    ) is True
