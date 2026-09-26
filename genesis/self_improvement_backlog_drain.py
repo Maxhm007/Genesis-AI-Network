@@ -83,7 +83,7 @@ def route_existing_self_improvement(
                     "execution_state": execution[-1].state,
                 }
             )
-            continue
+            assert github.posts == []
 
         if source.state in {"running", "review"}:
             result["skipped_in_flight"].append(source.task_id)
