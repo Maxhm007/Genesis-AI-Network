@@ -20,6 +20,7 @@ on:
       - scripts/requeue_exhausted_issues.py
       - scripts/pulse_coding_provider.py
       - genesis/github_issue_capability_builder.py
+      - genesis/anti_stuck.py
       - genesis/architecture_decomposer.py
       - scripts/advance_architecture_plan.py
   schedule:
