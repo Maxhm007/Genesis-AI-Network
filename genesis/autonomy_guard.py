@@ -131,6 +131,8 @@ class AutonomyGuard:
             reasons.append("multiple GitHub write permissions requested")
 
         score = min(score, 100)
+        if escalation:
+            return AutonomyDecision("high_risk", max(score, 60), False, True, files, tuple(reasons))
         if score >= 60:
             return AutonomyDecision("high_risk", score, False, True, files, tuple(reasons or ["high-risk change"]))
         if privileged:
