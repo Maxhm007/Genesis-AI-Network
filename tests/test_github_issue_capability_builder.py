@@ -393,3 +393,46 @@ def test_capability_growth_rejects_protected_script_blocker(tmp_path: Path, monk
     )
 
     assert provider is None
+
+
+
+def test_architecture_expansion_selects_bounded_new_file_provider(tmp_path: Path, monkeypatch) -> None:
+    class FakeHTTPProvider:
+        def __init__(self, base_url: str, name: str = "fake", timeout: float = 20.0) -> None:
+            self.base_url = base_url
+            self.name = name
+            self.timeout = timeout
+
+        def available(self) -> bool:
+            return True
+
+        def reason(self, prompt: str) -> str:
+            return '{"title":"x","rationale":"y","files":{"genesis/architecture_extensions/pull_request_maintenance.py":"from __future__ import annotations\n\ndef classify_pr(state: str) -> str:\n    return str(state).strip() or \"unknown\"\n"}}'
+
+    monkeypatch.setenv("GENESIS_REPAIR_PROVIDER_URL", "http://local-provider")
+    monkeypatch.setattr(capability_builder, "GenesisHTTPProvider", FakeHTTPProvider)
+    issue = {
+        "number": 859,
+        "title": "[Genesis Maintenance] Add autonomous review and resolution lane for stale open pull requests",
+        "user": {"login": "Maxhm007"},
+        "labels": [
+            {"name": "genesis-autonomous"},
+            {"name": "genesis-architecture-route"},
+        ],
+        "body": (
+            "<!-- genesis-architecture-plan:abc -->\n"
+            "- **Task type:** `architecture_expansion`\n"
+            "- **Architecture new target:** `genesis/architecture_extensions/pull_request_maintenance.py`\n"
+            "- **Architecture next target:** `genesis/github_issue_cleanup.py`\n"
+            "- **Target:** `genesis/architecture_extensions/pull_request_maintenance.py`\n"
+        ),
+    }
+
+    provider = GitHubIssueLearnedCapabilityProvider.for_issue(
+        tmp_path,
+        issue,
+        CodingModule(tmp_path),
+    )
+
+    assert isinstance(provider, capability_builder.ArchitectureExpansionProvider)
+    assert provider.target_path == "genesis/architecture_extensions/pull_request_maintenance.py"
