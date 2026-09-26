@@ -504,7 +504,7 @@ def ensure_capability_issue(
         )
         if not matches:
             continue
-        state = str(row.get("state") or "").lower()
+        state = str(row.get("state") or "open").lower()
         state_reason = str(row.get("state_reason") or "").lower()
         row_labels = labels(row)
         if state == "open":
