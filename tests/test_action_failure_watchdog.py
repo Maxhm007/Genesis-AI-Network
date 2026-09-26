@@ -135,3 +135,14 @@ def test_newer_success_prevents_stale_failure_reopening():
         return Result()
 
     assert _newer_success_resolves_failure("owner/repo", metadata, runs, runner=runner)
+
+
+def test_arbitrary_main_workflow_failure_is_actionable_without_allowlist():
+    run = _run(name="Brand New Workflow", path=".github/workflows/brand-new.yml")
+    assert actionable_run(run)
+
+
+def test_action_self_healing_workflows_are_excluded_to_prevent_loops():
+    assert not actionable_run(_run(name="Genesis Action Failure Watcher"))
+    assert not actionable_run(_run(name="Genesis Action Repair Worker"))
+    assert not actionable_run(_run(name="Genesis Action Repair Validator"))
