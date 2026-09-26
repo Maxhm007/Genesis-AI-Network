@@ -189,13 +189,17 @@ def main() -> int:
     restored = policy._restore_agentic_visibility(repository, token, all_open)
     released = agentic.release_ready_capability_dependencies(repository, token)
 
-    # Convert the oldest targetless autonomous/architecture Issue into one safe,
-    # concrete same-Issue repair step before value scoring. Without this handoff,
-    # architecture Issues can be labeled for Agentic Lab yet remain permanently
-    # invisible to the parallel router because no explicit Python target exists.
-    decomposition = policy._decompose_oldest_issue(repository, token, all_open)
-    if decomposition.get("status") == "decomposed":
+    # Reconcile/decompose multiple architecture Issues per recovery pass. One
+    # stale inferred target must not consume the whole cycle while newer work
+    # remains hidden. Keep this bounded to avoid an unbounded controller loop.
+    decomposition_steps: list[dict] = []
+    for _ in range(12):
+        step = policy._decompose_oldest_issue(repository, token, all_open)
+        decomposition_steps.append(step)
+        if step.get("status") not in {"decomposed", "retargeted", "target_revoked"}:
+            break
         all_open = policy._all_open_issues_fifo(repository, token)
+    decomposition = decomposition_steps[-1] if decomposition_steps else {"status": "idle"}
 
     active_before = _active_issue_numbers(repository, token)
     free_slots = max(0, MAX_PARALLEL - len(active_before))
@@ -217,6 +221,7 @@ def main() -> int:
         "capability_escalation": "enabled",
         "agentic_visibility_restored": restored,
         "decomposition": decomposition,
+        "decomposition_steps": decomposition_steps,
         "strategies": list(agentic.STRATEGIES),
     }
     print(json.dumps(result, sort_keys=True))
