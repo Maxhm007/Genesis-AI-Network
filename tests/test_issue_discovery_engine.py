@@ -48,6 +48,24 @@ class FalseSyntaxProvider:
         )
 
 
+class GuardWeakeningProvider:
+    name = "guard-weakening-provider"
+
+    def available(self) -> bool:
+        return True
+
+    def reason(self, prompt: str) -> str:
+        return json.dumps(
+            {
+                "decision": "issue",
+                "summary": "Materiality gate rejects candidate with adjacent duplicate statements.",
+                "acceptance": "Candidate should pass materiality check if it introduces adjacent duplicate statements.",
+                "evidence": "candidate_duplicates > base_duplicates",
+                "confidence": "high",
+            }
+        )
+
+
 class TimeoutProvider:
     name = "timeout-provider"
 
@@ -139,6 +157,23 @@ def test_unsupported_syntax_claim_is_rejected_before_queue(tmp_path: Path) -> No
     assert result["unsupported_finding_count"] >= 1
     assert result["scanned"][0]["status"] == "unsupported_finding"
     assert result["scanned"][0]["grounding_error"] == "syntax_claim_without_parser_evidence"
+    assert queue.list(limit=10) == []
+
+
+def test_discovery_rejects_acceptance_that_weakens_quality_guard(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "genesis/review_materiality.py",
+        "def gate(base_duplicates, candidate_duplicates):\n    if candidate_duplicates > base_duplicates:\n        return False\n    return True\n",
+    )
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "tasks.sqlite3")
+
+    result = GenesisIssueDiscoveryEngine(tmp_path).discover_and_enqueue(queue, GuardWeakeningProvider())
+
+    assert result["status"] == "no_issue_found"
+    assert result["unsupported_finding_count"] >= 1
+    assert result["scanned"][0]["status"] == "unsupported_finding"
+    assert result["scanned"][0]["grounding_error"] == "acceptance_requests_guard_weakening"
     assert queue.list(limit=10) == []
 
 
