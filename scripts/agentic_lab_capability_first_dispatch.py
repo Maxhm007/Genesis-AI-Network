@@ -240,6 +240,21 @@ def _derived_safe_target(body: str) -> str:
     return ""
 
 
+def _rejected_targets(comments: list[dict]) -> set[str]:
+    rejected: set[str] = set()
+    patterns = (
+        r"replaced rejected target `([^`]+)`",
+        r"classified target `([^`]+)` as protected/unsupported",
+    )
+    for row in comments:
+        body = str(row.get("body") or "")
+        for pattern in patterns:
+            match = re.search(pattern, body)
+            if match and match.group(1).strip() not in {"", "none"}:
+                rejected.add(match.group(1).strip())
+    return rejected
+
+
 def _routing_extension_target(issue: dict) -> str:
     title = str(issue.get("title") or f"issue-{int(issue.get('number') or 0)}").lower()
     slug = re.sub(r"[^a-z0-9]+", "_", title).strip("_")
@@ -258,15 +273,17 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
         body = str(issue.get("body") or "")
         issue_labels = agentic.labels(issue)
         explicit = agentic.explicit_target(body)
+        routing_comments = agentic.issue_comments(repository, token, number)
+        rejected_targets = _rejected_targets(routing_comments)
 
         # A target already rejected by the repair lane must never become a
-        # permanent parking state. Re-route it before normal decomposition.
-        if "genesis-needs-routing" in issue_labels:
+        # permanent parking state or be reselected by an older planner.
+        if "genesis-needs-routing" in issue_labels or explicit in rejected_targets:
             base_issue = dict(issue)
             if "### Genesis FIFO decomposition" in body:
                 base_issue["body"] = body.split("\n\n### Genesis FIFO decomposition\n", 1)[0]
             inferred, score, hits = _repository_safe_target(base_issue)
-            if not inferred or inferred == explicit:
+            if not inferred or inferred == explicit or inferred in rejected_targets:
                 inferred = _routing_extension_target(issue)
                 score = 0
                 hits = ["architecture-extension-fallback"]
@@ -297,10 +314,9 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
             return {"status": "retargeted", "issue_number": number, "target": inferred, "previous_target": explicit}
 
         if agentic.safe_lane(explicit):
-            reroute_comments = agentic.issue_comments(repository, token, number)
             reroute_locked = (
                 explicit.startswith("genesis/architecture_extensions/")
-                and any("<!-- genesis-agentic-rerouted -->" in str(row.get("body") or "") for row in reroute_comments)
+                and any("<!-- genesis-agentic-rerouted -->" in str(row.get("body") or "") for row in routing_comments)
             )
             if reroute_locked:
                 continue
