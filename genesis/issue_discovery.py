@@ -303,6 +303,9 @@ class GenesisIssueDiscoveryEngine:
             return False, "evidence_not_found_in_supplied_context"
 
         claim = f"{finding.get('summary', '')} {finding.get('acceptance', '')}".lower()
+        claims_bool_coercion = "bool coercion" in claim or "explicit bool" in claim
+        if claims_bool_coercion and "bool(" not in evidence.replace(" ", "").lower():
+            return False, "bool_coercion_claim_without_bool_evidence"
         claims_syntax_failure = "syntax error" in claim or "syntaxerror" in claim
         if claims_syntax_failure and "syntax_error" not in candidate.reasons:
             return False, "syntax_claim_without_parser_evidence"
