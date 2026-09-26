@@ -129,7 +129,7 @@ def test_capability_gap_creates_dependency_and_pauses_parent(monkeypatch):
     assert not any("genesis-agentic-strategy-worker.yml/dispatches" in path for _, path, _ in calls)
 
 
-def test_capability_issue_switches_provider_before_human_escalation(monkeypatch):
+def test_capability_issue_switches_provider_before_autonomous_reroute(monkeypatch):
     calls: list[tuple[str, str, dict | None]] = []
     issue = _issue(
         46,
@@ -160,7 +160,7 @@ def test_capability_issue_switches_provider_before_human_escalation(monkeypatch)
 
     result = module.reserve_and_dispatch("owner/repo", "token")
 
-    assert result["status"] == "needs_human"
+    assert result["status"] == "reroute_capability"
     assert result["reason"] == "repair_failed_validation"
     assert not any(method == "POST" and path == "/issues" for method, path, _ in calls)
 
