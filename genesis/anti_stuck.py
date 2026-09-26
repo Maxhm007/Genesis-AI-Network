@@ -18,6 +18,11 @@ DEEPSEEK_RESULT_PREFIX = "<!-- genesis-deepseek-result:"
 
 DEFAULT_PROVIDER_SWITCH_AFTER = 2
 DEFAULT_CAPABILITY_AFTER_DISTINCT_FAILURES = 5
+IMMEDIATE_LANE_SWITCH_RESULTS = {
+    "strategy_requires_more_methods",
+    "worker_failed_before_evidence",
+    "retry_pending_capability",
+}
 
 
 @dataclass(frozen=True)
@@ -171,12 +176,6 @@ def attempt_history(comments: Iterable[dict], token: str, target: str) -> tuple[
         if parsed is not None:
             explicit = True
             attempts.append(parsed)
-            def adaptive_stuck_issue_strategy(self, issue_id, max_attempts=5):
-                # Existing code...
-                # Add adaptive strategy logic here
-                # Example: If issue fails more than max_attempts, switch solver
-                if issue_attempts > max_attempts:
-                    self.switch_solver(issue_id)
 
         if explicit:
             continue
@@ -262,10 +261,13 @@ def anti_stuck_decision(
     if len(distinct_failure_keys) >= int(capability_after_distinct_failures):
         return AntiStuckDecision("capability", "distinct_failure_budget_exhausted")
 
-    if len(distinct_failure_keys) < int(provider_switch_after):
+    failed_lanes = {(attempt.provider.lower(), attempt.gene.lower()) for attempt in failures}
+    latest_failure = failures[-1].result.strip().lower() if failures else ""
+    force_lane_switch = latest_failure in IMMEDIATE_LANE_SWITCH_RESULTS
+
+    if len(distinct_failure_keys) < int(provider_switch_after) and not force_lane_switch:
         return AntiStuckDecision("continue", "strategy_budget_available")
 
-    failed_lanes = {(attempt.provider.lower(), attempt.gene.lower()) for attempt in failures}
     for provider, gene in compatible_lanes:
         if (provider.lower(), gene.lower()) not in failed_lanes:
             return AntiStuckDecision(
