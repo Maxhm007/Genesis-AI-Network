@@ -196,8 +196,17 @@ def main() -> int:
     # stale inferred target must not consume the whole cycle while newer work
     # remains hidden. Keep this bounded to avoid an unbounded controller loop.
     decomposition_steps: list[dict] = []
+    seen_decomposition_actions: set[tuple[str, int, str]] = set()
     for _ in range(12):
         step = policy._decompose_oldest_issue(repository, token, all_open)
+        key = (
+            str(step.get("status") or ""),
+            int(step.get("issue_number") or 0),
+            str(step.get("target") or step.get("previous_target") or ""),
+        )
+        if key in seen_decomposition_actions:
+            break
+        seen_decomposition_actions.add(key)
         decomposition_steps.append(step)
         if step.get("status") not in {"decomposed", "retargeted", "target_revoked"}:
             break
