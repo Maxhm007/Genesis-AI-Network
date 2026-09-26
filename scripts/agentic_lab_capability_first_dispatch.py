@@ -146,6 +146,11 @@ def _repository_target_score(title: str, body: str, relative: str, source: str) 
         + len(title_source_hits) * 4
         + min(len(body_source_hits), 6)
     )
+
+    basename = Path(relative).name.lower()
+    issue_lower = f"{title}\n{body}".lower()
+    if "discover" in basename and not any(term in issue_lower for term in ("discover", "discovery")):
+        score -= 24
     hits = [
         *title_path_hits,
         *body_path_hits,
@@ -181,6 +186,7 @@ def _repository_safe_target(issue: dict, *, root: Path = ROOT) -> tuple[str, int
         return "", 0, []
     ranked.sort(key=lambda row: (-row[0], row[1]))
     score, target, hits = ranked[0]
+    runner_up = ranked[1][0] if len(ranked) > 1 else 0
     target_path_tokens = _semantic_tokens(target.replace("/", " ").replace("_", " "))
     title_tokens = _semantic_tokens(title)
     body_tokens = _semantic_tokens(body)
@@ -195,6 +201,8 @@ def _repository_safe_target(issue: dict, *, root: Path = ROOT) -> tuple[str, int
         return "", score, hits
     if score < 18:
         return "", score, hits
+    if runner_up and score - runner_up < 6:
+        return "", score, hits[:8]
     return target, score, hits[:8]
 
 
@@ -231,10 +239,25 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
         body = str(issue.get("body") or "")
         explicit = agentic.explicit_target(body)
         if agentic.safe_lane(explicit):
-            # This issue can already enter the repair pool. Keep scanning so the
-            # same recovery cycle can make the next targetless architecture issue
-            # executable instead of letting one old routable issue block backlog
-            # decomposition indefinitely.
+            if "### Genesis FIFO decomposition" in body:
+                inferred, score, hits = _repository_safe_target(issue)
+                if inferred and inferred != explicit:
+                    new_body = re.sub(
+                        r"(?m)^- \*\*Target:\*\* `[^`]+`$",
+                        f"- **Target:** `{inferred}`",
+                        body,
+                        count=1,
+                    )
+                    agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": new_body})
+                    agentic.request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
+                        "<!-- genesis-fifo-retargeted -->\n"
+                        f"Genesis replaced weak inferred target `{explicit}` with stronger semantic target `{inferred}`. "
+                        f"Inference score: {score}; concepts: {', '.join(hits) or 'n/a'}."
+                    )})
+                    for label in agentic.ACTIVE_LABELS | {agentic.EXHAUSTED_LABEL, "genesis-blocked", "genesis-deferred"}:
+                        agentic.remove_label(repository, token, number, label)
+                    agentic.request(repository, token, "POST", f"/issues/{number}/labels", {"labels": [agentic.AGENTIC_LABEL, "genesis-autonomous"]})
+                    return {"status": "retargeted", "issue_number": number, "target": inferred, "previous_target": explicit}
             continue
 
         target = _derived_safe_target(body)
