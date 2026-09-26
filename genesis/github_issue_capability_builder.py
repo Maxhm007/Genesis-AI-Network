@@ -108,6 +108,41 @@ class EvidenceFirstRepairFollowupProvider:
         return self.delegate.reason(prompt + evidence)
 
 
+class ArchitectureExpansionProvider:
+    """Generate exactly one bounded new architecture module from an approved plan."""
+
+    def __init__(self, issue: dict, target_path: str, delegate: IntelligenceProvider) -> None:
+        self.issue = dict(issue)
+        self.target_path = str(target_path).replace("\\", "/").lstrip("./")
+        self.delegate = delegate
+        self.name = f"architecture-expansion:{delegate.name}"
+
+    def available(self) -> bool:
+        return self.delegate.available()
+
+    def reason(self, prompt: str) -> str:
+        title = str(self.issue.get("title") or "")[:500]
+        body = str(self.issue.get("body") or "")[:9000]
+        bounded_context = str(prompt or "")[-10000:]
+        architecture_prompt = (
+            "ROLE: Genesis bounded architecture module implementer\n"
+            f"ISSUE_TITLE: {title}\n"
+            f"PLANNED_NEW_PATH: {self.target_path}\n"
+            "AUTHORITY: Create exactly this one new Python module and no other file. "
+            "Do not modify workflows, tests, security controls, credentials, validation, owner controls, or existing files. "
+            "Implement a small but real reusable production capability toward the issue objective; do not emit placeholders, TODOs, pass-only stubs, or issue-specific constants. "
+            "Keep dependencies inside the Python standard library or existing Genesis public modules. "
+            "The full repository test suite will run before promotion.\n"
+            "OUTPUT: Return one JSON object with keys title, rationale, files. "
+            f"The files object must contain exactly one key: {self.target_path!r}, whose value is the complete Python source text.\n"
+            "ISSUE_EVIDENCE:\n"
+            + body
+            + "\nREAD_ONLY_REPOSITORY_CONTEXT:\n"
+            + bounded_context
+        )
+        return self.delegate.reason(architecture_prompt)
+
+
 class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvider):
     """Adapt trusted Genesis-generated GitHub tasks to deterministic builders."""
 
@@ -462,12 +497,65 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
         return EvidenceFirstRepairFollowupProvider(Path(root).resolve(), target_path, delegate)
 
     @classmethod
+    def _architecture_expansion_provider(
+        cls,
+        root: Path,
+        issue: dict,
+        coding: CodingModule,
+    ) -> IntelligenceProvider | None:
+        body = str(issue.get("body") or "")
+        labels = {
+            str(row.get("name") if isinstance(row, dict) else row)
+            for row in (issue.get("labels") or [])
+        }
+        if (
+            "<!-- genesis-architecture-plan:" not in body
+            or "- **Task type:** `architecture_expansion`" not in body
+            or "genesis-architecture-route" not in labels
+            or "genesis-autonomous" not in labels
+        ):
+            return None
+        target_match = re.search(r"^- \*\*Target:\*\* `([^`]+)`", body, re.M)
+        new_match = re.search(r"^- \*\*Architecture new target:\*\* `([^`]+)`", body, re.M)
+        if target_match is None or new_match is None:
+            return None
+        target = target_match.group(1).replace("\\", "/").lstrip("./")
+        planned = new_match.group(1).replace("\\", "/").lstrip("./")
+        if target != planned:
+            return None
+        if (
+            not target.startswith("genesis/architecture_extensions/")
+            or not target.endswith(".py")
+            or ".." in Path(target).parts
+            or (Path(root).resolve() / target).exists()
+        ):
+            return None
+        coding.executor._validate_paths([target])
+        provider_url = os.environ.get("GENESIS_REPAIR_PROVIDER_URL", "").strip()
+        if not provider_url:
+            return None
+        try:
+            timeout = max(5.0, min(float(os.environ.get("GENESIS_PROVIDER_TIMEOUT_SECONDS", "240")), 360.0))
+        except (TypeError, ValueError):
+            timeout = 240.0
+        delegate = GenesisHTTPProvider(
+            provider_url,
+            name=os.environ.get("GENESIS_PROVIDER_NAME", "genesis-architecture-expansion"),
+            timeout=timeout,
+        )
+        return ArchitectureExpansionProvider(issue, target, delegate)
+
+    @classmethod
     def for_issue(
         cls,
         root: Path,
         issue: dict,
         coding: CodingModule,
     ) -> IntelligenceProvider | None:
+        architecture_expansion = cls._architecture_expansion_provider(Path(root).resolve(), issue, coding)
+        if architecture_expansion is not None:
+            return architecture_expansion
+
         detected = cls._detected_exact_expression_provider(Path(root).resolve(), issue, coding)
         if detected is not None:
             return detected
