@@ -164,6 +164,49 @@ def _parse_explicit_attempt(body: str) -> Attempt | None:
     return Attempt(strategy, provider, gene, target, blocker)
 
 
+def target_attempt_history(comments: Iterable[dict], target: str) -> tuple[Attempt, ...]:
+    """Recover explicit same-target attempts across legacy reset epochs.
+
+    This is intended only for one-time migration from the old controller-version
+    epoch scheme. It ignores legacy implicit strategy markers and only trusts
+    explicit anti-stuck attempt records whose target exactly matches.
+    """
+    rows = list(comments)
+    latest_release = -1
+    for index, row in enumerate(rows):
+        if _body(row).startswith(CAPABILITY_RELEASE_PREFIX):
+            latest_release = index
+    rows = rows[latest_release + 1 :]
+
+    mutable: list[dict] = []
+    for row in rows:
+        body = _body(row)
+        parsed = _parse_explicit_attempt(body)
+        if parsed is not None and parsed.target.strip() == str(target or "").strip():
+            mutable.append(parsed.__dict__.copy())
+            continue
+
+        if body.startswith(AGENTIC_RESULT_PREFIX):
+            strategy = _marker_value(body, AGENTIC_RESULT_PREFIX)
+            status_match = re.search(r"repair status:\s*\x60([^\x60]+)\x60", body)
+            status = status_match.group(1).strip() if status_match else "failed"
+            for record in reversed(mutable):
+                if record["strategy"] == strategy and not record["result"]:
+                    record["result"] = status
+                    record["blocker"] = status
+                    break
+        elif body.startswith(DEEPSEEK_RESULT_PREFIX):
+            status_match = re.search(r"repair status:\s*\x60([^\x60]+)\x60", body)
+            status = status_match.group(1).strip() if status_match else _marker_value(body, DEEPSEEK_RESULT_PREFIX)
+            for record in reversed(mutable):
+                if record["provider"] == "deepseek" and not record["result"]:
+                    record["result"] = status
+                    record["blocker"] = status
+                    break
+
+    return tuple(Attempt(**record) for record in mutable)
+
+
 def attempt_history(comments: Iterable[dict], token: str, target: str) -> tuple[Attempt, ...]:
     """Read one state epoch into a cross-lane attempt history."""
     rows = current_epoch_comments(comments, token)
