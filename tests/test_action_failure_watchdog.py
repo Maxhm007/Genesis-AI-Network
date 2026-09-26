@@ -10,6 +10,7 @@ from scripts.action_failure_watchdog import (
     replace_metadata,
     sanitize_log_excerpt,
     select_actionable_run,
+    _newer_success_resolves_failure,
 )
 
 
@@ -112,3 +113,25 @@ def test_failure_discovery_ignores_historical_runs_outside_recent_horizon():
         max_age_hours=24,
     )
     assert not failure_is_recent({}, now=now, max_age_hours=24)
+
+
+def test_newer_success_prevents_stale_failure_reopening():
+    metadata = {
+        "workflow_id": 9,
+        "run_id": 10,
+        "head_sha": "a" * 40,
+        "failed_job": "build",
+    }
+    runs = [
+        {"id": 10, "workflow_id": 9, "status": "completed", "conclusion": "failure", "head_branch": "main", "head_sha": "a" * 40},
+        {"id": 11, "workflow_id": 9, "status": "completed", "conclusion": "success", "head_branch": "main", "head_sha": "b" * 40},
+    ]
+
+    def runner(args, **kwargs):
+        class Result:
+            returncode = 0
+            stdout = '{"jobs":[{"name":"build","conclusion":"success"}]}'
+            stderr = ""
+        return Result()
+
+    assert _newer_success_resolves_failure("owner/repo", metadata, runs, runner=runner)
