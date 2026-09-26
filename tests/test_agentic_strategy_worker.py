@@ -31,3 +31,12 @@ def test_agentic_strategy_worker_uses_explicit_strategy_input() -> None:
     assert "alternative_implementation" in text
     assert "diagnostic_reframe" in text
     assert "dependency_diagnosis" in text
+
+
+def test_agentic_strategy_worker_allows_declared_architecture_extension_new_file() -> None:
+    text = WORKER.read_text(encoding="utf-8")
+
+    assert "architecture_new_target=" in text
+    assert '$task_type" != "architecture_expansion"' in text
+    assert '$architecture_new_target" != "$target"' in text
+    assert '$target" != genesis/architecture_extensions/*.py' in text
