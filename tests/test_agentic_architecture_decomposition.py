@@ -422,3 +422,35 @@ def test_rerouted_architecture_extension_is_not_bounced_back(monkeypatch):
 
     assert result == {"status": "idle", "reason": "no_actionable_fifo_issue"}
     assert not any(call and call[0] == "PATCH" for call in calls)
+
+
+
+def test_previously_rejected_target_is_rerouted_even_after_label_was_removed(monkeypatch):
+    issue = _issue(858)
+    issue["body"] += "\n- **Target:** `scripts/gene_continuous_work.py`\n"
+    calls: list[tuple[str, str, dict | None]] = []
+    monkeypatch.setattr(module, "_infra_quarantined", lambda *args: False)
+    monkeypatch.setattr(
+        module.agentic,
+        "issue_comments",
+        lambda *args: [{
+            "body": "<!-- genesis-agentic-rerouted -->\n"
+                    "Agentic Lab replaced rejected target `scripts/gene_continuous_work.py` "
+                    "with `genesis/architecture_extensions/route_gene_backlog.py`."
+        }],
+    )
+    monkeypatch.setattr(module, "_repository_safe_target", lambda issue, root=module.ROOT: ("scripts/gene_continuous_work.py", 58, ["gene", "work"]))
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target))
+    monkeypatch.setattr(module.agentic, "remove_label", lambda *args, **kwargs: None)
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        return {}
+
+    monkeypatch.setattr(module.agentic, "request", fake_request)
+
+    result = module._decompose_oldest_issue("owner/repo", "token", [issue])
+
+    assert result["status"] == "retargeted"
+    assert result["target"].startswith("genesis/architecture_extensions/")
+    assert result["target"] != "scripts/gene_continuous_work.py"
