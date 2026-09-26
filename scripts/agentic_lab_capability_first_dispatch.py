@@ -57,31 +57,78 @@ def _all_open_issues_fifo(repository: str, token: str) -> list[dict]:
     return rows
 
 
+def _persistent_control_issue(issue: dict) -> bool:
+    issue_labels = agentic.labels(issue)
+    number = int(issue.get("number") or 0)
+    title = str(issue.get("title") or "").strip().lower()
+    body = str(issue.get("body") or "").lower()
+    return (
+        number <= 1
+        or "genesis-persistent" in issue_labels
+        or title.startswith(("[genesis gene chat]", "genesis chat:", "[genesis hourly report]", "[genesis ops]"))
+        or "persistent github-native reporting channel" in body
+    )
+
+
 def _actionable(issue: dict) -> bool:
     issue_labels = agentic.labels(issue)
     if "genesis-verified" in issue_labels:
         return False
-    if issue_labels & {"genesis-persistent", "duplicate", "invalid", "wontfix", "genesis-superseded"}:
+    if issue_labels & {"duplicate", "invalid", "wontfix", "genesis-superseded", "performance-indicator"}:
         return False
-    number = int(issue.get("number") or 0)
-    title = str(issue.get("title") or "").strip().lower()
-    body = str(issue.get("body") or "")
-    if number <= 1:
+    if _persistent_control_issue(issue):
         return False
-    if title.startswith(("[genesis gene chat]", "genesis chat:", "[genesis hourly report]", "[genesis ops]")):
-        return False
-    if "persistent github-native reporting channel" in body.lower():
-        return False
-    return True
+    return int(issue.get("number") or 0) > 1
+
+
+def _terminalize_non_actionable_issues(repository: str, token: str, issues: list[dict]) -> list[int]:
+    closed: list[int] = []
+    marker = "<!-- genesis-agentic-terminal-resolution -->"
+    for issue in issues:
+        number = int(issue.get("number") or 0)
+        if number <= 1 or _persistent_control_issue(issue):
+            continue
+        issue_labels = agentic.labels(issue)
+        if "genesis-verified" in issue_labels or _actionable(issue):
+            continue
+        comments = agentic.issue_comments(repository, token, number)
+        if not any(marker in str(row.get("body") or "") for row in comments):
+            agentic.request(
+                repository,
+                token,
+                "POST",
+                f"/issues/{number}/comments",
+                {"body": (
+                    f"{marker}\n"
+                    "Agentic Lab resolved this finite Issue as a terminal non-repair outcome. "
+                    "The Issue is not actionable repair work in its current state (for example duplicate, invalid, superseded, wontfix, or performance-only), "
+                    "so it is closed as not planned instead of remaining orphaned in the open backlog."
+                )},
+            )
+        agentic.request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/labels",
+            {"labels": [agentic.AGENTIC_LABEL, "genesis-autonomous"]},
+        )
+        updated = agentic.request(
+            repository,
+            token,
+            "PATCH",
+            f"/issues/{number}",
+            {"state": "closed", "state_reason": "not_planned"},
+        )
+        if isinstance(updated, dict) and str(updated.get("state") or "").lower() == "closed":
+            closed.append(number)
+    return closed
 
 
 def _restore_agentic_visibility(repository: str, token: str, issues: list[dict]) -> list[int]:
     restored: list[int] = []
     for issue in issues:
-        if not _actionable(issue):
-            continue
         number = int(issue.get("number") or 0)
-        if number <= 1 or _infra_quarantined(repository, token, number):
+        if number <= 1 or _persistent_control_issue(issue) or _infra_quarantined(repository, token, number):
             continue
         labels = agentic.labels(issue)
         missing = []
