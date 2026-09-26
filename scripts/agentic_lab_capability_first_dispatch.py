@@ -256,7 +256,46 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
         if _infra_quarantined(repository, token, number):
             continue
         body = str(issue.get("body") or "")
+        issue_labels = agentic.labels(issue)
         explicit = agentic.explicit_target(body)
+
+        # A target already rejected by the repair lane must never become a
+        # permanent parking state. Re-route it before normal decomposition.
+        if "genesis-needs-routing" in issue_labels:
+            base_issue = dict(issue)
+            if "### Genesis FIFO decomposition" in body:
+                base_issue["body"] = body.split("\n\n### Genesis FIFO decomposition\n", 1)[0]
+            inferred, score, hits = _repository_safe_target(base_issue)
+            if not inferred or inferred == explicit:
+                inferred = _routing_extension_target(issue)
+                score = 0
+                hits = ["architecture-extension-fallback"]
+            if explicit:
+                new_body = re.sub(
+                    r"(?m)^- \*\*Target:\*\* `[^`]+`$",
+                    f"- **Target:** `{inferred}`",
+                    body,
+                    count=1,
+                )
+            else:
+                new_body = body.rstrip() + (
+                    "\n\n### Genesis FIFO decomposition\n"
+                    f"- **Target:** `{inferred}`\n"
+                    "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
+                    "- **Execution:** Agentic Lab owns routing, implementation, verification, and closure for this Issue.\n"
+                )
+            agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": new_body})
+            agentic.request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
+                "<!-- genesis-agentic-rerouted -->\n"
+                f"Agentic Lab replaced rejected target `{explicit or 'none'}` with `{inferred}`. "
+                f"Routing score: {score}; concepts: {', '.join(hits) or 'fallback'}. "
+                "The Issue remains in the autonomous solve→verify→close loop."
+            )})
+            for label in ("genesis-needs-routing", "genesis-blocked", "genesis-deferred", agentic.EXHAUSTED_LABEL):
+                agentic.remove_label(repository, token, number, label)
+            agentic.request(repository, token, "POST", f"/issues/{number}/labels", {"labels": [agentic.AGENTIC_LABEL, "genesis-autonomous"]})
+            return {"status": "retargeted", "issue_number": number, "target": inferred, "previous_target": explicit}
+
         if agentic.safe_lane(explicit):
             if "<!-- genesis-architecture-plan:" in body:
                 step_match = re.search(r"(?m)^- \*\*Architecture step:\*\* `(\d+)/(\d+)`$", body)
