@@ -284,3 +284,39 @@ def test_revokes_prior_inferred_target_when_semantic_confidence_disappears(monke
         and "genesis-needs-routing" in payload["labels"]
         for method, path, payload in calls
     )
+
+
+
+def test_revalidation_ignores_previous_inferred_target_text(monkeypatch):
+    issue = _issue(874)
+    issue["title"] = "[Genesis Autonomy] Add least-privilege capability and credential manager"
+    issue["body"] = (
+        "Track narrowly scoped capability classes and credentials without exposing secret values."
+        "\n\n### Genesis FIFO decomposition\n"
+        "- **Target:** `scripts/discover_missing_qwen_capability.py`\n"
+        "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
+    )
+    calls: list[tuple[str, str, dict | None]] = []
+    monkeypatch.setattr(module, "_infra_quarantined", lambda repository, token, number: False)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target) and target.startswith("scripts/"))
+    seen = {}
+
+    def fake_score(candidate, root=module.ROOT):
+        seen["body"] = candidate["body"]
+        return "", 11, ["capability"]
+
+    monkeypatch.setattr(module, "_repository_safe_target", fake_score)
+    monkeypatch.setattr(module.agentic, "remove_label", lambda *args, **kwargs: None)
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        return {}
+
+    monkeypatch.setattr(module.agentic, "request", fake_request)
+
+    result = module._decompose_oldest_issue("owner/repo", "token", [issue])
+
+    assert "discover_missing_qwen_capability.py" not in seen["body"]
+    assert result["status"] == "target_revoked"
+    patch = next(payload for method, path, payload in calls if method == "PATCH")
+    assert "- **Target:**" not in patch["body"]
