@@ -4,9 +4,7 @@ on:
   workflow_dispatch:
   workflow_run:
     workflows:
-      - Genesis Bounded Repair Worker
       - Genesis Specialist Repair Worker v2
-      - Genesis Agentic Strategy Worker
       - Genesis DeepSeek Agentic Solver
     types:
       - completed
