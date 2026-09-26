@@ -393,3 +393,32 @@ def test_restore_agentic_visibility_enrolls_unlabeled_actionable_issue(monkeypat
         and set(payload["labels"]) == {module.agentic.AGENTIC_LABEL, "genesis-autonomous"}
         for method, path, payload in calls
     )
+
+
+
+def test_rerouted_architecture_extension_is_not_bounced_back(monkeypatch):
+    issue = _issue(858)
+    issue["body"] += (
+        "\n\n### Genesis FIFO decomposition\n"
+        "- **Target:** `genesis/architecture_extensions/route_gene_backlog.py`\n"
+        "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
+    )
+    calls: list[tuple[str, str, dict | None]] = []
+    monkeypatch.setattr(module, "_infra_quarantined", lambda *args: False)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target))
+    monkeypatch.setattr(
+        module.agentic,
+        "issue_comments",
+        lambda *args: [{"body": "<!-- genesis-agentic-rerouted -->\nprevious target rejected"}],
+    )
+    monkeypatch.setattr(
+        module,
+        "_repository_safe_target",
+        lambda issue, root=module.ROOT: ("scripts/gene_continuous_work.py", 58, ["gene", "work"]),
+    )
+    monkeypatch.setattr(module.agentic, "request", lambda *args, **kwargs: calls.append(args[2:]) or {})
+
+    result = module._decompose_oldest_issue("owner/repo", "token", [issue])
+
+    assert result == {"status": "idle", "reason": "no_actionable_fifo_issue"}
+    assert not any(call and call[0] == "PATCH" for call in calls)
