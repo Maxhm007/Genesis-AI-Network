@@ -366,3 +366,47 @@ def test_pause_for_capability_reuses_verified_dependency_without_waiting(monkeyp
     assert result["status"] == "capability_already_ready"
     assert result["released"] is True
     assert released == [(817, 792)]
+
+
+
+def test_protected_or_unsupported_target_is_routing_condition_not_capability_gap():
+    assert module.capability_gap_status("blocked_protected_or_unsupported_target") is False
+    assert module.capability_gap_status("retry_pending_capability") is True
+
+
+def test_policy_blocked_target_is_marked_for_routing_without_capability_issue(monkeypatch):
+    issue = _issue(71)
+    comments = [
+        {"body": "<!-- genesis-agentic-strategy:evidence_first -->\nmethod"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `blocked_protected_or_unsupported_target`"},
+    ]
+    calls: list[tuple[str, str, dict | None]] = []
+    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [issue])
+    monkeypatch.setattr(module, "safe_lane", lambda target: "generic")
+    monkeypatch.setattr(module, "ensure_anti_stuck_epoch", lambda repository, token, issue, comments, target: ("state", comments))
+    monkeypatch.setattr(module, "attempt_history", lambda comments, state_token, target: [])
+    monkeypatch.setattr(module, "anti_stuck_decision", lambda history: type("D", (), {"action": "capability", "reason": "strategy_set_exhausted"})())
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "GET" and path == "/issues/71/comments?per_page=100":
+            return comments
+        if method == "POST" and path == "/issues/71/comments":
+            comments.append({"body": payload["body"]})
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+
+    result = module.reserve_and_dispatch("owner/repo", "token")
+
+    assert result["status"] == "idle"
+    assert any(
+        method == "POST"
+        and path == "/issues/71/labels"
+        and "genesis-needs-routing" in (payload or {}).get("labels", [])
+        for method, path, payload in calls
+    )
+    assert not any(
+        method == "POST" and path == "/issues" and (payload or {}).get("title", "").startswith("[Genesis Capability]")
+        for method, path, payload in calls
+    )
