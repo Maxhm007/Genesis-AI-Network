@@ -241,3 +241,103 @@ def test_agentic_lab_terminally_closes_legacy_capability_growth_as_performance_i
     assert patches[-1]["state_reason"] == "not_planned"
     assert patches[-1]["labels"] == ["performance-indicator"]
     assert patches[-1]["title"].startswith("[Performance Indicator]")
+
+
+def test_capability_growth_satisfaction_detects_existing_bounded_route(tmp_path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "tests").mkdir()
+
+    (tmp_path / "genesis" / "github_issue_capability_builder.py").write_text(
+        "class GitHubIssueLearnedCapabilityProvider:\n"
+        "    CAPABILITY_GROWTH_TASK_LINE = '- **Task type:** \`capability_growth\`'\n"
+        "    CAPABILITY_WORK_MARKER = '<!-- genesis-capability-work:'\n"
+        "    @classmethod\n"
+        "    def _repairable_capability_blocked_target(cls, target_path):\n"
+        "        return target_path.startswith(('genesis/', 'scripts/')) and target_path.endswith('.py')\n"
+        "    @classmethod\n"
+        "    def _capability_growth_provider(cls, root, issue, coding):\n"
+        "        return EvidenceFirstRepairFollowupProvider\n"
+        "class EvidenceFirstRepairFollowupProvider: pass\n",
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_github_issue_capability_builder.py").write_text(
+        "def test_machine_capability_growth_issue_gets_bounded_self_repair_route(): pass\n"
+        "def test_capability_growth_allows_safe_dashboard_script_blocker(): pass\n"
+        "def test_capability_growth_rejects_protected_script_blocker(): pass\n",
+        encoding="utf-8",
+    )
+
+    issue = {
+        "state": "open",
+        "body": (
+            "- **Blocked target:** `scripts/validate_dashboard_artifact.py`\n"
+            "- **Observed blocker:** `worker_failed_before_evidence`\n"
+            "- **Task type:** `capability_growth`\n"
+            "- **Target:** `genesis/github_issue_capability_builder.py`\n"
+        ),
+    }
+
+    original = module.GitHubIssueLearnedCapabilityProvider._repairable_capability_blocked_target
+    module.GitHubIssueLearnedCapabilityProvider._repairable_capability_blocked_target = classmethod(
+        lambda cls, target: target.startswith(("genesis/", "scripts/")) and target.endswith(".py")
+    )
+    try:
+        result = module._capability_growth_satisfaction(issue, tmp_path)
+    finally:
+        module.GitHubIssueLearnedCapabilityProvider._repairable_capability_blocked_target = original
+
+    assert result is not None
+    assert result["task_type"] == "capability_growth"
+    assert result["target"] == "genesis/github_issue_capability_builder.py"
+    assert result["blocked_target"] == "scripts/validate_dashboard_artifact.py"
+
+
+def test_agentic_lab_closes_already_satisfied_capability_growth(monkeypatch, tmp_path):
+    issue = {
+        "state": "open",
+        "body": (
+            "- **Blocked target:** `scripts/agentic_strategy_repair.py`\n"
+            "- **Observed blocker:** `retry_pending_capability`\n"
+            "- **Task type:** `capability_growth`\n"
+            "- **Target:** `genesis/github_issue_capability_builder.py`\n"
+        ),
+    }
+    satisfaction = {
+        "task_type": "capability_growth",
+        "target": "genesis/github_issue_capability_builder.py",
+        "blocked_target": "scripts/agentic_strategy_repair.py",
+        "blocker": "retry_pending_capability",
+        "focused_tests": ["tests/test_github_issue_capability_builder.py"],
+    }
+    calls: list[tuple[str, str, object]] = []
+    labels: list[dict] = []
+
+    def fake_api(method, url, payload=None):
+        calls.append((method, url, payload))
+        if method == "GET":
+            return issue
+        if method == "PATCH":
+            return {"state": "closed"}
+        return {}
+
+    monkeypatch.setattr(module.base, "_api_json", fake_api)
+    monkeypatch.setattr(module.base, "_set_labels", lambda repository, issue_number, **kwargs: labels.append(kwargs))
+    monkeypatch.setattr(module, "_benchmark_runner_satisfaction", lambda issue, root: None)
+    monkeypatch.setattr(module, "_capability_growth_satisfaction", lambda issue, root: satisfaction)
+    monkeypatch.setattr(module, "_full_suite_passes", lambda root: (True, "all tests passed"))
+
+    result = module._close_if_current_main_satisfies(937, "owner/repo", tmp_path)
+
+    assert result is not None
+    assert result["status"] == "completed"
+    assert labels[0]["add"] == ("genesis-verified",)
+    assert any(
+        method == "POST"
+        and str(url).endswith("/comments")
+        and "capability-growth issue" in payload["body"]
+        for method, url, payload in calls
+    )
+    assert any(
+        method == "PATCH" and payload == {"state": "closed", "state_reason": "completed"}
+        for method, _, payload in calls
+    )
