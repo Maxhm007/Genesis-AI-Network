@@ -113,3 +113,37 @@ def test_capability_issue_reuses_same_blocker_class_across_targets(monkeypatch) 
     )
 
     assert reused is existing
+
+
+
+def test_obsolete_not_planned_capability_is_not_reused(monkeypatch) -> None:
+    obsolete = {
+        "number": 780,
+        "state": "closed",
+        "state_reason": "not_planned",
+        "labels": [{"name": "genesis-capability-gap"}],
+        "body": (
+            "<!-- genesis-capability-work:old -->\n"
+            "- **Blocked target:** `genesis/benchmark_execution.py`\n"
+            "- **Observed blocker:** `retry_pending_capability`\n"
+        ),
+    }
+    canonical = {
+        "number": 951,
+        "state": "closed",
+        "state_reason": "completed",
+        "labels": [{"name": "genesis-verified"}],
+        "body": (
+            "<!-- genesis-capability-work:new -->\n"
+            "- **Blocked target:** `genesis/issue_governor.py`\n"
+            "- **Observed blocker:** `retry_pending_capability`\n"
+        ),
+    }
+    monkeypatch.setattr(dispatcher, "_all_issues", lambda repository, token: [obsolete, canonical])
+    monkeypatch.setattr(dispatcher, "request", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("must reuse canonical completed capability")))
+
+    reused = dispatcher.ensure_capability_issue(
+        "owner/repo", "token", {"number": 999}, "genesis/intelligence_router.py", "retry_pending_capability"
+    )
+
+    assert reused is canonical
