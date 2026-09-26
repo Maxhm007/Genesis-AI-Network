@@ -390,11 +390,3 @@ jobs:
             /tmp/genesis-agentic-strategy-provider.log
           if-no-files-found: ignore
           retention-days: 30
-
-      - name: Continue Agentic Lab lifecycle
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
