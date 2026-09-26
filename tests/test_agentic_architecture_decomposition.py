@@ -503,3 +503,69 @@ def test_existing_architecture_extension_target_self_heals_metadata(monkeypatch)
     patch = next(payload for method, path, payload in calls if method == "PATCH" and path == "/issues/875")
     assert "- **Task type:** `architecture_expansion`" in patch["body"]
     assert f"- **Architecture new target:** `{target}`" in patch["body"]
+
+
+def test_restore_agentic_visibility_enrolls_terminalizable_issue(monkeypatch):
+    issue = {
+        "number": 902,
+        "state": "open",
+        "title": "[Genesis Test] Duplicate work",
+        "body": "Duplicate of an existing authoritative work item.",
+        "labels": [{"name": "duplicate"}],
+    }
+    calls = []
+    monkeypatch.setattr(module, "_infra_quarantined", lambda *args: False)
+    monkeypatch.setattr(module.agentic, "remove_label", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.agentic, "request", lambda repository, token, method, path, payload=None: calls.append((method, path, payload)) or {})
+
+    restored = module._restore_agentic_visibility("owner/repo", "token", [issue])
+
+    assert restored == [902]
+    assert any(
+        method == "POST"
+        and path == "/issues/902/labels"
+        and set(payload["labels"]) == {module.agentic.AGENTIC_LABEL, "genesis-autonomous"}
+        for method, path, payload in calls
+    )
+
+
+def test_terminalizes_non_actionable_finite_issue(monkeypatch):
+    issue = {
+        "number": 903,
+        "state": "open",
+        "title": "[Genesis Test] Superseded work",
+        "body": "This work was replaced by a newer authoritative implementation.",
+        "labels": [{"name": "genesis-superseded"}],
+    }
+    calls = []
+    monkeypatch.setattr(module.agentic, "issue_comments", lambda *args: [])
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        if method == "PATCH":
+            return {"state": "closed"}
+        return {}
+    monkeypatch.setattr(module.agentic, "request", fake_request)
+
+    closed = module._terminalize_non_actionable_issues("owner/repo", "token", [issue])
+
+    assert closed == [903]
+    assert any(method == "PATCH" and path == "/issues/903" and payload == {"state": "closed", "state_reason": "not_planned"} for method, path, payload in calls)
+    assert any(method == "POST" and path == "/issues/903/comments" for method, path, payload in calls)
+
+
+def test_persistent_control_issue_is_not_terminalized(monkeypatch):
+    issue = {
+        "number": 904,
+        "state": "open",
+        "title": "[Genesis Gene Chat] persistent coordination",
+        "body": "Persistent GitHub-native reporting channel",
+        "labels": [{"name": "genesis-persistent"}],
+    }
+    monkeypatch.setattr(module.agentic, "issue_comments", lambda *args: [])
+    calls = []
+    monkeypatch.setattr(module.agentic, "request", lambda *args, **kwargs: calls.append(args) or {})
+
+    closed = module._terminalize_non_actionable_issues("owner/repo", "token", [issue])
+
+    assert closed == []
+    assert calls == []
