@@ -240,7 +240,9 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
         explicit = agentic.explicit_target(body)
         if agentic.safe_lane(explicit):
             if "### Genesis FIFO decomposition" in body:
-                inferred, score, hits = _repository_safe_target(issue)
+                base_issue = dict(issue)
+                base_issue["body"] = body.split("\n\n### Genesis FIFO decomposition\n", 1)[0]
+                inferred, score, hits = _repository_safe_target(base_issue)
                 if inferred and inferred != explicit:
                     new_body = re.sub(
                         r"(?m)^- \*\*Target:\*\* `[^`]+`$",
