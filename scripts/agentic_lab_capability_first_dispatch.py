@@ -324,11 +324,13 @@ def _ensure_architecture_expansion_metadata(body: str, target: str) -> str:
     if not target.startswith("genesis/architecture_extensions/"):
         return body
     result = str(body or "")
-    if "- **Task type:** `architecture_expansion`" not in result:
-        result = result.rstrip() + "\n- **Task type:** `architecture_expansion`\n"
-    marker = f"- **Architecture new target:** `{target}`"
-    if marker not in result:
-        result = result.rstrip() + f"\n{marker}\n"
+    # Canonicalize stale reroute metadata so the architecture provider sees
+    # exactly one authoritative task type and one new-target declaration.
+    result = re.sub(r"(?m)^- \*\*Task type:\*\* `architecture_expansion`\n?", "", result)
+    result = re.sub(r"(?m)^- \*\*Architecture new target:\*\* `[^`]+`\n?", "", result)
+    result = result.rstrip()
+    result += "\n- **Task type:** `architecture_expansion`"
+    result += f"\n- **Architecture new target:** `{target}`\n"
     return result
 
 def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> dict:
