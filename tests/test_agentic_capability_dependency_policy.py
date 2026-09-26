@@ -17,11 +17,15 @@ def test_capability_gap_keeps_parent_open_and_paused() -> None:
     assert '"state": "closed"' not in pause_section
 
 
-def test_capability_work_does_not_create_unbounded_dependency_chain() -> None:
+def test_capability_work_stays_in_agentic_lab_without_recursive_dependency_chain() -> None:
     text = DISPATCHER.read_text(encoding="utf-8")
+    section = text.split("if CAPABILITY_WORK_PREFIX in str(issue.get(\"body\") or \"\"):", 1)[1].split("capability = ensure_capability_issue", 1)[0]
 
-    assert "genesis-needs-human" in text
-    assert "will not create an unbounded chain of capability Issues" in text
+    assert "genesis-needs-routing" in section
+    assert "genesis-autonomous" in section
+    assert "genesis-capability-self-reroute" in section
+    assert "No child capability Issue is created" in section
+    assert '"status": "needs_human"' not in section
 
 
 def test_capability_completion_releases_parent_for_fresh_strategy_cycle() -> None:
