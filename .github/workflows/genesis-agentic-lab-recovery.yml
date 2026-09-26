@@ -1,6 +1,8 @@
 name: Genesis Agentic Lab Recovery
 
 on:
+  issues:
+    types: [opened, reopened]
   push:
     branches: [main]
     paths:
