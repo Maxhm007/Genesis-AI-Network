@@ -11,6 +11,7 @@ from pathlib import Path
 import scripts.github_issue_autorepair as base
 from genesis.selfdev import ALLOWED_SCRIPT_PATHS, normalize_selfdev_path
 from genesis.issue_target import extract_issue_target
+from genesis.github_issue_capability_builder import GitHubIssueLearnedCapabilityProvider
 
 
 STRATEGY_GUIDANCE = {
@@ -246,6 +247,55 @@ def _benchmark_runner_satisfaction(issue: dict, root: Path) -> dict | None:
     }
 
 
+def _capability_growth_satisfaction(issue: dict, root: Path) -> dict | None:
+    body = str(issue.get("body") or "")
+    task_type = _TASK_TYPE_RE.search(body)
+    if task_type is None or task_type.group(1).strip() != "capability_growth":
+        return None
+    target = extract_issue_target(body)
+    if target != GitHubIssueLearnedCapabilityProvider.CAPABILITY_BUILDER_TARGET:
+        return None
+
+    blocked_match = re.search(r"^- \*\*Blocked target:\*\* `([^`]+)`", body, re.MULTILINE)
+    blocker_match = re.search(r"^- \*\*Observed blocker:\*\* `([^`]+)`", body, re.MULTILINE)
+    if blocked_match is None or blocker_match is None:
+        return None
+    blocked_target = blocked_match.group(1).replace("\\", "/").lstrip("./")
+    blocker = blocker_match.group(1).strip()
+    if not GitHubIssueLearnedCapabilityProvider._repairable_capability_blocked_target(blocked_target):
+        return None
+
+    builder = root / GitHubIssueLearnedCapabilityProvider.CAPABILITY_BUILDER_TARGET
+    tests = root / "tests" / "test_github_issue_capability_builder.py"
+    if not builder.is_file() or not tests.is_file():
+        return None
+    builder_text = builder.read_text(encoding="utf-8")
+    tests_text = tests.read_text(encoding="utf-8")
+
+    required_builder = (
+        "CAPABILITY_GROWTH_TASK_LINE" in builder_text,
+        "CAPABILITY_WORK_MARKER" in builder_text,
+        "def _capability_growth_provider(" in builder_text,
+        "def _repairable_capability_blocked_target(" in builder_text,
+        "EvidenceFirstRepairFollowupProvider" in builder_text,
+    )
+    required_tests = (
+        "test_machine_capability_growth_issue_gets_bounded_self_repair_route" in tests_text,
+        "test_capability_growth_allows_safe_dashboard_script_blocker" in tests_text,
+        "test_capability_growth_rejects_protected_script_blocker" in tests_text,
+    )
+    if not all(required_builder + required_tests):
+        return None
+
+    return {
+        "task_type": "capability_growth",
+        "target": target,
+        "blocked_target": blocked_target,
+        "blocker": blocker,
+        "focused_tests": ["tests/test_github_issue_capability_builder.py"],
+    }
+
+
 def _full_suite_passes(root: Path) -> tuple[bool, str]:
     completed = subprocess.run(
         [sys.executable, "-m", "pytest", "-q"],
@@ -266,6 +316,8 @@ def _close_if_current_main_satisfies(issue_number: int, repository: str, root: P
         return None
     satisfaction = _benchmark_runner_satisfaction(issue, root)
     if satisfaction is None:
+        satisfaction = _capability_growth_satisfaction(issue, root)
+    if satisfaction is None:
         return None
 
     passed, test_output = _full_suite_passes(root)
@@ -279,14 +331,27 @@ def _close_if_current_main_satisfies(issue_number: int, repository: str, root: P
         remove=ACTIVE_AGENTIC_LABELS,
     )
     marker = "<!-- genesis-current-main-satisfied -->"
+    if satisfaction.get("task_type") == "capability_growth":
+        detail_lines = (
+            "Genesis verified that the current `main` already satisfies this capability-growth issue, so no additional model-generated self-edit is required.\n\n"
+            f"- Target: `{satisfaction['target']}`\n"
+            f"- Blocked target class: `{satisfaction['blocked_target']}`\n"
+            f"- Blocker: `{satisfaction['blocker']}`\n"
+            "- Capability route: bounded evidence-first capability-growth adapter present\n"
+            "- Regression coverage: safe script blocker allowed; protected script blocker rejected\n"
+        )
+    else:
+        detail_lines = (
+            "Genesis verified that the current `main` already satisfies this benchmark-runner integration issue, so no additional model-generated patch is required.\n\n"
+            f"- Benchmark: `{satisfaction['benchmark_id']}`\n"
+            f"- Target: `{satisfaction['target']}`\n"
+            f"- Adapter: `{satisfaction['adapter']}`\n"
+        )
     comment = (
         f"{marker}\n"
-        "Genesis verified that the current `main` already satisfies this benchmark-runner integration issue, so no additional model-generated patch is required.\n\n"
-        f"- Benchmark: `{satisfaction['benchmark_id']}`\n"
-        f"- Target: `{satisfaction['target']}`\n"
-        f"- Adapter: `{satisfaction['adapter']}`\n"
-        "- Verification: full repository `pytest -q` passed on current `main`\n"
-        "- Closure rule: current-state satisfaction verified before close; no successor issue created."
+        + detail_lines
+        + "- Verification: full repository `pytest -q` passed on current `main`\n"
+        + "- Closure rule: current-state satisfaction verified before close; no successor issue created."
     )
     base._api_json("POST", issue_url + "/comments", {"body": comment})
     closed = base._api_json("PATCH", issue_url, {"state": "closed", "state_reason": "completed"})
