@@ -535,3 +535,15 @@ def test_ready_capability_release_continues_to_dispatch_in_same_pass(monkeypatch
         and path == "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches"
         for method, path, payload in calls
     )
+
+
+def test_cross_epoch_failure_history_forces_lane_rotation(monkeypatch):
+    issue = _issue(77)
+    comments = [
+        {"body": "<!-- genesis-anti-stuck-attempt:{\"blocker\":\"\",\"gene\":\"Gene 0\",\"provider\":\"agentic-default\",\"strategy\":\"evidence_first\",\"target\":\"genesis/example.py\"} -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `strategy_requires_more_methods`"},
+    ]
+    history = module.target_attempt_history(comments, "genesis/example.py")
+    decision = module.anti_stuck_decision(history)
+    assert decision.action == "switch_lane"
+    assert decision.provider == "qwen3"
