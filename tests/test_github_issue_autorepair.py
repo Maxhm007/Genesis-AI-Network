@@ -10,6 +10,7 @@ from scripts.github_issue_autorepair import (
     build_issue_text,
     candidate_context_paths,
     issue_coding_objective,
+    explicit_safe_repair_paths,
     propose_issue_repair,
     restricted_issue_targets,
     solve_reported_issue,
@@ -243,3 +244,60 @@ def test_failed_candidate_validation_is_fed_back_for_bounded_self_correction(tmp
     assert len(memory) == 2
     assert memory[0]["outcome"] == "tests_failed"
     assert memory[1]["outcome"] == "tests_failed"
+
+
+def test_safe_script_target_remains_actionable_when_workflows_are_only_evidence(tmp_path: Path):
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "runtime").mkdir()
+    target = tmp_path / "scripts" / "validate_dashboard_artifact.py"
+    target.write_text("VALUE = 1\n", encoding="utf-8")
+
+    issue = {
+        "number": 884,
+        "title": "Dashboard regression coverage",
+        "body": (
+            "- **Target:** `scripts/validate_dashboard_artifact.py`\n"
+            "Evidence also references `.github/workflows/genesis-dashboard-successor-identity.yml` "
+            "and `.github/workflows/genesis-hourly-dashboard-review.yml`, but those workflows are read-only context."
+        ),
+    }
+
+    safe = explicit_safe_repair_paths(build_issue_text(issue))
+    restricted = restricted_issue_targets(build_issue_text(issue))
+
+    assert "scripts/validate_dashboard_artifact.py" in safe
+    assert ".github/workflows/genesis-dashboard-successor-identity.yml" in restricted
+    assert ".github/workflows/genesis-hourly-dashboard-review.yml" in restricted
+
+    class RecordingProvider:
+        name = "recording-provider"
+
+        def available(self) -> bool:
+            return True
+
+        def reason(self, prompt: str) -> str:
+            return '{"edits":[{"path":"scripts/validate_dashboard_artifact.py","start_line":1,"end_line":1,"new":"VALUE = 2"}]}'
+
+    class PassingExecutor:
+        def execute(self, proposal: dict) -> SelfDevResult:
+            return SelfDevResult(
+                "genesis/candidate-dashboard-validator",
+                "dashboard-validator",
+                True,
+                True,
+                ("scripts/validate_dashboard_artifact.py",),
+                "b" * 40,
+                "candidate ready",
+            )
+
+    attempt = solve_reported_issue(
+        issue,
+        tmp_path,
+        provider=RecordingProvider(),
+        executor=PassingExecutor(),
+        repair_memory=[],
+    )
+
+    assert attempt.status == "candidate_repaired"
+    assert attempt.proposal is not None
+    assert set(attempt.proposal["files"]) == {"scripts/validate_dashboard_artifact.py"}
