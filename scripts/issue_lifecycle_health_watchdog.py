@@ -192,6 +192,20 @@ def _existing_open_watchdog(issues: list[dict]) -> dict | None:
     return None
 
 
+def _verify_recovered_watchdog(repository: str, issue: dict) -> bool:
+    number = int(issue.get("number") or 0)
+    if number <= 0:
+        return False
+    if "genesis-verified" in _labels(issue):
+        return True
+    result = _run([
+        "gh", "issue", "edit", str(number),
+        "--repo", repository,
+        "--add-label", "genesis-verified",
+    ])
+    return result.returncode == 0
+
+
 def check(
     repository: str,
     *,
@@ -212,6 +226,15 @@ def check(
         verified_open_grace_minutes=verified_open_grace_minutes,
     )
     if assessment["healthy"]:
+        existing = _existing_open_watchdog(issues)
+        if existing is not None:
+            verified = _verify_recovered_watchdog(repository, existing)
+            return {
+                "status": "healthy_watchdog_verified" if verified else "healthy_watchdog_verification_failed",
+                "issue_number": existing.get("number"),
+                "issue_url": existing.get("html_url"),
+                **assessment,
+            }
         return {"status": "healthy", **assessment}
 
     healing = _heal_actions(assessment, repository)
