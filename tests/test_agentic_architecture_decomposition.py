@@ -348,7 +348,7 @@ def test_unroutable_issue_is_rerouted_instead_of_parked(monkeypatch):
     patch = next(payload for method, path, payload in calls if method == "PATCH")
     assert result["target"] in patch["body"]
     assert "- **Task type:** `architecture_expansion`" in patch["body"]
-    assert f"- **Architecture new target:** `{result[\"target\"]}`" in patch["body"]
+    assert f"- **Architecture new target:** `{result['target']}`" in patch["body"]
     assert any(
         method == "POST"
         and path == "/issues/859/labels"
