@@ -301,16 +301,23 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
             target, inference_score, inference_hits = _repository_safe_target(issue)
         comments = agentic.issue_comments(repository, token, number)
         if not target:
+            issue_labels = agentic.labels(issue)
+            if "genesis-needs-routing" in issue_labels:
+                # This Issue has already been proven unsafe to map to an existing
+                # single file. Yield it temporarily so unrelated backlog work can
+                # advance while new-file/multi-file decomposition capability is
+                # developed. The authoritative Issue remains open.
+                continue
             if not any(FIFO_BLOCKED_MARKER in str(row.get("body") or "") for row in comments):
                 agentic.request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
                     f"{FIFO_BLOCKED_MARKER}\n"
                     "**Genesis FIFO decomposition blocked**\n\n"
-                    "This is the oldest actionable autonomous Issue, so Genesis will not let newer work jump ahead. "
-                    "No existing safe single-file target can be derived from the Issue metadata or referenced repository paths. "
-                    "Genesis must extend same-Issue repair support for new-file or multi-file work before this Issue can advance. "
-                    "No child/successor/capability Issue was created."
+                    "No confident safe single-file target can be derived from current evidence. "
+                    "Genesis marks this Issue for routing/decomposition work and yields to other actionable Issues "
+                    "instead of freezing the autonomous queue."
                 )})
-            return {"status": "fifo_blocked", "issue_number": number, "reason": "no_safe_single_file_decomposition"}
+                agentic.request(repository, token, "POST", f"/issues/{number}/labels", {"labels": ["genesis-needs-routing", agentic.AGENTIC_LABEL, "genesis-autonomous"]})
+            continue
 
         marker = f"{FIFO_DECOMPOSITION_PREFIX}{number} -->"
         if not any(marker in str(row.get("body") or "") for row in comments):
