@@ -461,6 +461,40 @@ def reconcile_open_issues(repository: str, *, runner: Runner = _default_runner) 
     return actions
 
 
+def _newer_success_resolves_failure(repository: str, metadata: dict, runs: list[dict], *, runner: Runner) -> bool:
+    workflow_id = int(metadata.get("workflow_id") or 0)
+    failed_run_id = int(metadata.get("run_id") or 0)
+    failed_job = str(metadata.get("failed_job") or "").strip()
+    failed_sha = str(metadata.get("head_sha") or "")
+    if not workflow_id or not failed_run_id or not failed_job:
+        return False
+
+    candidates = [
+        row
+        for row in runs
+        if int(row.get("id") or 0) > failed_run_id
+        and int(row.get("workflow_id") or 0) == workflow_id
+        and str(row.get("status") or "") == "completed"
+        and str(row.get("conclusion") or "") == "success"
+        and str(row.get("head_branch") or "") == "main"
+        and str(row.get("head_sha") or "") != failed_sha
+    ]
+    candidates.sort(key=lambda row: int(row.get("id") or 0), reverse=True)
+    for candidate in candidates:
+        if failed_job == "workflow":
+            return True
+        run_id = int(candidate.get("id") or 0)
+        jobs_payload = _run_json(runner, ["gh", "api", f"repos/{repository}/actions/runs/{run_id}/jobs?per_page=100"])
+        jobs = list(jobs_payload.get("jobs") or []) if isinstance(jobs_payload, dict) else []
+        if any(
+            str(job.get("name") or "").strip() == failed_job
+            and str(job.get("conclusion") or "") == "success"
+            for job in jobs
+        ):
+            return True
+    return False
+
+
 def open_new_failure(repository: str, *, runner: Runner = _default_runner) -> dict:
     open_issues = _list_action_issues(repository, state="open", runner=runner)
     known_roots = {
@@ -471,12 +505,14 @@ def open_new_failure(repository: str, *, runner: Runner = _default_runner) -> di
     payload = _run_json(runner, ["gh", "api", f"repos/{repository}/actions/runs?branch=main&per_page=100"])
     runs = list(payload.get("workflow_runs") or []) if isinstance(payload, dict) else []
     current_run_id = int(os.environ.get("GITHUB_RUN_ID", "0") or 0) or None
-    for run in sorted(runs, key=lambda row: int(row.get("id") or 0)):
+    for run in sorted(runs, key=lambda row: int(row.get("id") or 0), reverse=True):
         if not actionable_run(run, current_run_id=current_run_id):
             continue
         if not failure_is_recent(run):
             continue
         metadata = inspect_failure(repository, run, runner=runner)
+        if _newer_success_resolves_failure(repository, metadata, runs, runner=runner):
+            continue
         root = failure_root_fingerprint(metadata)
         if root in known_roots:
             continue
