@@ -255,6 +255,7 @@ jobs:
           echo "candidate_sha=$candidate_sha" >> "$GITHUB_OUTPUT"
 
       - name: Independently validate and promote exact Agentic candidate
+        id: promotion
         if: steps.evidence.outputs.status == 'candidate_created'
         env:
           GH_TOKEN: ${{ github.token }}
@@ -286,12 +287,17 @@ jobs:
             if ! git cherry-pick "$CANDIDATE_SHA"; then git cherry-pick --abort || true; continue; fi
             if [[ "$TARGET" == genesis/*.py ]]; then
               integrated_base=$(git rev-parse HEAD^)
-              git show "${integrated_base}:${TARGET}" > /tmp/genesis-agentic-semantic-base.py
-              python -m genesis.learned_capability_acceptance \
-                --issue-body-file /tmp/genesis-agentic-issue-body.md \
-                --target "$TARGET" \
-                --base-file /tmp/genesis-agentic-semantic-base.py \
-                --candidate-file "$TARGET"
+              if git cat-file -e "${integrated_base}:${TARGET}" 2>/dev/null; then
+                git show "${integrated_base}:${TARGET}" > /tmp/genesis-agentic-semantic-base.py
+                python -m genesis.learned_capability_acceptance \
+                  --issue-body-file /tmp/genesis-agentic-issue-body.md \
+                  --target "$TARGET" \
+                  --base-file /tmp/genesis-agentic-semantic-base.py \
+                  --candidate-file "$TARGET"
+              elif [[ "$TARGET" != genesis/architecture_extensions/*.py ]]; then
+                echo "New Genesis file is outside the bounded architecture extension lane: $TARGET" >&2
+                exit 1
+              fi
             fi
             python -m py_compile "$TARGET"
             if [[ -f "$target_test" ]]; then python -m pytest -q "$target_test"; fi
@@ -327,6 +333,20 @@ jobs:
             "Agentic Lab strategy \`${STRATEGY}\` produced a verified repair. Candidate: \`${CANDIDATE_SHA}\`. Promoted main SHA: \`${promoted_sha}\`. repair status: \`completed\`. Full repository validation passed after promotion." \
             > /tmp/genesis-agentic-success.md
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-success.md
+
+          python scripts/advance_architecture_plan.py \
+            --repository "$GITHUB_REPOSITORY" \
+            --issue-number "$ISSUE_NUMBER" \
+            --completed-target "$TARGET" \
+            > /tmp/genesis-architecture-advance.json
+          if [[ "$(jq -r '.status // "complete"' /tmp/genesis-architecture-advance.json)" == "continued" ]]; then
+            echo "continued=true" >> "$GITHUB_OUTPUT"
+            echo "Architecture step verified; same Issue re-armed for the next planned target."
+            git push origin --delete "$CANDIDATE_BRANCH" >/dev/null 2>&1 || true
+            exit 0
+          fi
+          echo "continued=false" >> "$GITHUB_OUTPUT"
+
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-verified >/dev/null
           for label in genesis-repair-in-progress genesis-validating genesis-autonomous genesis-claimed genesis-working genesis-verifying genesis-blocked genesis-solver-exhausted genesis-deferred genesis-waiting-capability genesis-needs-human agentic-lab genesis-qwen3-agentic; do
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
@@ -336,7 +356,7 @@ jobs:
           git push origin --delete "$CANDIDATE_BRANCH" >/dev/null 2>&1 || true
 
       - name: Release unsuccessful Agentic reservation without closing Issue
-        if: always() && steps.eligibility.outputs.eligible == 'true'
+        if: always() && steps.eligibility.outputs.eligible == 'true' && steps.promotion.outputs.continued != 'true'
         env:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
