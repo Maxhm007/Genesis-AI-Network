@@ -249,7 +249,7 @@ def test_capability_growth_satisfaction_detects_existing_bounded_route(tmp_path)
 
     (tmp_path / "genesis" / "github_issue_capability_builder.py").write_text(
         "class GitHubIssueLearnedCapabilityProvider:\n"
-        "    CAPABILITY_GROWTH_TASK_LINE = '- **Task type:** \`capability_growth\`'\n"
+        "    CAPABILITY_GROWTH_TASK_LINE = '- **Task type:** `capability_growth`'\n"
         "    CAPABILITY_WORK_MARKER = '<!-- genesis-capability-work:'\n"
         "    @classmethod\n"
         "    def _repairable_capability_blocked_target(cls, target_path):\n"
