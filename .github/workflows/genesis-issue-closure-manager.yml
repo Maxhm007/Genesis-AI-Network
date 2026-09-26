@@ -31,7 +31,7 @@ concurrency:
 
 jobs:
   reconcile:
-    if: github.event_name != 'issues' || github.event.action != 'labeled' || github.event.label.name == 'genesis-verified'
+    if: github.event_name != 'issues' || github.event.action != 'labeled' || contains(fromJSON('["genesis-verified","genesis-superseded"]'), github.event.label.name)
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
