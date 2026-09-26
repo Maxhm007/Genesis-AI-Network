@@ -75,15 +75,17 @@ def test_main_decomposes_targetless_work_before_parallel_dispatch(monkeypatch):
     monkeypatch.setattr(module.policy, "_all_open_issues_fifo", open_issues)
     monkeypatch.setattr(module.policy, "_restore_agentic_visibility", lambda *args: [])
     monkeypatch.setattr(module.agentic, "release_ready_capability_dependencies", lambda *args: [])
-    monkeypatch.setattr(
-        module.policy,
-        "_decompose_oldest_issue",
-        lambda repository, token, issues: events.append("decompose") or {
-            "status": "decomposed",
-            "issue_number": 857,
-            "target": "scripts/capability_issue_priority_dispatch.py",
-        },
-    )
+    def decompose_once(repository, token, issues):
+        events.append("decompose")
+        if len(events) == 1:
+            return {
+                "status": "decomposed",
+                "issue_number": 857,
+                "target": "scripts/capability_issue_priority_dispatch.py",
+            }
+        return {"status": "idle", "reason": "no_more_targetless_work"}
+
+    monkeypatch.setattr(module.policy, "_decompose_oldest_issue", decompose_once)
     monkeypatch.setattr(module, "_active_issue_numbers", lambda *args: [])
     monkeypatch.setattr(
         module.agentic,
@@ -92,5 +94,5 @@ def test_main_decomposes_targetless_work_before_parallel_dispatch(monkeypatch):
     )
 
     assert module.main() == 0
-    assert events == ["decompose"]
+    assert events == ["decompose", "decompose"]
     assert reads["count"] >= 2
