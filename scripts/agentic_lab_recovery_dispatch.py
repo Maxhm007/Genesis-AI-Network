@@ -63,6 +63,7 @@ RESULT_MARKER_PREFIX = "<!-- genesis-agentic-strategy-result:"
 CAPABILITY_DEPENDENCY_PREFIX = "<!-- genesis-capability-dependency:"
 CAPABILITY_RELEASE_PREFIX = "<!-- genesis-agentic-capability-release:"
 CAPABILITY_WORK_PREFIX = "<!-- genesis-capability-work:"
+STABLE_STATE_PREFIX = "<!-- genesis-anti-stuck-stable-base:"
 HUMAN_MARKER = "<!-- genesis-agentic-needs-human -->"
 NON_ACTIONABLE_TASK_TYPES = {
     "frontier_benchmark_measurement",
@@ -292,6 +293,24 @@ def recovery_material_state_token(
     return material_state_token(issue, target, comments, root=root)
 
 
+def _latest_state_token(comments: list[dict]) -> str:
+    for row in reversed(comments):
+        body = str(row.get("body") or "")
+        match = re.search(r"<!-- genesis-anti-stuck-state:([^ ]+) -->", body)
+        if match:
+            return match.group(1).strip()
+    return ""
+
+
+def _latest_stable_base(comments: list[dict]) -> str:
+    for row in reversed(comments):
+        body = str(row.get("body") or "")
+        if not body.startswith(STABLE_STATE_PREFIX):
+            continue
+        return body[len(STABLE_STATE_PREFIX):].split("-->", 1)[0].strip()
+    return ""
+
+
 def ensure_anti_stuck_epoch(
     repository: str,
     token: str,
@@ -299,27 +318,54 @@ def ensure_anti_stuck_epoch(
     comments: list[dict],
     target: str,
 ) -> tuple[str, list[dict]]:
-    state_token = recovery_material_state_token(issue, target, comments, root=ROOT)
-    has_any_epoch = any(
-        "<!-- genesis-anti-stuck-state:" in str(row.get("body") or "")
-        for row in comments
-    )
-    if not has_state_marker(comments, state_token) and has_any_epoch:
+    stable_base = recovery_material_state_token(issue, target, comments, root=ROOT)
+    latest_token = _latest_state_token(comments)
+    recorded_base = _latest_stable_base(comments)
+    number = int(issue.get("number") or 0)
+
+    # One-time migration from the former engine-version-scoped epoch scheme.
+    # Keep the latest existing epoch authoritative so controller-only updates do
+    # not erase failure history. Record the stable material-state fingerprint
+    # separately; only a future change to that fingerprint starts a fresh epoch.
+    if latest_token and not recorded_base:
         request(
             repository,
             token,
             "POST",
-            f"/issues/{int(issue.get('number') or 0)}/comments",
+            f"/issues/{number}/comments",
             {
                 "body": (
-                    f"{state_marker(state_token)}\n"
-                    "Genesis Anti-Stuck Controller started a new attempt epoch because "
-                    "repository state, issue evidence, or capability-release state materially changed."
+                    f"{STABLE_STATE_PREFIX}{stable_base} -->\n"
+                    "Genesis migrated anti-stuck state to stable material-state tracking without resetting "
+                    "the current attempt history."
                 )
             },
         )
-        comments = issue_comments(repository, token, int(issue.get("number") or 0))
-    return state_token, comments
+        comments = issue_comments(repository, token, number)
+        return latest_token, comments
+
+    if latest_token and recorded_base == stable_base:
+        return latest_token, comments
+
+    if latest_token and recorded_base and recorded_base != stable_base:
+        request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/comments",
+            {
+                "body": (
+                    f"{state_marker(stable_base)}\n"
+                    f"{STABLE_STATE_PREFIX}{stable_base} -->\n"
+                    "Genesis Anti-Stuck Controller started a new attempt epoch because the issue's "
+                    "material target, evidence, target content, or capability-release state changed."
+                )
+            },
+        )
+        comments = issue_comments(repository, token, number)
+        return stable_base, comments
+
+    return stable_base, comments
 
 
 def _marker_number(text: str, prefix: str) -> int | None:
