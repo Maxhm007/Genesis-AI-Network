@@ -98,6 +98,67 @@ def _restore_agentic_visibility(repository: str, token: str, issues: list[dict])
     return restored
 
 
+ARCHITECTURE_STOP_WORDS = {
+    "about", "across", "after", "against", "allow", "along", "also", "among",
+    "architecture", "autonomous", "before", "between", "build", "current",
+    "existing", "expected", "genesis", "github", "issue", "issues", "make",
+    "must", "objective", "preserve", "result", "safe", "should", "system",
+    "through", "using", "when", "where", "while", "with", "without",
+}
+
+
+def _semantic_tokens(text: str) -> set[str]:
+    return {
+        token
+        for token in re.findall(r"[a-z0-9]+", text.lower())
+        if len(token) >= 4 and token not in ARCHITECTURE_STOP_WORDS and not token.isdigit()
+    }
+
+
+def _repository_target_score(issue_text: str, relative: str, source: str) -> tuple[int, list[str]]:
+    wanted = _semantic_tokens(issue_text)
+    if not wanted:
+        return 0, []
+    path_tokens = _semantic_tokens(relative.replace("/", " ").replace("_", " "))
+    source_tokens = _semantic_tokens(source[:16000])
+    path_hits = sorted(wanted & path_tokens)
+    source_hits = sorted(wanted & source_tokens)
+    score = len(path_hits) * 8 + len(source_hits)
+    return score, path_hits + [token for token in source_hits if token not in path_hits]
+
+
+def _repository_safe_target(issue: dict, *, root: Path = ROOT) -> tuple[str, int, list[str]]:
+    text = f"{issue.get('title') or ''}\n{issue.get('body') or ''}"
+    ranked: list[tuple[int, str, list[str]]] = []
+    for base in ("genesis", "scripts"):
+        directory = root / base
+        if not directory.exists():
+            continue
+        for path in directory.rglob("*.py"):
+            try:
+                relative = path.relative_to(root).as_posix()
+            except ValueError:
+                continue
+            if not agentic.safe_lane(relative):
+                continue
+            try:
+                source = path.read_text(encoding="utf-8", errors="ignore")
+            except OSError:
+                continue
+            score, hits = _repository_target_score(text, relative, source)
+            if score > 0:
+                ranked.append((score, relative, hits))
+    if not ranked:
+        return "", 0, []
+    ranked.sort(key=lambda row: (-row[0], row[1]))
+    score, target, hits = ranked[0]
+    # Require more than a single incidental source-word match. A filename/path
+    # match is heavily weighted, while several source matches can also qualify.
+    if score < 8:
+        return "", score, hits
+    return target, score, hits[:8]
+
+
 def _derived_safe_target(body: str) -> str:
     explicit = agentic.explicit_target(body)
     if agentic.safe_lane(explicit):
@@ -134,6 +195,10 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
             return {"status": "already_routable", "issue_number": number, "target": explicit}
 
         target = _derived_safe_target(body)
+        inference_score = 0
+        inference_hits: list[str] = []
+        if not target:
+            target, inference_score, inference_hits = _repository_safe_target(issue)
         comments = agentic.issue_comments(repository, token, number)
         if not target:
             if not any(FIFO_BLOCKED_MARKER in str(row.get("body") or "") for row in comments):
@@ -160,7 +225,12 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
                 f"{marker}\n"
                 "**Genesis FIFO decomposition**\n\n"
                 f"Derived safe first implementation target: `{target}`. "
-                "The original Issue remains authoritative. Previous comments remain repair memory, and no additional Issue was created."
+                + (
+                    f"Repository inference score: {inference_score}; matched concepts: {', '.join(inference_hits) or 'explicit/reference target'}. "
+                    if inference_score
+                    else ""
+                )
+                + "The original Issue remains authoritative. Previous comments remain repair memory, and no additional Issue was created."
             )})
             for label in ("genesis-needs-routing", "genesis-blocked", "genesis-deferred", agentic.EXHAUSTED_LABEL):
                 agentic.remove_label(repository, token, number, label)
