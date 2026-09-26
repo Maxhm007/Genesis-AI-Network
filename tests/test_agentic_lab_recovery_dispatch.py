@@ -410,3 +410,63 @@ def test_policy_blocked_target_is_marked_for_routing_without_capability_issue(mo
         method == "POST" and path == "/issues" and (payload or {}).get("title", "").startswith("[Genesis Capability]")
         for method, path, payload in calls
     )
+
+
+
+def test_epoch_migration_preserves_latest_retry_history(monkeypatch):
+    issue = _issue(901)
+    comments = [
+        {"body": "<!-- genesis-anti-stuck-state:legacy123 -->"},
+        {"body": "<!-- genesis-anti-stuck-attempt:{\"blocker\":\"\",\"gene\":\"Gene 0\",\"provider\":\"agentic-default\",\"strategy\":\"evidence_first\",\"target\":\"genesis/example.py\"} -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `strategy_requires_more_methods`"},
+    ]
+    posted = []
+
+    monkeypatch.setattr(module, "recovery_material_state_token", lambda issue, target, comments, root=module.ROOT: "stable456")
+
+    def fake_request(repository, token, method, path, payload=None):
+        if method == "POST" and path == "/issues/901/comments":
+            posted.append(payload["body"])
+            comments.append({"body": payload["body"]})
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+    monkeypatch.setattr(module, "issue_comments", lambda repository, token, number: list(comments))
+
+    state_token, refreshed = module.ensure_anti_stuck_epoch(
+        "owner/repo", "token", issue, comments, "genesis/example.py"
+    )
+
+    assert state_token == "legacy123"
+    assert any(module.STABLE_STATE_PREFIX in body for body in posted)
+    history = module.attempt_history(refreshed, state_token, "genesis/example.py")
+    assert history
+    assert history[-1].result == "strategy_requires_more_methods"
+
+
+def test_stable_epoch_changes_only_when_material_base_changes(monkeypatch):
+    issue = _issue(902)
+    comments = [
+        {"body": "<!-- genesis-anti-stuck-state:legacy123 -->"},
+        {"body": "<!-- genesis-anti-stuck-stable-base:base-old -->"},
+        {"body": "<!-- genesis-agentic-strategy:evidence_first -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `failed`"},
+    ]
+    posted = []
+    monkeypatch.setattr(module, "recovery_material_state_token", lambda issue, target, comments, root=module.ROOT: "base-new")
+
+    def fake_request(repository, token, method, path, payload=None):
+        if method == "POST" and path == "/issues/902/comments":
+            posted.append(payload["body"])
+            comments.append({"body": payload["body"]})
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+    monkeypatch.setattr(module, "issue_comments", lambda repository, token, number: list(comments))
+
+    state_token, _ = module.ensure_anti_stuck_epoch(
+        "owner/repo", "token", issue, comments, "genesis/example.py"
+    )
+
+    assert state_token == "base-new"
+    assert any("genesis-anti-stuck-state:base-new" in body for body in posted)
