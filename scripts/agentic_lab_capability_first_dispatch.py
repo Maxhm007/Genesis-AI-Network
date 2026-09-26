@@ -325,7 +325,9 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
             continue
 
         marker = f"{FIFO_DECOMPOSITION_PREFIX}{number} -->"
-        if not any(marker in str(row.get("body") or "") for row in comments):
+        marker_exists = any(marker in str(row.get("body") or "") for row in comments)
+        should_write_decomposition = (not marker_exists) or architecture_plan is not None
+        if should_write_decomposition:
             architecture_lines = ""
             if architecture_plan is not None:
                 architecture_lines = (
