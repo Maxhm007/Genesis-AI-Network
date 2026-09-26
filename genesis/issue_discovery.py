@@ -269,9 +269,29 @@ class GenesisIssueDiscoveryEngine:
             "confidence": payload.get("confidence"),
         }
 
+    @staticmethod
+    def _requests_guard_weakening(finding: dict) -> bool:
+        acceptance = str(finding.get("acceptance") or "").casefold()
+        permissive = any(token in acceptance for token in ("should pass", "must pass", "allow ", "accept "))
+        guarded_behavior = any(
+            token in acceptance
+            for token in (
+                "adjacent duplicate",
+                "duplicate statement",
+                "unreachable statement",
+                "skip validation",
+                "bypass validation",
+                "disable validation",
+                "ignore security",
+            )
+        )
+        return permissive and guarded_behavior
+
     def _ground_finding(self, candidate: IssueDiscoveryCandidate, finding: dict) -> tuple[bool, str | None]:
         if finding.get("decision") != "issue":
             return True, None
+        if self._requests_guard_weakening(finding):
+            return False, "acceptance_requests_guard_weakening"
         source = self._bounded_text(self.root / candidate.path, self.MAX_SOURCE_BYTES)
         tests = (
             self._bounded_text(self.root / candidate.test_path, self.MAX_TEST_BYTES)
