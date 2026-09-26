@@ -168,11 +168,13 @@ def restricted_issue_targets(text: str) -> list[str]:
 
 
 def candidate_context_paths(issue_text: str, root: Path = ROOT, limit: int = MAX_CONTEXT_FILES) -> list[str]:
-    explicit = [
-        path
-        for path in explicit_safe_repair_paths(issue_text)
-        if (root / path).is_file()
-    ]
+    architecture_expansion = "- **Task type:** `architecture_expansion`" in issue_text
+    explicit: list[str] = []
+    for path in explicit_safe_repair_paths(issue_text):
+        exists = (root / path).is_file()
+        planned_new = architecture_expansion and path.startswith("genesis/architecture_extensions/") and path.endswith(".py")
+        if exists or planned_new:
+            explicit.append(path)
     if explicit:
         return explicit[: max(1, min(int(limit), MAX_CONTEXT_FILES))]
 
