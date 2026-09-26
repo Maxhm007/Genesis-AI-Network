@@ -192,10 +192,26 @@ def _existing_open_watchdog(issues: list[dict]) -> dict | None:
     return None
 
 
-def _verify_recovered_watchdog(repository: str, issue: dict) -> bool:
+def _verify_recovered_watchdog(repository: str, issue: dict, assessment: dict) -> bool:
     number = int(issue.get("number") or 0)
     if number <= 0:
         return False
+
+    evidence = json.dumps(assessment.get("evidence") or {}, sort_keys=True)
+    comment = (
+        "<!-- genesis-lifecycle-health-recovered -->\n"
+        "Genesis verification evidence: lifecycle watchdog confirmed automatic issue opening "
+        "and closing are current and healthy after self-healing. "
+        f"Evidence: `{evidence}`"
+    )
+    comment_result = _run([
+        "gh", "issue", "comment", str(number),
+        "--repo", repository,
+        "--body", comment,
+    ])
+    if comment_result.returncode != 0:
+        return False
+
     if "genesis-verified" in _labels(issue):
         return True
     result = _run([
@@ -228,7 +244,7 @@ def check(
     if assessment["healthy"]:
         existing = _existing_open_watchdog(issues)
         if existing is not None:
-            verified = _verify_recovered_watchdog(repository, existing)
+            verified = _verify_recovered_watchdog(repository, existing, assessment)
             return {
                 "status": "healthy_watchdog_verified" if verified else "healthy_watchdog_verification_failed",
                 "issue_number": existing.get("number"),
