@@ -48,6 +48,38 @@ def test_provider_switch_after_distinct_failures():
     assert decision.gene == "Gene 0"
 
 
+
+def test_tooling_failure_switches_provider_immediately():
+    history = (
+        Attempt(
+            "evidence_first",
+            "agentic-default",
+            "Gene 0",
+            "genesis/example.py",
+            result="strategy_requires_more_methods",
+        ),
+    )
+    decision = anti_stuck_decision(history)
+    assert decision.action == "switch_lane"
+    assert decision.provider == "qwen3"
+    assert decision.gene == "Gene 0"
+
+
+def test_worker_failure_before_evidence_switches_provider_immediately():
+    history = (
+        Attempt(
+            "evidence_first",
+            "agentic-default",
+            "Gene 0",
+            "genesis/example.py",
+            result="worker_failed_before_evidence",
+        ),
+    )
+    decision = anti_stuck_decision(history)
+    assert decision.action == "switch_lane"
+    assert decision.provider == "qwen3"
+    assert decision.gene == "Gene 0"
+
 def test_gene_switch_reaches_deepseek_after_qwen3_failure():
     history = (
         Attempt("evidence_first", "agentic-default", "Gene 0", "genesis/example.py", result="failed"),
