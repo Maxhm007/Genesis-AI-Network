@@ -98,7 +98,7 @@ def test_decomposition_skips_routable_issue_and_advances_next_targetless(monkeyp
     calls: list[tuple[str, str, dict | None]] = []
     monkeypatch.setattr(module, "_infra_quarantined", lambda repository, token, number: False)
     monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target) and target.startswith(("genesis/", "scripts/")))
-    monkeypatch.setattr(module, "_derived_safe_target", lambda body: "" if "idle Genes" in body else "scripts/capability_issue_priority_dispatch.py")
+    monkeypatch.setattr(module, "_derived_safe_target", lambda body: "")
     monkeypatch.setattr(
         module,
         "_repository_safe_target",
