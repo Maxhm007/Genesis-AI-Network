@@ -169,3 +169,83 @@ def test_weak_incidental_source_overlap_is_rejected(tmp_path, monkeypatch):
 
     assert target == ""
     assert score >= 0
+
+
+
+def test_workflow_governance_prefers_governor_over_discovery_script(tmp_path, monkeypatch):
+    governor = tmp_path / "scripts" / "workflow_governor.py"
+    governor.parent.mkdir(parents=True)
+    governor.write_text(
+        "def review_workflows():\n    return 'workflow governance retirement consolidation'\n",
+        encoding="utf-8",
+    )
+    discovery = tmp_path / "scripts" / "discover_recent_ai_capability.py"
+    discovery.write_text(
+        "def discover():\n    return 'workflow autonomous capability governance issue'\n",
+        encoding="utf-8",
+    )
+    issue = {
+        "number": 868,
+        "title": "[Genesis Governance] Let Genesis autonomously review, consolidate, disable and retire GitHub Actions workflows",
+        "body": "Review overlapping workflows, dead schedules, concurrency conflicts and protected workflows.",
+        "labels": [{"name": "genesis-autonomous"}],
+    }
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: target.startswith("scripts/"))
+
+    target, score, hits = module._repository_safe_target(issue, root=tmp_path)
+
+    assert target == "scripts/workflow_governor.py"
+    assert score >= 18
+    assert "workflow" in hits or "governor" in hits
+
+
+def test_ambiguous_source_only_match_is_rejected(tmp_path, monkeypatch):
+    first = tmp_path / "scripts" / "first.py"
+    second = tmp_path / "scripts" / "second.py"
+    first.parent.mkdir(parents=True)
+    first.write_text("def x():\n    return 'credential capability security autonomous'\n", encoding="utf-8")
+    second.write_text("def y():\n    return 'credential capability security autonomous'\n", encoding="utf-8")
+    issue = {
+        "number": 874,
+        "title": "[Genesis Autonomy] Add least-privilege capability and credential manager",
+        "body": "Use narrowly scoped credentials and capability classes.",
+        "labels": [{"name": "genesis-autonomous"}],
+    }
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: target.startswith("scripts/"))
+
+    target, score, hits = module._repository_safe_target(issue, root=tmp_path)
+
+    assert target == ""
+
+
+def test_retargets_prior_genesis_inferred_target_when_stronger_match_exists(monkeypatch):
+    issue = _issue(868)
+    issue["title"] = "[Genesis Governance] Workflow governance"
+    issue["body"] += (
+        "\n\n### Genesis FIFO decomposition\n"
+        "- **Target:** `scripts/discover_recent_ai_capability.py`\n"
+        "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
+    )
+    calls: list[tuple[str, str, dict | None]] = []
+    monkeypatch.setattr(module, "_infra_quarantined", lambda repository, token, number: False)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target) and target.startswith("scripts/"))
+    monkeypatch.setattr(
+        module,
+        "_repository_safe_target",
+        lambda issue, root=module.ROOT: ("scripts/workflow_governor.py", 60, ["workflow", "governance"]),
+    )
+    monkeypatch.setattr(module.agentic, "remove_label", lambda *args, **kwargs: None)
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        return {}
+
+    monkeypatch.setattr(module.agentic, "request", fake_request)
+
+    result = module._decompose_oldest_issue("owner/repo", "token", [issue])
+
+    assert result["status"] == "retargeted"
+    assert result["previous_target"] == "scripts/discover_recent_ai_capability.py"
+    assert result["target"] == "scripts/workflow_governor.py"
+    patch = next(payload for method, path, payload in calls if method == "PATCH")
+    assert "- **Target:** `scripts/workflow_governor.py`" in patch["body"]
