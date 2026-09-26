@@ -6,6 +6,8 @@ import os
 from pathlib import Path
 import re
 
+from genesis.architecture_decomposer import build_architecture_plan, plan_fingerprint
+
 try:
     from scripts import agentic_lab_recovery_dispatch as agentic
 except ModuleNotFoundError:
@@ -297,16 +299,17 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
         target = _derived_safe_target(body)
         inference_score = 0
         inference_hits: list[str] = []
+        architecture_plan = None
         if not target:
             target, inference_score, inference_hits = _repository_safe_target(issue)
+        if not target:
+            architecture_plan = build_architecture_plan(issue, ROOT)
+            if architecture_plan is not None:
+                target = architecture_plan.primary_target
         comments = agentic.issue_comments(repository, token, number)
         if not target:
             issue_labels = agentic.labels(issue)
             if "genesis-needs-routing" in issue_labels:
-                # This Issue has already been proven unsafe to map to an existing
-                # single file. Yield it temporarily so unrelated backlog work can
-                # advance while new-file/multi-file decomposition capability is
-                # developed. The authoritative Issue remains open.
                 continue
             if not any(FIFO_BLOCKED_MARKER in str(row.get("body") or "") for row in comments):
                 agentic.request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
@@ -321,11 +324,24 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
 
         marker = f"{FIFO_DECOMPOSITION_PREFIX}{number} -->"
         if not any(marker in str(row.get("body") or "") for row in comments):
+            architecture_lines = ""
+            if architecture_plan is not None:
+                architecture_lines = (
+                    f"<!-- genesis-architecture-plan:{plan_fingerprint(architecture_plan)} -->\n"
+                    f"- **Architecture step:** `1/{len(architecture_plan.targets)}`\n"
+                    f"- **Architecture reason:** `{architecture_plan.reason}`\n"
+                )
+                if architecture_plan.requires_new_file:
+                    architecture_lines += "- **Task type:** `architecture_expansion`\n"
+                    architecture_lines += f"- **Architecture new target:** `{architecture_plan.primary_target}`\n"
+                if architecture_plan.integration_target:
+                    architecture_lines += f"- **Architecture next target:** `{architecture_plan.integration_target}`\n"
             new_body = body.rstrip() + (
                 "\n\n### Genesis FIFO decomposition\n"
-                f"- **Target:** `{target}`\n"
-                "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
-                "- **Execution:** Complete the smallest verified step toward the original acceptance criteria, then continue on this same Issue if more work remains.\n"
+                + architecture_lines
+                + f"- **Target:** `{target}`\n"
+                + "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
+                + "- **Execution:** Complete the smallest verified step toward the original acceptance criteria, then continue on this same Issue if more work remains.\n"
             )
             agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": new_body})
             agentic.request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
