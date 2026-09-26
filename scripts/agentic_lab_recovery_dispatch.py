@@ -167,6 +167,8 @@ def explicit_target(body: str) -> str:
 def safe_lane(target: str) -> str:
     if not target or ".." in Path(target).parts or target in PROTECTED_TARGETS:
         return ""
+    if target.startswith("genesis/architecture_extensions/") and target.endswith(".py"):
+        return "generic"
     if not (ROOT / target).is_file():
         return ""
     if target.startswith("genesis/") and target.endswith(".py"):
