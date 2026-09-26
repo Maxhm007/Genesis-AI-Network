@@ -125,8 +125,6 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
         if policy._infra_quarantined(repository, token, number):
             continue
         issue_labels = agentic.labels(issue)
-        if "genesis-needs-routing" in issue_labels:
-            continue
         target = agentic.explicit_target(str(issue.get("body") or ""))
         if not agentic.safe_lane(target):
             continue
