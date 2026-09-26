@@ -380,16 +380,3 @@ jobs:
             /tmp/genesis-bounded-repair-provider.log
           if-no-files-found: ignore
           retention-days: 30
-
-      - name: Return control to Agentic Lab
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          if ! gh workflow run genesis-agentic-lab-recovery.yml \
-            --repo "$GITHUB_REPOSITORY" \
-            --ref main; then
-            echo 'Agentic Lab wake failed; workflow_run and scheduled fallbacks remain available.' >&2
-          fi
