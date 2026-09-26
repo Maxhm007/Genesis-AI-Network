@@ -96,3 +96,28 @@ def test_main_decomposes_targetless_work_before_parallel_dispatch(monkeypatch):
     assert module.main() == 0
     assert events == ["decompose", "decompose"]
     assert reads["count"] >= 2
+
+
+
+def test_exhausted_backlog_is_ranked_before_fresh_higher_value_work(monkeypatch):
+    exhausted = _issue(
+        10,
+        "2026-09-20T00:00:00Z",
+        labels=("genesis-autonomous", "agentic-lab", "genesis-solver-exhausted"),
+        body="- **Target:** `genesis/example.py`",
+    )
+    fresh = _issue(
+        11,
+        "2026-09-25T00:00:00Z",
+        labels=("genesis-autonomous", "agentic-lab", "owner-priority"),
+        body="- **Target:** `genesis/example.py`",
+    )
+
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [fresh, exhausted])
+    monkeypatch.setattr(module.policy, "_all_issue_comments", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
+    monkeypatch.setattr(module.policy, "_infra_quarantined", lambda *args: False)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: "generic")
+
+    ordered = module._parallel_routable_issues("owner/repo", "token")
+    assert [row["number"] for row in ordered[:2]] == [10, 11]
