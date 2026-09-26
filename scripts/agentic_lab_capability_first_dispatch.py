@@ -13,6 +13,7 @@ except ModuleNotFoundError:
     import agentic_lab_recovery_dispatch as agentic
 
 
+ROOT = Path(__file__).resolve().parents[1]
 STALE_RESERVATION_MINUTES = 135
 SAME_ISSUE_MEMORY_PREFIX = "<!-- genesis-same-issue-recovery-memory:"
 LEGACY_DEPENDENCY_RELEASE = "<!-- genesis-legacy-capability-dependency-released -->"
