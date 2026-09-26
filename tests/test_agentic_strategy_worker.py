@@ -40,3 +40,17 @@ def test_agentic_strategy_worker_allows_declared_architecture_extension_new_file
     assert '$task_type" != "architecture_expansion"' in text
     assert '$architecture_new_target" != "$target"' in text
     assert '$target" != genesis/architecture_extensions/*.py' in text
+
+
+def test_failed_strategy_immediately_wakes_agentic_recovery() -> None:
+    text = WORKER.read_text(encoding="utf-8")
+    release = text[text.index("Release unsuccessful Agentic reservation without closing Issue") :]
+    assert "gh workflow run genesis-agentic-lab-recovery.yml" in release
+
+
+def test_infrastructure_quarantine_keeps_agentic_ownership_and_is_generation_scoped() -> None:
+    text = WORKER.read_text(encoding="utf-8")
+    release = text[text.index("Release unsuccessful Agentic reservation without closing Issue") :]
+    assert "genesis-agentic-infrastructure-quarantine:${engine_generation}" in release
+    assert "--add-label agentic-lab" in release
+    assert "--remove-label agentic-lab" not in release
