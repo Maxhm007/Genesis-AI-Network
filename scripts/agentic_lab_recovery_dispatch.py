@@ -394,7 +394,6 @@ def capability_gap_status(status: str) -> bool:
     return normalized in {
         "retry_pending_capability",
         "blocked_no_safe_context",
-        "blocked_protected_or_unsupported_target",
     }
 
 
