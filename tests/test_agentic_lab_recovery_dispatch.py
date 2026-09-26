@@ -317,13 +317,14 @@ def test_current_material_state_epoch_reads_only_fresh_result():
 
 
 def test_recovery_engine_generation_changes_when_engine_changes(tmp_path):
+    assert "scripts/agentic_strategy_repair.py" in module.RECOVERY_ENGINE_PATHS
     for relative in module.RECOVERY_ENGINE_PATHS:
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("baseline\n", encoding="utf-8")
     before = module.recovery_engine_generation(tmp_path)
-    target = tmp_path / "scripts/agentic_lab_recovery_dispatch.py"
-    target.write_text("improved\n", encoding="utf-8")
+    target = tmp_path / "scripts/agentic_strategy_repair.py"
+    target.write_text("improved current-main satisfaction engine\n", encoding="utf-8")
     after = module.recovery_engine_generation(tmp_path)
     assert after != before
 
