@@ -604,3 +604,18 @@ def test_routing_release_clears_historical_rejection(monkeypatch):
     assert f"<!-- genesis-routing-release:{target} -->" in release
     assert target in module._rejected_targets(comments)
     assert target not in module._rejected_targets(comments + [{"body": release}])
+
+
+def test_architecture_metadata_canonicalizes_stale_new_target():
+    stale = (
+        "- **Target:** `genesis/architecture_extensions/current.py`\n"
+        "- **Task type:** `architecture_expansion`\n"
+        "- **Architecture new target:** `genesis/architecture_extensions/old.py`\n"
+        "- **Architecture new target:** `genesis/architecture_extensions/older.py`\n"
+    )
+    updated = module._ensure_architecture_expansion_metadata(
+        stale, "genesis/architecture_extensions/current.py"
+    )
+    assert updated.count("- **Task type:** `architecture_expansion`") == 1
+    assert updated.count("- **Architecture new target:**") == 1
+    assert "- **Architecture new target:** `genesis/architecture_extensions/current.py`" in updated
