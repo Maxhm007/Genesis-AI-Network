@@ -193,6 +193,9 @@ def main() -> int:
     # The former same-Issue override forced endless retries and could never converge.
     all_open = policy._all_open_issues_fifo(repository, token)
     restored = policy._restore_agentic_visibility(repository, token, all_open)
+    terminalized = policy._terminalize_non_actionable_issues(repository, token, all_open)
+    if terminalized:
+        all_open = policy._all_open_issues_fifo(repository, token)
     released = agentic.release_ready_capability_dependencies(repository, token)
 
     # Reconcile/decompose multiple architecture Issues per recovery pass. One
@@ -235,6 +238,7 @@ def main() -> int:
         "legacy_dependencies_released": released,
         "capability_escalation": "enabled",
         "agentic_visibility_restored": restored,
+        "terminalized_non_actionable": terminalized,
         "decomposition": decomposition,
         "decomposition_steps": decomposition_steps,
         "strategies": list(agentic.STRATEGIES),

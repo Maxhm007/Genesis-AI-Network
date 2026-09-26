@@ -57,3 +57,9 @@ def test_action_failure_watcher_reconciles_fresh_success_before_detection_retry(
     assert first_fresh < scan < second_fresh < retry
     assert "gh issue close" not in text
     assert "github_issue_autorepair.py" not in text
+
+
+def test_agentic_lab_wakes_on_new_or_reopened_issue() -> None:
+    text = AGENTIC.read_text(encoding="utf-8")
+    assert "issues:" in text
+    assert "types: [opened, reopened]" in text
