@@ -53,3 +53,44 @@ def test_age_component_prevents_old_work_from_permanent_starvation():
     fresh_score = module._score_issue(fresh, [], unlock_count=0, now=now)
 
     assert old_score["breakdown"]["age"] > fresh_score["breakdown"]["age"]
+
+
+def test_main_decomposes_targetless_work_before_parallel_dispatch(monkeypatch):
+    issue = _issue(
+        857,
+        "2026-09-18T00:00:00Z",
+        labels=("genesis-autonomous", "genesis-architecture-route"),
+        body="Architecture work without an explicit target",
+    )
+    events: list[str] = []
+    reads = {"count": 0}
+
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+
+    def open_issues(repository, token):
+        reads["count"] += 1
+        return [issue]
+
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", open_issues)
+    monkeypatch.setattr(module.policy, "_restore_agentic_visibility", lambda *args: [])
+    monkeypatch.setattr(module.agentic, "release_ready_capability_dependencies", lambda *args: [])
+    monkeypatch.setattr(
+        module.policy,
+        "_decompose_oldest_issue",
+        lambda repository, token, issues: events.append("decompose") or {
+            "status": "decomposed",
+            "issue_number": 857,
+            "target": "scripts/capability_issue_priority_dispatch.py",
+        },
+    )
+    monkeypatch.setattr(module, "_active_issue_numbers", lambda *args: [])
+    monkeypatch.setattr(
+        module.agentic,
+        "reserve_and_dispatch",
+        lambda *args: {"status": "idle", "reason": "test"},
+    )
+
+    assert module.main() == 0
+    assert events == ["decompose"]
+    assert reads["count"] >= 2
