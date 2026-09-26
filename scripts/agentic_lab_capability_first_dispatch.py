@@ -39,8 +39,10 @@ def _all_issue_comments(repository: str, token: str, number: int) -> list[dict]:
 def _infra_quarantined(repository: str, token: str, number: int) -> bool:
     if number <= 0:
         return False
+    current_generation = agentic.recovery_engine_generation()
+    marker = f"{INFRA_QUARANTINE_MARKER[:-4]}:{current_generation} -->"
     return any(
-        INFRA_QUARANTINE_MARKER in str(row.get("body") or "")
+        marker in str(row.get("body") or "")
         for row in _all_issue_comments(repository, token, number)
     )
 
