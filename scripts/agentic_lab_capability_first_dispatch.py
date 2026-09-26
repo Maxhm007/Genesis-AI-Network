@@ -302,9 +302,12 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
 
             if inferred == explicit:
                 # The current target is already the best bounded routing fallback.
-                # Do not consume a Recovery cycle by "retargeting" to itself;
-                # simply clear stale routing/exhaustion labels so dispatch can
-                # continue in this same pass.
+                # Ensure new-file authorization metadata is present before the
+                # repair worker sees the target again; otherwise the worker
+                # rejects the same architecture-extension target as unsupported.
+                repaired_body = _ensure_architecture_expansion_metadata(body, explicit)
+                if repaired_body != body:
+                    agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": repaired_body})
                 for label in ("genesis-needs-routing", "genesis-blocked", "genesis-deferred", agentic.EXHAUSTED_LABEL):
                     agentic.remove_label(repository, token, number, label)
                 agentic.request(
