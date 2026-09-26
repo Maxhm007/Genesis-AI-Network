@@ -423,7 +423,11 @@ def test_rerouted_architecture_extension_is_not_bounced_back(monkeypatch):
     result = module._decompose_oldest_issue("owner/repo", "token", [issue])
 
     assert result == {"status": "idle", "reason": "no_actionable_fifo_issue"}
-    assert not any(call and call[0] == "PATCH" for call in calls)
+    patch_calls = [call for call in calls if call and call[0] == "PATCH"]
+    assert len(patch_calls) == 1
+    patch = patch_calls[0][2]
+    assert "- **Task type:** `architecture_expansion`" in patch["body"]
+    assert "- **Architecture new target:** `genesis/architecture_extensions/route_gene_backlog.py`" in patch["body"]
 
 
 
