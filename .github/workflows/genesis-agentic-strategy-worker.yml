@@ -392,12 +392,13 @@ jobs:
               '[.comments[].body | select(contains("repair status: \`worker_failed_before_evidence\`"))] | length' 2>/dev/null || echo 0)
             if [[ "$recent_pre_evidence_failures" -ge 1 ]]; then
               gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-                --add-label genesis-blocked --add-label genesis-solver-exhausted --add-label genesis-autonomous >/dev/null 2>&1 || true
+                --add-label genesis-blocked --add-label genesis-solver-exhausted --add-label genesis-autonomous --add-label agentic-lab >/dev/null 2>&1 || true
               gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" \
-                --remove-label agentic-lab --remove-label genesis-deferred >/dev/null 2>&1 || true
+                --remove-label genesis-deferred >/dev/null 2>&1 || true
+              engine_generation=$(python -c 'from scripts.agentic_lab_recovery_dispatch import recovery_engine_generation; print(recovery_engine_generation())')
               printf '%s\n%s\n' \
-                '<!-- genesis-agentic-infrastructure-quarantine -->' \
-                "Genesis quarantined this Issue from Agentic Lab after repeated pre-evidence worker failures. No coding attempt was consumed and the Issue remains open. A repair-engine/workflow change must occur before Agentic Lab may reclaim it. Worker run: ${GITHUB_RUN_ID}." \
+                "<!-- genesis-agentic-infrastructure-quarantine:${engine_generation} -->" \
+                "Genesis quarantined this Issue for the current repair-engine generation after repeated pre-evidence worker failures. Agentic Lab remains the owner. A repair-engine/workflow change automatically makes the Issue eligible for reclamation. Worker run: ${GITHUB_RUN_ID}." \
                 > /tmp/genesis-agentic-failure.md
               gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-failure.md
               exit 0
@@ -411,6 +412,7 @@ jobs:
             "Agentic Lab strategy \`${STRATEGY}\` did not produce a verified promotion. repair status: \`${repair_status}\`. The Issue remains open and authoritative. The next Agentic Lab pass continues on this same Issue; no child/successor/capability Issue is created. Worker run: ${GITHUB_RUN_ID}." \
             > /tmp/genesis-agentic-failure.md
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-failure.md
+          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
 
       - name: Preserve Agentic repair evidence
         if: always()
