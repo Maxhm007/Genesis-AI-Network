@@ -454,3 +454,31 @@ def test_previously_rejected_target_is_rerouted_even_after_label_was_removed(mon
     assert result["status"] == "retargeted"
     assert result["target"].startswith("genesis/architecture_extensions/")
     assert result["target"] != "scripts/gene_continuous_work.py"
+
+
+
+def test_same_fallback_target_releases_routing_without_noop_retarget(monkeypatch):
+    issue = _issue(858)
+    fallback = "genesis/architecture_extensions/architecture_route_gene_0_backlog_work.py"
+    issue["body"] += f"\n- **Target:** `{fallback}`\n"
+    issue["labels"].append({"name": "genesis-needs-routing"})
+    calls: list[tuple[str, str, dict | None]] = []
+
+    monkeypatch.setattr(module, "_infra_quarantined", lambda repository, token, number: False)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: "generic" if target else "")
+    monkeypatch.setattr(module, "_repository_safe_target", lambda issue, root=module.ROOT: ("", 0, []))
+    monkeypatch.setattr(module, "_routing_extension_target", lambda issue: fallback)
+    monkeypatch.setattr(module.agentic, "issue_comments", lambda repository, token, number: [])
+    monkeypatch.setattr(module.agentic, "remove_label", lambda *args, **kwargs: None)
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        return {}
+
+    monkeypatch.setattr(module.agentic, "request", fake_request)
+
+    result = module._decompose_oldest_issue("owner/repo", "token", [issue])
+
+    assert result["status"] == "routing_released"
+    assert result["target"] == fallback
+    assert not any(method == "PATCH" for method, path, payload in calls)
