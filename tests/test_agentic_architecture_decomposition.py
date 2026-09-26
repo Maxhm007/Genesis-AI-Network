@@ -124,3 +124,48 @@ def test_decomposition_skips_routable_issue_and_advances_next_targetless(monkeyp
     assert result["target"] == "scripts/agentic_parallel_dispatch.py"
     assert any(method == "PATCH" and path == "/issues/858" for method, path, _ in calls)
     assert not any(method == "PATCH" and path == "/issues/857" for method, path, _ in calls)
+
+
+
+def test_workflow_governance_prefers_governor_path_over_generic_source_overlap(tmp_path, monkeypatch):
+    governor = tmp_path / "genesis" / "workflow_governor.py"
+    governor.parent.mkdir(parents=True)
+    governor.write_text(
+        "def review_workflows():\n    return ['consolidate', 'disable', 'retire']\n",
+        encoding="utf-8",
+    )
+    noisy = tmp_path / "scripts" / "discover_recent_ai_capability.py"
+    noisy.parent.mkdir(parents=True)
+    noisy.write_text(
+        "workflow capability autonomous issue governance review retire disable\n",
+        encoding="utf-8",
+    )
+    issue = {
+        "title": "[Genesis Governance] Let Genesis autonomously review, consolidate, disable and retire GitHub Actions workflows",
+        "body": "Continuously govern overlapping and obsolete workflows while protecting validation and owner controls.",
+    }
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: target.startswith(("genesis/", "scripts/")))
+
+    target, score, hits = module._repository_safe_target(issue, root=tmp_path)
+
+    assert target == "genesis/workflow_governor.py"
+    assert "workflow" in hits or "governor" in hits
+
+
+def test_weak_incidental_source_overlap_is_rejected(tmp_path, monkeypatch):
+    noisy = tmp_path / "scripts" / "discover_missing_qwen_capability.py"
+    noisy.parent.mkdir(parents=True)
+    noisy.write_text(
+        "credential capability missing secret access worker autonomous issue\n",
+        encoding="utf-8",
+    )
+    issue = {
+        "title": "[Genesis Autonomy] Add least-privilege capability and credential manager",
+        "body": "Track capability classes and credential requirements without exposing secret values.",
+    }
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: target.startswith(("genesis/", "scripts/")))
+
+    target, score, hits = module._repository_safe_target(issue, root=tmp_path)
+
+    assert target == ""
+    assert score >= 0
