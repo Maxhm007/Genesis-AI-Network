@@ -337,6 +337,7 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
                     "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
                     "- **Execution:** Agentic Lab owns routing, implementation, verification, and closure for this Issue.\n"
                 )
+            new_body = _ensure_architecture_expansion_metadata(new_body, inferred)
             agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": new_body})
             agentic.request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
                 "<!-- genesis-agentic-rerouted -->\n"
