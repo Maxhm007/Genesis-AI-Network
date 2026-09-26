@@ -54,7 +54,8 @@ def build_architecture_plan(issue: dict, root: Path) -> ArchitecturePlan | None:
     then exactly one existing integration surface is required as the second step.
     """
     root = Path(root).resolve()
-    text = _text(issue)
+    title_text = str(issue.get("title") or "").lower()
+    full_text = _text(issue)
 
     mappings = (
         (("stale", "pull request"), "genesis/architecture_extensions/pull_request_maintenance.py", "genesis/github_issue_cleanup.py", "pull_request_maintenance"),
@@ -71,15 +72,16 @@ def build_architecture_plan(issue: dict, root: Path) -> ArchitecturePlan | None:
         (("issue splitting",), "genesis/anti_stuck.py", "", "adaptive_recovery"),
     )
 
-    for terms, primary, integration, reason in mappings:
-        if not all(term in text for term in terms):
-            continue
-        if primary.startswith("genesis/architecture_extensions/"):
-            if not _safe_existing(root, integration):
-                return None
-            return ArchitecturePlan(primary, integration, reason)
-        if _safe_existing(root, primary):
-            return ArchitecturePlan(primary, "", reason)
-        return None
+    for corpus in (title_text, full_text):
+        for terms, primary, integration, reason in mappings:
+            if not all(term in corpus for term in terms):
+                continue
+            if primary.startswith("genesis/architecture_extensions/"):
+                if not _safe_existing(root, integration):
+                    return None
+                return ArchitecturePlan(primary, integration, reason)
+            if _safe_existing(root, primary):
+                return ArchitecturePlan(primary, "", reason)
+            return None
 
     return None
