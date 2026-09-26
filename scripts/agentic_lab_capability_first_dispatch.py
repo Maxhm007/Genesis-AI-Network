@@ -287,14 +287,21 @@ def _derived_safe_target(body: str) -> str:
     return ""
 
 
+ROUTING_RELEASE_PREFIX = "<!-- genesis-routing-release:"
+
+
 def _rejected_targets(comments: list[dict]) -> set[str]:
     rejected: set[str] = set()
     patterns = (
         r"replaced rejected target `([^`]+)`",
         r"classified target `([^`]+)` as protected/unsupported",
     )
+    release_pattern = re.compile(r"<!-- genesis-routing-release:([^ ]+) -->")
     for row in comments:
         body = str(row.get("body") or "")
+        release = release_pattern.search(body)
+        if release:
+            rejected.discard(release.group(1).strip())
         for pattern in patterns:
             match = re.search(pattern, body)
             if match and match.group(1).strip() not in {"", "none"}:
@@ -371,6 +378,19 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
                     f"/issues/{number}/labels",
                     {"labels": [agentic.AGENTIC_LABEL, "genesis-autonomous"]},
                 )
+                release_marker = f"{ROUTING_RELEASE_PREFIX}{explicit} -->"
+                if not any(release_marker in str(row.get("body") or "") for row in routing_comments):
+                    agentic.request(
+                        repository,
+                        token,
+                        "POST",
+                        f"/issues/{number}/comments",
+                        {"body": (
+                            f"{release_marker}\n"
+                            f"Agentic Lab released target `{explicit}` after repairing its bounded routing metadata. "
+                            "Historical unsupported-target evidence for this target is no longer authoritative for the current material state."
+                        )},
+                    )
                 return {
                     "status": "routing_released",
                     "issue_number": number,

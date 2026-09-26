@@ -573,3 +573,34 @@ def test_persistent_control_issue_is_not_terminalized(monkeypatch):
 
     assert closed == []
     assert calls == []
+
+
+def test_routing_release_clears_historical_rejection(monkeypatch):
+    issue = _issue(875)
+    target = "genesis/architecture_extensions/observability_build_unified_autonomous_health_dashboard.py"
+    issue["body"] += (
+        "\n\n### Genesis FIFO decomposition\n"
+        f"- **Target:** `{target}`\n"
+        "- **Task type:** `architecture_expansion`\n"
+        f"- **Architecture new target:** `{target}`\n"
+    )
+    issue["labels"].append({"name": "genesis-needs-routing"})
+    comments = [
+        {"body": f"<!-- genesis-policy-block-rerouted -->\nGenesis classified target `{target}` as protected/unsupported for the current repair lane."}
+    ]
+    calls = []
+    monkeypatch.setattr(module, "_infra_quarantined", lambda *args: False)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda value: "generic" if value else "")
+    monkeypatch.setattr(module, "_repository_safe_target", lambda issue, root=module.ROOT: ("", 0, []))
+    monkeypatch.setattr(module, "_routing_extension_target", lambda issue: target)
+    monkeypatch.setattr(module.agentic, "issue_comments", lambda *args: comments)
+    monkeypatch.setattr(module.agentic, "remove_label", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module.agentic, "request", lambda repository, token, method, path, payload=None: calls.append((method, path, payload)) or {})
+
+    result = module._decompose_oldest_issue("owner/repo", "token", [issue])
+
+    assert result["status"] == "routing_released"
+    release = next(payload["body"] for method, path, payload in calls if method == "POST" and path == "/issues/875/comments")
+    assert f"<!-- genesis-routing-release:{target} -->" in release
+    assert target in module._rejected_targets(comments)
+    assert target not in module._rejected_targets(comments + [{"body": release}])

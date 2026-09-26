@@ -214,7 +214,7 @@ def main() -> int:
             break
         seen_decomposition_actions.add(key)
         decomposition_steps.append(step)
-        if step.get("status") not in {"decomposed", "retargeted", "target_revoked"}:
+        if step.get("status") not in {"decomposed", "retargeted", "target_revoked", "routing_released"}:
             break
         all_open = policy._all_open_issues_fifo(repository, token)
     decomposition = decomposition_steps[-1] if decomposition_steps else {"status": "idle"}
