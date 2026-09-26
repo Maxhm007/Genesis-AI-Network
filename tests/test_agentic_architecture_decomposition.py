@@ -249,3 +249,38 @@ def test_retargets_prior_genesis_inferred_target_when_stronger_match_exists(monk
     assert result["target"] == "scripts/workflow_governor.py"
     patch = next(payload for method, path, payload in calls if method == "PATCH")
     assert "- **Target:** `scripts/workflow_governor.py`" in patch["body"]
+
+
+
+def test_revokes_prior_inferred_target_when_semantic_confidence_disappears(monkeypatch):
+    issue = _issue(874)
+    issue["title"] = "[Genesis Autonomy] Add least-privilege capability and credential manager"
+    issue["body"] += (
+        "\n\n### Genesis FIFO decomposition\n"
+        "- **Target:** `scripts/discover_missing_qwen_capability.py`\n"
+        "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
+    )
+    calls: list[tuple[str, str, dict | None]] = []
+    monkeypatch.setattr(module, "_infra_quarantined", lambda repository, token, number: False)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target) and target.startswith("scripts/"))
+    monkeypatch.setattr(module, "_repository_safe_target", lambda issue, root=module.ROOT: ("", 13, ["capability"]))
+    monkeypatch.setattr(module.agentic, "remove_label", lambda *args, **kwargs: None)
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        return {}
+
+    monkeypatch.setattr(module.agentic, "request", fake_request)
+
+    result = module._decompose_oldest_issue("owner/repo", "token", [issue])
+
+    assert result["status"] == "target_revoked"
+    assert result["previous_target"] == "scripts/discover_missing_qwen_capability.py"
+    patch = next(payload for method, path, payload in calls if method == "PATCH")
+    assert "discover_missing_qwen_capability.py" not in patch["body"]
+    assert any(
+        method == "POST"
+        and path == "/issues/874/labels"
+        and "genesis-needs-routing" in payload["labels"]
+        for method, path, payload in calls
+    )
