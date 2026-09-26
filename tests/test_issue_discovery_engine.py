@@ -66,6 +66,24 @@ class GuardWeakeningProvider:
         )
 
 
+class FalseBoolCoercionProvider:
+    name = "false-bool-coercion-provider"
+
+    def available(self) -> bool:
+        return True
+
+    def reason(self, prompt: str) -> str:
+        return json.dumps(
+            {
+                "decision": "issue",
+                "summary": "Explicit bool coercion in GeneComputeFabric.select() may lead to incorrect task assignment.",
+                "acceptance": "Select task based on module_id and objective without explicit bool coercion.",
+                "evidence": "self.gene_fabric.select(selected_task.module_id, selected_task.objective)",
+                "confidence": "high",
+            }
+        )
+
+
 class TimeoutProvider:
     name = "timeout-provider"
 
@@ -174,6 +192,23 @@ def test_discovery_rejects_acceptance_that_weakens_quality_guard(tmp_path: Path)
     assert result["unsupported_finding_count"] >= 1
     assert result["scanned"][0]["status"] == "unsupported_finding"
     assert result["scanned"][0]["grounding_error"] == "acceptance_requests_guard_weakening"
+    assert queue.list(limit=10) == []
+
+
+def test_bool_coercion_claim_requires_direct_bool_evidence(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "genesis/core_processor.py",
+        "def cycle(self, selected_task):\n    return self.gene_fabric.select(selected_task.module_id, selected_task.objective)\n",
+    )
+    queue = PersistentTaskQueue(tmp_path / "runtime" / "tasks.sqlite3")
+
+    result = GenesisIssueDiscoveryEngine(tmp_path).discover_and_enqueue(queue, FalseBoolCoercionProvider())
+
+    assert result["status"] == "no_issue_found"
+    assert result["unsupported_finding_count"] >= 1
+    assert result["scanned"][0]["status"] == "unsupported_finding"
+    assert result["scanned"][0]["grounding_error"] == "bool_coercion_claim_without_bool_evidence"
     assert queue.list(limit=10) == []
 
 
