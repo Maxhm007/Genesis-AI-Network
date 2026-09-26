@@ -13,6 +13,7 @@ from genesis.anti_stuck import (
     Attempt,
     anti_stuck_decision,
     attempt_history,
+    target_attempt_history,
     attempt_marker,
     current_epoch_comments,
     has_state_marker,
@@ -64,6 +65,7 @@ CAPABILITY_DEPENDENCY_PREFIX = "<!-- genesis-capability-dependency:"
 CAPABILITY_RELEASE_PREFIX = "<!-- genesis-agentic-capability-release:"
 CAPABILITY_WORK_PREFIX = "<!-- genesis-capability-work:"
 STABLE_STATE_PREFIX = "<!-- genesis-anti-stuck-stable-base:"
+MIGRATION_PRESERVE_PREFIX = "<!-- genesis-anti-stuck-migration-preserve:"
 HUMAN_MARKER = "<!-- genesis-agentic-needs-human -->"
 NON_ACTIONABLE_TASK_TYPES = {
     "frontier_benchmark_measurement",
@@ -336,8 +338,10 @@ def ensure_anti_stuck_epoch(
             {
                 "body": (
                     f"{STABLE_STATE_PREFIX}{stable_base} -->\n"
-                    "Genesis migrated anti-stuck state to stable material-state tracking without resetting "
-                    "the current attempt history."
+                    f"{MIGRATION_PRESERVE_PREFIX}{stable_base} -->\n"
+                    "Genesis migrated anti-stuck state to stable material-state tracking. "
+                    "Same-target explicit failures from artificial legacy reset epochs remain active "
+                    "for this material state only."
                 )
             },
         )
@@ -783,7 +787,15 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         state_token, comments = ensure_anti_stuck_epoch(
             repository, token, issue, comments, target
         )
-        history = attempt_history(comments, state_token, target)
+        migration_preserve = any(
+            str(row.get("body") or "").startswith(f"{MIGRATION_PRESERVE_PREFIX}{_latest_stable_base(comments)} -->")
+            for row in comments
+        )
+        history = (
+            target_attempt_history(comments, target)
+            if migration_preserve
+            else attempt_history(comments, state_token, target)
+        )
         policy = anti_stuck_decision(history)
         status = latest_result_status(comments, state_token)
 
