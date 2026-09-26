@@ -146,7 +146,11 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
     ]
     scored.sort(
         key=lambda row: (
-            0 if "genesis-solver-exhausted" in agentic.labels(row[0]) else 1,
+            0 if (
+                "genesis-capability-gap" in agentic.labels(row[0])
+                or "<!-- genesis-capability-work:" in str(row[0].get("body") or "")
+            ) else (1 if "genesis-solver-exhausted" in agentic.labels(row[0]) else 2),
+            -int(row[1]["unlock_count"]),
             -float(row[1]["score"]),
             row[1]["created_at"],
             int(row[1]["number"]),
@@ -154,7 +158,7 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
     )
     ordered = [row[0] for row in scored]
     print(json.dumps({
-        "selector": "bounded_parallel_exhausted_first_value_priority",
+        "selector": "bounded_parallel_capability_first_exhausted_second",
         "eligible": [int(row.get("number") or 0) for row in ordered],
         "ranked_candidates": [row[1] for row in scored[:10]],
         "max_parallel": MAX_PARALLEL,
