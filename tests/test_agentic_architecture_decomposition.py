@@ -323,25 +323,15 @@ def test_revalidation_ignores_previous_inferred_target_text(monkeypatch):
 
 
 
-def test_unroutable_issue_yields_and_allows_newer_issue_decomposition(monkeypatch):
+def test_unroutable_issue_is_rerouted_instead_of_parked(monkeypatch):
     blocked = _issue(859)
     blocked["labels"].append({"name": "genesis-needs-routing"})
-    newer = _issue(868)
-    newer["title"] = "[Genesis Governance] Workflow governance"
+    blocked["body"] += "\n- **Target:** `genesis/old_target.py`\n"
 
     calls: list[tuple[str, str, dict | None]] = []
     monkeypatch.setattr(module, "_infra_quarantined", lambda repository, token, number: False)
-    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target) and target.startswith("scripts/"))
-    monkeypatch.setattr(module, "_derived_safe_target", lambda body: "")
-    monkeypatch.setattr(
-        module,
-        "_repository_safe_target",
-        lambda issue, root=module.ROOT: (
-            ("", 10, ["stale"]) if issue["number"] == 859
-            else ("scripts/workflow_governor.py", 60, ["workflow", "governance"])
-        ),
-    )
-    monkeypatch.setattr(module.agentic, "issue_comments", lambda repository, token, number: [])
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target) and target.startswith(("genesis/", "scripts/")))
+    monkeypatch.setattr(module, "_repository_safe_target", lambda issue, root=module.ROOT: ("", 10, ["stale"]))
     monkeypatch.setattr(module.agentic, "remove_label", lambda *args, **kwargs: None)
 
     def fake_request(repository, token, method, path, payload=None):
@@ -350,8 +340,56 @@ def test_unroutable_issue_yields_and_allows_newer_issue_decomposition(monkeypatc
 
     monkeypatch.setattr(module.agentic, "request", fake_request)
 
-    result = module._decompose_oldest_issue("owner/repo", "token", [blocked, newer])
+    result = module._decompose_oldest_issue("owner/repo", "token", [blocked])
 
-    assert result["status"] == "decomposed"
-    assert result["issue_number"] == 868
-    assert result["target"] == "scripts/workflow_governor.py"
+    assert result["status"] == "retargeted"
+    assert result["issue_number"] == 859
+    assert result["target"].startswith("genesis/architecture_extensions/")
+    patch = next(payload for method, path, payload in calls if method == "PATCH")
+    assert result["target"] in patch["body"]
+    assert any(
+        method == "POST"
+        and path == "/issues/859/labels"
+        and payload == {"labels": [module.agentic.AGENTIC_LABEL, "genesis-autonomous"]}
+        for method, path, payload in calls
+    )
+
+
+
+def test_actionable_issue_does_not_require_existing_agentic_labels():
+    issue = {
+        "number": 900,
+        "state": "open",
+        "title": "[Genesis Test] Unlabeled actionable issue",
+        "body": "Implement and verify a repository change.",
+        "labels": [],
+    }
+    assert module._actionable(issue) is True
+
+
+def test_restore_agentic_visibility_enrolls_unlabeled_actionable_issue(monkeypatch):
+    issue = {
+        "number": 901,
+        "state": "open",
+        "title": "[Genesis Test] Enroll me",
+        "body": "Implement and verify a repository change.",
+        "labels": [],
+    }
+    calls = []
+    monkeypatch.setattr(module, "_infra_quarantined", lambda *args: False)
+    monkeypatch.setattr(module.agentic, "remove_label", lambda *args, **kwargs: None)
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        return {}
+
+    monkeypatch.setattr(module.agentic, "request", fake_request)
+    restored = module._restore_agentic_visibility("owner/repo", "token", [issue])
+
+    assert restored == [901]
+    assert any(
+        method == "POST"
+        and path == "/issues/901/labels"
+        and set(payload["labels"]) == {module.agentic.AGENTIC_LABEL, "genesis-autonomous"}
+        for method, path, payload in calls
+    )
