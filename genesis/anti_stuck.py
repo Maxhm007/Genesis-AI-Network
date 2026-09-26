@@ -171,7 +171,12 @@ def attempt_history(comments: Iterable[dict], token: str, target: str) -> tuple[
         if parsed is not None:
             explicit = True
             attempts.append(parsed)
-            continue
+            def adaptive_stuck_issue_strategy(self, issue_id, max_attempts=5):
+                # Existing code...
+                # Add adaptive strategy logic here
+                # Example: If issue fails more than max_attempts, switch solver
+                if issue_attempts > max_attempts:
+                    self.switch_solver(issue_id)
 
         if explicit:
             continue
