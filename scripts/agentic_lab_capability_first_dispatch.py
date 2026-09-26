@@ -285,6 +285,13 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
         body = str(issue.get("body") or "")
         issue_labels = agentic.labels(issue)
         explicit = agentic.explicit_target(body)
+        if explicit.startswith("genesis/architecture_extensions/"):
+            repaired_body = _ensure_architecture_expansion_metadata(body, explicit)
+            if repaired_body != body:
+                agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": repaired_body})
+                body = repaired_body
+                issue = dict(issue)
+                issue["body"] = body
         routing_comments = agentic.issue_comments(repository, token, number)
         rejected_targets = _rejected_targets(routing_comments)
 
