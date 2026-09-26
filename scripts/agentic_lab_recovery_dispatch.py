@@ -878,7 +878,19 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
                 status or policy.reason,
             )
             print(json.dumps(result, sort_keys=True))
-            return result
+            if result.get("status") != "capability_already_ready":
+                return result
+
+            # A satisfied dependency is a material state change. Recompute the
+            # epoch and strategy immediately so this same Recovery pass can
+            # dispatch the released parent instead of idling until another wake.
+            comments = issue_comments(repository, token, number)
+            state_token, comments = ensure_anti_stuck_epoch(
+                repository, token, issue, comments, target
+            )
+            history = attempt_history(comments, state_token, target)
+            policy = anti_stuck_decision(history)
+            status = latest_result_status(comments, state_token)
 
         provider = "agentic-default"
         gene = "Gene 0"
