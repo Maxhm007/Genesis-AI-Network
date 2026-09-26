@@ -31,14 +31,14 @@ def test_capability_completion_releases_parent_for_fresh_strategy_cycle() -> Non
     assert "fresh Agentic Lab strategy cycle" in text
 
 
-def test_capability_identity_is_shared_by_target_and_blocker_class() -> None:
+def test_capability_identity_is_shared_by_blocker_class_across_targets() -> None:
     coding = dispatcher._capability_fingerprint("genesis/coding.py", "retry_pending_capability")
     coding_same = dispatcher._capability_fingerprint("genesis/coding.py", "RETRY_PENDING_CAPABILITY")
     benchmark = dispatcher._capability_fingerprint("genesis/benchmark_execution.py", "retry_pending_capability")
     different_reason = dispatcher._capability_fingerprint("genesis/coding.py", "blocked_no_safe_context")
 
     assert coding == coding_same
-    assert coding != benchmark
+    assert coding == benchmark
     assert coding != different_reason
 
 
@@ -78,3 +78,34 @@ def test_capability_parent_links_remain_independent() -> None:
     assert "genesis-capability-parent:" in text
     assert "Each linked parent remains open but paused" in text
     assert "independently resume every linked parent" in text
+
+
+
+def test_capability_issue_reuses_same_blocker_class_across_targets(monkeypatch) -> None:
+    existing = {
+        "number": 951,
+        "body": (
+            "<!-- genesis-capability-work:legacy -->\n"
+            "<!-- genesis-capability-parent:863 -->\n"
+            "- **Blocked target:** `genesis/issue_governor.py`\n"
+            "- **Observed blocker:** `retry_pending_capability`\n"
+            "- **Task type:** `capability_growth`\n"
+            "- **Target:** `genesis/github_issue_capability_builder.py`\n"
+        ),
+    }
+    monkeypatch.setattr(dispatcher, "_all_issues", lambda repository, token: [existing])
+
+    def unexpected_request(*args, **kwargs):
+        raise AssertionError("same blocker class must reuse the existing capability Issue")
+
+    monkeypatch.setattr(dispatcher, "request", unexpected_request)
+
+    reused = dispatcher.ensure_capability_issue(
+        "owner/repo",
+        "token",
+        {"number": 999},
+        "genesis/intelligence_router.py",
+        "retry_pending_capability",
+    )
+
+    assert reused is existing
