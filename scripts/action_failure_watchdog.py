@@ -129,12 +129,20 @@ def failure_is_recent(run: dict, *, now: datetime | None = None, max_age_hours: 
     return observed >= current - timedelta(hours=max_age_hours)
 
 
+SELF_HEALING_WORKFLOWS = {
+    "Genesis Action Failure Watcher",
+    "Genesis Action Repair Worker",
+    "Genesis Action Repair Validator",
+}
+
 def actionable_run(run: dict, *, current_run_id: int | None = None) -> bool:
     try:
         run_id = int(run.get("id") or 0)
     except (TypeError, ValueError):
         return False
     if current_run_id and run_id == current_run_id:
+        return False
+    if str(run.get("name") or "").strip() in SELF_HEALING_WORKFLOWS:
         return False
     if str(run.get("status") or "") != "completed":
         return False
