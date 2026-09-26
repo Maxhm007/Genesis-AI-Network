@@ -1,0 +1,49 @@
+name: Genesis Issue Lifecycle Health Watchdog
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '*/15 * * * *'
+  push:
+    branches: [main]
+    paths:
+      - scripts/issue_lifecycle_health_watchdog.py
+      - tests/test_issue_lifecycle_health_watchdog.py
+      - .github/workflows/genesis-issue-lifecycle-health-watchdog.yml
+      - .github/workflows/genesis-issue-opening-manager.yml
+      - .github/workflows/genesis-issue-closure-manager.yml
+
+permissions:
+  actions: read
+  contents: read
+
+concurrency:
+  group: genesis-issue-lifecycle-health-watchdog
+  cancel-in-progress: true
+
+jobs:
+  audit-lifecycle:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install focused test dependency
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Validate lifecycle health policy
+        run: python -m pytest -q tests/test_issue_lifecycle_health_watchdog.py
+
+      - name: Audit automatic issue opening and closing
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/issue_lifecycle_health_watchdog.py --repository "$GITHUB_REPOSITORY"
