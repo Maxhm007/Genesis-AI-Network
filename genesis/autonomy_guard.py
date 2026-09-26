@@ -20,6 +20,15 @@ PRIVILEGED_PREFIXES = (
     "config/gden_peer_keys.json",
 )
 
+PROTECTION_POLICY_PATHS = {
+    "genesis/autonomy_guard.py",
+    "genesis/security.py",
+    "genesis/ephemeral_validator.py",
+    "scripts/secret_guard.py",
+    "scripts/privileged_change_gate.py",
+    "scripts/verify_validator_votes.py",
+}
+
 OWNER_ESCALATION_PATHS = {
     ".github/workflows/candidate-pr-gate.yml",
     ".github/workflows/independent-validator-gate.yml",
@@ -29,6 +38,9 @@ OWNER_ESCALATION_PATHS = {
     "genesis/autonomy_guard.py",
     "scripts/secret_guard.py",
     "scripts/privileged_change_gate.py",
+    "genesis/security.py",
+    "genesis/ephemeral_validator.py",
+    "scripts/verify_validator_votes.py",
 }
 
 RISKY_DIFF_HINTS = (
@@ -57,6 +69,14 @@ class AutonomyDecision:
 
     def as_dict(self) -> dict:
         return asdict(self)
+
+    @property
+    def authority_tier(self) -> str:
+        if self.level in {"immutable", "high_risk"} or self.owner_escalation_required:
+            return "owner_escalation"
+        if self.level == "privileged":
+            return "privileged"
+        return "ordinary"
 
 
 class AutonomyGuard:
@@ -116,6 +136,26 @@ class AutonomyGuard:
         if privileged:
             return AutonomyDecision("privileged", score, True, False, files, tuple(reasons))
         return AutonomyDecision("normal", score, True, False, files, tuple(reasons or ["ordinary bounded self-development"]))
+
+    @staticmethod
+    def authority_record(
+        decision: AutonomyDecision,
+        *,
+        validation_evidence: dict | None = None,
+    ) -> dict:
+        evidence = dict(validation_evidence or {})
+        if decision.authority_tier == "privileged" and not evidence:
+            raise ValueError("privileged mutation requires independent validation evidence")
+        return {
+            "schema": "genesis.autonomy-authority.v1",
+            "authority_tier": decision.authority_tier,
+            "risk_score": decision.risk_score,
+            "autonomous_allowed": decision.autonomous_allowed,
+            "owner_escalation_required": decision.owner_escalation_required,
+            "changed_files": list(decision.changed_files),
+            "reasons": list(decision.reasons),
+            "validation_evidence": evidence,
+        }
 
     def analyze_git_candidate(self, base_ref: str = "origin/main") -> AutonomyDecision:
         changed = subprocess.run(
