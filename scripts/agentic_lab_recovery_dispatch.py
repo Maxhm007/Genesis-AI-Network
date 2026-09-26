@@ -284,12 +284,12 @@ def recovery_material_state_token(
     *,
     root: Path = ROOT,
 ) -> str:
-    base = material_state_token(issue, target, comments, root=root)
-    digest = hashlib.sha256()
-    digest.update(base.encode("utf-8"))
-    digest.update(b"\0")
-    digest.update(recovery_engine_generation(root).encode("utf-8"))
-    return digest.hexdigest()[:20]
+    # Retry history belongs to the issue's material repair state, not to the
+    # controller implementation version. Controller-only changes must not erase
+    # evidence that a provider/strategy already failed. Capability releases,
+    # target content changes, issue evidence changes, and target changes are
+    # already represented by material_state_token().
+    return material_state_token(issue, target, comments, root=root)
 
 
 def ensure_anti_stuck_epoch(
