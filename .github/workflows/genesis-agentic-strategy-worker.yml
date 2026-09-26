@@ -11,7 +11,13 @@ on:
       - scripts/github_issue_autorepair.py
       - genesis/human_oversight.py
       - genesis/autonomy_guard.py
+      - genesis/architecture_decomposer.py
+      - genesis/github_issue_capability_builder.py
+      - scripts/advance_architecture_plan.py
       - tests/test_github_issue_autorepair.py
+      - tests/test_github_issue_capability_builder.py
+      - tests/test_architecture_decomposer.py
+      - tests/test_advance_architecture_plan.py
       - tests/test_autonomy_guard.py
       - tests/test_human_oversight.py
       - tests/test_agentic_parallel_dispatch.py
