@@ -15,7 +15,7 @@ from genesis.coding import CodingModule, CodingProposal
 from genesis.github_issue_capability_builder import GitHubIssueLearnedCapabilityProvider
 from genesis.issue_solver import Diagnosis, RepairAttempt
 from genesis.providers import GenesisHTTPProvider, IntelligenceProvider
-from genesis.selfdev import SelfDevelopmentExecutor
+from genesis.selfdev import ALLOWED_SCRIPT_PATHS, SelfDevelopmentExecutor
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -135,6 +135,23 @@ def _explicit_genesis_paths(text: str) -> list[str]:
         if normalized not in rows:
             rows.append(normalized)
     return rows
+
+
+def _explicit_safe_script_paths(text: str) -> list[str]:
+    rows: list[str] = []
+    for raw in re.findall(r"(?:^|[\s`'\"(])(scripts/[A-Za-z0-9_./-]+\.py)", text):
+        normalized = raw.replace("\\", "/").removeprefix("./")
+        if ".." in Path(normalized).parts:
+            continue
+        if normalized not in ALLOWED_SCRIPT_PATHS:
+            continue
+        if normalized not in rows:
+            rows.append(normalized)
+    return rows
+
+
+def explicit_safe_repair_paths(text: str) -> list[str]:
+    return _explicit_genesis_paths(text) + _explicit_safe_script_paths(text)
 
 
 def restricted_issue_targets(text: str) -> list[str]:
@@ -398,7 +415,7 @@ def solve_reported_issue(
     maintainer_guidance: str = "",
 ) -> RepairAttempt:
     issue_text = build_issue_text(issue)
-    safe_explicit = _explicit_genesis_paths(issue_text)
+    safe_explicit = explicit_safe_repair_paths(issue_text)
     restricted = restricted_issue_targets(issue_text)
     context_paths = candidate_context_paths(
         issue_text,
