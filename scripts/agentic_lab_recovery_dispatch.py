@@ -466,19 +466,19 @@ def _capability_class(reason: str) -> str:
     return normalized or "strategy_set_exhausted"
 
 
-def _capability_identity(body: str) -> tuple[str, str]:
-    blocked_target = ""
+def _capability_identity(body: str) -> str:
     blocker = ""
     for line in str(body or "").splitlines():
-        if line.startswith("- **Blocked target:** `"):
-            blocked_target = line.split("`", 2)[1].strip()
-        elif line.startswith("- **Observed blocker:** `"):
+        if line.startswith("- **Observed blocker:** `"):
             blocker = line.split("`", 2)[1].strip()
-    return blocked_target, _capability_class(blocker)
+    return _capability_class(blocker)
 
 
 def _capability_fingerprint(target: str, reason: str) -> str:
-    raw = f"agentic-capability:v2:{target}:{_capability_class(reason)}".encode("utf-8")
+    # Capability work is reusable by blocker class, not by one blocked file.
+    # Keep the target parameter for API compatibility, but do not fragment the
+    # capability pool by target path.
+    raw = f"agentic-capability:v3:{_capability_class(reason)}".encode("utf-8")
     return hashlib.sha256(raw).hexdigest()[:16]
 
 
@@ -498,7 +498,7 @@ def ensure_capability_issue(
         row_body = str(row.get("body") or "")
         if marker in row_body:
             return row
-        if CAPABILITY_WORK_PREFIX in row_body and _capability_identity(row_body) == (target, capability_class):
+        if CAPABILITY_WORK_PREFIX in row_body and _capability_identity(row_body) == capability_class:
             return row
 
     ensure_label(
