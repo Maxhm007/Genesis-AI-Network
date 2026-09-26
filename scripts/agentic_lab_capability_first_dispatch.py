@@ -297,6 +297,13 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
             return {"status": "retargeted", "issue_number": number, "target": inferred, "previous_target": explicit}
 
         if agentic.safe_lane(explicit):
+            reroute_comments = agentic.issue_comments(repository, token, number)
+            reroute_locked = (
+                explicit.startswith("genesis/architecture_extensions/")
+                and any("<!-- genesis-agentic-rerouted -->" in str(row.get("body") or "") for row in reroute_comments)
+            )
+            if reroute_locked:
+                continue
             if "<!-- genesis-architecture-plan:" in body:
                 step_match = re.search(r"(?m)^- \*\*Architecture step:\*\* `(\d+)/(\d+)`$", body)
                 desired_plan = build_architecture_plan(issue, ROOT)
