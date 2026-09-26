@@ -86,3 +86,41 @@ def test_targetless_architecture_issue_is_decomposed_on_same_issue(monkeypatch):
     )
     assert "Repository inference score: 24" in comment
     assert "capability, priority, blocked" in comment
+
+
+
+def test_decomposition_skips_routable_issue_and_advances_next_targetless(monkeypatch):
+    routable = _issue(857)
+    routable["body"] += "\n- **Target:** `scripts/capability_issue_priority_dispatch.py`\n"
+    targetless = _issue(858)
+    targetless["title"] = "[Genesis Architecture] Route backlog work to idle Genes"
+
+    calls: list[tuple[str, str, dict | None]] = []
+    monkeypatch.setattr(module, "_infra_quarantined", lambda repository, token, number: False)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target) and target.startswith(("genesis/", "scripts/")))
+    monkeypatch.setattr(module, "_derived_safe_target", lambda body: "" if "idle Genes" in body else "scripts/capability_issue_priority_dispatch.py")
+    monkeypatch.setattr(
+        module,
+        "_repository_safe_target",
+        lambda issue, root=module.ROOT: (
+            "scripts/agentic_parallel_dispatch.py",
+            20,
+            ["route", "backlog", "parallel"],
+        ),
+    )
+    monkeypatch.setattr(module.agentic, "issue_comments", lambda repository, token, number: [])
+    monkeypatch.setattr(module.agentic, "remove_label", lambda *args, **kwargs: None)
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        return {}
+
+    monkeypatch.setattr(module.agentic, "request", fake_request)
+
+    result = module._decompose_oldest_issue("owner/repo", "token", [routable, targetless])
+
+    assert result["status"] == "decomposed"
+    assert result["issue_number"] == 858
+    assert result["target"] == "scripts/agentic_parallel_dispatch.py"
+    assert any(method == "PATCH" and path == "/issues/858" for method, path, _ in calls)
+    assert not any(method == "PATCH" and path == "/issues/857" for method, path, _ in calls)
