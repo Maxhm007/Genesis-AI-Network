@@ -263,6 +263,18 @@ def _routing_extension_target(issue: dict) -> str:
         slug = f"issue_{int(issue.get('number') or 0)}"
     return f"genesis/architecture_extensions/{slug[:72]}.py"
 
+
+def _ensure_architecture_expansion_metadata(body: str, target: str) -> str:
+    if not target.startswith("genesis/architecture_extensions/"):
+        return body
+    result = str(body or "")
+    if "- **Task type:** `architecture_expansion`" not in result:
+        result = result.rstrip() + "\n- **Task type:** `architecture_expansion`\n"
+    marker = f"- **Architecture new target:** `{target}`"
+    if marker not in result:
+        result = result.rstrip() + f"\n{marker}\n"
+    return result
+
 def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> dict:
     for issue in issues:
         if not _actionable(issue):
@@ -290,9 +302,12 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
 
             if inferred == explicit:
                 # The current target is already the best bounded routing fallback.
-                # Do not consume a Recovery cycle by "retargeting" to itself;
-                # simply clear stale routing/exhaustion labels so dispatch can
-                # continue in this same pass.
+                # Ensure new-file authorization metadata is present before the
+                # repair worker sees the target again; otherwise the worker
+                # rejects the same architecture-extension target as unsupported.
+                repaired_body = _ensure_architecture_expansion_metadata(body, explicit)
+                if repaired_body != body:
+                    agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": repaired_body})
                 for label in ("genesis-needs-routing", "genesis-blocked", "genesis-deferred", agentic.EXHAUSTED_LABEL):
                     agentic.remove_label(repository, token, number, label)
                 agentic.request(
@@ -322,6 +337,7 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
                     "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
                     "- **Execution:** Agentic Lab owns routing, implementation, verification, and closure for this Issue.\n"
                 )
+            new_body = _ensure_architecture_expansion_metadata(new_body, inferred)
             agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": new_body})
             agentic.request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
                 "<!-- genesis-agentic-rerouted -->\n"
@@ -476,6 +492,7 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
                 + "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
                 + "- **Execution:** Complete the smallest verified step toward the original acceptance criteria, then continue on this same Issue if more work remains.\n"
             )
+            new_body = _ensure_architecture_expansion_metadata(new_body, target)
             agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": new_body})
             agentic.request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
                 f"{marker}\n"

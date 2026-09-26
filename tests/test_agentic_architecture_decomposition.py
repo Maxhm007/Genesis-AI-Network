@@ -347,6 +347,8 @@ def test_unroutable_issue_is_rerouted_instead_of_parked(monkeypatch):
     assert result["target"].startswith("genesis/architecture_extensions/")
     patch = next(payload for method, path, payload in calls if method == "PATCH")
     assert result["target"] in patch["body"]
+    assert "- **Task type:** `architecture_expansion`" in patch["body"]
+    assert f"- **Architecture new target:** `{result[\"target\"]}`" in patch["body"]
     assert any(
         method == "POST"
         and path == "/issues/859/labels"
@@ -481,4 +483,6 @@ def test_same_fallback_target_releases_routing_without_noop_retarget(monkeypatch
 
     assert result["status"] == "routing_released"
     assert result["target"] == fallback
-    assert not any(method == "PATCH" for method, path, payload in calls)
+    patch = next(payload for method, path, payload in calls if method == "PATCH" and path == "/issues/858")
+    assert "- **Task type:** `architecture_expansion`" in patch["body"]
+    assert f"- **Architecture new target:** `{fallback}`" in patch["body"]
