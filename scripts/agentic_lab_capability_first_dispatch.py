@@ -109,11 +109,25 @@ ARCHITECTURE_STOP_WORDS = {
 
 
 def _semantic_tokens(text: str) -> set[str]:
-    return {
-        token
-        for token in re.findall(r"[a-z0-9]+", text.lower())
-        if len(token) >= 4 and token not in ARCHITECTURE_STOP_WORDS and not token.isdigit()
+    aliases = {
+        "workflows": "workflow",
+        "credentials": "credential",
+        "capabilities": "capability",
+        "schedules": "schedule",
+        "conflicts": "conflict",
+        "blockers": "blocker",
+        "parents": "parent",
+        "workers": "worker",
+        "models": "model",
+        "benchmarks": "benchmark",
+        "metrics": "metric",
     }
+    result: set[str] = set()
+    for raw in re.findall(r"[a-z0-9]+", text.lower()):
+        token = aliases.get(raw, raw)
+        if len(token) >= 4 and token not in ARCHITECTURE_STOP_WORDS and not token.isdigit():
+            result.add(token)
+    return result
 
 
 def _repository_target_score(title: str, body: str, relative: str, source: str) -> tuple[int, list[str]]:
