@@ -572,29 +572,48 @@ def pause_for_capability(
 ) -> dict:
     number = int(issue.get("number") or 0)
     if CAPABILITY_WORK_PREFIX in str(issue.get("body") or ""):
+        # Capability work must not escape the autonomous loop. Do not create a
+        # recursive capability chain and do not park it for a human. Hand the
+        # same authoritative Issue back to Agentic routing so it can derive an
+        # isolated architecture-extension implementation and continue through
+        # the normal solve -> verify -> close lifecycle.
         ensure_label(
             repository,
             token,
-            NEEDS_HUMAN_LABEL,
-            "d73a4a",
-            "Genesis exhausted materially different safe strategies for this capability work; human review is required",
+            "genesis-needs-routing",
+            "fbca04",
+            "Agentic Lab must derive a safer implementation route for this open Issue",
         )
-        request(repository, token, "POST", f"/issues/{number}/labels", {"labels": [NEEDS_HUMAN_LABEL, EXHAUSTED_LABEL, AGENTIC_LABEL]})
-        for label in ("genesis-repair-in-progress", "genesis-validating", "genesis-autonomous", "genesis-deferred"):
+        request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/labels",
+            {"labels": ["genesis-needs-routing", AGENTIC_LABEL, "genesis-autonomous"]},
+        )
+        for label in (
+            "genesis-repair-in-progress",
+            "genesis-validating",
+            "genesis-deferred",
+            EXHAUSTED_LABEL,
+            NEEDS_HUMAN_LABEL,
+        ):
             remove_label(repository, token, number, label)
+        marker = "<!-- genesis-capability-self-reroute -->"
         _post_once(
             repository,
             token,
             number,
             comments,
-            HUMAN_MARKER,
+            marker,
             (
-                f"{HUMAN_MARKER}\n"
-                "Genesis tried the available materially different Agentic Lab strategies for this capability-building Issue and still could not produce a verified solution. "
-                "The Issue remains open for maintainer review; Genesis will not create an unbounded chain of capability Issues."
+                f"{marker}\n"
+                "Genesis exhausted the current capability-builder strategies without a verified solution. "
+                "This same capability Issue remains autonomous and is returned to Agentic routing for a bounded "
+                "architecture-extension implementation. No child capability Issue is created."
             ),
         )
-        return {"status": "needs_human", "issue_number": number, "reason": reason}
+        return {"status": "reroute_capability", "issue_number": number, "reason": reason}
 
     capability = ensure_capability_issue(repository, token, issue, target, reason)
     capability_number = int(capability.get("number") or 0)
