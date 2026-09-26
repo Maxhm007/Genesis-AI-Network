@@ -121,3 +121,39 @@ def test_exhausted_backlog_is_ranked_before_fresh_higher_value_work(monkeypatch)
 
     ordered = module._parallel_routable_issues("owner/repo", "token")
     assert [row["number"] for row in ordered[:2]] == [10, 11]
+
+
+
+def test_capability_dependency_is_ranked_before_exhausted_parent(monkeypatch):
+    capability = _issue(
+        951,
+        "2026-09-26T16:09:40Z",
+        labels=("genesis-autonomous", "agentic-lab", "genesis-capability-gap"),
+        body="<!-- genesis-capability-work:abc -->\n- **Target:** `genesis/github_issue_capability_builder.py`",
+    )
+    exhausted = _issue(
+        857,
+        "2026-09-18T00:00:00Z",
+        labels=("genesis-autonomous", "agentic-lab", "genesis-solver-exhausted"),
+        body="- **Target:** `scripts/capability_issue_priority_dispatch.py`",
+    )
+    parent = _issue(
+        863,
+        "2026-09-18T01:00:00Z",
+        labels=("genesis-autonomous", "agentic-lab"),
+        body="blocked parent",
+    )
+    comments = {
+        951: [],
+        857: [],
+        863: [{"body": "<!-- genesis-capability-dependency:951 -->"}],
+    }
+
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [exhausted, parent, capability])
+    monkeypatch.setattr(module.policy, "_all_issue_comments", lambda repository, token, number: comments[number])
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: issue["number"] != 863)
+    monkeypatch.setattr(module.policy, "_infra_quarantined", lambda *args: False)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: "generic")
+
+    ordered = module._parallel_routable_issues("owner/repo", "token")
+    assert [row["number"] for row in ordered[:2]] == [951, 857]
