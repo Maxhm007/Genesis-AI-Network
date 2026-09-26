@@ -48,6 +48,9 @@ jobs:
       - name: Install repository dependencies
         run: python -m pip install --disable-pip-version-check -r requirements.txt
 
+      - name: Validate generalized Action failure lifecycle
+        run: python -m pytest -q tests/test_action_failure_watchdog.py tests/test_action_issue_autorepair.py
+
       - name: Close stale Action failures proven healthy by newer main runs
         env:
           GH_TOKEN: ${{ github.token }}
