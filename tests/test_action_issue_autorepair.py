@@ -61,3 +61,23 @@ def test_build_objective_carries_exact_failed_action_evidence_and_feedback():
     assert "AssertionError: expected 4" in objective
     assert "PRIOR_VALIDATION_EVIDENCE" in objective
     assert "Do not change permissions" in objective
+
+
+def test_build_objective_includes_only_supplied_validated_repair_memory():
+    metadata = {
+        "workflow_name": "Arbitrary Workflow",
+        "failed_job": "build",
+        "failed_step": "Run tests",
+        "log_excerpt": "AssertionError: expected 4",
+    }
+    memory = [
+        {
+            "type": "repair",
+            "topic": "Arbitrary Workflow build failure",
+            "content": "Previously successful repair adjusted bounded implementation input handling.",
+            "confidence": 0.9,
+        }
+    ]
+    objective = build_objective(metadata, memory_context=memory)
+    assert "VALIDATED_REPAIR_MEMORY" in objective
+    assert "Previously successful repair" in objective
