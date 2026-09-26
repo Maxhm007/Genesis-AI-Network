@@ -329,7 +329,7 @@ def test_recovery_engine_generation_changes_when_engine_changes(tmp_path):
     assert after != before
 
 
-def test_recovery_material_state_token_rearms_on_engine_change(tmp_path):
+def test_recovery_material_state_token_preserves_history_on_engine_change(tmp_path):
     for relative in module.RECOVERY_ENGINE_PATHS:
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
@@ -339,7 +339,7 @@ def test_recovery_material_state_token_rearms_on_engine_change(tmp_path):
     before = module.recovery_material_state_token(issue, "", comments, root=tmp_path)
     (tmp_path / "genesis/coding.py").write_text("new engine\n", encoding="utf-8")
     after = module.recovery_material_state_token(issue, "", comments, root=tmp_path)
-    assert after != before
+    assert after == before
 
 
 def test_release_ready_capability_dependencies_preflight(monkeypatch):
