@@ -9,6 +9,7 @@ from pathlib import Path
 
 from genesis.coding import CodingModule
 from genesis.issue_discovery import AUTONOMOUS_REPAIR_EXCLUDED
+from genesis.memory import GenesisMemory
 from genesis.selfdev import SelfDevelopmentExecutor, normalize_selfdev_path
 from scripts.action_failure_watchdog import decode_metadata, sanitize_log_excerpt
 
@@ -148,7 +149,7 @@ def _numbered_excerpt(text: str, *, needle: str = "", line_hint: int | None = No
     return rendered[:MAX_CONTEXT_CHARS].rsplit("\n", 1)[0]
 
 
-def build_objective(metadata: dict, feedback: list[str] | None = None) -> str:
+def build_objective(metadata: dict, feedback: list[str] | None = None, memory_context: list[dict] | None = None) -> str:
     evidence = sanitize_log_excerpt(str(metadata.get("log_excerpt") or ""))[-MAX_FAILURE_EVIDENCE_CHARS:]
     objective = (
         "Repair the confirmed GitHub Actions failure with exactly one smallest repository edit. "
@@ -159,10 +160,12 @@ def build_objective(metadata: dict, feedback: list[str] | None = None) -> str:
     )
     if feedback:
         objective += " PRIOR_VALIDATION_EVIDENCE: " + " | ".join(feedback[-2:])[-1200:]
+    if memory_context:
+        objective += " VALIDATED_REPAIR_MEMORY: " + json.dumps(memory_context[:3], sort_keys=True)[:1800]
     return objective
 
 
-def propose_edit(root: Path, provider, metadata: dict, allowed_paths: list[str], feedback: list[str] | None = None) -> tuple[str, str]:
+def propose_edit(root: Path, provider, metadata: dict, allowed_paths: list[str], feedback: list[str] | None = None, memory_context: list[dict] | None = None) -> tuple[str, str]:
     contexts: dict[str, str] = {}
     failure_evidence = str(metadata.get("log_excerpt") or "")
     for path in allowed_paths[:MAX_CONTEXT_FILES]:
@@ -172,7 +175,7 @@ def propose_edit(root: Path, provider, metadata: dict, allowed_paths: list[str],
             needle=str(metadata.get("failed_step") or "") if path == str(metadata.get("workflow_path") or "") else "",
             line_hint=_line_hint(failure_evidence, path),
         )
-    objective = build_objective(metadata, feedback)
+    objective = build_objective(metadata, feedback, memory_context)
     example_path = allowed_paths[0]
     prompt = (
         "ROLE: genesis_privileged_action_repair_engineer\n"
@@ -253,11 +256,16 @@ def solve_issue(root: Path, repository: str, issue_number: int, *, provider=None
         return {"status": "blocked", "reason": "non_bootstrap_provider_required", "issue_number": issue_number}
     executor = executor or SelfDevelopmentExecutor(root)
     feedback: list[str] = []
+    memory_query = " ".join(
+        str(metadata.get(key) or "")
+        for key in ("workflow_name", "failed_job", "failed_step", "workflow_path")
+    )
+    memory_context = GenesisMemory(root).recall(memory_query, limit=3)
 
     for validation_attempt in range(1, MAX_VALIDATION_ATTEMPTS + 1):
         branch = ""
         try:
-            edited_path, rendered = propose_edit(root, provider, metadata, allowed_paths, feedback)
+            edited_path, rendered = propose_edit(root, provider, metadata, allowed_paths, feedback, memory_context)
             files = {edited_path: rendered}
             if edited_path != workflow_path:
                 files[workflow_path] = workflow_text
