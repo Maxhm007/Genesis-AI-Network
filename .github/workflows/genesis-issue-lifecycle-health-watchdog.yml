@@ -18,13 +18,13 @@ permissions:
   contents: read
 
 concurrency:
-  group: genesis-issue-lifecycle-health-watchdog
+  group: genesis-issue-lifecycle-health-watchdog-v2
   cancel-in-progress: true
 
 jobs:
   audit-lifecycle:
     runs-on: ubuntu-latest
-    timeout-minutes: 8
+    timeout-minutes: 4
     steps:
       - uses: actions/checkout@v4
         with:
