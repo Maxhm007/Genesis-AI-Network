@@ -16,6 +16,7 @@ on:
       - tests/test_human_oversight.py
       - tests/test_agentic_parallel_dispatch.py
       - tests/test_agentic_lab_recovery_dispatch.py
+      - tests/test_agentic_architecture_decomposition.py
       - tests/test_agentic_strategy_sequence.py
       - tests/test_systemwide_memory_attachment.py
       - tests/test_terminal_issue_reconciler_workflow.py
