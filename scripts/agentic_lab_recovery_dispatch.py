@@ -494,12 +494,30 @@ def ensure_capability_issue(
     fingerprint = _capability_fingerprint(target, capability_class)
     marker = f"{CAPABILITY_WORK_PREFIX}{fingerprint} -->"
 
+    open_matches: list[dict] = []
+    completed_matches: list[dict] = []
     for row in _all_issues(repository, token):
         row_body = str(row.get("body") or "")
-        if marker in row_body:
-            return row
-        if CAPABILITY_WORK_PREFIX in row_body and _capability_identity(row_body) == capability_class:
-            return row
+        matches = marker in row_body or (
+            CAPABILITY_WORK_PREFIX in row_body
+            and _capability_identity(row_body) == capability_class
+        )
+        if not matches:
+            continue
+        state = str(row.get("state") or "").lower()
+        state_reason = str(row.get("state_reason") or "").lower()
+        row_labels = labels(row)
+        if state == "open":
+            open_matches.append(row)
+        elif "genesis-verified" in row_labels or state_reason == "completed":
+            completed_matches.append(row)
+        # Closed not-planned/superseded capability Issues are historical only
+        # and must never become new dependencies.
+
+    if open_matches:
+        return max(open_matches, key=lambda row: int(row.get("number") or 0))
+    if completed_matches:
+        return max(completed_matches, key=lambda row: int(row.get("number") or 0))
 
     ensure_label(
         repository,
