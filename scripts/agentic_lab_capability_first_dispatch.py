@@ -256,6 +256,47 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
         explicit = agentic.explicit_target(body)
         if agentic.safe_lane(explicit):
             if "<!-- genesis-architecture-plan:" in body:
+                step_match = re.search(r"(?m)^- \*\*Architecture step:\*\* `(\d+)/(\d+)`$", body)
+                desired_plan = build_architecture_plan(issue, ROOT)
+                active = bool(agentic.labels(issue) & agentic.ACTIVE_LABELS)
+                if (
+                    desired_plan is not None
+                    and desired_plan.primary_target != explicit
+                    and step_match is not None
+                    and step_match.group(1) == "1"
+                    and not active
+                ):
+                    split_marker = "\n\n### Genesis FIFO decomposition\n<!-- genesis-architecture-plan:"
+                    base_body = body.split(split_marker, 1)[0].rstrip()
+                    architecture_lines = (
+                        f"<!-- genesis-architecture-plan:{plan_fingerprint(desired_plan)} -->\n"
+                        f"- **Architecture step:** `1/{len(desired_plan.targets)}`\n"
+                        f"- **Architecture reason:** `{desired_plan.reason}`\n"
+                    )
+                    if desired_plan.requires_new_file:
+                        architecture_lines += "- **Task type:** `architecture_expansion`\n"
+                        architecture_lines += f"- **Architecture new target:** `{desired_plan.primary_target}`\n"
+                    if desired_plan.integration_target:
+                        architecture_lines += f"- **Architecture next target:** `{desired_plan.integration_target}`\n"
+                    new_body = base_body + (
+                        "\n\n### Genesis FIFO decomposition\n"
+                        + architecture_lines
+                        + f"- **Target:** `{desired_plan.primary_target}`\n"
+                        + "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
+                        + "- **Execution:** Complete the smallest verified step toward the original acceptance criteria, then continue on this same Issue if more work remains.\n"
+                    )
+                    agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": new_body})
+                    agentic.request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
+                        "<!-- genesis-architecture-plan-corrected -->\n"
+                        f"Genesis corrected architecture target `{explicit}` to deterministic plan target "
+                        f"`{desired_plan.primary_target}` using title-first responsibility matching."
+                    )})
+                    return {
+                        "status": "retargeted",
+                        "issue_number": number,
+                        "target": desired_plan.primary_target,
+                        "previous_target": explicit,
+                    }
                 continue
             if "### Genesis FIFO decomposition" in body:
                 base_issue = dict(issue)
