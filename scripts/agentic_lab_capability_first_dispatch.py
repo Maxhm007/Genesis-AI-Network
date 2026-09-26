@@ -255,6 +255,8 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
         body = str(issue.get("body") or "")
         explicit = agentic.explicit_target(body)
         if agentic.safe_lane(explicit):
+            if "<!-- genesis-architecture-plan:" in body:
+                continue
             if "### Genesis FIFO decomposition" in body:
                 base_issue = dict(issue)
                 base_issue["body"] = body.split("\n\n### Genesis FIFO decomposition\n", 1)[0]
