@@ -193,7 +193,11 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
         body = str(issue.get("body") or "")
         explicit = agentic.explicit_target(body)
         if agentic.safe_lane(explicit):
-            return {"status": "already_routable", "issue_number": number, "target": explicit}
+            # This issue can already enter the repair pool. Keep scanning so the
+            # same recovery cycle can make the next targetless architecture issue
+            # executable instead of letting one old routable issue block backlog
+            # decomposition indefinitely.
+            continue
 
         target = _derived_safe_target(body)
         inference_score = 0
