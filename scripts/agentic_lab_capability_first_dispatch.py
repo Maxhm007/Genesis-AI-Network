@@ -283,10 +283,31 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
             if "### Genesis FIFO decomposition" in body:
                 base_issue["body"] = body.split("\n\n### Genesis FIFO decomposition\n", 1)[0]
             inferred, score, hits = _repository_safe_target(base_issue)
-            if not inferred or inferred == explicit or inferred in rejected_targets:
+            if not inferred or inferred in rejected_targets:
                 inferred = _routing_extension_target(issue)
                 score = 0
                 hits = ["architecture-extension-fallback"]
+
+            if inferred == explicit:
+                # The current target is already the best bounded routing fallback.
+                # Do not consume a Recovery cycle by "retargeting" to itself;
+                # simply clear stale routing/exhaustion labels so dispatch can
+                # continue in this same pass.
+                for label in ("genesis-needs-routing", "genesis-blocked", "genesis-deferred", agentic.EXHAUSTED_LABEL):
+                    agentic.remove_label(repository, token, number, label)
+                agentic.request(
+                    repository,
+                    token,
+                    "POST",
+                    f"/issues/{number}/labels",
+                    {"labels": [agentic.AGENTIC_LABEL, "genesis-autonomous"]},
+                )
+                return {
+                    "status": "routing_released",
+                    "issue_number": number,
+                    "target": explicit,
+                }
+
             if explicit:
                 new_body = re.sub(
                     r"(?m)^- \*\*Target:\*\* `[^`]+`$",
