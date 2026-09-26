@@ -263,6 +263,18 @@ def _routing_extension_target(issue: dict) -> str:
         slug = f"issue_{int(issue.get('number') or 0)}"
     return f"genesis/architecture_extensions/{slug[:72]}.py"
 
+
+def _ensure_architecture_expansion_metadata(body: str, target: str) -> str:
+    if not target.startswith("genesis/architecture_extensions/"):
+        return body
+    result = str(body or "")
+    if "- **Task type:** `architecture_expansion`" not in result:
+        result = result.rstrip() + "\n- **Task type:** `architecture_expansion`\n"
+    marker = f"- **Architecture new target:** `{target}`"
+    if marker not in result:
+        result = result.rstrip() + f"\n{marker}\n"
+    return result
+
 def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> dict:
     for issue in issues:
         if not _actionable(issue):
@@ -476,6 +488,7 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
                 + "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
                 + "- **Execution:** Complete the smallest verified step toward the original acceptance criteria, then continue on this same Issue if more work remains.\n"
             )
+            new_body = _ensure_architecture_expansion_metadata(new_body, target)
             agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": new_body})
             agentic.request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
                 f"{marker}\n"
