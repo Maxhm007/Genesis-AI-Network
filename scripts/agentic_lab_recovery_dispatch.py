@@ -833,8 +833,18 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             if migration_preserve
             else attempt_history(comments, state_token, target)
         )
-        policy = anti_stuck_decision(history)
         status = latest_result_status(comments, state_token)
+        if not history:
+            cross_epoch = target_attempt_history(comments, target)
+            if cross_epoch and cross_epoch[-1].result.strip().lower() in {
+                "strategy_requires_more_methods",
+                "retry_pending_capability",
+                "worker_failed_before_evidence",
+                "repair_failed_validation",
+            }:
+                history = cross_epoch
+                status = cross_epoch[-1].result.strip().lower()
+        policy = anti_stuck_decision(history)
 
         if status == "blocked_protected_or_unsupported_target":
             for label in ACTIVE_LABELS | {EXHAUSTED_LABEL, "genesis-blocked", "genesis-deferred"}:
