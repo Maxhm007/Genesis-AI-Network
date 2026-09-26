@@ -56,3 +56,55 @@ def test_selfdev_path_parser_requires_explicit_privileged_opt_in(tmp_path: Path)
     )
     with pytest.raises(RuntimeError, match="protected path"):
         normalize_selfdev_path(tmp_path, "GENESIS_BLOCK.json", allow_privileged=True)
+
+
+
+def test_authority_tiers_are_machine_readable(tmp_path: Path):
+    ordinary = AutonomyGuard(tmp_path).analyze(["genesis/example.py"], "+safe = True")
+    privileged = AutonomyGuard(tmp_path).analyze(
+        [".github/workflows/self-healing.yml"],
+        "+permissions:\n+  contents: read\n",
+    )
+    owner = AutonomyGuard(tmp_path).analyze(
+        ["genesis/autonomy_guard.py"],
+        "+change = True",
+    )
+
+    assert ordinary.authority_tier == "ordinary"
+    assert privileged.authority_tier == "privileged"
+    assert owner.authority_tier == "owner_escalation"
+
+
+def test_privileged_authority_record_requires_validation_evidence(tmp_path: Path):
+    decision = AutonomyGuard(tmp_path).analyze(
+        [".github/workflows/self-healing.yml"],
+        "+permissions:\n+  contents: read\n",
+    )
+    with pytest.raises(ValueError, match="independent validation evidence"):
+        AutonomyGuard.authority_record(decision)
+
+    record = AutonomyGuard.authority_record(
+        decision,
+        validation_evidence={"validator_run": 42, "conclusion": "success"},
+    )
+    assert record["authority_tier"] == "privileged"
+    assert record["validation_evidence"]["conclusion"] == "success"
+
+
+def test_validator_and_protection_policy_changes_require_owner_escalation(tmp_path: Path):
+    for path in (
+        "genesis/security.py",
+        "genesis/ephemeral_validator.py",
+        "scripts/verify_validator_votes.py",
+    ):
+        decision = AutonomyGuard(tmp_path).analyze([path], "+weaken = True")
+        assert decision.authority_tier == "owner_escalation"
+        assert decision.autonomous_allowed is False
+        assert decision.owner_escalation_required is True
+
+
+def test_ordinary_authority_record_needs_no_extra_approval(tmp_path: Path):
+    decision = AutonomyGuard(tmp_path).analyze(["genesis/example.py"], "+safe = True")
+    record = AutonomyGuard.authority_record(decision)
+    assert record["authority_tier"] == "ordinary"
+    assert record["validation_evidence"] == {}
