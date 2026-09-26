@@ -116,20 +116,48 @@ def _semantic_tokens(text: str) -> set[str]:
     }
 
 
-def _repository_target_score(issue_text: str, relative: str, source: str) -> tuple[int, list[str]]:
-    wanted = _semantic_tokens(issue_text)
+def _repository_target_score(title: str, body: str, relative: str, source: str) -> tuple[int, list[str]]:
+    title_tokens = _semantic_tokens(title)
+    body_tokens = _semantic_tokens(body)
+    wanted = title_tokens | body_tokens
     if not wanted:
         return 0, []
+
     path_tokens = _semantic_tokens(relative.replace("/", " ").replace("_", " "))
     source_tokens = _semantic_tokens(source[:16000])
-    path_hits = sorted(wanted & path_tokens)
-    source_hits = sorted(wanted & source_tokens)
-    score = len(path_hits) * 8 + len(source_hits)
-    return score, path_hits + [token for token in source_hits if token not in path_hits]
+
+    title_path_hits = sorted(title_tokens & path_tokens)
+    body_path_hits = sorted((body_tokens & path_tokens) - set(title_path_hits))
+    title_source_hits = sorted((title_tokens & source_tokens) - set(title_path_hits))
+    body_source_hits = sorted(
+        (body_tokens & source_tokens)
+        - set(title_path_hits)
+        - set(body_path_hits)
+        - set(title_source_hits)
+    )
+
+    # File/module naming agreement is the strongest signal. Title concepts are
+    # intentionally much stronger than generic body/source overlap so words like
+    # "issue", "workflow", "capability", or "retry" cannot accidentally route an
+    # architecture task into an unrelated discovery script.
+    score = (
+        len(title_path_hits) * 24
+        + len(body_path_hits) * 10
+        + len(title_source_hits) * 4
+        + min(len(body_source_hits), 6)
+    )
+    hits = [
+        *title_path_hits,
+        *body_path_hits,
+        *title_source_hits,
+        *body_source_hits[:6],
+    ]
+    return score, hits
 
 
 def _repository_safe_target(issue: dict, *, root: Path = ROOT) -> tuple[str, int, list[str]]:
-    text = f"{issue.get('title') or ''}\n{issue.get('body') or ''}"
+    title = str(issue.get("title") or "")
+    body = str(issue.get("body") or "")
     ranked: list[tuple[int, str, list[str]]] = []
     for base in ("genesis", "scripts"):
         directory = root / base
@@ -146,16 +174,26 @@ def _repository_safe_target(issue: dict, *, root: Path = ROOT) -> tuple[str, int
                 source = path.read_text(encoding="utf-8", errors="ignore")
             except OSError:
                 continue
-            score, hits = _repository_target_score(text, relative, source)
+            score, hits = _repository_target_score(title, body, relative, source)
             if score > 0:
                 ranked.append((score, relative, hits))
     if not ranked:
         return "", 0, []
     ranked.sort(key=lambda row: (-row[0], row[1]))
     score, target, hits = ranked[0]
-    # Require more than a single incidental source-word match. A filename/path
-    # match is heavily weighted, while several source matches can also qualify.
-    if score < 8:
+    target_path_tokens = _semantic_tokens(target.replace("/", " ").replace("_", " "))
+    title_tokens = _semantic_tokens(title)
+    body_tokens = _semantic_tokens(body)
+    direct_path_hits = (title_tokens | body_tokens) & target_path_tokens
+    title_path_hits = title_tokens & target_path_tokens
+
+    # Prefer "no target" over a semantically weak target. At least one direct
+    # path concept must match, and generic body-only matches need more evidence.
+    if not direct_path_hits:
+        return "", score, hits
+    if not title_path_hits and (score < 20 or len(direct_path_hits) < 2):
+        return "", score, hits
+    if score < 18:
         return "", score, hits
     return target, score, hits[:8]
 
