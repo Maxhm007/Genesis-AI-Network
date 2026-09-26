@@ -240,6 +240,14 @@ def _derived_safe_target(body: str) -> str:
     return ""
 
 
+def _routing_extension_target(issue: dict) -> str:
+    title = str(issue.get("title") or f"issue-{int(issue.get('number') or 0)}").lower()
+    slug = re.sub(r"[^a-z0-9]+", "_", title).strip("_")
+    slug = re.sub(r"^(genesis_)+", "", slug)
+    if not slug:
+        slug = f"issue_{int(issue.get('number') or 0)}"
+    return f"genesis/architecture_extensions/{slug[:72]}.py"
+
 def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> dict:
     for issue in issues:
         if not _actionable(issue):
@@ -346,19 +354,21 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
                 target = architecture_plan.primary_target
         comments = agentic.issue_comments(repository, token, number)
         if not target:
-            issue_labels = agentic.labels(issue)
-            if "genesis-needs-routing" in issue_labels:
-                continue
+            # Routing is an Agentic Lab stage, not a terminal parking state.
+            # When no existing repository target is safe/confident, create an
+            # isolated architecture-extension target for the same authoritative
+            # Issue so the solver can implement and integrate the missing piece.
+            target = _routing_extension_target(issue)
+            architecture_plan = None
+            inference_score = 0
+            inference_hits = ["architecture-extension-fallback"]
             if not any(FIFO_BLOCKED_MARKER in str(row.get("body") or "") for row in comments):
                 agentic.request(repository, token, "POST", f"/issues/{number}/comments", {"body": (
                     f"{FIFO_BLOCKED_MARKER}\n"
-                    "**Genesis FIFO decomposition blocked**\n\n"
-                    "No confident safe single-file target can be derived from current evidence. "
-                    "Genesis marks this Issue for routing/decomposition work and yields to other actionable Issues "
-                    "instead of freezing the autonomous queue."
+                    "**Genesis autonomous routing fallback**\n\n"
+                    "No confident safe existing-file target was available. Agentic Lab is keeping ownership "
+                    f"and routing this Issue to isolated extension target `{target}` instead of parking it."
                 )})
-                agentic.request(repository, token, "POST", f"/issues/{number}/labels", {"labels": ["genesis-needs-routing", agentic.AGENTIC_LABEL, "genesis-autonomous"]})
-            continue
 
         marker = f"{FIFO_DECOMPOSITION_PREFIX}{number} -->"
         marker_exists = any(marker in str(row.get("body") or "") for row in comments)
