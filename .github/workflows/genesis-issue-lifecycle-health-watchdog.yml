@@ -14,7 +14,7 @@ on:
       - .github/workflows/genesis-issue-closure-manager.yml
 
 permissions:
-  actions: read
+  actions: write
   contents: read
 
 concurrency:
