@@ -942,6 +942,27 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             provider = "qwen3"
             strategy = "qwen3_fallback"
         elif policy.action == "switch_lane" and policy.provider == "deepseek":
+            # DeepSeek's selector has its own bounded strategy epoch. Once it
+            # reports that epoch exhausted, redispatching the provider cannot
+            # create new evidence and only floods the Issue with handoff
+            # comments. Treat that marker as durable provider exhaustion until
+            # a capability release changes the material state.
+            release_index = _latest_release_index(comments)
+            deepseek_exhausted = any(
+                "<!-- genesis-deepseek-epoch-exhausted:" in str(row.get("body") or "")
+                for row in comments[release_index + 1 :]
+            )
+            if deepseek_exhausted:
+                result = pause_for_capability(
+                    repository,
+                    token,
+                    issue,
+                    comments,
+                    target,
+                    "deepseek_strategy_epoch_exhausted",
+                )
+                print(json.dumps(result, sort_keys=True))
+                return result
             provider = "deepseek"
             gene = "Gene 003"
             workflow = "genesis-deepseek-agentic-solver.yml"
@@ -951,7 +972,18 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
                 gene=gene,
                 target=target,
                 strategies=("evidence_first", "alternative_implementation", "diagnostic_reframe"),
-            ) or "evidence_first"
+            )
+            if not strategy:
+                result = pause_for_capability(
+                    repository,
+                    token,
+                    issue,
+                    comments,
+                    target,
+                    "deepseek_strategy_epoch_exhausted",
+                )
+                print(json.dumps(result, sort_keys=True))
+                return result
         else:
             strategy = next_lane_strategy(
                 history,
