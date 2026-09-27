@@ -16,7 +16,11 @@ except ModuleNotFoundError:
 from genesis.issue_governor import issue_value_score
 
 
-MAX_PARALLEL = int(os.environ.get("GENESIS_AGENTIC_MAX_PARALLEL", "4"))
+# Genesis owns exactly one authoritative issue at a time.  The historical
+# parallel dispatcher name is kept for compatibility with existing workflows
+# and tests, but dispatch capacity is intentionally hard-limited to one.
+MAX_PARALLEL = 1
+SEQUENTIAL_FOCUS_LABEL = "genesis-sequential-focus"
 
 if "qwen3_fallback" not in agentic.STRATEGIES:
     agentic.STRATEGIES = (*agentic.STRATEGIES, "qwen3_fallback")
@@ -167,10 +171,57 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
     return ordered
 
 
+def _sequential_routable_issues(repository: str, token: str) -> list[dict]:
+    """Return only the one issue Genesis currently owns.
+
+    A focus survives unsuccessful attempts, provider switches, and controller
+    wake-ups.  Genesis may choose a different issue only after the focused issue
+    is no longer open/authoritative (normally because it was verified/closed).
+    """
+    all_open = policy._all_open_issues_fifo(repository, token)
+    focused = [
+        issue
+        for issue in all_open
+        if SEQUENTIAL_FOCUS_LABEL in agentic.labels(issue)
+        and str(issue.get("state") or "").lower() != "closed"
+        and "genesis-verified" not in agentic.labels(issue)
+    ]
+    if focused:
+        focused.sort(key=lambda issue: (_created_at(issue), int(issue.get("number") or 0)))
+        return [focused[0]]
+
+    candidates = _parallel_routable_issues(repository, token)
+    if not candidates:
+        return []
+
+    selected = candidates[0]
+    number = int(selected.get("number") or 0)
+    if number > 0:
+        agentic.ensure_label(
+            repository,
+            token,
+            SEQUENTIAL_FOCUS_LABEL,
+            "1d76db",
+            "Single authoritative issue Genesis must finish before selecting another",
+        )
+        agentic.request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/labels",
+            {"labels": [SEQUENTIAL_FOCUS_LABEL]},
+        )
+    return [selected]
+
+
 def _active_issue_numbers(repository: str, token: str) -> list[int]:
     active: list[int] = []
+    active_labels = set(agentic.ACTIVE_LABELS) | {
+        "genesis-claimed",
+        "genesis-deepseek-working",
+    }
     for issue in policy._all_open_issues_fifo(repository, token):
-        if agentic.labels(issue) & agentic.ACTIVE_LABELS:
+        if agentic.labels(issue) & active_labels:
             number = int(issue.get("number") or 0)
             if number > 0:
                 active.append(number)
@@ -184,7 +235,7 @@ def main() -> int:
         raise RuntimeError("GITHUB_REPOSITORY and GITHUB_TOKEN are required")
 
     agentic.issue_comments = policy._all_issue_comments
-    agentic.open_agentic_issues = _parallel_routable_issues
+    agentic.open_agentic_issues = _sequential_routable_issues
     agentic.next_strategy = policy._least_recently_used_strategy
 
     # Do not override capability escalation here. When every materially different
@@ -230,7 +281,7 @@ def main() -> int:
         dispatched.append(result)
 
     result = {
-        "status": "parallel_dispatch_complete",
+        "status": "sequential_dispatch_complete",
         "max_parallel": MAX_PARALLEL,
         "active_before": active_before,
         "dispatched": [row.get("issue_number") for row in dispatched],
