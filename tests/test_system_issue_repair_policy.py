@@ -96,7 +96,7 @@ def test_ordinary_script_path_is_allowed_but_protected_script_stays_forbidden(tm
         == "scripts/helper.py"
     )
 
-    with pytest.raises(RuntimeError, match="protected path cannot be changed"):
+    with pytest.raises(RuntimeError, match="protected script changes require the privileged autonomy lane"):
         _normalize_with_privileged_scripts(tmp_path, "scripts/secret_guard.py", allow_privileged=False)
 
     with pytest.raises(RuntimeError, match="protected path cannot be changed"):
