@@ -34,13 +34,16 @@ class Attempt:
     result: str = ""
 
     @property
-    def material_key(self) -> tuple[str, str, str, str, str]:
+    def material_key(self) -> tuple[str, str, str, str]:
+        # Attempt identity is the actual work choice.  The blocker/result is
+        # evidence produced by that attempt, not a new attempt dimension.
+        # Including blocker here allowed the same strategy/provider/target to be
+        # redispatched indefinitely whenever the failure reason changed.
         return (
             self.strategy.strip().lower(),
             self.provider.strip().lower(),
             self.gene.strip().lower(),
             self.target.strip().lower(),
-            self.blocker.strip().lower(),
         )
 
 
