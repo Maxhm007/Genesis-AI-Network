@@ -206,6 +206,47 @@ def plan_deepseek_attempt(issue: dict, comments: list[dict], target: str) -> dic
     }
 
 
+def plan_reserved_deepseek_attempt(
+    issue: dict,
+    comments: list[dict],
+    target: str,
+    strategy: str,
+    state_token: str,
+) -> dict:
+    if strategy not in DEEPSEEK_STRATEGIES:
+        return {
+            "eligible": False,
+            "reason": "reserved_strategy_not_supported",
+            "state_token": state_token,
+        }
+    token = state_token or material_state_token(issue, target, comments, root=ROOT)
+    history = attempt_history(comments, token, target)
+    candidate = Attempt(
+        strategy=strategy,
+        provider="deepseek",
+        gene="Gene 003",
+        target=target,
+    )
+    if materially_equivalent_attempt(history, candidate):
+        return {
+            "eligible": False,
+            "reason": "reserved_attempt_already_consumed",
+            "state_token": token,
+            "needs_state_marker": not has_state_marker(comments, token),
+        }
+    return {
+        "eligible": True,
+        "strategy": strategy,
+        "provider": "deepseek",
+        "gene": "Gene 003",
+        "state_token": token,
+        "needs_state_marker": not has_state_marker(comments, token),
+        "state_marker": state_marker(token),
+        "attempt_marker": attempt_marker(candidate),
+        "attempt_number": len([row for row in history if row.provider.lower() == "deepseek"]) + 1,
+    }
+
+
 def main() -> None:
     parser = argparse.ArgumentParser(description="Select or plan work for the DeepSeek agentic solver")
     parser.add_argument("--issues-json", type=Path)
@@ -213,6 +254,8 @@ def main() -> None:
     parser.add_argument("--comments-json", type=Path)
     parser.add_argument("--target", default="")
     parser.add_argument("--allow-agentic-handoff", action="store_true")
+    parser.add_argument("--reserved-strategy", default="")
+    parser.add_argument("--reserved-state-token", default="")
     args = parser.parse_args()
 
     if args.issue_json and args.comments_json:
@@ -220,7 +263,17 @@ def main() -> None:
         comments_payload = json.loads(args.comments_json.read_text(encoding="utf-8"))
         if not isinstance(issue_payload, dict) or not isinstance(comments_payload, list):
             raise SystemExit("issue JSON must be an object and comments JSON must be a list")
-        print(json.dumps(plan_deepseek_attempt(issue_payload, comments_payload, args.target), sort_keys=True))
+        if args.reserved_strategy:
+            result = plan_reserved_deepseek_attempt(
+                issue_payload,
+                comments_payload,
+                args.target,
+                args.reserved_strategy,
+                args.reserved_state_token,
+            )
+        else:
+            result = plan_deepseek_attempt(issue_payload, comments_payload, args.target)
+        print(json.dumps(result, sort_keys=True))
         return
 
     if not args.issues_json:
