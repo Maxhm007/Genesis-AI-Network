@@ -70,7 +70,14 @@ def _labels(issue: dict) -> set[str]:
 
 
 def target_from(issue: dict) -> str:
-    text = f"{issue.get('title') or ''}\n{issue.get('body') or ''}"
+    body = str(issue.get("body") or "")
+    explicit = re.search(r"^- \*\*Target:\*\* `([^`]+)`", body, re.MULTILINE)
+    if explicit is not None:
+        target = explicit.group(1).strip().replace("\\", "/")
+        if target and target not in PROTECTED_TARGETS:
+            return target
+
+    text = f"{issue.get('title') or ''}\n{body}"
     for match in TARGET_RE.findall(text):
         target = match.strip().replace("\\", "/")
         if target and target not in PROTECTED_TARGETS:
