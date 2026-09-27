@@ -286,6 +286,49 @@ def open_agentic_issues(repository: str, token: str) -> list[dict]:
     return rows
 
 
+def _capability_parent_numbers(issue: dict, comments: list[dict]) -> set[int]:
+    if CAPABILITY_WORK_PREFIX not in str(issue.get("body") or ""):
+        return set()
+    pattern = re.compile(r"genesis-capability-parent:(\d+)")
+    parents: set[int] = set()
+    corpus = [str(issue.get("body") or "")]
+    corpus.extend(str(row.get("body") or "") for row in comments)
+    for text in corpus:
+        for match in pattern.finditer(text):
+            number = int(match.group(1))
+            if number > 0 and number != int(issue.get("number") or 0):
+                parents.add(number)
+    return parents
+
+
+def _live_priority_order(repository: str, token: str, issues: list[dict]) -> list[dict]:
+    """Put shared capability blockers ahead of unrelated FIFO work when safe."""
+    ranked: list[tuple[tuple, dict]] = []
+    for issue in issues:
+        number = int(issue.get("number") or 0)
+        body = str(issue.get("body") or "")
+        if CAPABILITY_WORK_PREFIX in body and number > 0:
+            parents = _capability_parent_numbers(issue, issue_comments(repository, token, number))
+            capability_rank = 0 if parents else 1
+            unlock_rank = -len(parents)
+        else:
+            capability_rank = 1
+            unlock_rank = 0
+        ranked.append(
+            (
+                (
+                    capability_rank,
+                    unlock_rank,
+                    str(issue.get("created_at") or issue.get("createdAt") or ""),
+                    number,
+                ),
+                issue,
+            )
+        )
+    ranked.sort(key=lambda row: row[0])
+    return [issue for _key, issue in ranked]
+
+
 def remove_label(repository: str, token: str, number: int, label: str) -> None:
     request(repository, token, "DELETE", f"/issues/{number}/labels/{urllib.parse.quote(label, safe='')}")
 
@@ -854,7 +897,20 @@ def release_ready_capability_dependencies(repository: str, token: str) -> list[i
 
 
 def reserve_and_dispatch(repository: str, token: str) -> dict:
-    for issue in open_agentic_issues(repository, token):
+    released_parents = release_ready_capability_dependencies(repository, token)
+    if released_parents:
+        print(json.dumps({
+            "status": "released_verified_capability_parents",
+            "parents": released_parents,
+            "count": len(released_parents),
+        }, sort_keys=True))
+
+    ordered_issues = _live_priority_order(
+        repository,
+        token,
+        open_agentic_issues(repository, token),
+    )
+    for issue in ordered_issues:
         if str(issue.get("state") or "").lower() == "closed":
             continue
 
