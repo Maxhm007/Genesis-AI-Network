@@ -993,6 +993,33 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
                 strategies=STRATEGIES,
             )
 
+        # Hard idempotency boundary: explicit attempt comments are the durable
+        # reservation ledger. Even if an epoch/history parser is confused by
+        # legacy duplicate state markers, never redispatch the same
+        # provider/gene/target/strategy tuple after the latest capability
+        # release. Advance to the next unused strategy instead.
+        durable_keys = {attempt.material_key for attempt in target_attempt_history(comments, target)}
+        if strategy:
+            candidate_key = Attempt(
+                strategy=strategy,
+                provider=provider,
+                gene=gene,
+                target=target,
+                blocker=status,
+            ).material_key
+            if candidate_key in durable_keys:
+                strategy = next_lane_strategy(
+                    target_attempt_history(comments, target),
+                    provider=provider,
+                    gene=gene,
+                    target=target,
+                    strategies=(
+                        ("evidence_first", "alternative_implementation", "diagnostic_reframe")
+                        if provider == "deepseek"
+                        else STRATEGIES
+                    ),
+                )
+
         if not strategy:
             result = pause_for_capability(
                 repository,
