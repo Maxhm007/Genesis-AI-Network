@@ -537,6 +537,47 @@ def test_ready_capability_release_continues_to_dispatch_in_same_pass(monkeypatch
     )
 
 
+def test_deepseek_exhaustion_is_terminal_for_provider_epoch(monkeypatch):
+    issue = _issue(905)
+    target = "genesis/example.py"
+    issue["body"] = f"- **Target:** `{target}`\n"
+    comments = [
+        {"body": "<!-- genesis-anti-stuck-attempt:{\"blocker\":\"failed\",\"gene\":\"Gene 0\",\"provider\":\"agentic-default\",\"strategy\":\"evidence_first\",\"target\":\"genesis/example.py\"} -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `worker_failed_before_evidence`"},
+        {"body": "<!-- genesis-deepseek-epoch-exhausted:epoch123 -->\nDeepSeek exhausted."},
+    ]
+    calls = []
+    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [issue])
+    monkeypatch.setattr(module, "issue_comments", lambda repository, token, number: list(comments))
+    monkeypatch.setattr(module, "local_claim_block_reason", lambda issue, comments: "")
+    monkeypatch.setattr(module, "unresolved_capability_dependency", lambda comments: None)
+    monkeypatch.setattr(module, "safe_lane", lambda target: "generic")
+    monkeypatch.setattr(module, "apply_integration_route", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "ensure_anti_stuck_epoch", lambda repository, token, issue, rows, target: ("state", list(rows)))
+    monkeypatch.setattr(module, "attempt_history", lambda comments, state_token, target: ())
+    monkeypatch.setattr(module, "target_attempt_history", lambda comments, target: ())
+    monkeypatch.setattr(module, "latest_result_status", lambda comments, state_token="": "")
+    monkeypatch.setattr(
+        module,
+        "anti_stuck_decision",
+        lambda history: type("D", (), {"action": "switch_lane", "provider": "deepseek", "gene": "Gene 003", "reason": "rotate"})(),
+    )
+    monkeypatch.setattr(
+        module,
+        "pause_for_capability",
+        lambda repository, token, issue, comments, target, reason: {"status": "waiting_capability", "reason": reason},
+    )
+    monkeypatch.setattr(module, "ensure_label", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "remove_label", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "request", lambda repository, token, method, path, payload=None: calls.append((method, path, payload)) or {})
+
+    result = module.reserve_and_dispatch("owner/repo", "token")
+
+    assert result["status"] == "waiting_capability"
+    assert result["reason"] == "deepseek_strategy_epoch_exhausted"
+    assert not any("/actions/workflows/genesis-deepseek-agentic-solver.yml/dispatches" in path for _, path, _ in calls)
+
+
 def test_issue_comments_paginates_retry_ledger_beyond_first_hundred(monkeypatch):
     calls = []
     first = [{"body": f"old-{index}"} for index in range(100)]
