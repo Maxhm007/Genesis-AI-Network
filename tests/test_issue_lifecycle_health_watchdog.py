@@ -150,3 +150,22 @@ def test_heal_actions_wakes_fifo_controller_for_any_lifecycle_fault(monkeypatch)
     assert "genesis-issue-opening-manager.yml" in result["dispatched"]
     assert "genesis-agentic-lab-recovery.yml" in result["dispatched"]
     assert calls == result["dispatched"]
+
+
+def test_healthy_backlog_only_wakes_fifo_when_no_active_work(monkeypatch):
+    dispatched: list[str] = []
+    issue = _issue(1001, labels=("genesis-autonomous",), minutes_ago=5)
+    active = _issue(1002, labels=("genesis-autonomous", "genesis-working"), minutes_ago=5)
+
+    monkeypatch.setattr(module, "_latest_workflow_run", lambda repository, name: _run(name))
+    monkeypatch.setattr(module, "_dispatch_workflow", lambda repository, workflow: dispatched.append(workflow) or True)
+
+    monkeypatch.setattr(module, "_issues", lambda repository: [issue, active])
+    result = module.check("owner/repo", now=NOW)
+    assert result["status"] == "healthy"
+    assert dispatched == []
+
+    monkeypatch.setattr(module, "_issues", lambda repository: [issue])
+    result = module.check("owner/repo", now=NOW)
+    assert result["status"] == "healthy"
+    assert dispatched == ["genesis-agentic-lab-recovery.yml"]
