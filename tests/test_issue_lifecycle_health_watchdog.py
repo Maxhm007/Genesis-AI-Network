@@ -103,6 +103,7 @@ def test_heal_actions_dispatches_stale_opening_and_closing_managers(monkeypatch)
     assert result["dispatched"] == [
         "genesis-issue-opening-manager.yml",
         "genesis-issue-closure-manager.yml",
+        "genesis-agentic-lab-recovery.yml",
     ]
     assert calls == result["dispatched"]
 
@@ -129,3 +130,23 @@ def test_persistent_fault_requires_more_than_one_stale_window():
         closure_max_age_minutes=30,
         verified_open_grace_minutes=20,
     ) is True
+
+
+def test_heal_actions_wakes_fifo_controller_for_any_lifecycle_fault(monkeypatch):
+    calls: list[str] = []
+    monkeypatch.setattr(
+        module,
+        "_dispatch_workflow",
+        lambda repository, workflow: calls.append(workflow) or True,
+    )
+    assessment = {
+        "faults": ["opening_manager_has_no_recent_run"],
+        "evidence": {},
+    }
+
+    result = module._heal_actions(assessment, "owner/repo")
+
+    assert result["failed"] == []
+    assert "genesis-issue-opening-manager.yml" in result["dispatched"]
+    assert "genesis-agentic-lab-recovery.yml" in result["dispatched"]
+    assert calls == result["dispatched"]
