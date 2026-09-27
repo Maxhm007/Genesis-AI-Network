@@ -43,7 +43,10 @@ permissions:
 
 concurrency:
   group: genesis-agentic-lab-recovery
-  cancel-in-progress: false
+  # Genesis has one authoritative sequential controller. A newer recovery event
+  # supersedes stale controller state so old runs cannot retarget/reclaim the
+  # focused issue after policy or evidence changes.
+  cancel-in-progress: true
 
 env:
   GENESIS_AGENTIC_MAX_PARALLEL: '1'
