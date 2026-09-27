@@ -537,6 +537,38 @@ def test_ready_capability_release_continues_to_dispatch_in_same_pass(monkeypatch
     )
 
 
+def test_duplicate_same_state_markers_do_not_erase_durable_strategy_history(monkeypatch):
+    issue = _issue(903)
+    target = "genesis/example.py"
+    comments = [
+        {"body": "<!-- genesis-anti-stuck-state:same123 -->\n<!-- genesis-anti-stuck-stable-base:same123 -->"},
+        {"body": "<!-- genesis-anti-stuck-attempt:{\"blocker\":\"\",\"gene\":\"Gene 0\",\"provider\":\"agentic-default\",\"strategy\":\"evidence_first\",\"target\":\"genesis/example.py\"} -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `strategy_requires_more_methods`"},
+        {"body": "<!-- genesis-anti-stuck-state:same123 -->\n<!-- genesis-anti-stuck-stable-base:same123 -->"},
+    ]
+    monkeypatch.setattr(
+        module,
+        "recovery_material_state_token",
+        lambda issue, target, comments, root=module.ROOT: "same123",
+    )
+
+    state_token, refreshed = module.ensure_anti_stuck_epoch(
+        "owner/repo", "token", issue, comments, target
+    )
+    assert state_token == "same123"
+    history = module.target_attempt_history(refreshed, target)
+    assert history
+    assert history[-1].strategy == "evidence_first"
+    assert history[-1].result == "strategy_requires_more_methods"
+    assert module.next_lane_strategy(
+        history,
+        provider="agentic-default",
+        gene="Gene 0",
+        target=target,
+        strategies=module.STRATEGIES,
+    ) == "alternative_implementation"
+
+
 def test_cross_epoch_more_methods_keeps_lane_for_next_strategy(monkeypatch):
     issue = _issue(77)
     comments = [
