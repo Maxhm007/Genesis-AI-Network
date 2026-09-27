@@ -11,6 +11,8 @@ on:
       - .github/workflows/genesis-missing-qwen-capability-discovery.yml
       - scripts/discover_missing_qwen_capability.py
       - scripts/agentic_lab_recovery_dispatch.py
+      - scripts/agentic_strategy_repair.py
+      - genesis/selfdev.py
       - scripts/agentic_lab_capability_first_dispatch.py
       - scripts/agentic_lab_fifo_router.py
       - scripts/agentic_parallel_dispatch.py
