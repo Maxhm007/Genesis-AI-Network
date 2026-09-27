@@ -105,6 +105,24 @@ RECOVERY_ENGINE_PATHS = (
     ".github/workflows/genesis-bounded-repair-worker.yml",
 )
 
+# Changes to these files materially change what the repair worker can execute or
+# validate, so exhausted strategies must be re-armed. Controller-only edits are
+# deliberately excluded so orchestration refactors do not erase retry history.
+REPAIR_EXECUTION_PATHS = (
+    "scripts/agentic_strategy_repair.py",
+    "scripts/github_issue_autorepair.py",
+    "genesis/coding.py",
+    "genesis/github_issue_capability_builder.py",
+    "genesis/selfdev.py",
+    "genesis/system_issue_repair_policy.py",
+    "tests/test_agentic_strategy_repair.py",
+    "tests/test_github_issue_capability_builder.py",
+    "tests/test_selfdev_policy.py",
+    "tests/test_system_issue_repair_policy.py",
+    ".github/workflows/genesis-agentic-strategy-worker.yml",
+    ".github/workflows/genesis-deepseek-agentic-solver.yml",
+)
+
 
 def request(repository: str, token: str, method: str, path: str, payload: dict | None = None):
     data = None if payload is None else json.dumps(payload).encode("utf-8")
@@ -314,6 +332,20 @@ def recovery_engine_generation(root: Path = ROOT) -> str:
     return digest.hexdigest()[:20]
 
 
+def repair_execution_generation(root: Path = ROOT) -> str:
+    digest = hashlib.sha256()
+    for relative in REPAIR_EXECUTION_PATHS:
+        path = Path(root) / relative
+        digest.update(relative.encode("utf-8"))
+        digest.update(b"\0")
+        try:
+            digest.update(path.read_bytes())
+        except OSError:
+            digest.update(b"<missing>")
+        digest.update(b"\0")
+    return digest.hexdigest()[:20]
+
+
 def recovery_material_state_token(
     issue: dict,
     target: str,
@@ -321,12 +353,16 @@ def recovery_material_state_token(
     *,
     root: Path = ROOT,
 ) -> str:
-    # Retry history belongs to the issue's material repair state, not to the
-    # controller implementation version. Controller-only changes must not erase
-    # evidence that a provider/strategy already failed. Capability releases,
-    # target content changes, issue evidence changes, and target changes are
-    # already represented by material_state_token().
-    return material_state_token(issue, target, comments, root=root)
+    # Retry history belongs to the issue's material repair state. Controller-only
+    # edits preserve it, while changes to the actual repair execution/validation
+    # stack legitimately re-arm strategies because previously failed attempts
+    # were made under a different executable capability.
+    base = material_state_token(issue, target, comments, root=root)
+    digest = hashlib.sha256()
+    digest.update(base.encode("utf-8"))
+    digest.update(b"\0")
+    digest.update(repair_execution_generation(root).encode("utf-8"))
+    return digest.hexdigest()[:20]
 
 
 def _latest_state_token(comments: list[dict]) -> str:
