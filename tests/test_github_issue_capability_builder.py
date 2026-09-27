@@ -312,7 +312,7 @@ def test_machine_capability_growth_issue_gets_bounded_self_repair_route(tmp_path
     )
 
     assert isinstance(provider, capability_builder.EvidenceFirstRepairFollowupProvider)
-    assert provider.target_path == "genesis/github_issue_capability_builder.py"
+    assert provider.target_path == "scripts/capability_issue_priority_dispatch.py"
     assert provider.delegate.name == "genesis-github-capability-repair"
 
 
