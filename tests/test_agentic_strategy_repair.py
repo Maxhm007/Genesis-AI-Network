@@ -71,11 +71,21 @@ def test_navigation_landmark_micro_repair_builds_one_safe_candidate(tmp_path):
     assert _proposal_with_privilege_anchor(SelfDevelopmentExecutor(tmp_path), {"files": proposal.files}) == {"files": proposal.files}
 
 
-@pytest.mark.parametrize("target", ["scripts/arbitrary.py", "scripts/secret_guard.py",
+def test_script_router_and_executor_allow_bounded_ordinary_script_target(tmp_path):
+    scripts = tmp_path / "scripts"
+    scripts.mkdir()
+    target = "scripts/capability_issue_priority_dispatch.py"
+    (tmp_path / target).write_text("pass\n", encoding="utf-8")
+
+    assert module._explicit_safe_script_paths(f"Target: `{target}`", tmp_path) == [target]
+    assert normalize_selfdev_path(tmp_path, target) == target
+
+
+@pytest.mark.parametrize("target", ["scripts/secret_guard.py",
     "scripts/privileged_change_gate.py", "scripts/verify_validator_votes.py",
     "scripts/action_repair_guard.py", "scripts/issue_acceptance_guard.py",
     "scripts/../scripts/self_evaluation_dashboard.py"])
-def test_script_router_and_executor_reject_unapproved_paths(tmp_path, target):
+def test_script_router_and_executor_reject_privileged_or_unsafe_paths(tmp_path, target):
     scripts = tmp_path / "scripts"
     scripts.mkdir()
     (scripts / Path(target).name).write_text("pass\n", encoding="utf-8")
