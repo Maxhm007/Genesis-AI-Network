@@ -50,7 +50,7 @@ def test_provider_switch_after_distinct_failures():
 
 
 
-def test_tooling_failure_switches_provider_immediately():
+def test_more_methods_keeps_current_provider_until_strategy_budget_is_used():
     history = (
         Attempt(
             "evidence_first",
@@ -61,9 +61,8 @@ def test_tooling_failure_switches_provider_immediately():
         ),
     )
     decision = anti_stuck_decision(history)
-    assert decision.action == "switch_lane"
-    assert decision.provider == "qwen3"
-    assert decision.gene == "Gene 0"
+    assert decision.action == "continue"
+    assert decision.reason == "same_lane_methods_remain"
 
 
 def test_worker_failure_before_evidence_switches_provider_immediately():
@@ -222,8 +221,8 @@ def test_target_attempt_history_recovers_failures_across_legacy_reset_epochs():
     assert len(history) == 2
     assert history[0].result == "strategy_requires_more_methods"
     decision = anti_stuck_decision(history)
-    assert decision.action == "switch_lane"
-    assert decision.provider == "qwen3"
+    assert decision.action == "continue"
+    assert decision.reason == "same_lane_methods_remain"
 
 
 def test_target_attempt_history_does_not_mix_other_targets():
