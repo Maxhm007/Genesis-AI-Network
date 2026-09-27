@@ -279,8 +279,23 @@ def ensure_label(repository: str, token: str, name: str, color: str, description
 
 
 def issue_comments(repository: str, token: str, number: int) -> list[dict]:
-    rows = request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
-    return [row for row in rows if isinstance(row, dict)]
+    # Retry history is stored in issue comments. Reading only GitHub's first
+    # 100 comments makes long-running issues forget newer attempts and causes
+    # the dispatcher to repeat already-consumed strategies/providers forever.
+    rows: list[dict] = []
+    for page in range(1, 101):
+        path = (
+            f"/issues/{number}/comments?per_page=100"
+            if page == 1
+            else f"/issues/{number}/comments?per_page=100&page={page}"
+        )
+        batch = request(repository, token, "GET", path) or []
+        if not isinstance(batch, list):
+            raise RuntimeError("GitHub issue comments response was not a list")
+        rows.extend(row for row in batch if isinstance(row, dict))
+        if len(batch) < 100:
+            break
+    return rows
 
 
 def recovery_engine_generation(root: Path = ROOT) -> str:
