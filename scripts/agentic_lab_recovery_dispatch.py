@@ -5,6 +5,8 @@ import json
 import os
 from pathlib import Path
 import re
+import time
+import http.client
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -116,15 +118,30 @@ def request(repository: str, token: str, method: str, path: str, payload: dict |
             "User-Agent": "Genesis-AI-Network/agentic-lab-strategy-recovery",
         },
     )
-    try:
-        with urllib.request.urlopen(req, timeout=30) as response:
-            raw = response.read().decode("utf-8")
-        return json.loads(raw) if raw.strip() else {}
-    except urllib.error.HTTPError as exc:
-        if method == "DELETE" and exc.code == 404:
-            return {}
-        detail = exc.read().decode("utf-8", errors="replace")[:1000]
-        raise RuntimeError(f"GitHub HTTP {exc.code} for {method} {path}: {detail}") from exc
+    # GitHub occasionally closes an Actions connection before returning a
+    # response. Retry transient transport/server/rate-limit failures so one
+    # network blip cannot abort the whole Agentic Lab recovery cycle.
+    retryable_http = {429, 500, 502, 503, 504}
+    max_attempts = 4
+    for attempt in range(1, max_attempts + 1):
+        try:
+            with urllib.request.urlopen(req, timeout=30) as response:
+                raw = response.read().decode("utf-8")
+            return json.loads(raw) if raw.strip() else {}
+        except urllib.error.HTTPError as exc:
+            if method == "DELETE" and exc.code == 404:
+                return {}
+            detail = exc.read().decode("utf-8", errors="replace")[:1000]
+            if exc.code not in retryable_http or attempt == max_attempts:
+                raise RuntimeError(
+                    f"GitHub HTTP {exc.code} for {method} {path}: {detail}"
+                ) from exc
+        except (urllib.error.URLError, http.client.RemoteDisconnected, TimeoutError, ConnectionError) as exc:
+            if attempt == max_attempts:
+                raise RuntimeError(
+                    f"GitHub transport failure for {method} {path} after {max_attempts} attempts: {exc}"
+                ) from exc
+        time.sleep(min(2 ** (attempt - 1), 8))
 
 
 def labels(issue: dict) -> set[str]:
