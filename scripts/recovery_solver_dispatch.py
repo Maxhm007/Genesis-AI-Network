@@ -15,6 +15,9 @@ from agentic_lab_recovery_dispatch import (
     request,
     safe_lane,
     explicit_target,
+    target_attempt_history,
+    next_lane_strategy,
+    Attempt,
 )
 
 RECOVERY_LABEL = "genesis-recovery-solver"
@@ -222,15 +225,32 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
                 _remove_label(repository, token, number, stale_label)
             continue
 
-        cycles = recovery_cycle_count(comments)
-        if cycles >= MAX_RECOVERY_CYCLES:
+        # One authoritative attempt ledger drives every recovery dispatch.
+        # Do not maintain a second cycle counter that can restart at
+        # evidence_first independently of Agentic Lab.
+        history = target_attempt_history(comments, target)
+        strategy = next_lane_strategy(
+            history,
+            provider="agentic-default",
+            gene="Gene 0",
+            target=target,
+            strategies=RECOVERY_STRATEGIES,
+        )
+        if not strategy:
             outcome = finalize_exhausted_issue(repository, token, issue, comments)
             if outcome.get("status") == "capability_dependency_exempt":
                 continue
             return outcome
 
+        cycles = len({
+            attempt.strategy
+            for attempt in history
+            if attempt.provider == "agentic-default"
+            and attempt.gene == "Gene 0"
+            and attempt.target == target
+            and attempt.strategy in RECOVERY_STRATEGIES
+        })
         cycle = cycles + 1
-        strategy = RECOVERY_STRATEGIES[cycles]
 
         # The downstream repair engine requires genesis-autonomous. Recovery used
         # to reserve only the Agentic/repair labels, which could make an otherwise
@@ -259,6 +279,12 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             continue
 
         marker = f"{RECOVERY_MARKER}{cycle} -->"
+        attempt = Attempt(
+            strategy=strategy,
+            provider="agentic-default",
+            gene="Gene 0",
+            target=target,
+        )
         request(
             repository,
             token,
@@ -267,9 +293,10 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             {
                 "body": (
                     f"{marker}\n"
+                    f"<!-- genesis-anti-stuck-attempt:{json.dumps({'blocker': '', 'gene': attempt.gene, 'provider': attempt.provider, 'strategy': attempt.strategy, 'target': attempt.target}, sort_keys=True, separators=(',', ':'))} -->\n"
                     f"Dedicated Recovery Solver claimed exhausted Issue #{number} for bounded recovery cycle {cycle}/{MAX_RECOVERY_CYCLES}. "
-                    f"It will use recovery strategy (`{strategy}`) while preserving the same Issue authority, validation, security, and exact-promotion gates. "
-                    "Cycle 1 is always evidence-first so current main is checked before any new repair is attempted."
+                    f"It will use recovery strategy (`{strategy}`) from the same authoritative Agentic attempt ledger. "
+                    "A consumed provider/gene/target/strategy tuple cannot be selected again until material capability state changes."
                 )
             },
         )
