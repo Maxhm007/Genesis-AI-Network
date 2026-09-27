@@ -917,9 +917,13 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         # releases are already a hard boundary inside target_attempt_history().
         epoch_history = attempt_history(comments, state_token, target)
         durable_history = target_attempt_history(comments, target)
-        history = durable_history or epoch_history
+        # Cross-epoch history exists only to migrate legacy controller state.
+        # Once Genesis has an explicit stable material-state marker, a genuinely
+        # new epoch must re-arm strategies; otherwise repaired code/tests can
+        # never escape exhaustion because old same-target failures dominate.
+        history = durable_history if migration_preserve else epoch_history
         status = latest_result_status(comments, state_token)
-        if durable_history and durable_history[-1].result:
+        if migration_preserve and durable_history and durable_history[-1].result:
             status = durable_history[-1].result.strip().lower()
         policy = anti_stuck_decision(history)
 
@@ -1092,7 +1096,8 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         # legacy duplicate state markers, never redispatch the same
         # provider/gene/target/strategy tuple after the latest capability
         # release. Advance to the next unused strategy instead.
-        durable_keys = {attempt.material_key for attempt in target_attempt_history(comments, target)}
+        reservation_history = durable_history if migration_preserve else epoch_history
+        durable_keys = {attempt.material_key for attempt in reservation_history}
         if strategy:
             candidate_key = Attempt(
                 strategy=strategy,
@@ -1103,7 +1108,7 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             ).material_key
             if candidate_key in durable_keys:
                 strategy = next_lane_strategy(
-                    target_attempt_history(comments, target),
+                    reservation_history,
                     provider=provider,
                     gene=gene,
                     target=target,
