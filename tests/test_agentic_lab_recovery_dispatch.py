@@ -537,6 +537,35 @@ def test_ready_capability_release_continues_to_dispatch_in_same_pass(monkeypatch
     )
 
 
+def test_issue_comments_paginates_retry_ledger_beyond_first_hundred(monkeypatch):
+    calls = []
+    first = [{"body": f"old-{index}"} for index in range(100)]
+    second = [
+        {"body": "<!-- genesis-anti-stuck-attempt:{\"blocker\":\"\",\"gene\":\"Gene 0\",\"provider\":\"agentic-default\",\"strategy\":\"alternative_implementation\",\"target\":\"genesis/example.py\"} -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:alternative_implementation -->\nrepair status: `strategy_requires_more_methods`"},
+    ]
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append(path)
+        if path == "/issues/904/comments?per_page=100":
+            return first
+        if path == "/issues/904/comments?per_page=100&page=2":
+            return second
+        raise AssertionError(path)
+
+    monkeypatch.setattr(module, "request", fake_request)
+    rows = module.issue_comments("owner/repo", "token", 904)
+
+    assert len(rows) == 102
+    assert calls == [
+        "/issues/904/comments?per_page=100",
+        "/issues/904/comments?per_page=100&page=2",
+    ]
+    history = module.target_attempt_history(rows, "genesis/example.py")
+    assert history[-1].strategy == "alternative_implementation"
+    assert history[-1].result == "strategy_requires_more_methods"
+
+
 def test_duplicate_same_state_markers_do_not_erase_durable_strategy_history(monkeypatch):
     issue = _issue(903)
     target = "genesis/example.py"
