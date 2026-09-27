@@ -339,9 +339,16 @@ def _latest_state_token(comments: list[dict]) -> str:
 def _latest_stable_base(comments: list[dict]) -> str:
     for row in reversed(comments):
         body = str(row.get("body") or "")
-        if not body.startswith(STABLE_STATE_PREFIX):
-            continue
-        return body[len(STABLE_STATE_PREFIX):].split("-->", 1)[0].strip()
+        # State and stable-base markers are commonly written in the same
+        # comment, with the stable marker on the second line.  Requiring the
+        # whole comment to start with STABLE_STATE_PREFIX made Genesis forget
+        # the recorded base and perform an unnecessary live GitHub write while
+        # merely reconstructing retry history (including during unit tests).
+        for line in body.splitlines():
+            line = line.strip()
+            if not line.startswith(STABLE_STATE_PREFIX):
+                continue
+            return line[len(STABLE_STATE_PREFIX):].split("-->", 1)[0].strip()
     return ""
 
 
