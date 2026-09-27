@@ -537,7 +537,7 @@ def test_ready_capability_release_continues_to_dispatch_in_same_pass(monkeypatch
     )
 
 
-def test_cross_epoch_failure_history_forces_lane_rotation(monkeypatch):
+def test_cross_epoch_more_methods_keeps_lane_for_next_strategy(monkeypatch):
     issue = _issue(77)
     comments = [
         {"body": "<!-- genesis-anti-stuck-attempt:{\"blocker\":\"\",\"gene\":\"Gene 0\",\"provider\":\"agentic-default\",\"strategy\":\"evidence_first\",\"target\":\"genesis/example.py\"} -->"},
@@ -545,5 +545,5 @@ def test_cross_epoch_failure_history_forces_lane_rotation(monkeypatch):
     ]
     history = module.target_attempt_history(comments, "genesis/example.py")
     decision = module.anti_stuck_decision(history)
-    assert decision.action == "switch_lane"
-    assert decision.provider == "qwen3"
+    assert decision.action == "continue"
+    assert decision.reason == "same_lane_methods_remain"
