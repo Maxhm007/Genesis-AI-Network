@@ -75,14 +75,27 @@ jobs:
             gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title,body,labels > /tmp/deepseek-open.json
           fi
 
-          if [[ -n "$REQUESTED_ISSUE" ]]; then
+          if [[ -n "$REQUESTED_ISSUE" && -n "$RESERVED_STRATEGY" ]]; then
+            number="$REQUESTED_ISSUE"
+            target=$(python - <<'PY'
+import json
+from scripts.deepseek_agentic_selector import target_from
+issue = json.load(open("/tmp/deepseek-open.json", encoding="utf-8"))[0]
+print(target_from(issue))
+PY
+)
+            score="reserved"
+          elif [[ -n "$REQUESTED_ISSUE" ]]; then
             selection=$(python scripts/deepseek_agentic_selector.py --issues-json /tmp/deepseek-open.json --allow-agentic-handoff)
+            number=$(jq -r '.number // empty' <<<"$selection")
+            target=$(jq -r '.target // empty' <<<"$selection")
+            score=$(jq -r '.score // empty' <<<"$selection")
           else
             selection=$(python scripts/deepseek_agentic_selector.py --issues-json /tmp/deepseek-open.json)
+            number=$(jq -r '.number // empty' <<<"$selection")
+            target=$(jq -r '.target // empty' <<<"$selection")
+            score=$(jq -r '.score // empty' <<<"$selection")
           fi
-          number=$(jq -r '.number // empty' <<<"$selection")
-          target=$(jq -r '.target // empty' <<<"$selection")
-          score=$(jq -r '.score // empty' <<<"$selection")
           if [[ -z "$number" ]]; then
             if [[ -n "$REQUESTED_ISSUE" ]]; then
               gh issue edit "$REQUESTED_ISSUE" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deepseek-handoff-pending >/dev/null 2>&1 || true
@@ -101,6 +114,11 @@ jobs:
             conflict=$(jq -r '[.labels[].name] | any(. == "genesis-repair-in-progress" or . == "genesis-claimed" or . == "genesis-working" or . == "genesis-validating" or . == "genesis-verifying" or . == "genesis-deepseek-working")' <<<"$current")
           fi
           if [[ "$state" != OPEN || "$conflict" == true ]]; then
+            printf '%s\n%s\n' \
+              "<!-- genesis-deepseek-handoff-rejected:availability -->" \
+              "DeepSeek rejected the handoff before claim: state=`${state}`, conflicting_active_label=`${conflict}`." \
+              > /tmp/deepseek-reject.md
+            gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body-file /tmp/deepseek-reject.md >/dev/null 2>&1 || true
             gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deepseek-handoff-pending >/dev/null 2>&1 || true
             echo 'selected=false' >> "$GITHUB_OUTPUT"
             echo 'Candidate became unavailable before reservation.'
