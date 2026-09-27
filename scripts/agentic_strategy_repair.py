@@ -95,7 +95,7 @@ def _explicit_safe_script_paths(issue_text: str, root: Path) -> list[str]:
     rows: list[str] = []
     for raw in _SCRIPT_TARGET_RE.findall(issue_text):
         normalized = raw.replace("\\", "/").removeprefix("./")
-        if normalized not in ALLOWED_SCRIPT_PATHS or normalized in PROTECTED_SCRIPT_TARGETS:
+        if not normalized.startswith("scripts/") or normalized in PROTECTED_SCRIPT_TARGETS:
             continue
         try:
             normalize_selfdev_path(root, normalized)
@@ -117,7 +117,7 @@ def _script_aware_allowed_paths(original, context_paths: list[str]) -> set[str]:
     allowed = set(original(context_paths))
     for relative in context_paths:
         path = Path(relative)
-        if relative in ALLOWED_SCRIPT_PATHS and relative not in PROTECTED_SCRIPT_TARGETS:
+        if relative.startswith("scripts/") and relative not in PROTECTED_SCRIPT_TARGETS:
             allowed.add(f"tests/test_{path.stem}.py")
     return allowed
 
