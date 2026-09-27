@@ -81,12 +81,12 @@ jobs:
           if [[ -n "$REQUESTED_ISSUE" && -n "$RESERVED_STRATEGY" ]]; then
             number="$REQUESTED_ISSUE"
             target=$(python - <<'PY'
-import json
-from scripts.deepseek_agentic_selector import target_from
-issue = json.load(open("/tmp/deepseek-open.json", encoding="utf-8"))[0]
-print(target_from(issue))
-PY
-)
+          import json
+          from scripts.deepseek_agentic_selector import target_from
+          issue = json.load(open("/tmp/deepseek-open.json", encoding="utf-8"))[0]
+          print(target_from(issue))
+          PY
+          )
             score="reserved"
           elif [[ -n "$REQUESTED_ISSUE" ]]; then
             selection=$(python scripts/deepseek_agentic_selector.py --issues-json /tmp/deepseek-open.json --allow-agentic-handoff)
