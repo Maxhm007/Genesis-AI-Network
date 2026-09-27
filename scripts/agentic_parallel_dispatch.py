@@ -273,32 +273,51 @@ def main() -> int:
     # layer must pause the parent and create/reuse one bounded capability Issue.
     # The former same-Issue override forced endless retries and could never converge.
     all_open = policy._all_open_issues_fifo(repository, token)
-    restored = policy._restore_agentic_visibility(repository, token, all_open)
-    terminalized = policy._terminalize_non_actionable_issues(repository, token, all_open)
-    if terminalized:
-        all_open = policy._all_open_issues_fifo(repository, token)
-    released = agentic.release_ready_capability_dependencies(repository, token)
+    focused_chain = any(
+        SEQUENTIAL_FOCUS_LABEL in agentic.labels(issue)
+        and str(issue.get("state") or "").lower() != "closed"
+        and "genesis-verified" not in agentic.labels(issue)
+        for issue in all_open
+    )
 
-    # Reconcile/decompose multiple architecture Issues per recovery pass. One
-    # stale inferred target must not consume the whole cycle while newer work
-    # remains hidden. Keep this bounded to avoid an unbounded controller loop.
-    decomposition_steps: list[dict] = []
-    seen_decomposition_actions: set[tuple[str, int, str]] = set()
-    for _ in range(12):
-        step = policy._decompose_oldest_issue(repository, token, all_open)
-        key = (
-            str(step.get("status") or ""),
-            int(step.get("issue_number") or 0),
-            str(step.get("target") or step.get("previous_target") or ""),
-        )
-        if key in seen_decomposition_actions:
-            break
-        seen_decomposition_actions.add(key)
-        decomposition_steps.append(step)
-        if step.get("status") not in {"decomposed", "retargeted", "target_revoked", "routing_released"}:
-            break
-        all_open = policy._all_open_issues_fifo(repository, token)
-    decomposition = decomposition_steps[-1] if decomposition_steps else {"status": "idle"}
+    # The authoritative sequential chain always gets first service. Repository-
+    # wide cleanup/decomposition is maintenance, not a prerequisite to solving
+    # the one issue Genesis already owns. Running broad maintenance first made a
+    # simple handoff spend minutes scanning unrelated issues and allowed stale
+    # routing work to interfere with the focused parent/dependency chain.
+    if focused_chain:
+        restored: list[int] = []
+        terminalized: list[int] = []
+        released: list[int] = []
+        decomposition_steps: list[dict] = []
+        decomposition = {"status": "skipped", "reason": "sequential_focus_has_priority"}
+    else:
+        restored = policy._restore_agentic_visibility(repository, token, all_open)
+        terminalized = policy._terminalize_non_actionable_issues(repository, token, all_open)
+        if terminalized:
+            all_open = policy._all_open_issues_fifo(repository, token)
+        released = agentic.release_ready_capability_dependencies(repository, token)
+
+        # Reconcile/decompose architecture work only when Genesis is selecting a
+        # new authoritative chain. Once focus exists, target/routing maintenance
+        # cannot preempt that chain.
+        decomposition_steps = []
+        seen_decomposition_actions: set[tuple[str, int, str]] = set()
+        for _ in range(12):
+            step = policy._decompose_oldest_issue(repository, token, all_open)
+            key = (
+                str(step.get("status") or ""),
+                int(step.get("issue_number") or 0),
+                str(step.get("target") or step.get("previous_target") or ""),
+            )
+            if key in seen_decomposition_actions:
+                break
+            seen_decomposition_actions.add(key)
+            decomposition_steps.append(step)
+            if step.get("status") not in {"decomposed", "retargeted", "target_revoked", "routing_released"}:
+                break
+            all_open = policy._all_open_issues_fifo(repository, token)
+        decomposition = decomposition_steps[-1] if decomposition_steps else {"status": "idle"}
 
     active_before = _active_issue_numbers(repository, token)
     free_slots = max(0, MAX_PARALLEL - len(active_before))
