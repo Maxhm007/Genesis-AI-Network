@@ -9,6 +9,9 @@ from scripts.gene_continuous_work import run_step
 from .github_issue_authority_reconciler import reconcile_closed_github_issue_tasks
 from .github_issue_task_router import issue_authority_enabled, route_unbacked_tasks
 from .github_issue_terminal_reconciler import reconcile_terminal_github_issues
+from .architecture_extensions.architecture_route_gene_0_backlog_work_to_idle_gene_002_and_gene_003 import (
+    BacklogDelegationRouter,
+)
 
 
 DEFAULT_IDLE_DISCOVERY_BURST = 4
@@ -246,6 +249,18 @@ class GenePulse:
             )
 
         payload = run_step(self.logical_id)
+
+        delegation_router = BacklogDelegationRouter(self.root)
+        if self.logical_id == "gene-node-1":
+            payload["delegation_reclaimed"] = delegation_router.reclaim_expired()
+            payload["delegation_active"] = delegation_router.active()
+        elif self.logical_id in {"gene-node-2", "gene-node-3"}:
+            payload["delegated_work_inbox"] = [
+                message
+                for message in delegation_router.peer_network.receive_messages(self.logical_id)
+                if message.get("message_type") == "delegated_work_lease"
+            ]
+
         issue_sync_after = route_unbacked_tasks(self.root)
         payload["github_terminal_reconcile_before"] = terminal_reconcile_before
         payload["github_open_issue_backlog"] = backlog
