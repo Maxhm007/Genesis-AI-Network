@@ -343,6 +343,54 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
         body = str(issue.get("body") or "")
         issue_labels = agentic.labels(issue)
         explicit = agentic.explicit_target(body)
+
+        # Capability-growth Issues have one canonical implementation authority:
+        # the reusable capability builder. The blocked parent target is evidence,
+        # not a replacement write target. Never reroute capability work onto the
+        # parent file or the capability can no longer verify/release its parent.
+        if agentic.CAPABILITY_WORK_PREFIX in body:
+            capability_target = "genesis/github_issue_capability_builder.py"
+            if explicit != capability_target:
+                if explicit:
+                    new_body = re.sub(
+                        r"(?m)^- \*\*Target:\*\* `[^`]+`$",
+                        f"- **Target:** `{capability_target}`",
+                        body,
+                        count=1,
+                    )
+                else:
+                    new_body = body.rstrip() + f"\n- **Target:** `{capability_target}`\n"
+                agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": new_body})
+                for label in ("genesis-needs-routing", "genesis-blocked", "genesis-deferred", agentic.EXHAUSTED_LABEL):
+                    agentic.remove_label(repository, token, number, label)
+                agentic.request(
+                    repository,
+                    token,
+                    "POST",
+                    f"/issues/{number}/labels",
+                    {"labels": [agentic.AGENTIC_LABEL, "genesis-autonomous"]},
+                )
+                return {
+                    "status": "retargeted",
+                    "issue_number": number,
+                    "target": capability_target,
+                    "previous_target": explicit,
+                }
+            if "genesis-needs-routing" in issue_labels:
+                for label in ("genesis-needs-routing", "genesis-blocked", "genesis-deferred", agentic.EXHAUSTED_LABEL):
+                    agentic.remove_label(repository, token, number, label)
+                agentic.request(
+                    repository,
+                    token,
+                    "POST",
+                    f"/issues/{number}/labels",
+                    {"labels": [agentic.AGENTIC_LABEL, "genesis-autonomous"]},
+                )
+                return {
+                    "status": "routing_released",
+                    "issue_number": number,
+                    "target": capability_target,
+                }
         if explicit.startswith("genesis/architecture_extensions/"):
             repaired_body = _ensure_architecture_expansion_metadata(body, explicit)
             if repaired_body != body:
