@@ -537,6 +537,27 @@ def test_ready_capability_release_continues_to_dispatch_in_same_pass(monkeypatch
     )
 
 
+def test_durable_attempt_key_cannot_be_redispatched_after_duplicate_epochs(monkeypatch):
+    target = "genesis/example.py"
+    comments = [
+        {"body": "<!-- genesis-anti-stuck-attempt:{\"blocker\":\"\",\"gene\":\"Gene 0\",\"provider\":\"agentic-default\",\"strategy\":\"evidence_first\",\"target\":\"genesis/example.py\"} -->"},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first -->\nrepair status: `worker_failed_before_evidence`"},
+        {"body": "<!-- genesis-anti-stuck-state:same -->"},
+        {"body": "<!-- genesis-anti-stuck-state:same -->"},
+    ]
+    history = module.target_attempt_history(comments, target)
+    first = module.next_lane_strategy(
+        history,
+        provider="agentic-default",
+        gene="Gene 0",
+        target=target,
+        strategies=module.STRATEGIES,
+    )
+    assert first == "alternative_implementation"
+    duplicate = module.Attempt("evidence_first", "agentic-default", "Gene 0", target)
+    assert duplicate.material_key in {attempt.material_key for attempt in history}
+
+
 def test_deepseek_exhaustion_is_terminal_for_provider_epoch(monkeypatch):
     issue = _issue(905)
     target = "genesis/example.py"
