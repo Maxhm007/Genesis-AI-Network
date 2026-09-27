@@ -124,3 +124,17 @@ def test_deepseek_rejects_blocked_issue():
     value, detail = score(row)
     assert value < 0
     assert detail["reason"] == "conflicting_or_unsuitable_label"
+
+
+def test_target_from_prefers_explicit_issue_target_over_title_blocked_target():
+    row = issue(
+        973,
+        "[Genesis Capability] Repair scripts/capability_issue_priority_dispatch.py blocker: strategy_set_exhausted",
+        (
+            "- **Blocked target:** `scripts/capability_issue_priority_dispatch.py`\n"
+            "- **Target:** `genesis/github_issue_capability_builder.py`\n"
+        ),
+        ["genesis-autonomous", "agentic-lab", "genesis-capability-gap"],
+    )
+
+    assert target_from(row) == "genesis/github_issue_capability_builder.py"
