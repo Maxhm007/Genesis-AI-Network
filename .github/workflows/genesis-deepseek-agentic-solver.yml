@@ -25,7 +25,10 @@ permissions:
 
 concurrency:
   group: genesis-deepseek-agentic-solver
-  cancel-in-progress: false
+  # Sequential Genesis has exactly one live DeepSeek handoff. Supersede stale
+  # queued/running handoffs so an old pre-fix run cannot clear the current
+  # reservation before the newest controller decision executes.
+  cancel-in-progress: true
 
 env:
   PYTHONPATH: ${{ github.workspace }}
