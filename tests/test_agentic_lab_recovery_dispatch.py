@@ -682,3 +682,41 @@ def test_cross_epoch_more_methods_keeps_lane_for_next_strategy(monkeypatch):
     decision = module.anti_stuck_decision(history)
     assert decision.action == "continue"
     assert decision.reason == "same_lane_methods_remain"
+
+
+
+def test_live_priority_order_prefers_shared_capability_blocker(monkeypatch):
+    capability = _issue(200, body="<!-- genesis-capability-work:abc -->")
+    normal = _issue(100)
+    monkeypatch.setattr(
+        module,
+        "issue_comments",
+        lambda repository, token, number: (
+            [
+                {"body": "<!-- genesis-capability-parent:10 -->"},
+                {"body": "<!-- genesis-capability-parent:11 -->"},
+            ]
+            if number == 200
+            else []
+        ),
+    )
+
+    ordered = module._live_priority_order("owner/repo", "token", [normal, capability])
+
+    assert [issue["number"] for issue in ordered] == [200, 100]
+
+
+def test_reserve_releases_ready_capability_parents_before_selection(monkeypatch):
+    calls = []
+    monkeypatch.setattr(
+        module,
+        "release_ready_capability_dependencies",
+        lambda repository, token: calls.append("release") or [],
+    )
+    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [])
+    monkeypatch.setattr(module, "_live_priority_order", lambda repository, token, issues: issues)
+
+    result = module.reserve_and_dispatch("owner/repo", "token")
+
+    assert calls == ["release"]
+    assert result["status"] == "idle"
