@@ -19,7 +19,6 @@ DEEPSEEK_RESULT_PREFIX = "<!-- genesis-deepseek-result:"
 DEFAULT_PROVIDER_SWITCH_AFTER = 2
 DEFAULT_CAPABILITY_AFTER_DISTINCT_FAILURES = 5
 IMMEDIATE_LANE_SWITCH_RESULTS = {
-    "strategy_requires_more_methods",
     "worker_failed_before_evidence",
     "retry_pending_capability",
 }
@@ -307,6 +306,13 @@ def anti_stuck_decision(
     failed_lanes = {(attempt.provider.lower(), attempt.gene.lower()) for attempt in failures}
     latest_failure = failures[-1].result.strip().lower() if failures else ""
     force_lane_switch = latest_failure in IMMEDIATE_LANE_SWITCH_RESULTS
+
+    # A strategy asking for "more methods" is not evidence that the provider
+    # itself is exhausted. Keep the same lane long enough to try the next
+    # materially different strategy; otherwise every first evidence-first miss
+    # prematurely jumps providers and strands alternative/reframe strategies.
+    if latest_failure == "strategy_requires_more_methods":
+        return AntiStuckDecision("continue", "same_lane_methods_remain")
 
     if len(distinct_failure_keys) < int(provider_switch_after) and not force_lane_switch:
         return AntiStuckDecision("continue", "strategy_budget_available")
