@@ -7,7 +7,7 @@ on:
 permissions:
   actions: write
   contents: read
-  issues: read
+  issues: write
 
 concurrency:
   group: genesis-capability-priority
