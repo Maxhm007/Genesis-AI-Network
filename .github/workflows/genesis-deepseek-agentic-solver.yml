@@ -8,6 +8,11 @@ on:
         required: false
         type: string
         default: ''
+      target:
+        description: Exact target reserved by Agentic Lab for an explicit handoff
+        required: false
+        type: string
+        default: ''
       strategy:
         description: Strategy reserved by Agentic Lab for an explicit handoff
         required: false
@@ -62,6 +67,7 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_ISSUE: ${{ inputs.issue_number }}
+          RESERVED_TARGET: ${{ inputs.target }}
           RESERVED_STRATEGY: ${{ inputs.strategy }}
           RESERVED_STATE_TOKEN: ${{ inputs.state_token }}
         shell: bash
@@ -78,15 +84,9 @@ jobs:
             gh issue list --repo "$GITHUB_REPOSITORY" --state open --limit 100 --json number,title,body,labels > /tmp/deepseek-open.json
           fi
 
-          if [[ -n "$REQUESTED_ISSUE" && -n "$RESERVED_STRATEGY" ]]; then
+          if [[ -n "$REQUESTED_ISSUE" && -n "$RESERVED_STRATEGY" && -n "$RESERVED_TARGET" ]]; then
             number="$REQUESTED_ISSUE"
-            target=$(python - <<'PY'
-          import json
-          from scripts.deepseek_agentic_selector import target_from
-          issue = json.load(open("/tmp/deepseek-open.json", encoding="utf-8"))[0]
-          print(target_from(issue))
-          PY
-          )
+            target="$RESERVED_TARGET"
             score="reserved"
           elif [[ -n "$REQUESTED_ISSUE" ]]; then
             selection=$(python scripts/deepseek_agentic_selector.py --issues-json /tmp/deepseek-open.json --allow-agentic-handoff)
