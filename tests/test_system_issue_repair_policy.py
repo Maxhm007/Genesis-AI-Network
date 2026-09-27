@@ -90,24 +90,29 @@ def test_successor_keeps_explicit_script_target_before_required_strategy(tmp_pat
     assert context == grounded
 
 
-def test_script_path_requires_privileged_normalization(tmp_path: Path) -> None:
-    with pytest.raises(RuntimeError, match="privileged autonomy lane"):
-        _normalize_with_privileged_scripts(tmp_path, "scripts/helper.py", allow_privileged=False)
-
+def test_ordinary_script_path_is_allowed_but_protected_script_requires_privilege(tmp_path: Path) -> None:
     assert (
-        _normalize_with_privileged_scripts(tmp_path, "scripts/helper.py", allow_privileged=True)
+        _normalize_with_privileged_scripts(tmp_path, "scripts/helper.py", allow_privileged=False)
         == "scripts/helper.py"
     )
 
+    with pytest.raises(RuntimeError, match="privileged autonomy lane"):
+        _normalize_with_privileged_scripts(tmp_path, "scripts/secret_guard.py", allow_privileged=False)
 
-def test_script_proposal_gets_unchanged_privilege_anchor(tmp_path: Path) -> None:
+    assert (
+        _normalize_with_privileged_scripts(tmp_path, "scripts/secret_guard.py", allow_privileged=True)
+        == "scripts/secret_guard.py"
+    )
+
+
+def test_protected_script_proposal_gets_unchanged_privilege_anchor(tmp_path: Path) -> None:
     _write(tmp_path, PRIVILEGE_ANCHOR, "name: Genesis GitHub Issue Autorepair\n")
     executor = SimpleNamespace(root=tmp_path)
     proposal = {
         "title": "Genesis issue repair #273",
         "files": {
-            "scripts/github_issue_autorepair.py": "VALUE = 2\n",
-            "tests/test_github_issue_autorepair.py": "def test_value(): assert True\n",
+            "scripts/secret_guard.py": "VALUE = 2\n",
+            "tests/test_secret_guard.py": "def test_value(): assert True\n",
         },
     }
 
@@ -116,8 +121,8 @@ def test_script_proposal_gets_unchanged_privilege_anchor(tmp_path: Path) -> None
     assert anchored is not proposal
     assert anchored["files"][PRIVILEGE_ANCHOR] == "name: Genesis GitHub Issue Autorepair\n"
     assert proposal["files"].keys() == {
-        "scripts/github_issue_autorepair.py",
-        "tests/test_github_issue_autorepair.py",
+        "scripts/secret_guard.py",
+        "tests/test_secret_guard.py",
     }
 
 
