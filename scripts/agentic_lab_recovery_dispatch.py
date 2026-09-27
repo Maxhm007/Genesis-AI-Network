@@ -951,17 +951,65 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             provider = "qwen3"
             strategy = "qwen3_fallback"
         elif policy.action == "switch_lane" and policy.provider == "deepseek":
-            # DeepSeek's selector has its own bounded strategy epoch. Once it
-            # reports that epoch exhausted, redispatching the provider cannot
-            # create new evidence and only floods the Issue with handoff
-            # comments. Treat that marker as durable provider exhaustion until
-            # a capability release changes the material state.
+            # A DeepSeek handoff is useful only if the worker actually accepts
+            # ownership. Repeated lane-switch comments without a matching
+            # DeepSeek attempt are durable evidence that the transport/workflow
+            # is unavailable for this material state. Continue the SAME Issue
+            # through the next unused standard Agentic strategy instead of
+            # freezing or creating another dependency.
             release_index = _latest_release_index(comments)
+            recent_comments = comments[release_index + 1 :]
+            deepseek_switches = sum(
+                "<!-- genesis-anti-stuck-lane-switch:deepseek -->" in str(row.get("body") or "")
+                for row in recent_comments
+            )
+            deepseek_attempts = sum(
+                "<!-- genesis-deepseek-attempt:" in str(row.get("body") or "")
+                for row in recent_comments
+            )
             deepseek_exhausted = any(
                 "<!-- genesis-deepseek-epoch-exhausted:" in str(row.get("body") or "")
-                for row in comments[release_index + 1 :]
+                for row in recent_comments
             )
-            if deepseek_exhausted:
+            deepseek_transport_failed = deepseek_switches > deepseek_attempts
+
+            if deepseek_transport_failed:
+                remove_label(repository, token, number, DEEPSEEK_HANDOFF_LABEL)
+                provider = "agentic-default"
+                gene = "Gene 0"
+                workflow = "genesis-agentic-strategy-worker.yml"
+                strategy = next_lane_strategy(
+                    target_attempt_history(comments, target),
+                    provider=provider,
+                    gene=gene,
+                    target=target,
+                    strategies=STRATEGIES,
+                )
+                if not strategy:
+                    result = pause_for_capability(
+                        repository,
+                        token,
+                        issue,
+                        comments,
+                        target,
+                        "standard_strategy_epoch_exhausted_after_deepseek_transport_failure",
+                    )
+                    print(json.dumps(result, sort_keys=True))
+                    return result
+                _post_once(
+                    repository,
+                    token,
+                    number,
+                    comments,
+                    "<!-- genesis-deepseek-transport-bypass -->",
+                    (
+                        "<!-- genesis-deepseek-transport-bypass -->\n"
+                        "Genesis detected DeepSeek handoff requests without an accepted DeepSeek attempt. "
+                        f"The same Issue will continue through standard Agentic strategy `{strategy}`; "
+                        "no successor Issue is created and the authoritative chain is unchanged."
+                    ),
+                )
+            elif deepseek_exhausted:
                 result = pause_for_capability(
                     repository,
                     token,
@@ -972,27 +1020,28 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
                 )
                 print(json.dumps(result, sort_keys=True))
                 return result
-            provider = "deepseek"
-            gene = "Gene 003"
-            workflow = "genesis-deepseek-agentic-solver.yml"
-            strategy = next_lane_strategy(
-                history,
-                provider=provider,
-                gene=gene,
-                target=target,
-                strategies=("evidence_first", "alternative_implementation", "diagnostic_reframe"),
-            )
-            if not strategy:
-                result = pause_for_capability(
-                    repository,
-                    token,
-                    issue,
-                    comments,
-                    target,
-                    "deepseek_strategy_epoch_exhausted",
+            else:
+                provider = "deepseek"
+                gene = "Gene 003"
+                workflow = "genesis-deepseek-agentic-solver.yml"
+                strategy = next_lane_strategy(
+                    history,
+                    provider=provider,
+                    gene=gene,
+                    target=target,
+                    strategies=("evidence_first", "alternative_implementation", "diagnostic_reframe"),
                 )
-                print(json.dumps(result, sort_keys=True))
-                return result
+                if not strategy:
+                    result = pause_for_capability(
+                        repository,
+                        token,
+                        issue,
+                        comments,
+                        target,
+                        "deepseek_strategy_epoch_exhausted",
+                    )
+                    print(json.dumps(result, sort_keys=True))
+                    return result
         else:
             strategy = next_lane_strategy(
                 history,
