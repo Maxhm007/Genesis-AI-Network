@@ -329,17 +329,29 @@ def test_recovery_engine_generation_changes_when_engine_changes(tmp_path):
     assert after != before
 
 
-def test_recovery_material_state_token_preserves_history_on_engine_change(tmp_path):
-    for relative in module.RECOVERY_ENGINE_PATHS:
+def test_recovery_material_state_token_rearms_on_repair_execution_change(tmp_path):
+    for relative in set(module.RECOVERY_ENGINE_PATHS) | set(module.REPAIR_EXECUTION_PATHS):
         path = tmp_path / relative
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text("baseline\n", encoding="utf-8")
     issue = {"body": "task", "number": 99}
     comments = []
     before = module.recovery_material_state_token(issue, "", comments, root=tmp_path)
-    (tmp_path / "genesis/coding.py").write_text("new engine\n", encoding="utf-8")
-    after = module.recovery_material_state_token(issue, "", comments, root=tmp_path)
-    assert after == before
+
+    (tmp_path / "genesis/coding.py").write_text("new repair execution\n", encoding="utf-8")
+    after_execution_change = module.recovery_material_state_token(issue, "", comments, root=tmp_path)
+    assert after_execution_change != before
+
+    (tmp_path / "genesis/coding.py").write_text("baseline\n", encoding="utf-8")
+    restored = module.recovery_material_state_token(issue, "", comments, root=tmp_path)
+    assert restored == before
+
+    (tmp_path / "scripts/agentic_lab_recovery_dispatch.py").write_text(
+        "controller-only change\n",
+        encoding="utf-8",
+    )
+    after_controller_change = module.recovery_material_state_token(issue, "", comments, root=tmp_path)
+    assert after_controller_change == before
 
 
 def test_release_ready_capability_dependencies_preflight(monkeypatch):
