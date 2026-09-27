@@ -155,10 +155,12 @@ def _normalize_with_privileged_scripts(
     allow_privileged: bool = False,
 ) -> str:
     normalized = str(path).replace("\\", "/").lstrip("./")
-    if (normalized.startswith("scripts/")
-        and normalized not in selfdev_module.ALLOWED_SCRIPT_PATHS
-        and not allow_privileged):
-        raise RuntimeError("script changes require the privileged autonomy lane")
+    if (
+        normalized.startswith("scripts/")
+        and normalized in selfdev_module.PROTECTED_PATHS
+        and not allow_privileged
+    ):
+        raise RuntimeError("protected script changes require the privileged autonomy lane")
     return _ORIGINAL_NORMALIZE(root, path, allow_privileged=allow_privileged)
 
 
@@ -167,8 +169,7 @@ def _proposal_with_privilege_anchor(executor: SelfDevelopmentExecutor, proposal:
         return None
     raw_files = dict(proposal.get("files", {}))
     if not any(
-        str(path).replace("\\", "/").lstrip("./").startswith("scripts/")
-        and str(path).replace("\\", "/").lstrip("./") not in selfdev_module.ALLOWED_SCRIPT_PATHS
+        str(path).replace("\\", "/").lstrip("./") in selfdev_module.PROTECTED_PATHS
         for path in raw_files
     ):
         return proposal
