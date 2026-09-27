@@ -32,6 +32,7 @@ AGENTIC_LABEL = "agentic-lab"
 WAITING_CAPABILITY_LABEL = "genesis-waiting-capability"
 CAPABILITY_GAP_LABEL = "genesis-capability-gap"
 NEEDS_HUMAN_LABEL = "genesis-needs-human"
+DEEPSEEK_HANDOFF_LABEL = "genesis-deepseek-handoff-pending"
 EXHAUSTED_LABEL = "genesis-solver-exhausted"
 ACTIVE_LABELS = {
     "genesis-repair-in-progress",
@@ -1061,7 +1062,16 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         for label in ("genesis-deferred", "genesis-blocked", EXHAUSTED_LABEL, NEEDS_HUMAN_LABEL):
             remove_label(repository, token, number, label)
         claim_labels = ["genesis-autonomous", AGENTIC_LABEL]
-        if provider != "deepseek":
+        if provider == "deepseek":
+            ensure_label(
+                repository,
+                token,
+                DEEPSEEK_HANDOFF_LABEL,
+                "0e8a16",
+                "DeepSeek handoff dispatched and awaiting accept/reject acknowledgement",
+            )
+            claim_labels.insert(0, DEEPSEEK_HANDOFF_LABEL)
+        else:
             claim_labels.insert(0, "genesis-repair-in-progress")
         request(
             repository,
