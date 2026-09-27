@@ -494,7 +494,10 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
             name=os.environ.get("GENESIS_PROVIDER_NAME", "genesis-github-capability-repair"),
             timeout=timeout,
         )
-        return EvidenceFirstRepairFollowupProvider(Path(root).resolve(), target_path, delegate)
+        # Capability growth changes the builder, but the evidence must come from
+        # the blocked parent target.  Using the builder itself as evidence made
+        # the model diagnose the wrong file and repeatedly exhaust strategies.
+        return EvidenceFirstRepairFollowupProvider(Path(root).resolve(), blocked_target, delegate)
 
     @classmethod
     def _architecture_expansion_provider(
