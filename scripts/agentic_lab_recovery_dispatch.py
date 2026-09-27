@@ -1144,11 +1144,85 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
                 dispatch_path,
                 {"ref": "main", "inputs": dispatch_inputs},
             )
-        except Exception:
-            remove_label(repository, token, number, "genesis-repair-in-progress")
-            remove_label(repository, token, number, "genesis-autonomous")
-            request(repository, token, "POST", f"/issues/{number}/labels", {"labels": [EXHAUSTED_LABEL, AGENTIC_LABEL]})
-            raise
+        except Exception as exc:
+            if workflow == "genesis-deepseek-agentic-solver.yml":
+                # A provider workflow failure must not freeze the authoritative
+                # issue chain. Release the DeepSeek handoff and immediately use
+                # the next unused standard Agentic strategy on this same Issue.
+                remove_label(repository, token, number, DEEPSEEK_HANDOFF_LABEL)
+                fallback_history = target_attempt_history(
+                    issue_comments(repository, token, number),
+                    target,
+                )
+                fallback_strategy = next_lane_strategy(
+                    fallback_history,
+                    provider="agentic-default",
+                    gene="Gene 0",
+                    target=target,
+                    strategies=STRATEGIES,
+                )
+                if fallback_strategy:
+                    request(
+                        repository,
+                        token,
+                        "POST",
+                        f"/issues/{number}/labels",
+                        {"labels": ["genesis-repair-in-progress", "genesis-autonomous", AGENTIC_LABEL]},
+                    )
+                    fallback_candidate = Attempt(
+                        strategy=fallback_strategy,
+                        provider="agentic-default",
+                        gene="Gene 0",
+                        target=target,
+                    )
+                    request(
+                        repository,
+                        token,
+                        "POST",
+                        f"/issues/{number}/comments",
+                        {
+                            "body": (
+                                f"{attempt_marker(fallback_candidate)}\n"
+                                f"{STRATEGY_MARKER_PREFIX}{fallback_strategy} -->\n"
+                                "<!-- genesis-deepseek-handoff-fallback -->\n"
+                                "DeepSeek dispatch could not start, so Genesis immediately "
+                                f"continued the same Issue through standard Agentic strategy `{fallback_strategy}` "
+                                "instead of leaving the chain pending."
+                            )
+                        },
+                    )
+                    request(
+                        repository,
+                        token,
+                        "POST",
+                        "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches",
+                        {
+                            "ref": "main",
+                            "inputs": {
+                                "issue_number": str(number),
+                                "strategy": fallback_strategy,
+                            },
+                        },
+                    )
+                    provider = "agentic-default"
+                    gene = "Gene 0"
+                    workflow = "genesis-agentic-strategy-worker.yml"
+                    strategy = fallback_strategy
+                else:
+                    remove_label(repository, token, number, "genesis-autonomous")
+                    request(
+                        repository,
+                        token,
+                        "POST",
+                        f"/issues/{number}/labels",
+                        {"labels": [EXHAUSTED_LABEL, AGENTIC_LABEL]},
+                    )
+                    raise
+            else:
+                remove_label(repository, token, number, "genesis-repair-in-progress")
+                remove_label(repository, token, number, "genesis-autonomous")
+                request(repository, token, "POST", f"/issues/{number}/labels", {"labels": [EXHAUSTED_LABEL, AGENTIC_LABEL]})
+                raise
 
         result = {
             "status": "dispatched",
