@@ -71,8 +71,48 @@ def open_issues(repository: str, token: str) -> list[dict]:
 
 
 def issue_comments(repository: str, token: str, number: int) -> list[dict]:
-    rows = request(repository, token, "GET", f"/issues/{number}/comments?per_page=100") or []
-    return [row for row in rows if isinstance(row, dict)]
+    rows: list[dict] = []
+    for page in range(1, 101):
+        batch = request(
+            repository,
+            token,
+            "GET",
+            f"/issues/{number}/comments?per_page=100&page={page}",
+        ) or []
+        if not isinstance(batch, list):
+            raise RuntimeError("GitHub issue comments response was not a list")
+        rows.extend(row for row in batch if isinstance(row, dict))
+        if len(batch) < 100:
+            break
+    return rows
+
+
+def dependency_unlock_counts(
+    issues: list[dict],
+    comments_by_issue: dict[int, list[dict]],
+) -> dict[int, int]:
+    """Count live parent Issues unlocked by each capability Issue."""
+    parents_by_capability: dict[int, set[int]] = {}
+    dependency_re = re.compile(r"genesis-capability-dependency:(\d+)")
+    release_re = re.compile(r"genesis-agentic-capability-release:(\d+)")
+
+    for issue in issues:
+        parent = int(issue.get("number") or 0)
+        if parent <= 0 or str(issue.get("state") or "open").lower() == "closed":
+            continue
+        active: set[int] = set()
+        corpus = [str(issue.get("body") or "")]
+        corpus.extend(str(row.get("body") or "") for row in comments_by_issue.get(parent, []))
+        for text in corpus:
+            for match in dependency_re.finditer(text):
+                active.add(int(match.group(1)))
+            for match in release_re.finditer(text):
+                active.discard(int(match.group(1)))
+        for capability in active:
+            if capability > 0 and capability != parent:
+                parents_by_capability.setdefault(capability, set()).add(parent)
+
+    return {number: len(parents) for number, parents in parents_by_capability.items()}
 
 
 def latest_requeue_marker(comments: list[dict]) -> tuple[str, str]:
@@ -145,16 +185,23 @@ def _retry_depth(comments: list[dict]) -> int:
     return markers
 
 
-def score_issue(issue: dict, comments: list[dict], *, now: datetime | None = None) -> dict:
+def score_issue(
+    issue: dict,
+    comments: list[dict],
+    *,
+    now: datetime | None = None,
+    blocked_issues: int | None = None,
+) -> dict:
     now = now or datetime.now(timezone.utc)
     issue_labels = labels(issue)
     retry_depth = _retry_depth(comments)
     owner_priority = 1.0 if issue_labels & {"owner-priority", "owner_priority", "user-priority"} else 0.0
     reuse_value = 0.9 if issue_labels & {"genesis-capability", "genesis-capability-blocker", "capability-blocker"} else 0.7
     success_probability = max(0.25, 0.88 - 0.08 * retry_depth)
+    unlock_count = _blocked_issue_count(issue) if blocked_issues is None else max(0, int(blocked_issues))
     value = issue_value_score(
         severity=_severity(issue_labels),
-        blocked_issues=_blocked_issue_count(issue),
+        blocked_issues=unlock_count,
         age_hours=_age_hours(issue, now),
         reuse_value=reuse_value,
         owner_priority=owner_priority,
@@ -166,14 +213,27 @@ def score_issue(issue: dict, comments: list[dict], *, now: datetime | None = Non
         "score": value.score,
         "breakdown": value.breakdown,
         "retry_depth": retry_depth,
-        "blocked_issues": _blocked_issue_count(issue),
+        "blocked_issues": unlock_count,
     }
 
 
 def prioritize(repository: str, token: str) -> dict:
-    issues = capability_issues(repository, token)
+    all_open = open_issues(repository, token)
+    issues = [
+        issue
+        for issue in all_open
+        if CAPABILITY_WORK_PREFIX in str(issue.get("body") or "")
+        and "genesis-verified" not in labels(issue)
+    ]
     if not issues:
         return {"status": "idle", "reason": "no_open_capability_issue"}
+
+    comments_by_issue = {
+        int(issue.get("number") or 0): issue_comments(repository, token, int(issue.get("number") or 0))
+        for issue in all_open
+        if int(issue.get("number") or 0) > 0
+    }
+    unlock_counts = dependency_unlock_counts(all_open, comments_by_issue)
 
     current_generation = engine_generation()
     eligible: list[tuple[dict, list[dict]]] = []
@@ -181,7 +241,7 @@ def prioritize(repository: str, token: str) -> dict:
 
     for issue in issues:
         number = int(issue.get("number") or 0)
-        comments = issue_comments(repository, token, number)
+        comments = comments_by_issue.get(number, [])
         if quarantined_for_current_generation(comments, current_generation):
             quarantined.append(number)
             continue
@@ -207,7 +267,18 @@ def prioritize(repository: str, token: str) -> dict:
             request(repository, token, "POST", f"/issues/{number}/labels", {"labels": missing})
 
     now = datetime.now(timezone.utc)
-    scored = [(issue, score_issue(issue, comments, now=now)) for issue, comments in eligible]
+    scored = [
+        (
+            issue,
+            score_issue(
+                issue,
+                comments,
+                now=now,
+                blocked_issues=unlock_counts.get(int(issue.get("number") or 0), 0),
+            ),
+        )
+        for issue, comments in eligible
+    ]
     scored.sort(
         key=lambda row: (
             -float(row[1]["score"]),
