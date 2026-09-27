@@ -157,3 +157,34 @@ def test_capability_dependency_is_ranked_before_exhausted_parent(monkeypatch):
 
     ordered = module._parallel_routable_issues("owner/repo", "token")
     assert [row["number"] for row in ordered[:2]] == [951, 857]
+
+
+def test_sequential_focus_executes_unresolved_capability_dependency(monkeypatch):
+    parent = _issue(
+        857,
+        "2026-09-18T00:00:00Z",
+        labels=("genesis-autonomous", "agentic-lab", "genesis-sequential-focus", "genesis-waiting-capability"),
+        body="- **Target:** `scripts/capability_issue_priority_dispatch.py`",
+    )
+    capability = _issue(
+        973,
+        "2026-09-27T15:42:00Z",
+        labels=("genesis-autonomous", "agentic-lab", "genesis-capability-gap"),
+        body="<!-- genesis-capability-work:abc -->\n- **Target:** `genesis/github_issue_capability_builder.py`",
+    )
+
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [parent, capability])
+    monkeypatch.setattr(
+        module.policy,
+        "_all_issue_comments",
+        lambda repository, token, number: (
+            [{"body": "<!-- genesis-capability-dependency:973 -->"}] if number == 857 else []
+        ),
+    )
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
+
+    selected = module._sequential_routable_issues("owner/repo", "token")
+
+    assert [row["number"] for row in selected] == [973]
+    assert "genesis-sequential-focus" in {row["name"] for row in parent["labels"]}
+    assert "genesis-sequential-focus" not in {row["name"] for row in capability["labels"]}
