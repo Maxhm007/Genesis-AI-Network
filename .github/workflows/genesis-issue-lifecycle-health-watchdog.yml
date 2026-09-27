@@ -3,7 +3,7 @@ name: Genesis Issue Lifecycle Health Watchdog
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/15 * * * *'
+    - cron: '*/5 * * * *'
   push:
     branches: [main]
     paths:
@@ -12,6 +12,7 @@ on:
       - .github/workflows/genesis-issue-lifecycle-health-watchdog.yml
       - .github/workflows/genesis-issue-opening-manager.yml
       - .github/workflows/genesis-issue-closure-manager.yml
+      - .github/workflows/genesis-agentic-lab-recovery.yml
 
 permissions:
   actions: write
