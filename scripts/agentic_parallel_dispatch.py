@@ -248,6 +248,7 @@ def _active_issue_numbers(repository: str, token: str) -> list[int]:
     active_labels = set(agentic.ACTIVE_LABELS) | {
         "genesis-claimed",
         "genesis-deepseek-working",
+        "genesis-deepseek-handoff-pending",
     }
     for issue in policy._all_open_issues_fifo(repository, token):
         if agentic.labels(issue) & active_labels:
