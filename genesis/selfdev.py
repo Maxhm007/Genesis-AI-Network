@@ -12,8 +12,16 @@ from .autonomy_guard import AutonomyGuard
 from .autonomy_proof import AutonomyProofLedger
 
 
-PROTECTED_PATHS = {"GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"}
-ALLOWED_PREFIXES = ("genesis/", "tests/", "docs/", "config/", "desktop/", "mobile/", ".github/")
+PROTECTED_PATHS = {
+    "GENESIS_CONSTITUTION.md",
+    "GENESIS_BLOCK.json",
+    "scripts/secret_guard.py",
+    "scripts/privileged_change_gate.py",
+    "scripts/verify_validator_votes.py",
+    "scripts/action_repair_guard.py",
+    "scripts/issue_acceptance_guard.py",
+}
+ALLOWED_PREFIXES = ("genesis/", "scripts/", "tests/", "docs/", "config/", "desktop/", "mobile/", ".github/")
 ALLOWED_SCRIPT_PATHS = frozenset({
     "scripts/self_evaluation_dashboard.py",
     "scripts/dashboard_navigation_fallback.py",
