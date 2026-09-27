@@ -357,6 +357,22 @@ def _close_if_current_main_satisfies(issue_number: int, repository: str, root: P
     closed = base._api_json("PATCH", issue_url, {"state": "closed", "state_reason": "completed"})
     if not isinstance(closed, dict) or str(closed.get("state") or "").lower() != "closed":
         return None
+
+    # Capability completion is a lifecycle hinge for its waiting parents.
+    # Wake the single authoritative recovery controller immediately instead of
+    # relying only on eventual workflow_run delivery.
+    if satisfaction.get("task_type") == "capability_growth":
+        try:
+            base._api_json(
+                "POST",
+                f"https://api.github.com/repos/{repository}/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
+                {"ref": "main"},
+            )
+        except Exception:
+            # Closure evidence remains authoritative; FIFO/workflow_run recovery
+            # is the fallback wake-up path if dispatch is temporarily unavailable.
+            pass
+
     return {
         "status": "completed",
         "reason": "current_main_already_satisfies_issue",
