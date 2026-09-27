@@ -93,12 +93,19 @@ def issue_comments(repository: str, token: str, number: int) -> list[dict]:
     return rows
 
 
-def dependency_unlock_counts(
+def dependency_graph(
     issues: list[dict],
     comments_by_issue: dict[int, list[dict]],
-) -> dict[int, int]:
-    """Count live parent Issues unlocked by each capability Issue."""
+) -> dict:
+    """Build the active parent->capability graph and report invalid/cyclic edges."""
+    issue_numbers = {
+        int(issue.get("number") or 0)
+        for issue in issues
+        if int(issue.get("number") or 0) > 0
+    }
+    dependencies_by_parent: dict[int, set[int]] = {}
     parents_by_capability: dict[int, set[int]] = {}
+    invalid_edges: list[tuple[int, int, str]] = []
     dependency_re = re.compile(r"genesis-capability-dependency:(\d+)")
     release_re = re.compile(r"genesis-agentic-capability-release:(\d+)")
 
@@ -114,11 +121,103 @@ def dependency_unlock_counts(
                 active.add(int(match.group(1)))
             for match in release_re.finditer(text):
                 active.discard(int(match.group(1)))
-        for capability in active:
-            if capability > 0 and capability != parent:
-                parents_by_capability.setdefault(capability, set()).add(parent)
+        for capability in sorted(active):
+            if capability <= 0:
+                invalid_edges.append((parent, capability, "invalid_number"))
+                continue
+            if capability == parent:
+                invalid_edges.append((parent, capability, "self_cycle"))
+                continue
+            if capability not in issue_numbers:
+                invalid_edges.append((parent, capability, "missing_capability"))
+                continue
+            dependencies_by_parent.setdefault(parent, set()).add(capability)
+            parents_by_capability.setdefault(capability, set()).add(parent)
 
-    return {number: len(parents) for number, parents in parents_by_capability.items()}
+    cycles: list[tuple[int, ...]] = []
+    visiting: set[int] = set()
+    visited: set[int] = set()
+    stack: list[int] = []
+
+    def walk(node: int) -> None:
+        if node in visited:
+            return
+        if node in visiting:
+            try:
+                start = stack.index(node)
+            except ValueError:
+                start = 0
+            cycle = tuple(stack[start:] + [node])
+            if cycle and cycle not in cycles:
+                cycles.append(cycle)
+            return
+        visiting.add(node)
+        stack.append(node)
+        for child in sorted(dependencies_by_parent.get(node, ())):
+            walk(child)
+        stack.pop()
+        visiting.discard(node)
+        visited.add(node)
+
+    for node in sorted(dependencies_by_parent):
+        walk(node)
+
+    cyclic_edges = {
+        (cycle[i], cycle[i + 1])
+        for cycle in cycles
+        for i in range(len(cycle) - 1)
+    }
+    if cyclic_edges:
+        for parent, capability in sorted(cyclic_edges):
+            dependencies_by_parent.get(parent, set()).discard(capability)
+            parents_by_capability.get(capability, set()).discard(parent)
+            invalid_edges.append((parent, capability, "cycle"))
+
+    parents_by_capability = {
+        capability: parents
+        for capability, parents in parents_by_capability.items()
+        if parents
+    }
+    dependencies_by_parent = {
+        parent: dependencies
+        for parent, dependencies in dependencies_by_parent.items()
+        if dependencies
+    }
+    return {
+        "dependencies_by_parent": dependencies_by_parent,
+        "parents_by_capability": parents_by_capability,
+        "invalid_edges": invalid_edges,
+        "cycles": cycles,
+    }
+
+
+def dependency_unlock_counts(
+    issues: list[dict],
+    comments_by_issue: dict[int, list[dict]],
+) -> dict[int, int]:
+    graph = dependency_graph(issues, comments_by_issue)
+    return {
+        number: len(parents)
+        for number, parents in graph["parents_by_capability"].items()
+    }
+
+
+def _parent_priority(issue: dict) -> float:
+    issue_labels = labels(issue)
+    if issue_labels & {"owner-priority", "owner_priority", "user-priority", "critical", "severity-critical"}:
+        return 1.0
+    if issue_labels & {"priority-high", "high", "severity-high"}:
+        return 0.8
+    if issue_labels & {"priority-low", "low", "severity-low"}:
+        return 0.25
+    return 0.5
+
+
+def _expected_reuse(unlock_count: int, parent_priorities: list[float]) -> float:
+    if unlock_count <= 0:
+        return 0.35
+    priority_bonus = max(parent_priorities or [0.0])
+    return min(1.0, 0.55 + min(unlock_count, 8) * 0.05 + priority_bonus * 0.1)
 
 
 def latest_requeue_marker(comments: list[dict]) -> tuple[str, str]:
@@ -197,12 +296,21 @@ def score_issue(
     *,
     now: datetime | None = None,
     blocked_issues: int | None = None,
+    parent_priority: float = 0.0,
+    expected_reuse: float | None = None,
 ) -> dict:
     now = now or datetime.now(timezone.utc)
     issue_labels = labels(issue)
     retry_depth = _retry_depth(comments)
-    owner_priority = 1.0 if issue_labels & {"owner-priority", "owner_priority", "user-priority"} else 0.0
-    reuse_value = 0.9 if issue_labels & {"genesis-capability", "genesis-capability-blocker", "capability-blocker"} else 0.7
+    owner_priority = max(
+        1.0 if issue_labels & {"owner-priority", "owner_priority", "user-priority"} else 0.0,
+        max(0.0, min(1.0, float(parent_priority))),
+    )
+    reuse_value = (
+        max(0.0, min(1.0, float(expected_reuse)))
+        if expected_reuse is not None
+        else (0.9 if issue_labels & {"genesis-capability", "genesis-capability-blocker", "capability-blocker"} else 0.7)
+    )
     success_probability = max(0.25, 0.88 - 0.08 * retry_depth)
     unlock_count = _blocked_issue_count(issue) if blocked_issues is None else max(0, int(blocked_issues))
     value = issue_value_score(
@@ -220,6 +328,8 @@ def score_issue(
         "breakdown": value.breakdown,
         "retry_depth": retry_depth,
         "blocked_issues": unlock_count,
+        "parent_priority": round(owner_priority, 3),
+        "expected_reuse": round(reuse_value, 3),
     }
 
 
