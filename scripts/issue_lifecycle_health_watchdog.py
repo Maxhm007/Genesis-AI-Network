@@ -12,7 +12,8 @@ TITLE = "[Genesis Lifecycle] Automatic issue opening/closing health degraded"
 MARKER = "<!-- genesis-issue-lifecycle-health-watchdog -->"
 LABEL = "genesis-lifecycle-health"
 OPENING_WORKFLOW = "Genesis Issue Opening Manager"
-CLOSURE_WORKFLOW = "Genesis Issue Closure Manager"\nAGENTIC_WORKFLOW = "Genesis Agentic Lab Recovery"
+CLOSURE_WORKFLOW = "Genesis Issue Closure Manager"
+AGENTIC_WORKFLOW = "Genesis Agentic Lab Recovery"
 ACTIVE_WORK_LABELS = {"genesis-repair-in-progress", "genesis-validating", "genesis-claimed", "genesis-working", "genesis-verifying"}
 
 
