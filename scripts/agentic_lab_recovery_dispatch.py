@@ -1131,6 +1131,9 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         dispatch_inputs = {"issue_number": str(number)}
         if workflow == "genesis-agentic-strategy-worker.yml":
             dispatch_inputs["strategy"] = strategy
+        elif workflow == "genesis-deepseek-agentic-solver.yml":
+            dispatch_inputs["strategy"] = strategy
+            dispatch_inputs["state_token"] = state_token
 
         try:
             request(
