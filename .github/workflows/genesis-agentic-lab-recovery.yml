@@ -33,6 +33,9 @@ on:
       - genesis/anti_stuck.py
       - genesis/architecture_decomposer.py
       - scripts/advance_architecture_plan.py
+      - genesis/architecture_extensions/architecture_route_gene_0_backlog_work_to_idle_gene_002_and_gene_003.py
+      - genesis/pulse.py
+      - tests/test_gene_backlog_delegation_router.py
   schedule:
     - cron: '*/5 * * * *'
   workflow_dispatch:
