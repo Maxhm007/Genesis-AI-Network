@@ -8,7 +8,13 @@ import urllib.request
 from datetime import datetime, timezone
 
 from genesis.issue_governor import issue_value_score
-from requeue_exhausted_issues import engine_generation
+
+try:
+    from scripts.requeue_exhausted_issues import engine_generation
+except ModuleNotFoundError:
+    # Direct execution via "python scripts/capability_issue_priority_dispatch.py"
+    # places scripts/ on sys.path instead of importing it as a package.
+    from requeue_exhausted_issues import engine_generation
 
 CAPABILITY_WORK_PREFIX = "<!-- genesis-capability-work:"
 REQUEUE_MARKER_PREFIX = "<!-- genesis-requeue-engine:"
