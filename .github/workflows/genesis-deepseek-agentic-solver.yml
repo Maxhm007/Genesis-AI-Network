@@ -8,6 +8,16 @@ on:
         required: false
         type: string
         default: ''
+      strategy:
+        description: Strategy reserved by Agentic Lab for an explicit handoff
+        required: false
+        type: string
+        default: ''
+      state_token:
+        description: Material-state token reserved by Agentic Lab for an explicit handoff
+        required: false
+        type: string
+        default: ''
 permissions:
   contents: write
   issues: write
@@ -49,6 +59,8 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
           REQUESTED_ISSUE: ${{ inputs.issue_number }}
+          RESERVED_STRATEGY: ${{ inputs.strategy }}
+          RESERVED_STATE_TOKEN: ${{ inputs.state_token }}
         shell: bash
         run: |
           set -euo pipefail
@@ -96,17 +108,26 @@ jobs:
           fi
 
           gh api --paginate "repos/${GITHUB_REPOSITORY}/issues/${number}/comments?per_page=100" | jq -s 'add // []' > /tmp/deepseek-comments.json
-          plan=$(python scripts/deepseek_agentic_selector.py \
-            --issue-json /tmp/deepseek-issue.json \
-            --comments-json /tmp/deepseek-comments.json \
-            --target "$target")
+          if [[ -n "$REQUESTED_ISSUE" && -n "$RESERVED_STRATEGY" ]]; then
+            plan=$(python scripts/deepseek_agentic_selector.py \
+              --issue-json /tmp/deepseek-issue.json \
+              --comments-json /tmp/deepseek-comments.json \
+              --target "$target" \
+              --reserved-strategy "$RESERVED_STRATEGY" \
+              --reserved-state-token "$RESERVED_STATE_TOKEN")
+          else
+            plan=$(python scripts/deepseek_agentic_selector.py \
+              --issue-json /tmp/deepseek-issue.json \
+              --comments-json /tmp/deepseek-comments.json \
+              --target "$target")
+          fi
           eligible=$(jq -r '.eligible // false' <<<"$plan")
           if [[ "$eligible" != true ]]; then
             reason=$(jq -r '.reason // "anti_stuck_not_eligible"' <<<"$plan")
             token=$(jq -r '.state_token // ""' <<<"$plan")
             printf '%s\n%s\n' \
-              "<!-- genesis-deepseek-epoch-exhausted:${token} -->" \
-              "DeepSeek did not consume another repair slot because the Anti-Stuck Controller returned \`${reason}\`. Another compatible lane or capability dependency may proceed." \
+              "<!-- genesis-deepseek-handoff-rejected:${token} -->" \
+              "DeepSeek rejected this reserved handoff because `${reason}`. The reservation is released and Agentic Lab may choose another bounded action." \
               > /tmp/deepseek-exhausted.md
             gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body-file /tmp/deepseek-exhausted.md >/dev/null 2>&1 || true
             gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deepseek-handoff-pending >/dev/null 2>&1 || true
