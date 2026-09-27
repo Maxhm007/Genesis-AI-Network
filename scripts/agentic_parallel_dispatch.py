@@ -188,7 +188,36 @@ def _sequential_routable_issues(repository: str, token: str) -> list[dict]:
     ]
     if focused:
         focused.sort(key=lambda issue: (_created_at(issue), int(issue.get("number") or 0)))
-        return [focused[0]]
+        parent = focused[0]
+
+        # Sequential ownership is a chain, not a deadlock. If the focused
+        # parent is paused on a capability dependency, execute that dependency
+        # as the only temporary child of the same chain while keeping the
+        # parent as the authoritative focus. Unrelated backlog work remains
+        # ineligible until the dependency is verified and the parent resumes.
+        comments = policy._all_issue_comments(
+            repository,
+            token,
+            int(parent.get("number") or 0),
+        )
+        dependency = agentic.unresolved_capability_dependency(comments)
+        if dependency:
+            by_number = {
+                int(issue.get("number") or 0): issue
+                for issue in all_open
+                if int(issue.get("number") or 0) > 0
+            }
+            capability = by_number.get(int(dependency))
+            if capability is not None:
+                capability_labels = agentic.labels(capability)
+                if (
+                    str(capability.get("state") or "").lower() != "closed"
+                    and "genesis-verified" not in capability_labels
+                    and policy._actionable(capability)
+                ):
+                    return [capability]
+
+        return [parent]
 
     candidates = _parallel_routable_issues(repository, token)
     if not candidates:
