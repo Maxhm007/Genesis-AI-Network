@@ -349,7 +349,16 @@ def prioritize(repository: str, token: str) -> dict:
         for issue in all_open
         if int(issue.get("number") or 0) > 0
     }
-    unlock_counts = dependency_unlock_counts(all_open, comments_by_issue)
+    graph = dependency_graph(all_open, comments_by_issue)
+    unlock_counts = {
+        number: len(parents)
+        for number, parents in graph["parents_by_capability"].items()
+    }
+    issues_by_number = {
+        int(issue.get("number") or 0): issue
+        for issue in all_open
+        if int(issue.get("number") or 0) > 0
+    }
 
     current_generation = engine_generation()
     eligible: list[tuple[dict, list[dict]]] = []
@@ -383,18 +392,31 @@ def prioritize(repository: str, token: str) -> dict:
             request(repository, token, "POST", f"/issues/{number}/labels", {"labels": missing})
 
     now = datetime.now(timezone.utc)
-    scored = [
-        (
-            issue,
-            score_issue(
+    scored = []
+    for issue, comments in eligible:
+        number = int(issue.get("number") or 0)
+        parent_numbers = sorted(graph["parents_by_capability"].get(number, set()))
+        parent_priorities = [
+            _parent_priority(issues_by_number[parent])
+            for parent in parent_numbers
+            if parent in issues_by_number
+        ]
+        scored.append(
+            (
                 issue,
-                comments,
-                now=now,
-                blocked_issues=unlock_counts.get(int(issue.get("number") or 0), 0),
-            ),
+                score_issue(
+                    issue,
+                    comments,
+                    now=now,
+                    blocked_issues=unlock_counts.get(number, 0),
+                    parent_priority=max(parent_priorities or [0.0]),
+                    expected_reuse=_expected_reuse(
+                        unlock_counts.get(number, 0),
+                        parent_priorities,
+                    ),
+                ),
+            )
         )
-        for issue, comments in eligible
-    ]
     scored.sort(
         key=lambda row: (
             -float(row[1]["score"]),
@@ -427,6 +449,22 @@ def prioritize(repository: str, token: str) -> dict:
         "eligible_capability_issues": len(eligible),
         "quarantined_capability_issues": quarantined,
         "repair_engine_generation": current_generation,
+        "dependency_status": {
+            "parents_by_capability": {
+                str(number): sorted(parents)
+                for number, parents in graph["parents_by_capability"].items()
+            },
+            "dependencies_by_parent": {
+                str(number): sorted(dependencies)
+                for number, dependencies in graph["dependencies_by_parent"].items()
+            },
+            "invalid_edges": [
+                {"parent": parent, "capability": capability, "reason": reason}
+                for parent, capability, reason in graph["invalid_edges"]
+            ],
+            "cycles": [list(cycle) for cycle in graph["cycles"]],
+        },
+        "selected_unlock_count": decision["blocked_issues"],
     }
 
 
