@@ -63,9 +63,20 @@ def test_selfdev_allows_bounded_dashboard_repair_scripts(tmp_path: Path):
     ])
 
 
-def test_selfdev_still_rejects_unapproved_scripts(tmp_path: Path):
+def test_selfdev_allows_bounded_ordinary_scripts(tmp_path: Path):
+    assert normalize_selfdev_path(tmp_path, "scripts/arbitrary.py") == "scripts/arbitrary.py"
+
+
+@pytest.mark.parametrize("target", [
+    "scripts/secret_guard.py",
+    "scripts/privileged_change_gate.py",
+    "scripts/verify_validator_votes.py",
+    "scripts/action_repair_guard.py",
+    "scripts/issue_acceptance_guard.py",
+])
+def test_selfdev_still_rejects_privileged_scripts(tmp_path: Path, target: str):
     with pytest.raises(RuntimeError):
-        normalize_selfdev_path(tmp_path, "scripts/arbitrary.py")
+        normalize_selfdev_path(tmp_path, target)
 
 
 
