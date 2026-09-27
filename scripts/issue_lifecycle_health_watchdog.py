@@ -13,6 +13,7 @@ MARKER = "<!-- genesis-issue-lifecycle-health-watchdog -->"
 LABEL = "genesis-lifecycle-health"
 OPENING_WORKFLOW = "Genesis Issue Opening Manager"
 CLOSURE_WORKFLOW = "Genesis Issue Closure Manager"\nAGENTIC_WORKFLOW = "Genesis Agentic Lab Recovery"
+ACTIVE_WORK_LABELS = {"genesis-repair-in-progress", "genesis-validating", "genesis-claimed", "genesis-working", "genesis-verifying"}
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -256,7 +257,12 @@ def check(
             and "genesis-verified" not in _labels(issue)
             and not (_labels(issue) & {"genesis-persistent", "duplicate", "invalid", "wontfix", "genesis-superseded", "performance-indicator"})
         ]
-        if actionable:
+        active_work = [
+            issue for issue in issues
+            if str(issue.get("state") or "").lower() == "open"
+            and bool(_labels(issue) & ACTIVE_WORK_LABELS)
+        ]
+        if actionable and not active_work:
             _dispatch_workflow(repository, "genesis-agentic-lab-recovery.yml")
         existing = _existing_open_watchdog(issues)
         if existing is not None:
