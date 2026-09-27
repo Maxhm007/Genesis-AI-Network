@@ -12,7 +12,7 @@ TITLE = "[Genesis Lifecycle] Automatic issue opening/closing health degraded"
 MARKER = "<!-- genesis-issue-lifecycle-health-watchdog -->"
 LABEL = "genesis-lifecycle-health"
 OPENING_WORKFLOW = "Genesis Issue Opening Manager"
-CLOSURE_WORKFLOW = "Genesis Issue Closure Manager"
+CLOSURE_WORKFLOW = "Genesis Issue Closure Manager"\nAGENTIC_WORKFLOW = "Genesis Agentic Lab Recovery"
 
 
 def _run(args: list[str]) -> subprocess.CompletedProcess[str]:
@@ -145,9 +145,14 @@ def _heal_actions(assessment: dict, repository: str) -> dict:
     closing_fault = any(fault.startswith("closing_manager_") for fault in faults)
     verified_stuck = any(fault.startswith("verified_issues_not_auto_closed:") for fault in faults)
 
+    # The lifecycle watchdog is the independent control-plane supervisor.
+    # It must not depend on Agentic Lab to restart the managers that feed and
+    # close the queue. After repairing those managers it also wakes the
+    # authoritative FIFO controller so work resumes immediately.
     for needed, workflow in (
         (opening_fault, "genesis-issue-opening-manager.yml"),
         (closing_fault or verified_stuck, "genesis-issue-closure-manager.yml"),
+        (bool(faults), "genesis-agentic-lab-recovery.yml"),
     ):
         if not needed:
             continue
@@ -242,6 +247,17 @@ def check(
         verified_open_grace_minutes=verified_open_grace_minutes,
     )
     if assessment["healthy"]:
+        # Even when opening/closing are healthy, an actionable backlog must
+        # continue moving without a human "check now" or manual dispatch.
+        actionable = [
+            issue for issue in issues
+            if str(issue.get("state") or "").lower() == "open"
+            and "genesis-autonomous" in _labels(issue)
+            and "genesis-verified" not in _labels(issue)
+            and not (_labels(issue) & {"genesis-persistent", "duplicate", "invalid", "wontfix", "genesis-superseded", "performance-indicator"})
+        ]
+        if actionable:
+            _dispatch_workflow(repository, "genesis-agentic-lab-recovery.yml")
         existing = _existing_open_watchdog(issues)
         if existing is not None:
             verified = _verify_recovered_watchdog(repository, existing, assessment)
