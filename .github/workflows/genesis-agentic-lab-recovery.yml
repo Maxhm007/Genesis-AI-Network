@@ -45,7 +45,7 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GENESIS_AGENTIC_MAX_PARALLEL: '4'
+  GENESIS_AGENTIC_MAX_PARALLEL: '1'
 
 jobs:
   dispatch-agentic-pool:
@@ -62,12 +62,7 @@ jobs:
         with:
           python-version: '3.12'
 
-      - name: Park exhausted unsolved issues without closing them
-        env:
-          GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/park_exhausted_agentic_issues.py
-
-      - name: Fill bounded parallel Agentic issue pool
+      - name: Dispatch authoritative sequential Agentic chain
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/agentic_parallel_dispatch.py
