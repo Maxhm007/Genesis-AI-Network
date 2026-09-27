@@ -20,4 +20,9 @@ def test_recovery_solver_runs_dependency_diagnosis_before_escalation():
     source = Path("scripts/recovery_solver_dispatch.py").read_text(encoding="utf-8")
     assert '"dependency_diagnosis",' in source
     assert "MAX_RECOVERY_CYCLES = len(RECOVERY_STRATEGIES)" in source
-    assert "strategy = RECOVERY_STRATEGIES[cycles]" in source
+    # Strategy selection now uses the shared durable attempt ledger instead of
+    # a second positional cycle counter.  This still guarantees every declared
+    # recovery strategy (including dependency_diagnosis) is consumed before
+    # same-Issue escalation, while preventing duplicate redispatch.
+    assert "strategy = next_lane_strategy(" in source
+    assert "strategies=RECOVERY_STRATEGIES" in source
