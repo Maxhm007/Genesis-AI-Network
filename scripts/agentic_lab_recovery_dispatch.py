@@ -366,7 +366,13 @@ def ensure_anti_stuck_epoch(
         return latest_token, comments
 
     if latest_token and recorded_base == stable_base:
-        return latest_token, comments
+        # The stable material fingerprint is authoritative. Older controller
+        # versions could append the same state marker repeatedly, which made
+        # current_epoch_comments() keep only the empty tail after the newest
+        # duplicate marker and forget completed attempts. Do not add another
+        # marker for an unchanged state, and return the stable token so callers
+        # reconstruct one durable epoch.
+        return recorded_base, comments
 
     if latest_token and recorded_base and recorded_base != stable_base:
         request(
@@ -845,22 +851,16 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             str(row.get("body") or "").startswith(f"{MIGRATION_PRESERVE_PREFIX}{_latest_stable_base(comments)} -->")
             for row in comments
         )
-        history = (
-            target_attempt_history(comments, target)
-            if migration_preserve
-            else attempt_history(comments, state_token, target)
-        )
+        # Explicit same-target attempt markers are the durable retry ledger.
+        # Use them across duplicate/legacy state markers so a controller wake
+        # cannot make an already-consumed strategy look unused. Capability
+        # releases are already a hard boundary inside target_attempt_history().
+        epoch_history = attempt_history(comments, state_token, target)
+        durable_history = target_attempt_history(comments, target)
+        history = durable_history or epoch_history
         status = latest_result_status(comments, state_token)
-        if not history:
-            cross_epoch = target_attempt_history(comments, target)
-            if cross_epoch and cross_epoch[-1].result.strip().lower() in {
-                "strategy_requires_more_methods",
-                "retry_pending_capability",
-                "worker_failed_before_evidence",
-                "repair_failed_validation",
-            }:
-                history = cross_epoch
-                status = cross_epoch[-1].result.strip().lower()
+        if durable_history and durable_history[-1].result:
+            status = durable_history[-1].result.strip().lower()
         policy = anti_stuck_decision(history)
 
         if status == "blocked_protected_or_unsupported_target":
