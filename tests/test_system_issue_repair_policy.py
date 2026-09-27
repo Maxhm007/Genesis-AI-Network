@@ -90,19 +90,17 @@ def test_successor_keeps_explicit_script_target_before_required_strategy(tmp_pat
     assert context == grounded
 
 
-def test_ordinary_script_path_is_allowed_but_protected_script_requires_privilege(tmp_path: Path) -> None:
+def test_ordinary_script_path_is_allowed_but_protected_script_stays_forbidden(tmp_path: Path) -> None:
     assert (
         _normalize_with_privileged_scripts(tmp_path, "scripts/helper.py", allow_privileged=False)
         == "scripts/helper.py"
     )
 
-    with pytest.raises(RuntimeError, match="privileged autonomy lane"):
+    with pytest.raises(RuntimeError, match="protected path cannot be changed"):
         _normalize_with_privileged_scripts(tmp_path, "scripts/secret_guard.py", allow_privileged=False)
 
-    assert (
+    with pytest.raises(RuntimeError, match="protected path cannot be changed"):
         _normalize_with_privileged_scripts(tmp_path, "scripts/secret_guard.py", allow_privileged=True)
-        == "scripts/secret_guard.py"
-    )
 
 
 def test_protected_script_proposal_gets_unchanged_privilege_anchor(tmp_path: Path) -> None:
