@@ -39,6 +39,7 @@ ACTIVE_LABELS = {
     "genesis-validating",
     "genesis-working",
     "genesis-verifying",
+    DEEPSEEK_HANDOFF_LABEL,
 }
 PROTECTED_TARGETS = {
     "genesis/autonomy_guard.py",
