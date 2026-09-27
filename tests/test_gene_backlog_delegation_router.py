@@ -165,3 +165,12 @@ def test_invalid_signature_is_rejected(tmp_path):
     )
 
     assert result == {"status": "rejected", "reason": "invalid_signature"}
+
+
+
+def test_pulse_integrates_delegation_router():
+    text = __import__("pathlib").Path("genesis/pulse.py").read_text(encoding="utf-8")
+    assert "BacklogDelegationRouter" in text
+    assert 'payload["delegation_reclaimed"]' in text
+    assert 'payload["delegated_work_inbox"]' in text
+    assert '"gene-node-2", "gene-node-3"' in text
