@@ -6,6 +6,7 @@ on:
     workflows:
       - Genesis Bounded Repair Worker
       - Genesis Agentic Strategy Worker
+      - Genesis DeepSeek Agentic Solver
     types:
       - completed
   push:
