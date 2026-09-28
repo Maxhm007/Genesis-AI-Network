@@ -351,3 +351,73 @@ def test_agentic_lab_closes_already_satisfied_capability_growth(monkeypatch, tmp
         method == "PATCH" and payload == {"state": "closed", "state_reason": "completed"}
         for method, _, payload in calls
     )
+
+
+def test_backlog_governor_satisfaction_detects_existing_complete_lane(tmp_path):
+    (tmp_path / "genesis").mkdir()
+    (tmp_path / "scripts").mkdir()
+    (tmp_path / "tests").mkdir()
+    (tmp_path / "genesis" / "issue_governor.py").write_text(
+        'class BacklogHealth: pass\n'
+        'def backlog_health():\n    states = ("healthy", "warning", "overloaded")\n'
+        'def count_recent_velocity(): pass\n'
+        'def publication_decision(): pass\n'
+        'def persist_deferred_candidate(): pass\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "scripts" / "github_issue_discovery.py").write_text(
+        'persist_deferred_candidate(candidate)\nstatus = "deferred_backlog"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "scripts" / "deferred_issue_release.py").write_text(
+        'publication_decision(candidate)\nstatus = "released_deferred_candidate"\n',
+        encoding="utf-8",
+    )
+    (tmp_path / "tests" / "test_issue_governor.py").write_text(
+        'def test_backlog_governor_defers_lower_value_work_but_critical_bypasses(): pass\n'
+        'def test_backlog_recovery_releases_same_candidate_without_changing_value(): pass\n',
+        encoding="utf-8",
+    )
+    issue = {
+        "state": "open",
+        "body": "Add a backlog governor.\n- **Target:** `genesis/issue_governor.py`\n",
+    }
+
+    result = module._backlog_governor_satisfaction(issue, tmp_path)
+
+    assert result is not None
+    assert result["task_type"] == "backlog_governor"
+    assert result["target"] == "genesis/issue_governor.py"
+
+
+def test_current_main_gate_checks_backlog_governor_before_solver(monkeypatch, tmp_path):
+    issue = {"state": "open", "body": "Backlog governor\n- **Target:** `genesis/issue_governor.py`\n"}
+    satisfaction = {
+        "task_type": "backlog_governor",
+        "target": "genesis/issue_governor.py",
+        "focused_tests": ["tests/test_issue_governor.py"],
+        "evidence": "verified governor implementation",
+    }
+    calls = []
+
+    def fake_api(method, url, payload=None):
+        calls.append((method, url, payload))
+        if method == "GET":
+            return issue
+        if method == "PATCH":
+            return {"state": "closed"}
+        return {}
+
+    monkeypatch.setattr(module.base, "_api_json", fake_api)
+    monkeypatch.setattr(module.base, "_set_labels", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "_benchmark_runner_satisfaction", lambda issue, root: None)
+    monkeypatch.setattr(module, "_capability_growth_satisfaction", lambda issue, root: None)
+    monkeypatch.setattr(module, "_backlog_governor_satisfaction", lambda issue, root: satisfaction)
+    monkeypatch.setattr(module, "_full_suite_passes", lambda root: (True, "all tests passed"))
+
+    result = module._close_if_current_main_satisfies(863, "owner/repo", tmp_path)
+
+    assert result is not None
+    assert result["status"] == "completed"
+    assert result["current_state_checked_first"] is True
+    assert any(method == "PATCH" and payload["state"] == "closed" for method, _, payload in calls)
