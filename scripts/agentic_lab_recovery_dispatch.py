@@ -1004,36 +1004,47 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         policy = anti_stuck_decision(history)
 
         if status == "blocked_protected_or_unsupported_target":
-            for label in ACTIVE_LABELS | {EXHAUSTED_LABEL, "genesis-blocked", "genesis-deferred"}:
-                remove_label(repository, token, number, label)
-            ensure_label(
-                repository,
-                token,
-                "genesis-needs-routing",
-                "fbca04",
-                "Genesis needs a safer implementation target before autonomous repair can continue",
-            )
-            request(
-                repository,
-                token,
-                "POST",
-                f"/issues/{number}/labels",
-                {"labels": ["genesis-needs-routing", AGENTIC_LABEL, "genesis-autonomous"]},
-            )
-            _post_once(
-                repository,
-                token,
-                number,
-                comments,
-                "<!-- genesis-policy-block-rerouted -->",
-                (
-                    "<!-- genesis-policy-block-rerouted -->\n"
-                    f"Genesis classified target `{target}` as protected/unsupported for the current repair lane. "
-                    "This is a routing/policy condition, not a reusable capability gap. The Issue remains open and "
-                    "is removed from autonomous repair until a safer target is derived."
-                ),
-            )
-            continue
+            # Worker rejection historically conflated an actually unsafe target
+            # with stale/not-owned reservations. Re-evaluate the CURRENT target
+            # before parking the authoritative Issue. If safe_lane() accepts it,
+            # the rejection was not a present routing blocker and the same Issue
+            # must remain in the autonomous chain.
+            if not safe_lane(target):
+                for label in ACTIVE_LABELS | {EXHAUSTED_LABEL, "genesis-blocked", "genesis-deferred"}:
+                    remove_label(repository, token, number, label)
+                ensure_label(
+                    repository,
+                    token,
+                    "genesis-needs-routing",
+                    "fbca04",
+                    "Genesis needs a safer implementation target before autonomous repair can continue",
+                )
+                request(
+                    repository,
+                    token,
+                    "POST",
+                    f"/issues/{number}/labels",
+                    {"labels": ["genesis-needs-routing", AGENTIC_LABEL, "genesis-autonomous"]},
+                )
+                _post_once(
+                    repository,
+                    token,
+                    number,
+                    comments,
+                    "<!-- genesis-policy-block-rerouted -->",
+                    (
+                        "<!-- genesis-policy-block-rerouted -->\n"
+                        f"Genesis classified target `{target}` as protected/unsupported for the current repair lane. "
+                        "This is a routing/policy condition, not a reusable capability gap. The Issue remains open and "
+                        "is removed from autonomous repair until a safer target is derived."
+                    ),
+                )
+                continue
+
+            # Current route is valid: clear a stale routing hold and let
+            # anti-stuck/capability policy choose the next material attempt.
+            remove_label(repository, token, number, "genesis-needs-routing")
+            status = ""
 
         if capability_gap_status(status) or policy.action == "capability":
             result = pause_for_capability(
