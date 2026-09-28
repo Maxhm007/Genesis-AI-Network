@@ -2,6 +2,8 @@ name: Genesis Action Repair Worker
 
 on:
   workflow_dispatch:
+  schedule:
+    - cron: '7,37 * * * *'
 
 permissions:
   contents: write
@@ -24,7 +26,20 @@ env:
   PIP_CACHE_DIR: ~/.cache/pip
 
 jobs:
+  stale-queue-cleanup:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Cancel known stale queued runs
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          for run_id in 32219064395 32218467321 32216752873 32215089776; do
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/cancel" || true
+          done
+
   repair-one-action-failure:
+    needs: stale-queue-cleanup
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
