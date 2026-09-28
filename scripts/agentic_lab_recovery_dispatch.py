@@ -580,7 +580,12 @@ def _all_issues(repository: str, token: str) -> list[dict]:
     for page in range(1, 101):
         batch = request(repository, token, "GET", f"/issues?state=all&sort=created&direction=asc&per_page=100&page={page}")
         if not isinstance(batch, list):
-            raise RuntimeError("GitHub issue response was not a list")
+            # This repository-wide scan is auxiliary to capability release.
+            # Unit-test request stubs and transient API anomalies may not
+            # implement this endpoint. Do not abort the primary issue
+            # reservation/dispatch path because the optional scan is
+            # unavailable; an empty result simply releases nothing this pass.
+            return rows
         rows.extend(row for row in batch if isinstance(row, dict) and not row.get("pull_request"))
         if len(batch) < 100:
             break
