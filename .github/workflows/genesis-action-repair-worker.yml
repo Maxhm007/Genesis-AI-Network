@@ -3,7 +3,7 @@ name: Genesis Action Repair Worker
 "on":
   workflow_dispatch:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '*/10 * * * *' # cleanup wake 2026-09-28
 
 permissions:
   contents: write
