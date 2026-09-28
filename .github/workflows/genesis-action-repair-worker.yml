@@ -178,8 +178,20 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      - name: Continue failure lifecycle after selected work
-        if: always() && steps.select.outputs.issue_number != ''
+      - name: Continue autonomous lifecycle
+        if: always()
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run genesis-action-failure-watcher.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+        shell: bash
+        run: |
+          set -euo pipefail
+          # Keep Action-failure discovery alive when this pass selected work.
+          if [[ -n "${{ steps.select.outputs.issue_number }}" ]]; then
+            gh workflow run genesis-action-failure-watcher.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+          fi
+
+          # An idle/completed Action lane must never leave Genesis idle while
+          # Agentic-Lab backlog exists. Wake the single authoritative Agentic
+          # controller after every Action-repair pass; its own reservation and
+          # concurrency rules decide whether work can safely start.
+          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
