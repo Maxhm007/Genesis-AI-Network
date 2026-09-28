@@ -296,6 +296,49 @@ def _capability_growth_satisfaction(issue: dict, root: Path) -> dict | None:
     }
 
 
+
+def _backlog_governor_satisfaction(issue: dict, root: Path) -> dict | None:
+    """Recognize issue #863-style backlog-governor work already present on main."""
+    body = str(issue.get("body") or "")
+    target = extract_issue_target(body)
+    if target != "genesis/issue_governor.py" or "backlog governor" not in body.lower():
+        return None
+
+    governor_path = root / "genesis" / "issue_governor.py"
+    discovery_path = root / "scripts" / "github_issue_discovery.py"
+    release_path = root / "scripts" / "deferred_issue_release.py"
+    tests_path = root / "tests" / "test_issue_governor.py"
+    if not all(path.is_file() for path in (governor_path, discovery_path, release_path, tests_path)):
+        return None
+
+    governor = governor_path.read_text(encoding="utf-8")
+    discovery = discovery_path.read_text(encoding="utf-8")
+    release = release_path.read_text(encoding="utf-8")
+    tests = tests_path.read_text(encoding="utf-8")
+    required = (
+        "class BacklogHealth" in governor,
+        "def backlog_health(" in governor,
+        "def count_recent_velocity(" in governor,
+        "def publication_decision(" in governor,
+        "def persist_deferred_candidate(" in governor,
+        '"overloaded"' in governor and '"warning"' in governor and '"healthy"' in governor,
+        "persist_deferred_candidate(" in discovery,
+        '"deferred_backlog"' in discovery,
+        "publication_decision(" in release,
+        '"released_deferred_candidate"' in release,
+        "test_backlog_governor_defers_lower_value_work_but_critical_bypasses" in tests,
+        "test_backlog_recovery_releases_same_candidate_without_changing_value" in tests,
+    )
+    if not all(required):
+        return None
+    return {
+        "task_type": "backlog_governor",
+        "target": target,
+        "focused_tests": ["tests/test_issue_governor.py"],
+        "evidence": "governor states, velocity, deferral, bypass, persistent queue, recovery release, and regression coverage present",
+    }
+
+
 def _full_suite_passes(root: Path) -> tuple[bool, str]:
     completed = subprocess.run(
         [sys.executable, "-m", "pytest", "-q"],
@@ -318,6 +361,8 @@ def _close_if_current_main_satisfies(issue_number: int, repository: str, root: P
     if satisfaction is None:
         satisfaction = _capability_growth_satisfaction(issue, root)
     if satisfaction is None:
+        satisfaction = _backlog_governor_satisfaction(issue, root)
+    if satisfaction is None:
         return None
 
     passed, test_output = _full_suite_passes(root)
@@ -339,6 +384,12 @@ def _close_if_current_main_satisfies(issue_number: int, repository: str, root: P
             f"- Blocker: `{satisfaction['blocker']}`\n"
             "- Capability route: bounded evidence-first capability-growth adapter present\n"
             "- Regression coverage: safe script blocker allowed; protected script blocker rejected\n"
+        )
+    elif satisfaction.get("task_type") == "backlog_governor":
+        detail_lines = (
+            "Genesis verified that the current `main` already satisfies this backlog-governor issue, so no additional model-generated patch is required.\n\n"
+            f"- Target: `{satisfaction['target']}`\n"
+            f"- Evidence: {satisfaction['evidence']}\n"
         )
     else:
         detail_lines = (
