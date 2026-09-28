@@ -384,7 +384,12 @@ jobs:
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
           done
           gh workflow run genesis-issue-closure-manager.yml --repo "$GITHUB_REPOSITORY" --ref main -f issue_number="$ISSUE_NUMBER" >/dev/null 2>&1 || true
-          echo "Verified evidence recorded; Genesis Issue Closure Manager dispatched for final close/seal."
+          # Do not wait for a separate close-event workflow to continue FIFO.
+          # The verified worker owns the transition and immediately wakes the
+          # controller; Recovery will ignore this issue once Closure Manager
+          # closes it and claim the next sequential focus.
+          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+          echo "Verified evidence recorded; closure and next Agentic recovery dispatched."
           git push origin --delete "$CANDIDATE_BRANCH" >/dev/null 2>&1 || true
 
       - name: Release unsuccessful Agentic reservation without closing Issue
