@@ -1,0 +1,51 @@
+name: Genesis Pull Request Maintenance
+
+on:
+  schedule:
+    - cron: '17 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+  issues: write
+  pull-requests: write
+  checks: read
+
+concurrency:
+  group: genesis-pull-request-maintenance
+  cancel-in-progress: false
+
+jobs:
+  maintain:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout current main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Review and safely resolve open pull requests
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          GITHUB_REPOSITORY: ${{ github.repository }}
+          PYTHONPATH: ${{ github.workspace }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          python - <<'PY'
+          import json
+          from genesis.architecture_extensions.pull_request_maintenance import maintain_open_pull_requests
+          from genesis.github_issue_cleanup import _github_request
+
+          result = maintain_open_pull_requests(_github_request)
+          print(json.dumps(result, indent=2, sort_keys=True))
+          if result.get("status") == "blocked":
+              raise SystemExit("PR maintenance could not inspect repository state")
+          PY
