@@ -1,4 +1,5 @@
 name: Genesis Agentic Lab Recovery
+run-name: ${{ github.event_name == 'issues' && format('Issue #{0} — Recovery', github.event.issue.number) || 'Genesis Agentic Lab Recovery' }}
 # canonical-capability-retry-v1
 # sequential-handoff-v6
 
