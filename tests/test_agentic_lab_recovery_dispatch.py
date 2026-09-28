@@ -394,7 +394,7 @@ def test_policy_blocked_target_is_marked_for_routing_without_capability_issue(mo
     ]
     calls: list[tuple[str, str, dict | None]] = []
     monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [issue])
-    monkeypatch.setattr(module, "safe_lane", lambda target: "generic")
+    monkeypatch.setattr(module, "safe_lane", lambda target: "")
     monkeypatch.setattr(module, "ensure_anti_stuck_epoch", lambda repository, token, issue, comments, target: ("state", comments))
     monkeypatch.setattr(module, "attempt_history", lambda comments, state_token, target: [])
     monkeypatch.setattr(module, "anti_stuck_decision", lambda history: type("D", (), {"action": "capability", "reason": "strategy_set_exhausted"})())
