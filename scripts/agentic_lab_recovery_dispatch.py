@@ -974,6 +974,38 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
         target = explicit_target(str(issue.get("body") or ""))
         lane = safe_lane(target)
         if not lane:
+            # An unsafe/missing target is a routing condition, not a reason to
+            # silently skip the authoritative Issue. Mark it for retargeting so
+            # Agentic routing can derive a safe implementation path.
+            for label in ACTIVE_LABELS | {EXHAUSTED_LABEL, "genesis-blocked", "genesis-deferred"}:
+                remove_label(repository, token, number, label)
+            ensure_label(
+                repository,
+                token,
+                "genesis-needs-routing",
+                "fbca04",
+                "Genesis needs a safer implementation target before autonomous repair can continue",
+            )
+            request(
+                repository,
+                token,
+                "POST",
+                f"/issues/{number}/labels",
+                {"labels": ["genesis-needs-routing", AGENTIC_LABEL, "genesis-autonomous"]},
+            )
+            _post_once(
+                repository,
+                token,
+                number,
+                comments,
+                "<!-- genesis-policy-block-rerouted -->",
+                (
+                    "<!-- genesis-policy-block-rerouted -->\n"
+                    f"Genesis classified target `{target}` as protected/unsupported for the current repair lane. "
+                    "This is a routing/policy condition, not a reusable capability gap. The Issue remains open "
+                    "and is marked for Agentic retargeting to a safe implementation path."
+                ),
+            )
             continue
 
         # Agentic Lab owns integration-sensitive classification and guidance.
