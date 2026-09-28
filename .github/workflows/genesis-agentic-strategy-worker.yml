@@ -453,10 +453,19 @@ jobs:
 
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label agentic-lab --add-label genesis-solver-exhausted --add-label genesis-autonomous >/dev/null 2>&1 || true
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deferred >/dev/null 2>&1 || true
-          printf '%s\n%s\n' \
-            "<!-- genesis-agentic-strategy-result:${STRATEGY} -->" \
-            "Agentic Lab strategy \`${STRATEGY}\` did not produce a verified promotion. repair status: \`${repair_status}\`. The Issue remains open and authoritative. The next Agentic Lab pass continues on this same Issue; no child/successor/capability Issue is created. Worker run: ${GITHUB_RUN_ID}." \
-            > /tmp/genesis-agentic-failure.md
+          failure_evidence='{}'
+          if [[ -f runtime/github_issue_autorepair.json ]]; then
+            failure_evidence=$(jq -c '{status,reason,repair_status,diagnosis,provider,proposal_files,validation_attempts_this_run,repair_memory}' runtime/github_issue_autorepair.json 2>/dev/null || echo '{}')
+          fi
+          {
+            printf '%s\n' "<!-- genesis-agentic-strategy-result:${STRATEGY} -->"
+            printf '%s\n' "Agentic Lab strategy \`${STRATEGY}\` did not produce a verified promotion. repair status: \`${repair_status}\`. The Issue remains open and authoritative. The next Agentic Lab pass continues on this same Issue; no child/successor/capability Issue is created. Worker run: ${GITHUB_RUN_ID}."
+            printf '%s\n' '<!-- genesis-agentic-failure-evidence -->'
+            printf '%s\n' 'Latest bounded failure evidence for the next retry:'
+            printf '%s\n' '```json'
+            printf '%s\n' "$failure_evidence"
+            printf '%s\n' '```'
+          } > /tmp/genesis-agentic-failure.md
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-failure.md
           gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
 
