@@ -777,6 +777,21 @@ def pause_for_capability(
             comments,
             capability_number,
         )
+        # Re-enter Recovery immediately. The capability-release marker changes
+        # the material state and therefore starts a fresh anti-stuck epoch on
+        # the next pass. Without this handoff an exhausted sequential-focus
+        # issue can remain open with no worker even though its dependency is
+        # already verified.
+        try:
+            request(
+                repository,
+                token,
+                "POST",
+                "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
+                {"ref": "main"},
+            )
+        except Exception:
+            pass
         return {
             "status": "capability_already_ready",
             "issue_number": number,
