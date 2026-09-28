@@ -1,4 +1,5 @@
 name: Genesis Agentic Strategy Worker
+run-name: "Issue #${{ inputs.issue_number || 'validation' }} — ${{ inputs.strategy || 'push' }}"
 
 on:
   push:
