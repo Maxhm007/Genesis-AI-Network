@@ -79,14 +79,18 @@ jobs:
           PYTHONPATH: ${{ github.workspace }}
         run: python scripts/action_failure_watchdog.py --repository "$GITHUB_REPOSITORY" --retry-once
 
-      - name: Cancel four legacy queued runs
+      - name: Force-cancel or delete four legacy queued runs
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
         run: |
           set -euo pipefail
           for run_id in 32219064395 32218467321 32216752873 32215089776; do
-            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/cancel" || true
+            echo "force-cancel $run_id"
+            gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/force-cancel" || {
+              echo "force-cancel failed for $run_id; trying delete"
+              gh api --method DELETE "repos/$GITHUB_REPOSITORY/actions/runs/$run_id" || true
+            }
           done
 
       - name: Dispatch autonomous Action repair lane when authorized work exists
