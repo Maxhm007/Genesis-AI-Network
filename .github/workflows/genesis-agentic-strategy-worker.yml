@@ -1,5 +1,4 @@
 name: Genesis Agentic Strategy Worker
-run-name: ${{ github.event_name == 'workflow_dispatch' && format('Issue #{0} — {1}', inputs.issue_number, inputs.strategy) || 'Strategy Worker validation' }}
 
 on:
   push:
