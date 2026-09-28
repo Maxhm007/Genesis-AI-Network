@@ -2,11 +2,16 @@ name: Genesis FIFO Handoff
 
 on:
   workflow_dispatch:
+  schedule:
+    # Independent watchdog: if no worker completion event fires, periodically
+    # wake the authoritative Agentic controller so an idle backlog cannot stall.
+    - cron: '2,12,22,32,42,52 * * * *'
   workflow_run:
     workflows:
       - Genesis Bounded Repair Worker
       - Genesis Agentic Strategy Worker
       - Genesis DeepSeek Agentic Solver
+      - Genesis Action Repair Worker
     types:
       - completed
   push:
