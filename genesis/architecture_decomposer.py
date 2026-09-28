@@ -65,6 +65,7 @@ def build_architecture_plan(issue: dict, root: Path) -> ArchitecturePlan | None:
         (("workflow", "retire"), "genesis/workflow_governor.py", "", "workflow_governance"),
         (("least-privilege", "credential"), "genesis/capability_routing.py", "", "least_privilege_capability_routing"),
         (("least privilege", "credential"), "genesis/capability_routing.py", "", "least_privilege_capability_routing"),
+        (("autonomous", "system", "health", "closure", "velocity"), "genesis/architecture_extensions/autonomous_system_health_controller.py", "genesis/health.py", "autonomous_system_health_observability"),
         (("health", "dashboard"), "genesis/health.py", "", "health_observability"),
         (("model", "specialization"), "genesis/intelligence_router.py", "", "model_specialization"),
         (("task-to-model", "routing"), "genesis/intelligence_router.py", "", "model_specialization"),
