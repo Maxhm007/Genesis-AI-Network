@@ -243,6 +243,59 @@ def _sequential_routable_issues(repository: str, token: str) -> list[dict]:
     return [selected]
 
 
+def _live_agentic_worker_exists(repository: str, token: str) -> bool:
+    """Return whether the single sequential lane has a queued/running worker."""
+    for status in ("queued", "in_progress", "waiting", "pending", "requested"):
+        try:
+            payload = agentic.request(
+                repository,
+                token,
+                "GET",
+                f"/actions/runs?status={status}&per_page=100",
+            )
+        except Exception:
+            # Fail closed: never clear a reservation when Actions visibility is
+            # unavailable, because that could create duplicate workers.
+            return True
+        runs = payload.get("workflow_runs", []) if isinstance(payload, dict) else []
+        for run in runs:
+            if str(run.get("name") or "") in {
+                "Genesis Agentic Strategy Worker",
+                "Genesis DeepSeek Agentic Solver",
+                "Genesis Bounded Repair Worker",
+            }:
+                return True
+    return False
+
+
+def _reclaim_stale_sequential_reservation(repository: str, token: str) -> list[int]:
+    """Release a focus reservation only when no solver worker exists at all."""
+    if _live_agentic_worker_exists(repository, token):
+        return []
+    reclaimed: list[int] = []
+    for issue in policy._all_open_issues_fifo(repository, token):
+        labels = agentic.labels(issue)
+        if SEQUENTIAL_FOCUS_LABEL not in labels:
+            continue
+        if not (labels & set(agentic.ACTIVE_LABELS)):
+            continue
+        number = int(issue.get("number") or 0)
+        if number <= 0:
+            continue
+        for stale in (
+            "genesis-repair-in-progress",
+            "genesis-validating",
+            "genesis-working",
+            "genesis-verifying",
+            "genesis-deepseek-handoff-pending",
+            "genesis-claimed",
+            "genesis-deepseek-working",
+        ):
+            agentic.remove_label(repository, token, number, stale)
+        reclaimed.append(number)
+    return reclaimed
+
+
 def _active_issue_numbers(repository: str, token: str) -> list[int]:
     active: list[int] = []
     # A handoff-pending label is only a dispatch reservation, not proof that a
@@ -322,6 +375,7 @@ def main() -> int:
             all_open = policy._all_open_issues_fifo(repository, token)
         decomposition = decomposition_steps[-1] if decomposition_steps else {"status": "idle"}
 
+    stale_reservations_reclaimed = _reclaim_stale_sequential_reservation(repository, token)
     active_before = _active_issue_numbers(repository, token)
     free_slots = max(0, MAX_PARALLEL - len(active_before))
     dispatched: list[dict] = []
@@ -336,6 +390,7 @@ def main() -> int:
         "status": "sequential_dispatch_complete",
         "max_parallel": MAX_PARALLEL,
         "active_before": active_before,
+        "stale_reservations_reclaimed": stale_reservations_reclaimed,
         "dispatched": [row.get("issue_number") for row in dispatched],
         "active_after": _active_issue_numbers(repository, token),
         "legacy_dependencies_released": released,
