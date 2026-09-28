@@ -47,10 +47,11 @@ permissions:
 
 concurrency:
   group: genesis-agentic-lab-recovery
-  # Genesis has one authoritative sequential controller. A newer recovery event
-  # supersedes stale controller state so old runs cannot retarget/reclaim the
-  # focused issue after policy or evidence changes.
-  cancel-in-progress: true
+  # Keep exactly one authoritative Recovery controller running at a time, but
+  # never kill active recovery work when another wake-up arrives. GitHub may
+  # coalesce/replace pending wake-ups, while the in-progress controller is
+  # allowed to finish and preserve the sequential issue handoff.
+  cancel-in-progress: false
 
 env:
   GENESIS_AGENTIC_MAX_PARALLEL: '1'
