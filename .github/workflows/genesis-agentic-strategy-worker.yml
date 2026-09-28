@@ -57,7 +57,8 @@ env:
   GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_NAME: genesis-agentic-strategy-repair
-  GENESIS_PROVIDER_TIMEOUT_SECONDS: '420'
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '180'
+  GENESIS_STRATEGY_TIMEOUT_SECONDS: '300'
   GENESIS_PROVIDER_MAX_NEW_TOKENS: '640'
   GENESIS_REPAIR_FALLBACK_MODEL: Qwen/Qwen2.5-Coder-0.5B-Instruct
   GENESIS_REPAIR_ESCALATION_MODEL: Qwen/Qwen2.5-Coder-1.5B-Instruct
@@ -244,11 +245,30 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           ISSUE_NUMBER: ${{ inputs.issue_number }}
           STRATEGY: ${{ inputs.strategy }}
+        shell: bash
         run: |
-          python scripts/agentic_strategy_repair.py \
-            --issue-number "$ISSUE_NUMBER" \
-            --repository "$GITHUB_REPOSITORY" \
-            --strategy "$STRATEGY"
+          set -o pipefail
+          set +e
+          timeout --signal=TERM --kill-after=30s "$GENESIS_STRATEGY_TIMEOUT_SECONDS" \
+            python scripts/agentic_strategy_repair.py \
+              --issue-number "$ISSUE_NUMBER" \
+              --repository "$GITHUB_REPOSITORY" \
+              --strategy "$STRATEGY"
+          rc=$?
+          set -e
+          if [[ "$rc" -eq 124 || "$rc" -eq 137 || "$rc" -eq 143 ]]; then
+            mkdir -p runtime
+            jq -n \
+              --arg status "strategy_timeout" \
+              --arg strategy "$STRATEGY" \
+              --arg issue "$ISSUE_NUMBER" \
+              --arg run "$GITHUB_RUN_ID" \
+              '{status:$status, reason:$status, repair_status:$status, strategy:$strategy, issue_number:($issue|tonumber), worker_run:$run}' \
+              > runtime/github_issue_autorepair.json
+            echo "Agentic strategy timed out; handing control back to Recovery."
+            exit 0
+          fi
+          exit "$rc"
 
       - name: Read repair evidence
         if: steps.eligibility.outputs.eligible == 'true'
