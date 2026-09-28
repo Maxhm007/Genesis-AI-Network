@@ -178,39 +178,6 @@ jobs:
           if-no-files-found: ignore
           retention-days: 30
 
-      - name: Clear stale queued Actions
-        if: always()
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          cutoff="$(date -u -d '30 minutes ago' +%s)"
-          gh api "repos/$GITHUB_REPOSITORY/actions/runs?status=queued&per_page=100" --paginate --jq '.workflow_runs[] | [.id,.created_at,.name,.run_number] | @tsv' |
-          while IFS=
-        env:
-          GH_TOKEN: ${{ github.token }}
-        shell: bash
-        run: |
-          set -euo pipefail
-          # Keep Action-failure discovery alive when this pass selected work.
-          if [[ -n "${{ steps.select.outputs.issue_number }}" ]]; then
-            gh workflow run genesis-action-failure-watcher.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
-          fi
-
-          # An idle/completed Action lane must never leave Genesis idle while
-          # Agentic-Lab backlog exists. Wake the single authoritative Agentic
-          # controller after every Action-repair pass; its own reservation and
-          # concurrency rules decide whether work can safely start.
-          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
-\\t' read -r run_id created_at workflow_name run_number; do
-            created_epoch="$(date -u -d "$created_at" +%s)"
-            if [[ "$created_epoch" -lt "$cutoff" ]]; then
-              echo "Cancelling stale queued run: $workflow_name #$run_number ($run_id)"
-              gh api --method POST "repos/$GITHUB_REPOSITORY/actions/runs/$run_id/cancel" || true
-            fi
-          done
-
       - name: Continue autonomous lifecycle
         if: always()
         env:
