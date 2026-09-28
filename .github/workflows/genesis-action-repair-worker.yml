@@ -55,8 +55,35 @@ jobs:
           echo "issue_number=$issue_number" >> "$GITHUB_OUTPUT"
           if [[ -z "$issue_number" ]]; then
             echo "No authorized Action failure is waiting for repair."
+            {
+              echo "## Genesis Action Repair"
+              echo ""
+              echo "**Active issue:** none"
+              echo "**State:** idle"
+            } >> "$GITHUB_STEP_SUMMARY"
+            mkdir -p runtime
+            printf '%s\n' '{"issue_number":null,"state":"idle","run_id":"'\"$GITHUB_RUN_ID\"'","run_url":"https://github.com/'\"$GITHUB_REPOSITORY\"'/actions/runs/'\"$GITHUB_RUN_ID\"'"}' > runtime/action_repair_active.json
             exit 0
           fi
+
+          issue_url="https://github.com/$GITHUB_REPOSITORY/issues/$issue_number"
+          {
+            echo "## Genesis Action Repair"
+            echo ""
+            echo "**Active issue:** [#$issue_number]($issue_url)"
+            echo "**State:** selected / repair starting"
+            echo "**Run:** [$GITHUB_RUN_ID](https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID)"
+          } >> "$GITHUB_STEP_SUMMARY"
+          mkdir -p runtime
+          jq -n \
+            --argjson issue_number "$issue_number" \
+            --arg state "selected" \
+            --arg run_id "$GITHUB_RUN_ID" \
+            --arg run_url "https://github.com/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID" \
+            --arg issue_url "$issue_url" \
+            '{issue_number:$issue_number,state:$state,run_id:$run_id,run_url:$run_url,issue_url:$issue_url}' \
+            > runtime/action_repair_active.json
+          echo "::notice title=Genesis Action Repair::Working on issue #$issue_number"
           gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY"             --add-label genesis-action-verifying >/dev/null 2>&1 || true
 
       - name: Start bounded local coding provider
@@ -146,6 +173,7 @@ jobs:
           name: genesis-action-repair-${{ github.run_id }}
           path: |
             runtime/action_repair_candidate.json
+            runtime/action_repair_active.json
             /tmp/genesis-action-repair-provider.log
           if-no-files-found: ignore
           retention-days: 30
