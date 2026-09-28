@@ -560,10 +560,25 @@ def _decode_repair_memory(text: str) -> list[dict]:
     return _bounded_repair_memory(value if isinstance(value, list) else [])
 
 
-def load_issue_repair_memory(repository: str, issue_number: int) -> list[dict]:
+def _all_issue_comments(repository: str, issue_number: int) -> list[dict]:
     base = f"https://api.github.com/repos/{repository}"
+    rows: list[dict] = []
+    for page in range(1, 101):
+        batch = _api_json(
+            "GET",
+            f"{base}/issues/{issue_number}/comments?per_page=100&page={page}",
+        ) or []
+        if not isinstance(batch, list):
+            break
+        rows.extend(row for row in batch if isinstance(row, dict))
+        if len(batch) < 100:
+            break
+    return rows
+
+
+def load_issue_repair_memory(repository: str, issue_number: int) -> list[dict]:
     try:
-        comments = _api_json("GET", f"{base}/issues/{issue_number}/comments?per_page=100") or []
+        comments = _all_issue_comments(repository, issue_number)
     except Exception as exc:
         print(
             json.dumps(
@@ -575,7 +590,9 @@ def load_issue_repair_memory(repository: str, issue_number: int) -> list[dict]:
             flush=True,
         )
         return []
-    for row in comments:
+    # Newest Genesis status is authoritative. Older status comments may contain
+    # repair memory from prior material states and must not drive the next retry.
+    for row in reversed(comments):
         existing = str(row.get("body") or "")
         if existing.startswith(STATUS_MARKER):
             return _decode_repair_memory(existing)
@@ -583,9 +600,8 @@ def load_issue_repair_memory(repository: str, issue_number: int) -> list[dict]:
 
 
 def load_maintainer_repair_guidance(repository: str, issue_number: int) -> str:
-    base = f"https://api.github.com/repos/{repository}"
     try:
-        comments = _api_json("GET", f"{base}/issues/{issue_number}/comments?per_page=100") or []
+        comments = _all_issue_comments(repository, issue_number)
     except Exception as exc:
         print(
             json.dumps(
@@ -608,9 +624,11 @@ def _upsert_status_comment(
     repair_memory: list[dict] | None = None,
 ) -> None:
     base = f"https://api.github.com/repos/{repository}"
-    comments = _api_json("GET", f"{base}/issues/{issue_number}/comments?per_page=100") or []
+    comments = _all_issue_comments(repository, issue_number)
     body = STATUS_MARKER + "\n" + text.strip() + "\n" + _encode_repair_memory(repair_memory)
-    for row in comments:
+    # Update the newest status record. This keeps the latest retry evidence
+    # authoritative even on long-lived issues with more than 100 comments.
+    for row in reversed(comments):
         existing = str(row.get("body") or "")
         if existing.startswith(STATUS_MARKER):
             _api_json("PATCH", f"{base}/issues/comments/{row['id']}", {"body": body})
