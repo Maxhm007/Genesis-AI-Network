@@ -245,10 +245,13 @@ def _sequential_routable_issues(repository: str, token: str) -> list[dict]:
 
 def _active_issue_numbers(repository: str, token: str) -> list[int]:
     active: list[int] = []
-    active_labels = set(agentic.ACTIVE_LABELS) | {
+    # A handoff-pending label is only a dispatch reservation, not proof that a
+    # worker is actually running. Counting it as active can permanently consume
+    # the single sequential slot after a failed/stale provider handoff and stop
+    # Recovery from reclaiming the focused issue.
+    active_labels = (set(agentic.ACTIVE_LABELS) - {"genesis-deepseek-handoff-pending"}) | {
         "genesis-claimed",
         "genesis-deepseek-working",
-        "genesis-deepseek-handoff-pending",
     }
     for issue in policy._all_open_issues_fifo(repository, token):
         if agentic.labels(issue) & active_labels:
