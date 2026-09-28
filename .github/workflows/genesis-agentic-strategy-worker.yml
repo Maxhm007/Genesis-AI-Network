@@ -1,4 +1,5 @@
 name: Genesis Agentic Strategy Worker
+run-name: ${{ github.event_name == 'workflow_dispatch' && format('Issue #{0} — {1}', inputs.issue_number, inputs.strategy) || 'Strategy Worker validation' }}
 
 on:
   push:
@@ -89,6 +90,26 @@ jobs:
       - name: Verify clean repository baseline
         if: github.event_name == 'push'
         run: python -m pytest -q
+
+      - name: Show active issue in run summary
+        if: github.event_name == 'workflow_dispatch'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+          STRATEGY: ${{ inputs.strategy }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json title --jq '.title')
+          {
+            echo "## 🎯 Genesis is working on Issue #$ISSUE_NUMBER"
+            echo
+            echo "**Issue:** [#$ISSUE_NUMBER — $title](https://github.com/$GITHUB_REPOSITORY/issues/$ISSUE_NUMBER)"
+            echo
+            echo "**Strategy:** \`$STRATEGY\`"
+            echo
+            echo "**Worker run:** #$GITHUB_RUN_NUMBER"
+          } >> "$GITHUB_STEP_SUMMARY"
 
       - name: Verify actionable Agentic Lab reservation and safe target
         if: github.event_name == 'workflow_dispatch'
