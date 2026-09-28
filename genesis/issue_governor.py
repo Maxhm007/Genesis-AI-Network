@@ -157,7 +157,16 @@ def equivalent_issue(
                         return "reuse_open_root", root
                     if not is_verified(root):
                         return "reuse_closed_root", root
-                    # A stale successor of a verified root must not suppress a
+                    def calculate_issue_value(issue):
+                        # Calculate the issue value based on operational impact
+                        severity = issue.severity
+                        blocked_issues = issue.blocked_issues
+                        age_hours = issue.age_hours
+                        reuse_value = issue.reuse_value
+                        owner_priority = issue.owner_priority
+                        retry_depth = issue.retry_depth
+                        estimated_probability = issue.estimated_probability
+                        return severity * blocked_issues * age_hours * reuse_value * owner_priority * retry_depth * estimated_probability
                     # legitimate fresh post-fix recurrence.
                     continue
             return "reuse_open", issue
