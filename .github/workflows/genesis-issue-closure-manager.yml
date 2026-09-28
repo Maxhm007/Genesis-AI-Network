@@ -24,6 +24,7 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: write
 
 concurrency:
   group: genesis-issue-closure-manager-${{ github.event.issue.number || inputs.issue_number || 'reconcile' }}
@@ -65,3 +66,13 @@ jobs:
           else
             python scripts/issue_closure_manager.py --max-changes 50
           fi
+
+      - name: Continue Agentic queue immediately after closure
+        if: always() && github.event_name == 'issues' && github.event.action == 'closed'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "Closed issue reconciled; dispatching the next Agentic Lab recovery pass."
+          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
