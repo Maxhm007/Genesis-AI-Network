@@ -1,5 +1,7 @@
 # Codex Handoff
 
+Read `AGENTS.md` and `CODEX_TEAM.md` first for the owner-facing Codex engineering-team roles and chat routing.
+
 Read this file together with `GENESIS_CONSTITUTION.md`, `NETWORK_SPEC.md`, `MODEL_POLICY.md`, `KNOWLEDGE_POLICY.md`, `DISTRIBUTION_PROTOCOL.md`, and `CURRENT_TASK.md` before making changes.
 
 ## Project intent
