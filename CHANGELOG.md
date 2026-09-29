@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.8 - 29-Sep-2026 - 10:20 AM - Validate every dashboard tab mapping
+
+- Replaced the fixed-count, attribute-order-dependent tab regex with structural HTML parsing.
+- Require bidirectional one-to-one mappings between every `section#view-*` target and every dashboard navigation control.
+- Reject missing, orphaned, mismatched, duplicate and non-anchor controls while preserving the no-JavaScript navigation contract.
+- Added focused regression coverage including the Chat tab and all new failure modes; 34 tests passed and 2 Windows-only cases skipped.
+- Confirmed the checked-in generated dashboard still fails the pre-existing loading-placeholder check; no deployment claim is made.
+
 ## qwen3-github-v1.0.2 - 13-Sep-2026 - 01:47 AM - Bound one-at-a-time GitHub inference
 
 - Request a valid single-line function to avoid newline over-escaping, retaining strict AST/scope/functional validation.

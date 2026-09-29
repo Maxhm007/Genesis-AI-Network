@@ -17,7 +17,7 @@ This file is a **human-readable near-term backlog**. It is not the authority for
 
 - [ ] Benchmark optional Qwen3-4B-Instruct-2507 for compatibility, memory/latency and accepted repairs; retain existing active providers and routing until normal validation/trust evidence and explicit activation approval.
 
-- [ ] Resolve remaining dashboard-script targets through an appropriately safeguarded repair lane; the verified ordinary exception covers only `scripts/self_evaluation_dashboard.py`, not arbitrary or control scripts.
+- [ ] Resolve remaining dashboard-script targets through an appropriately safeguarded repair lane; tab-mapping validation in `scripts/validate_dashboard_artifact.py` is now covered, while the verified ordinary exception still covers only `scripts/self_evaluation_dashboard.py`, not arbitrary or control scripts.
 
 - [x] Prevent push and schedule bursts from cancelling GitHub Issue discovery before its publication decision.
 - [x] Verify live automatic Issue closure after the autorepair recovery release; issue `#426` closed as completed with `genesis-solved` after its exact grounding test passed on `main`.
