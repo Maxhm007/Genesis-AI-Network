@@ -1,9 +1,10 @@
-name: Deploy Genesis Team Chat to GitHub Pages
+name: Deploy Genesis Pages
 
 on:
   push:
     branches: [main]
     paths:
+      - docs/status/**
       - web/**
       - .github/workflows/deploy-team-chat-pages.yml
   workflow_dispatch:
@@ -14,7 +15,7 @@ permissions:
   id-token: write
 
 concurrency:
-  group: genesis-team-chat-pages
+  group: genesis-pages
   cancel-in-progress: true
 
 jobs:
@@ -32,10 +33,18 @@ jobs:
         with:
           enablement: true
 
-      - name: Upload Team Chat
+      - name: Build Pages site
+        run: |
+          rm -rf _site
+          mkdir -p _site/team-chat
+          cp -a docs/status/. _site/
+          cp web/index.html _site/team-chat/index.html
+          touch _site/.nojekyll
+
+      - name: Upload Pages artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: web
+          path: _site
 
       - name: Deploy
         id: deployment
