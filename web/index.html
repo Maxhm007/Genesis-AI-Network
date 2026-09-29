@@ -62,6 +62,7 @@
 </div>
 <script>
 (()=>{const $=s=>document.querySelector(s),messages=$('#messages'),message=$('#message'),send=$('#send'),token=$('#token'),sender=$('#sender');
+const PUBLIC_PREVIEW=location.hostname.endsWith('github.io');
 token.value=sessionStorage.getItem('genesis_token')||'';sender.value=sessionStorage.getItem('genesis_sender')||'Human';
 token.oninput=()=>sessionStorage.setItem('genesis_token',token.value);sender.oninput=()=>sessionStorage.setItem('genesis_sender',sender.value);
 const icons={nexus:'N',atlas:'A',forge:'</>',sentinel:'S',scout:'Q',recovery:'R'};
@@ -70,9 +71,30 @@ function card(m,status='ready'){return '<div class="member"><div class="mIcon">'
 function add(kind,text,meta=''){const a=document.createElement('article');a.className='msg '+kind;a.innerHTML=(kind==='user'?'':'<div class="msgAvatar">N</div>')+'<div class="bubble"><div class="who">'+(kind==='user'?'You':'Nexus')+'</div><div class="body"></div><div class="meta"></div></div>'+(kind==='user'?'<div class="msgAvatar">You</div>':'');a.querySelector('.body').textContent=text;a.querySelector('.meta').textContent=meta;messages.appendChild(a);$('#chat').scrollTop=$('#chat').scrollHeight;return a}
 function typing(){const a=add('nexus','');a.querySelector('.body').innerHTML='<span class="typing"><i></i><i></i><i></i></span>';return a}
 function activity(names=[]){document.querySelectorAll('.member').forEach(x=>{const n=x.querySelector('strong')?.textContent?.toLowerCase();if(names.map(String).map(v=>v.toLowerCase()).some(v=>n?.includes(v.replace('planner','atlas').replace('engineer','forge').replace('validator','sentinel').replace('researcher','scout').replace('reviewer','sentinel'))))x.querySelector('.pill').textContent='working'})}
-async function loadTeam(){try{const h=await fetch('/health');if(!h.ok)throw 0;const r=await fetch('/v1/team',{headers:headers(),cache:'no-store'});if(r.status===401){$('#teamSummary').textContent='Access token required';return}const d=await r.json();$('#brainLabel').textContent=(d.brain||'Genesis')+' Brain active';$('#teamSummary').textContent='Orchestrating '+Math.max(0,(d.roster||[]).length-1)+' teammates';$('#teamCount').textContent=(d.roster||[]).length;$('#roster').innerHTML=(d.roster||[]).map(x=>card(x,x.status)).join('');$('#autoInfo').textContent=d.autonomous_development?'Enabled — Nexus can select and delegate Genesis development work independently.':'Disabled';$('#evolveInfo').textContent=d.nexus_can_evolve_team?'Enabled — Nexus may evolve specialist teammates through validated workflows.':'Disabled';$('#autonomyPreview').textContent=d.autonomous_development?'Nexus team working independently':'Autonomous team development disabled'}catch(e){$('#teamSummary').textContent='Genesis unavailable';$('#statusDot').style.color='#ff7d8a'}}
+async function loadTeam(){try{
+if(PUBLIC_PREVIEW){
+  const d={brain:'Genesis',autonomous_development:true,nexus_can_evolve_team:true,roster:[
+    {id:'nexus',name:'Nexus',role:'Team Leader',status:'active'},
+    {id:'atlas',name:'Atlas',role:'Architecture & Planning',status:'ready'},
+    {id:'forge',name:'Forge',role:'Development',status:'ready'},
+    {id:'sentinel',name:'Sentinel',role:'Review & QA',status:'ready'},
+    {id:'scout',name:'Scout',role:'Research',status:'ready'},
+    {id:'recovery',name:'Recovery',role:'Troubleshooting',status:'ready'}]};
+  $('#brainLabel').textContent='Genesis Brain preview';
+  $('#teamSummary').textContent='Public GitHub Pages preview';
+  $('#teamCount').textContent=d.roster.length;
+  $('#roster').innerHTML=d.roster.map(x=>card(x,x.status)).join('');
+  $('#autoInfo').textContent='Enabled in Genesis — public preview does not execute backend work.';
+  $('#evolveInfo').textContent='Enabled in Genesis — changes execute through the private runtime and GitHub workflows.';
+  $('#autonomyPreview').textContent='Public preview · live runtime not connected';
+  $('#convPreview').textContent='Open the local Genesis runtime for live Nexus chat';
+  return;
+}
+const h=await fetch('/health');if(!h.ok)throw 0;const r=await fetch('/v1/team',{headers:headers(),cache:'no-store'});if(r.status===401){$('#teamSummary').textContent='Access token required';return}const d=await r.json();$('#brainLabel').textContent=(d.brain||'Genesis')+' Brain active';$('#teamSummary').textContent='Orchestrating '+Math.max(0,(d.roster||[]).length-1)+' teammates';$('#teamCount').textContent=(d.roster||[]).length;$('#roster').innerHTML=(d.roster||[]).map(x=>card(x,x.status)).join('');$('#autoInfo').textContent=d.autonomous_development?'Enabled — Nexus can select and delegate Genesis development work independently.':'Disabled';$('#evolveInfo').textContent=d.nexus_can_evolve_team?'Enabled — Nexus may evolve specialist teammates through validated workflows.':'Disabled';$('#autonomyPreview').textContent=d.autonomous_development?'Nexus team working independently':'Autonomous team development disabled'}catch(e){$('#teamSummary').textContent='Genesis unavailable';$('#statusDot').style.color='#ff7d8a'}}
 $('#refresh').onclick=loadTeam;
-$('#composer').onsubmit=async e=>{e.preventDefault();const text=message.value.trim();if(!text)return;add('user',text,'Now');$('#convPreview').textContent=text;message.value='';send.disabled=true;const t=typing();try{const r=await fetch('/v1/message',{method:'POST',headers:headers(true),body:JSON.stringify({sender:sender.value.trim()||'Human',message:text})});const d=await r.json();t.remove();if(!r.ok){add('nexus',d.error==='unauthorized'?'Access token required or incorrect.':'I could not process that request: '+(d.error||r.status));return}add('nexus',d.genesis_response||'Genesis returned no response.',d.provider?'Provider: '+d.provider:'');activity(d.team_members_consulted||[]);$('#convPreview').textContent='Nexus coordinated '+((d.team_members_consulted||[]).length||'the')+' teammate roles'}catch(e){t.remove();add('nexus','Connection to Genesis was lost. Check that the communication server is running.')}finally{send.disabled=false;message.focus()}};
+$('#composer').onsubmit=async e=>{e.preventDefault();const text=message.value.trim();if(!text)return;
+if(PUBLIC_PREVIEW){add('user',text,'Preview');add('nexus','This is the public GitHub Pages preview. Live Nexus chat requires the Genesis communication runtime. Use the repository or run the Genesis server to connect the real team.','Public preview');message.value='';return;}
+add('user',text,'Now');$('#convPreview').textContent=text;message.value='';send.disabled=true;const t=typing();try{const r=await fetch('/v1/message',{method:'POST',headers:headers(true),body:JSON.stringify({sender:sender.value.trim()||'Human',message:text})});const d=await r.json();t.remove();if(!r.ok){add('nexus',d.error==='unauthorized'?'Access token required or incorrect.':'I could not process that request: '+(d.error||r.status));return}add('nexus',d.genesis_response||'Genesis returned no response.',d.provider?'Provider: '+d.provider:'');activity(d.team_members_consulted||[]);$('#convPreview').textContent='Nexus coordinated '+((d.team_members_consulted||[]).length||'the')+' teammate roles'}catch(e){t.remove();add('nexus','Connection to Genesis was lost. Check that the communication server is running.')}finally{send.disabled=false;message.focus()}};
 message.oninput=()=>{message.style.height='auto';message.style.height=Math.min(140,message.scrollHeight)+'px'};message.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#composer').requestSubmit()}};
 loadTeam();message.focus()})();
 </script>
