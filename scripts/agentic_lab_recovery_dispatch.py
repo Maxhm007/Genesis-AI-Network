@@ -32,6 +32,7 @@ AGENTIC_LABEL = "agentic-lab"
 WAITING_CAPABILITY_LABEL = "genesis-waiting-capability"
 CAPABILITY_GAP_LABEL = "genesis-capability-gap"
 NEEDS_HUMAN_LABEL = "genesis-needs-human"
+SEQUENTIAL_FOCUS_LABEL = "genesis-sequential-focus"
 DEEPSEEK_HANDOFF_LABEL = "genesis-deepseek-handoff-pending"
 EXHAUSTED_LABEL = "genesis-solver-exhausted"
 ACTIVE_LABELS = {
@@ -805,7 +806,18 @@ def pause_for_capability(
             f"/issues/{number}/labels",
             {"labels": [NEEDS_HUMAN_LABEL, EXHAUSTED_LABEL, AGENTIC_LABEL]},
         )
-        for label in ACTIVE_LABELS | {WAITING_CAPABILITY_LABEL, "genesis-autonomous", "genesis-deferred"}:
+        for label in ACTIVE_LABELS | {
+            WAITING_CAPABILITY_LABEL,
+            SEQUENTIAL_FOCUS_LABEL,
+            "genesis-autonomous",
+            "genesis-deferred",
+            "genesis-claimed",
+            "genesis-deepseek-working",
+            "genesis-qwen3-agentic",
+            "genesis-deepseek-agentic",
+            "genesis-recovery-solver",
+            "genesis-blocked",
+        }:
             remove_label(repository, token, number, label)
         capability_class = _capability_class(reason)
         marker = f"<!-- genesis-capability-class-exhausted:{capability_class} -->"

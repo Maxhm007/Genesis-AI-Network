@@ -1,5 +1,17 @@
 # Genesis AI Network — Project Summary
 
+## Human-escalation dispatch isolation
+
+Agentic Recovery now releases the sequential focus and all worker reservation
+labels when a repeatedly exhausted parent is escalated to
+`genesis-needs-human`. The sequential controller also excludes human-paused
+Issues from focused-chain and fallback candidate selection. This prevents an
+open maintainer-review Issue such as `#867` from blocking the queue or being
+automatically selected again while preserving its audit/provenance labels.
+
+Focused regression coverage passes locally. Live GitHub label cleanup and
+queue advancement remain pending deployment and post-merge verification.
+
 ## Agentic capability-loop guard
 
 Agentic Recovery now treats a verified capability dependency as consumable
