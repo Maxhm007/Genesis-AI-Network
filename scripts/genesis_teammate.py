@@ -58,6 +58,96 @@ def dispatch(workflow: str, inputs: dict[str, str]) -> None:
     request("POST", f"/actions/workflows/{workflow}/dispatches", {"ref": "main", "inputs": inputs})
 
 
+ACTION_TOKENS = (
+    "check", "fix", "solve", "do it", "investigate", "analyze", "analyse",
+    "plan", "implement", "verify", "validate", "review", "research",
+    "find", "compare", "test", "retry", "run", "deploy", "update",
+    "change", "create", "close", "open", "why", "how", "what", "can ",
+    "should ", "please", "?",
+)
+
+HARD_ADMIN_PREFIXES = (
+    "### nexus is live",
+    "nexus is live",
+    "admin note:",
+    "setup note:",
+    "fyi:",
+    "for information:",
+)
+
+STATUS_PREFIXES = (
+    "status note:",
+)
+
+ADMIN_PHRASES = (
+    "use this issue as the **only owner-facing ai team chat**",
+    "use this issue as the only owner-facing ai team chat",
+    "authority model:",
+)
+
+
+def should_route_owner_comment(text: str) -> bool:
+    """Return True only for owner comments that look like actionable requests.
+
+    Explicit Genesis metadata/admin comments are always ignored. Informational
+    notes are ignored unless they also contain a clear action/question token,
+    preserving concise owner requests such as "Genesis is stuck" + "check it".
+    """
+    value = (text or "").strip()
+    lower = value.lower()
+    if not value:
+        return False
+    if "<!-- genesis-" in lower:
+        return False
+    if lower.startswith(HARD_ADMIN_PREFIXES):
+        return False
+    if any(phrase in lower for phrase in ADMIN_PHRASES):
+        return False
+    if lower.startswith(STATUS_PREFIXES):
+        return any(token in lower for token in ACTION_TOKENS)
+    return True
+
+
+TEAM_EVOLUTION_ACTIONS = (
+    "add teammate", "add agent", "new teammate", "new agent",
+    "modify teammate", "modify agent", "change teammate", "change agent",
+    "replace teammate", "replace agent", "disable teammate", "disable agent",
+    "enable teammate", "enable agent", "remove teammate", "remove agent",
+    "change role", "modify role", "new specialist",
+)
+
+
+def is_team_evolution_request(text: str) -> bool:
+    value = (text or "").lower()
+    return any(token in value for token in TEAM_EVOLUTION_ACTIONS)
+
+
+def create_team_evolution_issue(objective: str, source_comment_id: str) -> int:
+    title = f"[Nexus Team Evolution] {clean_title(objective)}"
+    body = (
+        "<!-- genesis-team-evolution -->\n"
+        "**Authority:** Nexus may evolve specialist teammates when a capability gap or organizational need is identified.\n\n"
+        f"**Nexus workspace:** #{CONFIG['workspaces']['nexus']}\n"
+        f"**Source comment id:** {source_comment_id}\n\n"
+        "## Requested evolution\n"
+        f"{objective}\n\n"
+        "## Required invariants\n"
+        "- Genesis remains the Brain and identity authority.\n"
+        "- Owner control and the Nexus-only owner entrypoint remain intact.\n"
+        "- Every added specialist gets a permanent workspace issue and a separate workflow.\n"
+        "- Modified specialists preserve an auditable issue history.\n"
+        "- Removed/disabled specialists are retired without deleting historical comments.\n"
+        "- Existing Agentic Lab, validation, safety, and promotion gates remain authoritative.\n"
+        "- No teammate may self-approve a high-impact capability or bypass independent validation.\n"
+    )
+    result = request(
+        "POST",
+        "/issues",
+        {"title": title, "body": body, "labels": ["genesis-autonomous", "agentic-lab"]},
+    )
+    return int(result["number"])
+
+
 def classify(text: str) -> str:
     value = text.lower()
     if any(k in value for k in ("stuck", "retry", "recovery", "keeps failing", "failed again", "exhausted", "blocked")):
@@ -86,6 +176,8 @@ def provider_reason(agent: str, objective: str) -> tuple[str, str]:
         f"OBJECTIVE: {objective}\n"
         "Genesis is the Brain. Nexus is the team leader and only owner-facing teammate. "
         "Return concise findings, evidence, risks, and the smallest next action. "
+        "If the current specialist roster lacks a capability needed to complete the objective safely, "
+        "end with exactly: TEAM_CHANGE_REQUIRED: <specialist role>: <reason>. "
         "Do not claim execution that did not happen."
     )
     return provider.name, provider.reason(prompt)
@@ -117,6 +209,30 @@ def create_execution_issue(agent: str, objective: str, source_comment_id: str) -
 
 def nexus(objective: str, actor: str, source_comment_id: str) -> None:
     nexus_issue = int(CONFIG["workspaces"]["nexus"])
+    if not should_route_owner_comment(objective):
+        return
+    if is_team_evolution_request(objective):
+        evolution_issue = create_team_evolution_issue(objective, source_comment_id)
+        forge_issue = int(CONFIG["workspaces"]["forge"])
+        comment(
+            nexus_issue,
+            f"<!-- genesis-nexus-team-evolution:{source_comment_id} -->\n"
+            "### Nexus team evolution\n"
+            f"- **Request:** {objective}\n"
+            f"- **Evolution issue:** #{evolution_issue}\n"
+            f"- **Implementation journal:** Forge #{forge_issue}\n"
+            "- **Status:** admitted to the existing Agentic Lab/validation path\n\n"
+            "Nexus is authorized to add, modify, disable, replace, or retire specialist teammates while preserving Genesis and owner-control invariants.",
+        )
+        comment(
+            forge_issue,
+            f"<!-- genesis-team-evolution-assignment:{source_comment_id} -->\n"
+            "### Team evolution assignment from Nexus\n"
+            f"- **Objective:** {objective}\n"
+            f"- **Execution issue:** #{evolution_issue}\n"
+            "- **Requirement:** maintain a separate permanent workspace issue and separate workflow for every active specialist.",
+        )
+        return
     agent = classify(objective)
     agent_issue = int(CONFIG["workspaces"][agent])
     workflow = str(CONFIG["workflows"][agent])
@@ -172,11 +288,26 @@ def agent_run(agent: str, objective: str, source_comment_id: str, nexus_issue: i
     )
     comment(workspace, result_body)
 
+    team_change_match = re.search(r"(?im)^TEAM_CHANGE_REQUIRED:\s*(.+)$", output)
+    team_change_issue = None
+    if team_change_match and CONFIG.get("rules", {}).get("nexus_can_evolve_team", False):
+        requested = team_change_match.group(1).strip()
+        team_change_issue = create_team_evolution_issue(
+            f"Autonomous capability-gap request from {agent}: {requested}",
+            source_comment_id,
+        )
+        comment(
+            workspace,
+            f"<!-- genesis-autonomous-team-evolution:{source_comment_id}:{agent} -->\n"
+            f"Capability gap escalated to Nexus team evolution issue #{team_change_issue}.",
+        )
+
     mirror = (
         f"<!-- genesis-nexus-result:{source_comment_id}:{agent} -->\n"
         f"### Nexus update — {agent.title()}\n"
         f"{output}{suffix}\n\n"
         f"Full specialist journal: #{workspace}"
+        + (f"\n\nTeam evolution issue: #{team_change_issue}" if team_change_issue else "")
     )
     comment(nexus_issue, mirror)
 
