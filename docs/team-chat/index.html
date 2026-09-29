@@ -13,7 +13,7 @@
 .nav{width:56px;height:56px;border:0;border-radius:14px;background:transparent;color:#8495aa;display:grid;place-items:center;gap:2px;cursor:pointer;font-size:18px}.nav small{font-size:10px}.nav.active,.nav:hover{background:#172130;color:#fff}
 .list{border-right:1px solid var(--line);background:rgba(10,16,24,.96);padding:22px 16px;overflow:auto}.brand h1{margin:0;font-size:22px}.brand p{color:var(--muted);margin:5px 0 20px}.search{width:100%;border:1px solid var(--line);background:#101821;color:#fff;border-radius:11px;padding:11px 12px;outline:none}
 .sectionTitle{color:#92a1b4;font-size:12px;margin:20px 4px 9px;text-transform:uppercase;letter-spacing:.08em}.conv{padding:12px;border-radius:13px;display:grid;grid-template-columns:38px 1fr auto;gap:10px;align-items:center;margin-bottom:5px}.conv.active{background:#182234;border:1px solid #2a3850}.convIcon{width:38px;height:38px;border-radius:11px;background:#111c29;border:1px solid #263649;display:grid;place-items:center}.conv strong{display:block;font-size:13px}.conv span{display:block;color:var(--muted);font-size:11px;margin-top:4px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.conv time{color:#8190a4;font-size:10px}
-.main{display:flex;flex-direction:column;min-width:0}.top{height:78px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 20px;background:rgba(9,14,21,.88);backdrop-filter:blur(14px)}.identity{display:flex;gap:12px;align-items:center}.avatar{width:42px;height:42px;border-radius:13px;border:1px solid #2b3b4f;background:#101925;display:grid;place-items:center;font-weight:800}.identity h2{margin:0;font-size:17px}.identity p{margin:4px 0 0;color:var(--muted);font-size:12px}.live{color:var(--green)}
+.main{display:flex;flex-direction:column;min-width:0}.top{height:78px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 20px;background:rgba(9,14,21,.88);backdrop-filter:blur(14px)}.identity{display:flex;gap:12px;align-items:center}.avatar{width:42px;height:42px;border-radius:13px;border:1px solid #2b3b4f;background:#101925;display:grid;place-items:center;font-weight:800}.identity h2{margin:0;font-size:17px}.identity p{margin:4px 0 0;color:var(--muted);font-size:12px}.live{color:var(--green)}.connectBtn{border:1px solid #2b3a4d;background:#111a25;color:#dce8f6;border-radius:10px;padding:8px 11px;font-size:11px;font-weight:750;cursor:pointer}.connectBtn.connected{border-color:#245a43;color:#76e7b0;background:#0f2a20}
 .chat{flex:1;overflow:auto;padding:24px 28px 128px}.messages{max-width:880px;margin:auto;display:flex;flex-direction:column;gap:18px}.msg{display:flex;gap:10px;align-items:flex-start}.msg.user{justify-content:flex-end}.msg.user .bubble{background:#1a2a41;border-color:#304563;max-width:72%}.msg.user .msgAvatar{order:2}.msgAvatar{width:34px;height:34px;border-radius:10px;background:#111a25;border:1px solid var(--line);display:grid;place-items:center;font-size:12px;font-weight:800;flex:0 0 auto}.bubble{max-width:82%;border:1px solid var(--line);background:#0f171f;border-radius:14px;padding:12px 14px;line-height:1.55}.who{font-size:11px;font-weight:800;color:#c9d4df;margin-bottom:6px}.meta{font-size:10px;color:var(--muted);margin-top:7px}
 .activity{margin-top:10px;display:grid;gap:8px}.agentCard{border:1px solid var(--line);background:#0c141d;border-radius:12px;padding:10px 12px;display:grid;grid-template-columns:32px 1fr auto;gap:10px;align-items:center}.agentCard .ico{width:32px;height:32px;border-radius:9px;background:#121e2b;display:grid;place-items:center}.agentCard strong{font-size:12px}.agentCard p{margin:3px 0 0;color:var(--muted);font-size:11px}.pill{font-size:10px;padding:5px 8px;border-radius:999px;background:#152238;color:#8fb8ff;border:1px solid #263f63}.pill.green{background:#103126;color:#70e8b1;border-color:#1e543e}.pill.amber{background:#332712;color:#f0c875;border-color:#5b4723}.pill.gray{background:#1a2029;color:#9aa7b8}
 .composerWrap{position:absolute;left:416px;right:320px;bottom:0;padding:16px 24px 20px;background:linear-gradient(180deg,transparent,#080d14 28%,#080d14)}.composer{max-width:880px;margin:auto;border:1px solid #2a3747;background:#111923;border-radius:15px;padding:8px;display:grid;grid-template-columns:auto 1fr auto;align-items:end;box-shadow:0 20px 50px #0008}.attach,.send{border:0}.attach{background:transparent;color:#94a4b8;font-size:18px;padding:10px}.composer textarea{resize:none;max-height:140px;min-height:42px;background:transparent;border:0;outline:0;color:#fff;padding:10px}.send{height:42px;width:42px;border-radius:11px;background:#dce8f7;color:#0a1118;font-size:19px;font-weight:900}
@@ -40,7 +40,7 @@
 <main class="main">
 <header class="top">
  <div class="identity"><div class="avatar">N</div><div><h2>Nexus — Team Leader <span class="live">●</span></h2><p><span id="brainLabel">Genesis Brain active</span> · <span id="teamSummary">Loading teammates…</span></p></div></div>
- <div style="color:#8392a6">⌕ &nbsp; •••</div>
+ <div style="display:flex;align-items:center;gap:10px;color:#8392a6"><button id="connectGithub" class="connectBtn" type="button">Connect GitHub</button><span>⌕ &nbsp; •••</span></div>
 </header>
 <section id="chat" class="chat"><div id="messages" class="messages">
  <article class="msg"><div class="msgAvatar">N</div><div class="bubble"><div class="who">Nexus</div><div>Talk to me directly. I’ll coordinate the Genesis specialist team, route work to the right teammate, and keep the conversation here.</div><div class="activity" id="welcomeActivity"></div><div class="meta">Team leader · Genesis Brain authority</div></div></article>
@@ -63,10 +63,53 @@
 <script>
 (()=>{const $=s=>document.querySelector(s),messages=$('#messages'),message=$('#message'),send=$('#send'),token=$('#token'),sender=$('#sender');
 const PUBLIC_PREVIEW=location.hostname.endsWith('github.io');
+const GH_REPO='Maxhm007/Genesis-AI-Network',NEXUS_ISSUE=1000,GH_API='https://api.github.com/repos/'+GH_REPO;
+const connectGithub=$('#connectGithub');
 token.value=sessionStorage.getItem('genesis_token')||'';sender.value=sessionStorage.getItem('genesis_sender')||'Human';
 token.oninput=()=>sessionStorage.setItem('genesis_token',token.value);sender.oninput=()=>sessionStorage.setItem('genesis_sender',sender.value);
 const icons={nexus:'N',atlas:'A',forge:'</>',sentinel:'S',scout:'Q',recovery:'R'};
 function headers(json=false){const h={};if(json)h['Content-Type']='application/json';if(token.value.trim())h.Authorization='Bearer '+token.value.trim();return h}
+function ghHeaders(){const t=token.value.trim();const h={'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};if(t)h.Authorization='Bearer '+t;return h}
+function setGithubState(ok){if(!connectGithub)return;connectGithub.textContent=ok?'GitHub connected':'Connect GitHub';connectGithub.classList.toggle('connected',!!ok)}
+async function verifyGithubToken(){
+  if(!token.value.trim()){setGithubState(false);return false}
+  try{const r=await fetch('https://api.github.com/user',{headers:ghHeaders(),cache:'no-store'});const d=await r.json();const ok=r.ok&&String(d.login||'').toLowerCase()==='maxhm007';setGithubState(ok);return ok}catch{return false}
+}
+async function ensureGithubToken(){
+  if(await verifyGithubToken())return true;
+  const entered=prompt('Enter a GitHub fine-grained personal access token for Maxhm007/Genesis-AI-Network with Issues: Read and write. It is stored only in this browser tab.');
+  if(!entered)return false;
+  token.value=entered.trim();sessionStorage.setItem('genesis_token',token.value);
+  const ok=await verifyGithubToken();
+  if(!ok){alert('GitHub token could not be verified as Maxhm007.');return false}
+  return true;
+}
+async function postNexusComment(text){
+  const r=await fetch(GH_API+'/issues/'+NEXUS_ISSUE+'/comments',{method:'POST',headers:{...ghHeaders(),'Content-Type':'application/json'},body:JSON.stringify({body:text})});
+  const d=await r.json();if(!r.ok)throw new Error(d.message||('GitHub '+r.status));return d;
+}
+async function fetchNexusComments(){
+  const r=await fetch(GH_API+'/issues/'+NEXUS_ISSUE+'/comments?per_page=100&sort=created&direction=desc',{headers:ghHeaders(),cache:'no-store'});
+  const d=await r.json();if(!r.ok)throw new Error(d.message||('GitHub '+r.status));return Array.isArray(d)?d:[];
+}
+function cleanNexusResult(body){
+  let s=String(body||'');
+  s=s.replace(/<!--[^]*?-->/g,'').trim();
+  s=s.replace(/^### Nexus update —[^\n]*\n?/i,'').trim();
+  s=s.replace(/\n\nFull specialist journal:[^\n]*/i,'').trim();
+  s=s.replace(/\n\nTeam evolution issue:[^\n]*/i,'').trim();
+  return s||'Nexus completed the request.';
+}
+async function waitForNexus(sourceId,timeoutMs=180000){
+  const started=Date.now(),resultMarker='genesis-nexus-result:'+sourceId+':',evolutionMarker='genesis-nexus-team-evolution:'+sourceId;
+  while(Date.now()-started<timeoutMs){
+    const comments=await fetchNexusComments();
+    const result=comments.find(c=>String(c.body||'').includes(resultMarker)||String(c.body||'').includes(evolutionMarker));
+    if(result)return cleanNexusResult(result.body);
+    await new Promise(r=>setTimeout(r,5000));
+  }
+  throw new Error('Nexus is still working. Refresh later to see the GitHub issue result.');
+}
 function card(m,status='ready'){return '<div class="member"><div class="mIcon">'+(icons[m.id]||m.name[0])+'</div><div><strong>'+m.name+'</strong><small>'+m.role+'</small></div><span class="pill '+(status==='active'?'green':status==='working'?'':'gray')+'">'+status+'</span></div>'}
 function add(kind,text,meta=''){const a=document.createElement('article');a.className='msg '+kind;a.innerHTML=(kind==='user'?'':'<div class="msgAvatar">N</div>')+'<div class="bubble"><div class="who">'+(kind==='user'?'You':'Nexus')+'</div><div class="body"></div><div class="meta"></div></div>'+(kind==='user'?'<div class="msgAvatar">You</div>':'');a.querySelector('.body').textContent=text;a.querySelector('.meta').textContent=meta;messages.appendChild(a);$('#chat').scrollTop=$('#chat').scrollHeight;return a}
 function typing(){const a=add('nexus','');a.querySelector('.body').innerHTML='<span class="typing"><i></i><i></i><i></i></span>';return a}
@@ -80,22 +123,35 @@ if(PUBLIC_PREVIEW){
     {id:'sentinel',name:'Sentinel',role:'Review & QA',status:'ready'},
     {id:'scout',name:'Scout',role:'Research',status:'ready'},
     {id:'recovery',name:'Recovery',role:'Troubleshooting',status:'ready'}]};
-  $('#brainLabel').textContent='Genesis Brain preview';
-  $('#teamSummary').textContent='Public GitHub Pages preview';
+  $('#brainLabel').textContent='Genesis Brain';
+  $('#teamSummary').textContent=(await verifyGithubToken())?'Live through Nexus #1000':'Connect GitHub for live Nexus chat';
   $('#teamCount').textContent=d.roster.length;
   $('#roster').innerHTML=d.roster.map(x=>card(x,x.status)).join('');
-  $('#autoInfo').textContent='Enabled in Genesis — public preview does not execute backend work.';
-  $('#evolveInfo').textContent='Enabled in Genesis — changes execute through the private runtime and GitHub workflows.';
-  $('#autonomyPreview').textContent='Public preview · live runtime not connected';
-  $('#convPreview').textContent='Open the local Genesis runtime for live Nexus chat';
+  $('#autoInfo').textContent='Enabled — Nexus can independently select Genesis development work.';
+  $('#evolveInfo').textContent='Enabled — Nexus can evolve specialist teammates through validated workflows.';
+  $('#autonomyPreview').textContent='Autonomous team development enabled';
+  $('#convPreview').textContent=(await verifyGithubToken())?'Live Nexus GitHub channel connected':'Connect GitHub to message Nexus';
   return;
 }
 const h=await fetch('/health');if(!h.ok)throw 0;const r=await fetch('/v1/team',{headers:headers(),cache:'no-store'});if(r.status===401){$('#teamSummary').textContent='Access token required';return}const d=await r.json();$('#brainLabel').textContent=(d.brain||'Genesis')+' Brain active';$('#teamSummary').textContent='Orchestrating '+Math.max(0,(d.roster||[]).length-1)+' teammates';$('#teamCount').textContent=(d.roster||[]).length;$('#roster').innerHTML=(d.roster||[]).map(x=>card(x,x.status)).join('');$('#autoInfo').textContent=d.autonomous_development?'Enabled — Nexus can select and delegate Genesis development work independently.':'Disabled';$('#evolveInfo').textContent=d.nexus_can_evolve_team?'Enabled — Nexus may evolve specialist teammates through validated workflows.':'Disabled';$('#autonomyPreview').textContent=d.autonomous_development?'Nexus team working independently':'Autonomous team development disabled'}catch(e){$('#teamSummary').textContent='Genesis unavailable';$('#statusDot').style.color='#ff7d8a'}}
 $('#refresh').onclick=loadTeam;
+connectGithub.onclick=async()=>{if(await ensureGithubToken()){setGithubState(true);loadTeam();}};
 $('#composer').onsubmit=async e=>{e.preventDefault();const text=message.value.trim();if(!text)return;
-if(PUBLIC_PREVIEW){add('user',text,'Preview');add('nexus','This is the public GitHub Pages preview. Live Nexus chat requires the Genesis communication runtime. Use the repository or run the Genesis server to connect the real team.','Public preview');message.value='';return;}
+if(PUBLIC_PREVIEW){
+  if(!(await ensureGithubToken()))return;
+  add('user',text,'GitHub · Nexus #1000');$('#convPreview').textContent=text;message.value='';send.disabled=true;const t=typing();
+  try{
+    const posted=await postNexusComment(text);
+    const sourceId=String(posted.id);
+    t.querySelector('.meta').textContent='Nexus is coordinating the team…';
+    const answer=await waitForNexus(sourceId);
+    t.remove();add('nexus',answer,'Live result · Nexus #1000');$('#convPreview').textContent='Nexus replied';
+  }catch(err){t.remove();add('nexus',String(err.message||err),'GitHub Nexus channel');}
+  finally{send.disabled=false;message.focus()}
+  return;
+}
 add('user',text,'Now');$('#convPreview').textContent=text;message.value='';send.disabled=true;const t=typing();try{const r=await fetch('/v1/message',{method:'POST',headers:headers(true),body:JSON.stringify({sender:sender.value.trim()||'Human',message:text})});const d=await r.json();t.remove();if(!r.ok){add('nexus',d.error==='unauthorized'?'Access token required or incorrect.':'I could not process that request: '+(d.error||r.status));return}add('nexus',d.genesis_response||'Genesis returned no response.',d.provider?'Provider: '+d.provider:'');activity(d.team_members_consulted||[]);$('#convPreview').textContent='Nexus coordinated '+((d.team_members_consulted||[]).length||'the')+' teammate roles'}catch(e){t.remove();add('nexus','Connection to Genesis was lost. Check that the communication server is running.')}finally{send.disabled=false;message.focus()}};
 message.oninput=()=>{message.style.height='auto';message.style.height=Math.min(140,message.scrollHeight)+'px'};message.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#composer').requestSubmit()}};
-loadTeam();message.focus()})();
+verifyGithubToken();loadTeam();message.focus()})();
 </script>
 </body></html>
