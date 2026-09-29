@@ -5,110 +5,181 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover"/>
 <title>Genesis Team Chat</title>
 <style>
-:root{color-scheme:dark;--bg:#0b1119;--panel:#111821;--panel2:#151d28;--line:#283241;--line2:#354154;--text:#f3f6fb;--muted:#919bac;--blue:#5d8df5;--green:#48d7a0;--amber:#e4ad4f;--red:#ef6f7d;--shadow:0 14px 36px rgba(0,0,0,.32)}
-*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:linear-gradient(180deg,#111923 0,#0b1119 42%,#080d13 100%);color:var(--text);font:14px Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}body{overflow:hidden}button,input,textarea{font:inherit}
-.app{height:100vh;display:grid;grid-template-columns:68px 330px minmax(520px,1fr) 310px}
-.rail{background:rgba(9,14,21,.98);border-right:1px solid var(--line);padding:16px 8px;display:flex;flex-direction:column;align-items:center;gap:10px}
-.logo{width:44px;height:44px;border-radius:12px;background:linear-gradient(145deg,#1d2b3c,#101722);border:1px solid #334258;display:grid;place-items:center;font-weight:900;font-size:20px;color:#dbe8fb;margin-bottom:10px}
-.nav{width:52px;height:58px;border:0;border-radius:12px;background:transparent;color:#8e99aa;display:grid;place-items:center;gap:2px;cursor:pointer}.nav span{font-size:19px;line-height:1}.nav small{font-size:10px}.nav.active{background:#202937;color:#fff}.nav.settings{margin-top:auto}
-.left{background:rgba(15,21,30,.98);border-right:1px solid var(--line);padding:18px 16px;overflow:auto}.leftTop{display:flex;align-items:flex-start;justify-content:space-between}.left h1{font-size:21px;margin:0}.sub{margin:4px 0 18px;color:var(--muted);font-size:12px}.launch{border:0;background:transparent;color:#9ba7b7;font-size:18px}.workspace{height:60px;border:1px solid var(--line);border-radius:12px;background:#161f2b;display:flex;align-items:center;gap:10px;padding:8px 10px;margin-bottom:14px}.workIcon{width:38px;height:38px;border-radius:10px;background:#202a39;display:grid;place-items:center;font-weight:800}.workspace strong{display:block;font-size:12px}.workspace small{color:var(--muted)}.workspace .chev{margin-left:auto;color:#8c99a9}.search{height:40px;width:100%;border-radius:10px;border:1px solid var(--line);background:#151c26;color:#fff;padding:0 12px;outline:none}.label{margin:16px 4px 8px;color:#a2adbc;font-size:11px}.conv{display:grid;grid-template-columns:38px minmax(0,1fr) auto;gap:10px;align-items:center;border-radius:11px;padding:10px;margin-bottom:5px}.conv.active{background:linear-gradient(90deg,#223047,#1b2534);border:1px solid #334158;box-shadow:inset 3px 0 0 #5c8ff3}.convIcon{width:38px;height:38px;border-radius:10px;background:#182230;border:1px solid #2d3a4d;display:grid;place-items:center;font-weight:800}.conv strong{display:block;font-size:12px}.conv p{margin:3px 0 0;color:var(--muted);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.conv time{font-size:10px;color:#a0a9b6}
-.main{min-width:0;display:flex;flex-direction:column;background:rgba(9,14,21,.86)}.topbar{height:78px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 18px}.identity{display:flex;align-items:center;gap:12px}.avatar{width:46px;height:46px;border-radius:13px;background:#16202d;border:1px solid #314159;display:grid;place-items:center;font-size:17px;font-weight:900}.identity h2{margin:0;font-size:17px}.identity p{margin:4px 0 0;color:var(--muted);font-size:11px}.online{color:var(--green)}.topActions{display:flex;gap:8px;align-items:center}.iconBtn,.connectBtn{height:34px;border:1px solid var(--line);border-radius:9px;background:#151d28;color:#c6d0dd}.iconBtn{width:34px}.connectBtn{padding:0 10px;font-size:10px;font-weight:700}.connectBtn.connected{background:#123027;border-color:#245a43;color:#75e6b0}
-.chat{flex:1;overflow:auto;padding:18px 26px 116px}.messages{max-width:790px;margin:auto;display:flex;flex-direction:column;gap:14px}.msg{display:flex;gap:10px;align-items:flex-start}.msg.user{justify-content:flex-end}.msgAvatar{width:34px;height:34px;border-radius:10px;background:#151f2b;border:1px solid var(--line);display:grid;place-items:center;font-size:11px;font-weight:800;flex:0 0 auto}.msg.user .msgAvatar{order:2}.bubble{max-width:78%;border:1px solid var(--line);border-radius:13px;background:#101820;padding:11px 13px;line-height:1.5;white-space:pre-wrap}.msg.user .bubble{max-width:65%;background:#1d2b43;border-color:#3b4f6f}.who{font-size:11px;font-weight:800;margin-bottom:6px}.meta{font-size:9px;color:var(--muted);margin-top:7px}.plan{padding-left:18px;margin:8px 0 0}.plan li{margin:6px 0}.agentGrid{display:grid;gap:7px;margin-top:12px}.agentUpdate{display:grid;grid-template-columns:34px minmax(0,1fr) auto 18px;gap:9px;align-items:center;border:1px solid var(--line);border-radius:10px;background:#0f171f;padding:7px 9px}.agentIcon{width:34px;height:34px;border-radius:10px;border:1px solid #2d3a50;background:#172233;display:grid;place-items:center;font-size:11px;font-weight:800}.agentUpdate strong{font-size:11px}.agentUpdate p{margin:3px 0 0;font-size:10px;color:var(--muted)}.dots{color:#8692a2}
+:root{
+  color-scheme:dark;
+  --bg:#080d14;--panel:#0c121b;--panel2:#111923;--panel3:#172231;--line:#202b39;--line2:#314056;
+  --text:#f4f7fb;--muted:#8f9cad;--blue:#6b98ff;--purple:#b786ff;--green:#4ddd9f;--amber:#efb94f;--red:#ee6e7b;
+  --shadow:0 20px 60px rgba(0,0,0,.35)
+}
+*{box-sizing:border-box}html,body{margin:0;width:100%;height:100%;background:
+radial-gradient(circle at 74% -10%,#20314a 0,#101823 28%,#080d14 70%);color:var(--text);
+font:14px Inter,ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}
+body{overflow:hidden}button,input,textarea{font:inherit}.hidden{display:none!important}
+.app{height:100vh;display:grid;grid-template-columns:74px 342px minmax(520px,1fr) 330px}
+.rail{background:rgba(8,13,20,.98);border-right:1px solid var(--line);padding:18px 9px;display:flex;flex-direction:column;align-items:center;gap:9px}
+.logo{width:46px;height:46px;border-radius:13px;background:linear-gradient(145deg,#1d2c40,#111824);border:1px solid #35465e;display:grid;place-items:center;margin-bottom:12px;box-shadow:0 10px 30px #0007}
+.logo svg{width:27px;height:27px;filter:drop-shadow(0 0 8px #77aaff55)}
+.nav{width:56px;height:60px;border:0;border-radius:14px;background:transparent;color:#8594a9;display:grid;place-items:center;gap:2px;cursor:pointer;transition:.18s}
+.nav .navIcon{font-size:20px;line-height:1}.nav small{font-size:10px}.nav:hover{background:#151f2d;color:#fff;transform:translateY(-1px)}.nav.active{background:#202c3d;color:#fff;box-shadow:inset 0 0 0 1px #2c3d55}.nav.settings{margin-top:auto}
+.left{background:rgba(13,19,28,.97);border-right:1px solid var(--line);padding:20px 16px;overflow:auto}
+.leftTop{display:flex;align-items:flex-start;justify-content:space-between}.left h1{font-size:22px;margin:0;letter-spacing:-.02em}.sub{margin:5px 0 18px;color:var(--muted);font-size:12px}
+.launch,.ghostBtn{border:1px solid transparent;background:transparent;color:#9aa8ba;border-radius:9px;cursor:pointer}.launch{font-size:18px;padding:5px}.launch:hover,.ghostBtn:hover{background:#172130;border-color:#27374b;color:#fff}
+.workspace{height:62px;border:1px solid var(--line);border-radius:13px;background:linear-gradient(180deg,#151e2a,#111923);display:flex;align-items:center;gap:10px;padding:8px 11px;margin-bottom:14px;cursor:pointer}
+.workspace:hover{border-color:#35465e}.workIcon{width:40px;height:40px;border-radius:11px;background:linear-gradient(145deg,#29374a,#1a2534);display:grid;place-items:center;font-weight:800}.workspace strong{display:block;font-size:12px}.workspace small{color:var(--muted)}.workspace .chev{margin-left:auto;color:#8d9aab}
+.workspaceMenu{position:absolute;z-index:60;width:220px;background:#111923;border:1px solid #2b394c;border-radius:11px;padding:7px;box-shadow:var(--shadow)}
+.workspaceMenu button{width:100%;border:0;background:transparent;color:#d7e0eb;text-align:left;padding:9px;border-radius:8px;cursor:pointer}.workspaceMenu button:hover{background:#1a2635}
+.search{height:41px;width:100%;border-radius:11px;border:1px solid var(--line);background:#111923;color:#fff;padding:0 12px;outline:none}.search:focus{border-color:#5278b6;box-shadow:0 0 0 3px #4c78c51a}
+.label{margin:17px 4px 8px;color:#a4afbe;font-size:11px}
+.conv{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:10px;align-items:center;border-radius:12px;padding:10px;margin-bottom:5px;cursor:pointer;border:1px solid transparent;transition:.16s}
+.conv:hover{background:#151f2c;border-color:#243246}.conv.active{background:linear-gradient(90deg,#24334d,#1a2535);border-color:#34465f;box-shadow:inset 3px 0 0 var(--blue)}
+.convIcon,.agentIcon,.mIcon,.mini{display:grid;place-items:center;font-weight:800;border:1px solid #2c3a4d}
+.convIcon{width:40px;height:40px;border-radius:11px}.conv strong{display:block;font-size:12px}.conv p{margin:4px 0 0;color:var(--muted);font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.conv time{font-size:10px;color:#9aa5b3}
+.tone-nexus{background:linear-gradient(145deg,#263954,#162234);color:#acd0ff}.tone-atlas{background:linear-gradient(145deg,#163c69,#12233a);color:#67b8ff}.tone-forge{background:linear-gradient(145deg,#412756,#20162f);color:#c69aff}.tone-sentinel{background:linear-gradient(145deg,#114836,#10261f);color:#62e6af}.tone-scout{background:linear-gradient(145deg,#4c3511,#2c220f);color:#f1c65f}.tone-recovery{background:linear-gradient(145deg,#333947,#1e242d);color:#d1d8e3}
+.main{min-width:0;display:flex;flex-direction:column;background:rgba(8,13,20,.74);position:relative}
+.topbar{height:78px;border-bottom:1px solid var(--line);display:flex;align-items:center;justify-content:space-between;padding:0 18px;background:rgba(9,14,21,.88);backdrop-filter:blur(14px)}
+.identity{display:flex;align-items:center;gap:12px}.avatar{width:48px;height:48px;border-radius:14px;display:grid;place-items:center;font-weight:900;border:1px solid #34455d;background:linear-gradient(145deg,#21334b,#121c29);color:#b6d5ff}
+.identity h2{margin:0;font-size:18px;letter-spacing:-.015em}.identity p{margin:4px 0 0;color:var(--muted);font-size:11px}.online{color:var(--green)}
+.topActions{display:flex;gap:8px;align-items:center}.iconBtn,.connectBtn{height:36px;border:1px solid var(--line);border-radius:10px;background:#141d28;color:#c8d1dc;cursor:pointer}.iconBtn{width:36px}.iconBtn:hover,.connectBtn:hover{background:#1c2837;border-color:#37485f}.connectBtn{padding:0 11px;font-size:10px;font-weight:700}.connectBtn.connected{background:#103127;border-color:#245a43;color:#72e4ae}
+.menu{position:absolute;right:18px;top:66px;z-index:80;width:190px;background:#111923;border:1px solid #2b394b;border-radius:11px;padding:7px;box-shadow:var(--shadow)}.menu button{width:100%;border:0;background:transparent;color:#dbe3ed;padding:9px;text-align:left;border-radius:8px;cursor:pointer}.menu button:hover{background:#1b2736}
+.chat{flex:1;overflow:auto;padding:18px 28px 116px}.messages{max-width:820px;margin:auto;display:flex;flex-direction:column;gap:15px}.msg{display:flex;gap:10px;align-items:flex-start}.msg.user{justify-content:flex-end}.msgAvatar{width:35px;height:35px;border-radius:10px;display:grid;place-items:center;font-size:11px;font-weight:800;flex:0 0 auto;border:1px solid #2d3c50;background:#141f2c}.msg.user .msgAvatar{order:2}.bubble{max-width:80%;border:1px solid var(--line);border-radius:14px;background:#0f171f;padding:12px 14px;line-height:1.52;white-space:pre-wrap}.msg.user .bubble{max-width:66%;background:#1e2e48;border-color:#3c5273}.who{font-size:11px;font-weight:800;margin-bottom:6px}.meta{font-size:9px;color:var(--muted);margin-top:8px}.plan{padding-left:20px;margin:8px 0 0}.plan li{margin:6px 0}
+.agentGrid{display:grid;gap:7px;margin-top:11px}.agentUpdate{display:grid;grid-template-columns:36px minmax(0,1fr) auto 20px;gap:9px;align-items:center;border:1px solid var(--line);border-radius:11px;background:#0f171f;padding:7px 9px;cursor:pointer;transition:.16s}.agentUpdate:hover{background:#151f2b;border-color:#35465d}.agentIcon{width:36px;height:36px;border-radius:10px}.agentUpdate strong{font-size:11px}.agentUpdate p{margin:3px 0 0;font-size:10px;color:var(--muted)}.dots{color:#8793a3}
 .pill{display:inline-flex;align-items:center;justify-content:center;padding:4px 8px;border-radius:999px;border:1px solid #29436c;background:#17233d;color:#8eb2ff;font-size:9px;white-space:nowrap}.pill.green{background:#103127;border-color:#245540;color:#6fe3ad}.pill.amber{background:#352811;border-color:#5d4722;color:#efc767}.pill.gray{background:#1a2028;border-color:#353e4c;color:#a2adbc}.pill.red{background:#32151a;border-color:#5c2730;color:#ef8591}
-.composerWrap{position:absolute;left:398px;right:310px;bottom:0;padding:12px 20px 16px;background:linear-gradient(180deg,transparent,#0b1119 28%,#0b1119)}.composer{max-width:790px;margin:auto;border:1px solid #2f3c4c;background:#151d27;border-radius:13px;padding:6px;display:grid;grid-template-columns:40px minmax(0,1fr) 42px;align-items:end;box-shadow:var(--shadow)}.attach,.send{border:0}.attach{height:40px;background:transparent;color:#91a0b2;font-size:18px}.composer textarea{resize:none;min-height:40px;max-height:130px;padding:9px;border:0;outline:0;background:transparent;color:#fff}.send{height:40px;border-radius:10px;background:#dbe7f6;color:#0a121b;font-size:18px}
-.right{background:rgba(14,20,28,.98);border-left:1px solid var(--line);padding:17px 14px;overflow:auto}.rightHead{display:flex;align-items:center;justify-content:space-between}.right h3{font-size:14px;margin:0}.count{margin-left:5px;background:#222a36;color:#c1c9d4;border-radius:7px;padding:2px 7px;font-size:10px}.member{display:grid;grid-template-columns:40px minmax(0,1fr) auto;gap:9px;align-items:center;padding:9px 0;border-bottom:1px solid #1b222c}.mIcon{width:40px;height:40px;border-radius:11px;background:#131d29;border:1px solid #2c3a4d;display:grid;place-items:center;font-weight:800}.member strong{display:block;font-size:11px}.member small{color:var(--muted);font-size:10px}.sep{height:1px;background:var(--line);margin:16px 0}.viewAll{font-size:9px;color:#9aa6b6}.task{display:grid;grid-template-columns:18px 1fr auto;gap:8px;align-items:start;padding:7px 0}.taskDot{width:15px;height:15px;border:1px solid #435165;border-radius:50%;margin-top:2px}.task strong{display:block;font-size:10px}.task small{font-size:9px;color:var(--muted)}.activityRow{display:grid;grid-template-columns:24px 1fr auto;gap:7px;align-items:center;padding:5px 0}.mini{width:24px;height:24px;border-radius:7px;background:#16202c;display:grid;place-items:center;font-size:9px}.activityRow strong{font-size:9px;font-weight:600}.activityRow span{font-size:9px;color:var(--muted)}
-.mobileOverview{display:none}.typing{display:inline-flex;gap:4px}.typing i{width:5px;height:5px;border-radius:50%;background:#8192a7;animation:b 1s infinite}.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}@keyframes b{50%{opacity:.25;transform:translateY(-2px)}}
-@media(max-width:1180px){.app{grid-template-columns:64px 290px minmax(430px,1fr)}.right{display:none}.composerWrap{left:354px;right:0}.mobileOverview{display:block;padding:8px 14px 0}.mobileTeam{display:flex;gap:7px;overflow:auto}.mobileMember{flex:0 0 auto;border:1px solid var(--line);border-radius:9px;background:#111923;padding:6px 8px;font-size:9px}}
-@media(max-width:760px){body{overflow:hidden}.app{display:block}.left{height:84px;border:0;border-bottom:1px solid var(--line);padding:7px 9px;overflow:hidden}.leftTop,.sub,.workspace,.search,.label{display:none}.conversationsInner{display:flex;gap:7px;height:100%;overflow-x:auto}.conv{flex:0 0 178px;margin:0;padding:7px}.conv:nth-child(n+5){display:none}.rail{position:fixed;z-index:40;bottom:0;left:0;right:0;height:58px;border:0;border-top:1px solid var(--line);display:flex;flex-direction:row;justify-content:space-around;padding:4px 8px}.logo{display:none}.nav{width:60px;height:48px;margin:0!important}.nav span{font-size:16px}.nav small{font-size:9px}.main{height:calc(100vh - 142px)}.topbar{height:68px;padding:0 10px}.avatar{width:40px;height:40px}.identity h2{font-size:14px}.identity p{max-width:190px;font-size:9px}.topActions .iconBtn{display:none}.connectBtn{height:30px;padding:0 8px}.mobileOverview{display:block;padding:7px 9px 0}.chat{padding:9px 10px 96px}.messages{gap:11px}.bubble{max-width:88%;font-size:13px}.msg.user .bubble{max-width:80%}.composerWrap{position:fixed;left:0;right:0;bottom:58px;padding:8px 10px 10px}.composer{max-width:none}}
+.composerWrap{position:absolute;left:0;right:0;bottom:0;padding:12px 20px 16px;background:linear-gradient(180deg,transparent,#080d14 28%,#080d14)}.composer{max-width:820px;margin:auto;border:1px solid #334256;background:#151e29;border-radius:14px;padding:6px;display:grid;grid-template-columns:40px minmax(0,1fr) 42px;align-items:end;box-shadow:var(--shadow)}.attach,.send{border:0;cursor:pointer}.attach{height:40px;background:transparent;color:#92a0b1;font-size:18px}.attach:hover{color:#fff}.composer textarea{resize:none;min-height:40px;max-height:130px;padding:9px;border:0;outline:0;background:transparent;color:#fff}.send{height:40px;border-radius:10px;background:#dbe7f6;color:#09121b;font-size:18px}.send:hover{background:#fff}
+.right{background:rgba(12,18,26,.98);border-left:1px solid var(--line);padding:17px 14px;overflow:auto}.rightHead{display:flex;align-items:center;justify-content:space-between}.right h3{font-size:14px;margin:0}.count{margin-left:5px;background:#222b37;color:#c6cfda;border-radius:7px;padding:2px 7px;font-size:10px}.addTeam,.viewAll{border:0;background:transparent;color:#9aa6b7;cursor:pointer}.addTeam:hover,.viewAll:hover{color:#fff}.viewAll{font-size:9px}
+.member{display:grid;grid-template-columns:42px minmax(0,1fr) auto;gap:9px;align-items:center;padding:9px 0;border-bottom:1px solid #1b222c;cursor:pointer}.member:hover{background:#111a25}.mIcon{width:42px;height:42px;border-radius:12px}.member strong{display:block;font-size:11px}.member small{color:var(--muted);font-size:10px}.sep{height:1px;background:var(--line);margin:16px 0}
+.task{display:grid;grid-template-columns:18px 1fr auto;gap:8px;align-items:start;padding:8px 0;cursor:pointer;border-radius:8px}.task:hover{background:#111a25}.taskDot{width:15px;height:15px;border:1px solid #435165;border-radius:50%;margin-top:2px}.task strong{display:block;font-size:10px}.task small{font-size:9px;color:var(--muted)}
+.activityRow{display:grid;grid-template-columns:26px 1fr auto;gap:7px;align-items:center;padding:6px 0;border-radius:8px;cursor:pointer}.activityRow:hover{background:#111a25}.mini{width:26px;height:26px;border-radius:8px}.activityRow strong{font-size:9px;font-weight:600}.activityRow span{font-size:9px;color:var(--muted)}
+.typing{display:inline-flex;gap:4px}.typing i{width:5px;height:5px;border-radius:50%;background:#8192a7;animation:b 1s infinite}.typing i:nth-child(2){animation-delay:.15s}.typing i:nth-child(3){animation-delay:.3s}@keyframes b{50%{opacity:.25;transform:translateY(-2px)}}
+.centerView{flex:1;overflow:auto;padding:24px 28px 120px}.viewCard{max-width:920px;margin:auto;border:1px solid var(--line);border-radius:16px;background:linear-gradient(180deg,#111a25,#0d141d);padding:20px}.viewCard h2{margin:0 0 8px;font-size:20px}.viewCard p{color:var(--muted);line-height:1.55}.gridCards{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));gap:12px;margin-top:16px}.detailCard{border:1px solid var(--line);background:#0f171f;border-radius:12px;padding:14px;cursor:pointer}.detailCard:hover{border-color:#3c506a;background:#141f2b}.detailCard strong{display:block}.detailCard span{display:block;color:var(--muted);font-size:11px;margin-top:5px}.settingField{display:grid;gap:7px;margin-top:14px}.settingField input{height:40px;border:1px solid var(--line);border-radius:10px;background:#0f171f;color:#fff;padding:0 11px}
+.toast{position:fixed;z-index:100;right:24px;bottom:24px;background:#162130;border:1px solid #33455d;border-radius:11px;padding:10px 13px;color:#dce5ef;box-shadow:var(--shadow);font-size:11px}
+@media(max-width:1180px){.app{grid-template-columns:70px 300px minmax(430px,1fr)}.right{display:none}.gridCards{grid-template-columns:1fr}}
+@media(max-width:760px){body{overflow:hidden}.app{display:block}.left{height:88px;border:0;border-bottom:1px solid var(--line);padding:7px 9px;overflow:hidden}.leftTop,.sub,.workspace,.search,.label{display:none}.conversationsInner{display:flex;gap:7px;height:100%;overflow-x:auto}.conv{flex:0 0 180px;margin:0;padding:7px}.conv:nth-child(n+5){display:none}.rail{position:fixed;z-index:40;bottom:0;left:0;right:0;height:58px;border:0;border-top:1px solid var(--line);display:flex;flex-direction:row;justify-content:space-around;padding:4px 8px}.logo{display:none}.nav{width:60px;height:48px;margin:0!important}.nav .navIcon{font-size:16px}.nav small{font-size:9px}.main{height:calc(100vh - 146px)}.topbar{height:68px;padding:0 10px}.avatar{width:40px;height:40px}.identity h2{font-size:14px}.identity p{max-width:190px;font-size:9px}.topActions .iconBtn{display:none}.connectBtn{height:30px;padding:0 8px}.chat,.centerView{padding:10px 10px 96px}.messages{gap:11px}.bubble{max-width:88%;font-size:13px}.msg.user .bubble{max-width:80%}.composerWrap{position:fixed;left:0;right:0;bottom:58px;padding:8px 10px 10px}.composer{max-width:none}.right{display:none}}
 </style>
 </head>
 <body>
 <div class="app">
 <nav class="rail">
-  <div class="logo">G</div>
-  <button class="nav"><span>⌂</span><small>Home</small></button>
-  <button class="nav active"><span>●</span><small>Chats</small></button>
-  <button class="nav"><span>◎</span><small>Teammates</small></button>
-  <button class="nav"><span>✓</span><small>Tasks</small></button>
-  <button class="nav settings"><span>⚙</span><small>Settings</small></button>
+  <div class="logo" title="Genesis"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3 21 20h-5.2L12 13.2 8.2 20H3L12 3Z" fill="#b9d9ff"/><path d="M12 8.2 15.3 14h-6.6L12 8.2Z" fill="#6fa5ff"/></svg></div>
+  <button class="nav" data-view="home"><span class="navIcon">⌂</span><small>Home</small></button>
+  <button class="nav active" data-view="chats"><span class="navIcon">●</span><small>Chats</small></button>
+  <button class="nav" data-view="teammates"><span class="navIcon">◎</span><small>Teammates</small></button>
+  <button class="nav" data-view="tasks"><span class="navIcon">✓</span><small>Tasks</small></button>
+  <button class="nav settings" data-view="settings"><span class="navIcon">⚙</span><small>Settings</small></button>
 </nav>
+
 <aside class="left">
-  <div class="leftTop"><div><h1>Genesis Team Chat</h1><div class="sub">AI teammates. Real progress.</div></div><button class="launch">↗</button></div>
-  <div class="workspace"><div class="workIcon">AC</div><div><strong>Genesis AI</strong><small>6 members</small></div><span class="chev">⌄</span></div>
-  <input class="search" placeholder="⌕  Search conversations…"/>
+  <div class="leftTop"><div><h1>Genesis Team Chat</h1><div class="sub">AI teammates. Real progress.</div></div><button id="openCommand" class="launch" title="Open Command Center">↗</button></div>
+  <div id="workspace" class="workspace"><div class="workIcon tone-nexus">G</div><div><strong>Genesis AI</strong><small>6 members</small></div><span class="chev">⌄</span></div>
+  <div id="workspaceMenu" class="workspaceMenu hidden"><button data-ws="team">Genesis Team</button><button data-ws="command">Open Command Center</button></div>
+  <input id="search" class="search" placeholder="⌕  Search conversations…"/>
   <div class="label">Pinned</div>
   <div class="conversationsInner">
-    <div class="conv active"><div class="convIcon">N</div><div><strong>Nexus — Team Leader</strong><p id="convPreview">Ready for requests</p></div><time>Live</time></div>
-    <div class="conv"><div class="convIcon">A</div><div><strong>Product Launch</strong><p>Atlas: planning update</p></div><time>Yesterday</time></div>
-    <div class="conv"><div class="convIcon">F</div><div><strong>Bug Triage</strong><p>Forge: implementation activity</p></div><time>Yesterday</time></div>
-    <div class="conv"><div class="convIcon">S</div><div><strong>Website Review</strong><p>Sentinel: validation complete</p></div><time>Today</time></div>
-    <div class="conv"><div class="convIcon">Q</div><div><strong>Research</strong><p>Scout: evidence review</p></div><time>Today</time></div>
+    <div class="conv active" data-agent="nexus"><div class="convIcon tone-nexus">N</div><div><strong>Nexus — Team Leader</strong><p id="convPreview">Ready for requests</p></div><time>Live</time></div>
+    <div class="conv" data-agent="atlas"><div class="convIcon tone-atlas">◎</div><div><strong>Product Launch</strong><p>Atlas: planning update</p></div><time>Yesterday</time></div>
+    <div class="conv" data-agent="forge"><div class="convIcon tone-forge">&lt;/&gt;</div><div><strong>Bug Triage</strong><p>Forge: implementation activity</p></div><time>Yesterday</time></div>
+    <div class="conv" data-agent="sentinel"><div class="convIcon tone-sentinel">◇</div><div><strong>Website Review</strong><p>Sentinel: validation complete</p></div><time>Today</time></div>
+    <div class="conv" data-agent="scout"><div class="convIcon tone-scout">⌕</div><div><strong>Research</strong><p>Scout: evidence review</p></div><time>Today</time></div>
   </div>
 </aside>
+
 <main class="main">
   <header class="topbar">
-    <div class="identity"><div class="avatar">N</div><div><h2>Nexus — Team Leader <span class="online">●</span></h2><p><span id="brainLabel">Genesis Brain active</span> · <span id="teamSummary">Orchestrating 5 teammates</span></p></div></div>
-    <div class="topActions"><button id="connectGithub" class="connectBtn">Connect GitHub</button><button class="iconBtn">⌕</button><button class="iconBtn">•••</button></div>
+    <div class="identity"><div id="headerAvatar" class="avatar">N</div><div><h2 id="headerTitle">Nexus — Team Leader <span class="online">●</span></h2><p id="headerSub"><span id="brainLabel">Genesis Brain active</span> · <span id="teamSummary">Orchestrating 5 teammates</span></p></div></div>
+    <div class="topActions"><button id="connectGithub" class="connectBtn">Connect GitHub</button><button id="topSearch" class="iconBtn" title="Search">⌕</button><button id="topMenu" class="iconBtn" title="Menu">•••</button></div>
+    <div id="menu" class="menu hidden"><button data-menu="refresh">Refresh connection</button><button data-menu="team">View teammates</button><button data-menu="tasks">View tasks</button><button data-menu="settings">Settings</button></div>
   </header>
-  <section class="mobileOverview"><div id="mobileTeam" class="mobileTeam"></div></section>
-  <section id="chat" class="chat"><div id="messages" class="messages">
-    <article class="msg"><div class="msgAvatar">N</div><div class="bubble"><div class="who">Nexus</div><div>Requests are received here and routed to the relevant Genesis teammate when specialist work is required.</div><ol class="plan"><li>Atlas — architecture and planning</li><li>Forge — implementation</li><li>Sentinel — validation and QA</li><li>Scout — research and evidence</li><li>Recovery — troubleshooting</li></ol><div class="meta">Team coordination channel</div></div></article>
+
+  <section id="chatView" class="chat"><div id="messages" class="messages">
+    <article class="msg"><div class="msgAvatar tone-nexus">N</div><div class="bubble"><div class="who">Nexus</div><div>Requests are received here and routed to the relevant Genesis teammate when specialist work is required.</div><ol class="plan"><li>Atlas — architecture and planning</li><li>Forge — implementation</li><li>Sentinel — validation and QA</li><li>Scout — research and evidence</li><li>Recovery — troubleshooting</li></ol><div class="meta">Team coordination channel</div></div></article>
     <div class="agentGrid">
-      <div class="agentUpdate"><div class="agentIcon">A</div><div><strong>Atlas</strong><p>Architecture and planning ready</p></div><span class="pill">Ready</span><span class="dots">•••</span></div>
-      <div class="agentUpdate"><div class="agentIcon">F</div><div><strong>Forge</strong><p>Implementation workflow ready</p></div><span class="pill">Ready</span><span class="dots">•••</span></div>
-      <div class="agentUpdate"><div class="agentIcon">S</div><div><strong>Sentinel</strong><p>Validation workflow active</p></div><span class="pill green">Active</span><span class="dots">•••</span></div>
-      <div class="agentUpdate"><div class="agentIcon">Q</div><div><strong>Scout</strong><p>Research workflow ready</p></div><span class="pill amber">Waiting</span><span class="dots">•••</span></div>
-      <div class="agentUpdate"><div class="agentIcon">R</div><div><strong>Recovery</strong><p>Recovery workflow idle</p></div><span class="pill gray">Idle</span><span class="dots">•••</span></div>
+      <div class="agentUpdate" data-agent="atlas"><div class="agentIcon tone-atlas">◎</div><div><strong>Atlas</strong><p>Architecture and planning ready</p></div><span class="pill">Ready</span><span class="dots">•••</span></div>
+      <div class="agentUpdate" data-agent="forge"><div class="agentIcon tone-forge">&lt;/&gt;</div><div><strong>Forge</strong><p>Implementation workflow ready</p></div><span class="pill">Ready</span><span class="dots">•••</span></div>
+      <div class="agentUpdate" data-agent="sentinel"><div class="agentIcon tone-sentinel">◇</div><div><strong>Sentinel</strong><p>Validation workflow active</p></div><span class="pill green">Active</span><span class="dots">•••</span></div>
+      <div class="agentUpdate" data-agent="scout"><div class="agentIcon tone-scout">⌕</div><div><strong>Scout</strong><p>Research workflow ready</p></div><span class="pill amber">Waiting</span><span class="dots">•••</span></div>
+      <div class="agentUpdate" data-agent="recovery"><div class="agentIcon tone-recovery">⌘</div><div><strong>Recovery</strong><p>Recovery workflow idle</p></div><span class="pill gray">Idle</span><span class="dots">•••</span></div>
     </div>
   </div></section>
-  <div class="composerWrap"><form id="composer" class="composer"><button type="button" class="attach">＋</button><textarea id="message" rows="1" maxlength="12000" placeholder="Message Nexus…"></textarea><button id="send" class="send" type="submit">➤</button></form></div>
+
+  <section id="detailView" class="centerView hidden"></section>
+
+  <div id="composerWrap" class="composerWrap"><form id="composer" class="composer"><button id="attach" type="button" class="attach" title="Attachment">＋</button><textarea id="message" rows="1" maxlength="12000" placeholder="Message Nexus…"></textarea><button id="send" class="send" type="submit">➤</button></form><input id="filePicker" type="file" class="hidden"/></div>
 </main>
+
 <aside class="right">
-  <div class="rightHead"><h3>Teammates <span id="teamCount" class="count">6</span></h3><span>＋</span></div>
+  <div class="rightHead"><h3>Teammates <span id="teamCount" class="count">6</span></h3><button id="addTeam" class="addTeam">＋</button></div>
   <div id="roster"></div>
   <div class="sep"></div>
-  <div class="rightHead"><h3>Open Tasks <span class="count">3</span></h3><span class="viewAll">View all →</span></div>
-  <div class="task"><span class="taskDot"></span><div><strong>Issue auto-close flow</strong><small>Recovery · High</small></div><span class="pill">In Progress</span></div>
-  <div class="task"><span class="taskDot"></span><div><strong>Webhook validation</strong><small>Sentinel · Medium</small></div><span class="pill amber">Pending</span></div>
-  <div class="task"><span class="taskDot"></span><div><strong>Project configuration</strong><small>Scout · Low</small></div><span class="pill amber">Pending</span></div>
+  <div class="rightHead"><h3>Open Tasks <span class="count">3</span></h3><button class="viewAll" data-viewall="tasks">View all →</button></div>
+  <div class="task" data-task="Issue auto-close flow"><span class="taskDot"></span><div><strong>Issue auto-close flow</strong><small>Recovery · High</small></div><span class="pill">In Progress</span></div>
+  <div class="task" data-task="Webhook validation"><span class="taskDot"></span><div><strong>Webhook validation</strong><small>Sentinel · Medium</small></div><span class="pill amber">Pending</span></div>
+  <div class="task" data-task="Project configuration"><span class="taskDot"></span><div><strong>Project configuration</strong><small>Scout · Low</small></div><span class="pill amber">Pending</span></div>
   <div class="sep"></div>
-  <div class="rightHead"><h3>Recent Team Activity</h3><span class="viewAll">View all →</span></div>
+  <div class="rightHead"><h3>Recent Team Activity</h3><button class="viewAll" data-viewall="teammates">View all →</button></div>
   <div id="recentActivity">
-    <div class="activityRow"><div class="mini">A</div><strong>Atlas · configuration checked</strong><span>—</span></div>
-    <div class="activityRow"><div class="mini">F</div><strong>Forge · implementation ready</strong><span>—</span></div>
-    <div class="activityRow"><div class="mini">S</div><strong>Sentinel · validation active</strong><span>—</span></div>
-    <div class="activityRow"><div class="mini">Q</div><strong>Scout · context review ready</strong><span>—</span></div>
-    <div class="activityRow"><div class="mini">R</div><strong>Recovery · idle</strong><span>—</span></div>
+    <div class="activityRow" data-agent="atlas"><div class="mini tone-atlas">◎</div><strong>Atlas · configuration checked</strong><span>2m</span></div>
+    <div class="activityRow" data-agent="forge"><div class="mini tone-forge">&lt;/&gt;</div><strong>Forge · implementation ready</strong><span>3m</span></div>
+    <div class="activityRow" data-agent="sentinel"><div class="mini tone-sentinel">◇</div><strong>Sentinel · validation active</strong><span>4m</span></div>
+    <div class="activityRow" data-agent="scout"><div class="mini tone-scout">⌕</div><strong>Scout · context review ready</strong><span>5m</span></div>
+    <div class="activityRow" data-agent="recovery"><div class="mini tone-recovery">⌘</div><strong>Recovery · idle</strong><span>5m</span></div>
   </div>
 </aside>
 </div>
+<div id="toast" class="toast hidden"></div>
 <script>
-(()=>{const $=s=>document.querySelector(s),messages=$('#messages'),message=$('#message'),send=$('#send');
+(()=>{const $=s=>document.querySelector(s),$$=s=>[...document.querySelectorAll(s)],messages=$('#messages'),message=$('#message'),send=$('#send');
 const PUBLIC=location.hostname.endsWith('github.io'),GH_REPO='Maxhm007/Genesis-AI-Network',NEXUS_ISSUE=1000,GH_API='https://api.github.com/repos/'+GH_REPO,TOKEN_KEY='genesis_github_token';
 const connectGithub=$('#connectGithub');let token=sessionStorage.getItem(TOKEN_KEY)||'';
 const roster=[
-{id:'nexus',name:'Nexus',role:'Team Leader',status:'active'},
-{id:'atlas',name:'Atlas',role:'Research & Analysis',status:'ready'},
-{id:'forge',name:'Forge',role:'Development',status:'ready'},
-{id:'sentinel',name:'Sentinel',role:'Monitoring & Reliability',status:'active'},
-{id:'scout',name:'Scout',role:'Product & Context',status:'waiting'},
-{id:'recovery',name:'Recovery',role:'Troubleshooting & Fixes',status:'idle'}];
-const icons={nexus:'N',atlas:'A',forge:'</>',sentinel:'S',scout:'Q',recovery:'R'};
+{id:'nexus',name:'Nexus',role:'Team Leader',status:'active',tone:'nexus',symbol:'N'},
+{id:'atlas',name:'Atlas',role:'Research & Analysis',status:'working',tone:'atlas',symbol:'◎'},
+{id:'forge',name:'Forge',role:'Development',status:'working',tone:'forge',symbol:'</>'},
+{id:'sentinel',name:'Sentinel',role:'Monitoring & Reliability',status:'active',tone:'sentinel',symbol:'◇'},
+{id:'scout',name:'Scout',role:'Product & Context',status:'waiting',tone:'scout',symbol:'⌕'},
+{id:'recovery',name:'Recovery',role:'Troubleshooting & Fixes',status:'idle',tone:'recovery',symbol:'⌘'}];
+function toast(text){const t=$('#toast');t.textContent=text;t.classList.remove('hidden');clearTimeout(window._toast);window._toast=setTimeout(()=>t.classList.add('hidden'),2200)}
 function ghHeaders(){const h={'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'};if(token)h.Authorization='Bearer '+token;return h}
 function setConnect(ok){connectGithub.textContent=ok?'GitHub connected':'Connect GitHub';connectGithub.classList.toggle('connected',ok)}
 async function verifyToken(){if(!token){setConnect(false);return false}try{const r=await fetch('https://api.github.com/user',{headers:ghHeaders(),cache:'no-store'});const d=await r.json();const ok=r.ok&&String(d.login||'').toLowerCase()==='maxhm007';setConnect(ok);return ok}catch{setConnect(false);return false}}
 async function ensureToken(){if(await verifyToken())return true;const entered=prompt('Enter a GitHub fine-grained token for Maxhm007/Genesis-AI-Network with Issues: Read and write. It is kept only in this browser tab.');if(!entered)return false;token=entered.trim();sessionStorage.setItem(TOKEN_KEY,token);if(await verifyToken())return true;sessionStorage.removeItem(TOKEN_KEY);token='';alert('The GitHub token could not be verified.');return false}
-function renderRoster(){const h=roster.map(m=>'<div class="member"><div class="mIcon">'+(icons[m.id]||m.name[0])+'</div><div><strong>'+m.name+'</strong><small>'+m.role+'</small></div><span class="pill '+(m.status==='active'?'green':m.status==='waiting'?'amber':m.status==='idle'?'gray':'')+'">'+m.status[0].toUpperCase()+m.status.slice(1)+'</span></div>').join('');$('#roster').innerHTML=h;$('#teamCount').textContent=roster.length;$('#mobileTeam').innerHTML=roster.map(m=>'<div class="mobileMember">'+m.name+' · '+m.status+'</div>').join('')}
-function add(kind,text,meta=''){const a=document.createElement('article');a.className='msg '+kind;a.innerHTML=(kind==='user'?'':'<div class="msgAvatar">N</div>')+'<div class="bubble"><div class="who">'+(kind==='user'?'You':'Nexus')+'</div><div class="body"></div><div class="meta"></div></div>'+(kind==='user'?'<div class="msgAvatar">You</div>':'');a.querySelector('.body').textContent=text;a.querySelector('.meta').textContent=meta;messages.appendChild(a);$('#chat').scrollTop=$('#chat').scrollHeight;return a}
+function statusClass(s){return s==='active'?'green':s==='waiting'?'amber':s==='idle'?'gray':''}
+function renderRoster(){const h=roster.map(m=>'<div class="member" data-agent="'+m.id+'"><div class="mIcon tone-'+m.tone+'">'+m.symbol+'</div><div><strong>'+m.name+'</strong><small>'+m.role+'</small></div><span class="pill '+statusClass(m.status)+'">'+m.status[0].toUpperCase()+m.status.slice(1)+'</span></div>').join('');$('#roster').innerHTML=h;$('#teamCount').textContent=roster.length;bindAgentClicks()}
+function add(kind,text,meta=''){const a=document.createElement('article');a.className='msg '+kind;a.innerHTML=(kind==='user'?'':'<div class="msgAvatar tone-nexus">N</div>')+'<div class="bubble"><div class="who">'+(kind==='user'?'You':'Nexus')+'</div><div class="body"></div><div class="meta"></div></div>'+(kind==='user'?'<div class="msgAvatar">You</div>':'');a.querySelector('.body').textContent=text;a.querySelector('.meta').textContent=meta;messages.appendChild(a);$('#chatView').scrollTop=$('#chatView').scrollHeight;return a}
 function typing(){const a=add('nexus','');a.querySelector('.body').innerHTML='<span class="typing"><i></i><i></i><i></i></span>';return a}
 function cleanNexusResult(body){let s=String(body||'').replace(/<!--[^]*?-->/g,'').trim();s=s.replace(/^### Nexus update —[^\n]*\n?/i,'').replace(/^### Nexus\s*/i,'').trim();s=s.replace(/\n\nFull specialist journal:[^\n]*/i,'').replace(/\n\nTeam evolution issue:[^\n]*/i,'').trim();const issue=s.match(/\*\*Execution issue:\*\*\s*#(\d+)/i);const start=s.indexOf('{'),end=s.lastIndexOf('}');if(start>=0&&end>start){try{const o=JSON.parse(s.slice(start,end+1)),parts=[];if(o.finding)parts.push(String(o.finding));if(o.smallest_next_action)parts.push('Next: '+String(o.smallest_next_action));if(issue)parts.push('Execution issue: #'+issue[1]);if(parts.length)return parts.join('\n\n')}catch{}}return s||'Request completed.'}
 async function postComment(text){const r=await fetch(GH_API+'/issues/'+NEXUS_ISSUE+'/comments',{method:'POST',headers:{...ghHeaders(),'Content-Type':'application/json'},body:JSON.stringify({body:text})});const d=await r.json();if(!r.ok)throw new Error(d.message||('GitHub '+r.status));return d}
 async function comments(){const r=await fetch(GH_API+'/issues/'+NEXUS_ISSUE+'/comments?per_page=100',{headers:ghHeaders(),cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(d.message||('GitHub '+r.status));return Array.isArray(d)?d:[]}
 async function waitResult(id,timeout=180000){const begin=Date.now(),m1='genesis-nexus-result:'+id+':',m2='genesis-nexus-team-evolution:'+id;while(Date.now()-begin<timeout){const rows=await comments();const hit=rows.find(c=>String(c.body||'').includes(m1)||String(c.body||'').includes(m2));if(hit)return cleanNexusResult(hit.body);await new Promise(r=>setTimeout(r,5000))}throw new Error('Nexus is still processing the request.')}
 function setTeamState(connected){$('#brainLabel').textContent='Genesis Brain active';$('#teamSummary').textContent=connected?'Orchestrating 5 teammates · live':'Orchestrating 5 teammates';$('#convPreview').textContent=connected?'Live Nexus channel connected':'Ready for requests'}
+function setView(view){$$('.nav').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#chatView').classList.toggle('hidden',view!=='chats');$('#composerWrap').classList.toggle('hidden',view!=='chats');$('#detailView').classList.toggle('hidden',view==='chats');
+  if(view==='home'){location.href='../';return}
+  if(view==='teammates')showTeamView();
+  if(view==='tasks')showTaskView();
+  if(view==='settings')showSettings();
+}
+function showTeamView(){const cards=roster.map(m=>'<div class="detailCard" data-agent="'+m.id+'"><div class="mIcon tone-'+m.tone+'" style="margin-bottom:10px">'+m.symbol+'</div><strong>'+m.name+'</strong><span>'+m.role+' · '+m.status+'</span></div>').join('');$('#detailView').innerHTML='<div class="viewCard"><h2>Teammates</h2><p>Specialist workspaces are coordinated through Nexus. Direct owner messaging remains disabled for specialists.</p><div class="gridCards">'+cards+'</div></div>';bindAgentClicks()}
+function showTaskView(focus=''){const tasks=[['Issue auto-close flow','Recovery','In Progress'],['Webhook validation','Sentinel','Pending'],['Project configuration','Scout','Pending']];$('#detailView').innerHTML='<div class="viewCard"><h2>Open Tasks</h2><p>Current team work overview.</p><div class="gridCards">'+tasks.map(t=>'<div class="detailCard" data-task="'+t[0]+'"><strong>'+t[0]+'</strong><span>'+t[1]+' · '+t[2]+'</span></div>').join('')+'</div></div>';if(focus)toast(focus)}
+function showSettings(){$('#detailView').innerHTML='<div class="viewCard"><h2>Settings</h2><p>GitHub connection is used for the live Nexus workspace.</p><div class="settingField"><label>Repository</label><input value="'+GH_REPO+'" readonly/></div><div class="settingField"><label>Nexus workspace</label><input value="Issue #1000" readonly/></div><div class="gridCards"><div class="detailCard" id="reconnect"><strong>Reconnect GitHub</strong><span>Verify or replace the current browser-session token.</span></div><div class="detailCard" id="clearToken"><strong>Clear session token</strong><span>Remove the token from this browser tab.</span></div></div></div>';$('#reconnect').onclick=async()=>{token='';sessionStorage.removeItem(TOKEN_KEY);await ensureToken();setTeamState(await verifyToken())};$('#clearToken').onclick=()=>{token='';sessionStorage.removeItem(TOKEN_KEY);setConnect(false);setTeamState(false);toast('Session token cleared')}}
+function showAgent(id){const m=roster.find(x=>x.id===id);if(!m)return;if(id==='nexus'){setView('chats');return}setView('teammates');$('#detailView').innerHTML='<div class="viewCard"><div class="mIcon tone-'+m.tone+'" style="width:52px;height:52px;border-radius:14px;margin-bottom:12px">'+m.symbol+'</div><h2>'+m.name+'</h2><p>'+m.role+'. Current status: '+m.status+'. Specialist work is logged in its dedicated GitHub workspace; owner requests continue through Nexus.</p><div class="gridCards"><div class="detailCard"><strong>Workspace role</strong><span>'+m.role+'</span></div><div class="detailCard"><strong>Communication policy</strong><span>Owner-facing communication through Nexus only.</span></div></div></div>'}
+function bindAgentClicks(){$$('[data-agent]').forEach(el=>el.onclick=()=>showAgent(el.dataset.agent))}
+renderRoster();bindAgentClicks();
+$$('.nav').forEach(b=>b.onclick=()=>setView(b.dataset.view));
+$$('.conv').forEach(c=>c.onclick=()=>{$$('.conv').forEach(x=>x.classList.remove('active'));c.classList.add('active');showAgent(c.dataset.agent)});
+$$('[data-viewall]').forEach(b=>b.onclick=()=>setView(b.dataset.viewall));
+$$('.task').forEach(t=>t.onclick=()=>{setView('tasks');showTaskView(t.dataset.task)});
+$('#search').oninput=e=>{const q=e.target.value.toLowerCase();$$('.conv').forEach(c=>c.style.display=c.textContent.toLowerCase().includes(q)?'grid':'none')};
+$('#topSearch').onclick=()=>{$('#search').focus();toast('Conversation search focused')};
+$('#topMenu').onclick=()=>$('#menu').classList.toggle('hidden');
+$$('[data-menu]').forEach(b=>b.onclick=async()=>{const a=b.dataset.menu;$('#menu').classList.add('hidden');if(a==='refresh'){setTeamState(await verifyToken());toast('Connection refreshed')}else setView(a)});
+$('#workspace').onclick=e=>{const m=$('#workspaceMenu');m.style.left=Math.min(e.currentTarget.getBoundingClientRect().left,window.innerWidth-240)+'px';m.style.top=(e.currentTarget.getBoundingClientRect().bottom+5)+'px';m.classList.toggle('hidden')};
+$$('[data-ws]').forEach(b=>b.onclick=()=>{if(b.dataset.ws==='command')location.href='../';else toast('Genesis Team workspace selected');$('#workspaceMenu').classList.add('hidden')});
+$('#openCommand').onclick=()=>location.href='../';
+$('#addTeam').onclick=()=>{setView('teammates');toast('Team changes are managed through Nexus')};
+$('#attach').onclick=()=>$('#filePicker').click();$('#filePicker').onchange=e=>{if(e.target.files[0])toast('Attachment selected: '+e.target.files[0].name+' · GitHub comment upload is not enabled yet')};
 connectGithub.onclick=async()=>setTeamState(await ensureToken());
 $('#composer').onsubmit=async e=>{e.preventDefault();const text=message.value.trim();if(!text)return;if(PUBLIC&&!(await ensureToken()))return;add('user',text,PUBLIC?'GitHub · Nexus #1000':'Now');$('#convPreview').textContent=text;message.value='';send.disabled=true;const t=typing();try{if(PUBLIC){const posted=await postComment(text);t.querySelector('.meta').textContent='Processing through Nexus…';const result=await waitResult(String(posted.id));t.remove();add('nexus',result,'Live result · Nexus #1000')}else{t.remove();add('nexus','Local runtime connection is required for this build.','Local mode')}}catch(err){t.remove();add('nexus',String(err.message||err),'Nexus channel')}finally{send.disabled=false;message.focus()}};
 message.oninput=()=>{message.style.height='auto';message.style.height=Math.min(130,message.scrollHeight)+'px'};message.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#composer').requestSubmit()}};
-renderRoster();verifyToken().then(setTeamState);message.focus()})();
+verifyToken().then(setTeamState);message.focus();
+})();
 </script>
-</body></html>
+</body>
+</html>
