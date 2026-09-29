@@ -68,6 +68,7 @@ RESULT_MARKER_PREFIX = "<!-- genesis-agentic-strategy-result:"
 CAPABILITY_DEPENDENCY_PREFIX = "<!-- genesis-capability-dependency:"
 CAPABILITY_RELEASE_PREFIX = "<!-- genesis-agentic-capability-release:"
 CAPABILITY_WORK_PREFIX = "<!-- genesis-capability-work:"
+CAPABILITY_ESCALATION_PREFIX = "<!-- genesis-capability-escalation:"
 STABLE_STATE_PREFIX = "<!-- genesis-anti-stuck-stable-base:"
 MIGRATION_PRESERVE_PREFIX = "<!-- genesis-anti-stuck-migration-preserve:"
 HUMAN_MARKER = "<!-- genesis-agentic-needs-human -->"
@@ -720,6 +721,95 @@ def ensure_capability_issue(
     return created
 
 
+def ensure_capability_escalation_issue(
+    repository: str,
+    token: str,
+    issue: dict,
+    target: str,
+    reason: str,
+    consumed_capability: int,
+) -> dict:
+    """Create/reuse a higher-order capability task when a verified capability proved insufficient.
+
+    This remains bounded capability work: it cannot recursively create another
+    capability dependency because CAPABILITY_WORK_PREFIX is present in its body.
+    It must improve the reusable repair mechanism and pass the same validation
+    and promotion gates before the blocked parent can resume.
+    """
+    parent_number = int(issue.get("number") or 0)
+    capability_class = _capability_class(reason)
+    raw = f"agentic-capability-escalation:v1:{capability_class}:{int(consumed_capability)}".encode("utf-8")
+    fingerprint = hashlib.sha256(raw).hexdigest()[:16]
+    escalation_marker = f"{CAPABILITY_ESCALATION_PREFIX}{fingerprint} -->"
+    capability_marker = f"{CAPABILITY_WORK_PREFIX}escalation-{fingerprint} -->"
+
+    open_matches: list[dict] = []
+    completed_matches: list[dict] = []
+    for row in _all_issues(repository, token):
+        row_body = str(row.get("body") or "")
+        if escalation_marker not in row_body:
+            continue
+        state = str(row.get("state") or "open").lower()
+        state_reason = str(row.get("state_reason") or "").lower()
+        row_labels = labels(row)
+        if state == "open":
+            open_matches.append(row)
+        elif "genesis-verified" in row_labels or state_reason == "completed":
+            completed_matches.append(row)
+
+    if open_matches:
+        return max(open_matches, key=lambda row: int(row.get("number") or 0))
+    if completed_matches:
+        return max(completed_matches, key=lambda row: int(row.get("number") or 0))
+
+    ensure_label(
+        repository,
+        token,
+        CAPABILITY_GAP_LABEL,
+        "5319e7",
+        "Genesis capability work required before a blocked parent Issue can resume",
+    )
+    title = f"[Genesis Capability Escalation] {capability_class} after capability #{int(consumed_capability)}"
+    body = (
+        f"{capability_marker}\n"
+        f"{escalation_marker}\n"
+        f"<!-- genesis-capability-parent:{parent_number} -->\n"
+        "A previously verified repair capability was consumed by the parent but the same blocker class returned. "
+        "Genesis must autonomously improve the reusable repair mechanism rather than stop at maintainer review.\n\n"
+        f"- **Parent issue:** #{parent_number}\n"
+        f"- **Prior verified capability:** #{int(consumed_capability)}\n"
+        f"- **Blocked target:** `{target}`\n"
+        f"- **Observed blocker:** `capability_class_exhausted:{capability_class}`\n"
+        "- **Task type:** `capability_growth`\n"
+        "- **Target:** `genesis/github_issue_capability_builder.py`\n\n"
+        "### Objective\n"
+        "Determine why the prior reusable capability was insufficient and add the smallest materially stronger, reusable repair capability. "
+        "The change must generalize to the blocker class and must not hard-code the parent Issue.\n\n"
+        "### Required evidence\n"
+        "- Compare the prior capability's intended behavior with the parent's new failure evidence.\n"
+        "- Add focused regression coverage proving the newly observed failure class is handled.\n"
+        "- Preserve Security, protected-file boundaries, signing, exact promotion, secret boundaries, independent validation, and owner control.\n"
+        "- Do not weaken tests or validation to obtain completion.\n"
+        "- Close only after the stronger capability is verified and promoted.\n\n"
+        "### Dependency rule\n"
+        "The parent remains open and paused until this escalation capability is verified/completed, then Recovery automatically resumes it with a fresh material-state epoch.\n"
+    )
+    created = request(
+        repository,
+        token,
+        "POST",
+        "/issues",
+        {
+            "title": title[:240],
+            "body": body,
+            "labels": ["genesis-task", "genesis-repair", "genesis-autonomous", CAPABILITY_GAP_LABEL],
+        },
+    )
+    if not isinstance(created, dict) or not int(created.get("number") or 0):
+        raise RuntimeError("GitHub did not return a valid capability escalation Issue")
+    return created
+
+
 def capability_ready(repository: str, token: str, number: int) -> bool:
     issue = request(repository, token, "GET", f"/issues/{int(number)}")
     if not isinstance(issue, dict):
@@ -791,24 +881,76 @@ def pause_for_capability(
 
     consumed_capability = released_capability_for_reason(comments, reason)
     if consumed_capability:
+        capability_class = _capability_class(reason)
+        escalation = ensure_capability_escalation_issue(
+            repository,
+            token,
+            issue,
+            target,
+            capability_class,
+            consumed_capability,
+        )
+        escalation_number = int(escalation.get("number") or 0)
+
+        if escalation_number and capability_ready(repository, token, escalation_number):
+            refreshed = _release_waiting_issue(
+                repository,
+                token,
+                issue,
+                comments,
+                escalation_number,
+            )
+            marker = f"<!-- genesis-capability-class-escalated:{capability_class}:{escalation_number} -->"
+            _post_once(
+                repository,
+                token,
+                number,
+                refreshed,
+                marker,
+                (
+                    f"{marker}\n"
+                    f"Genesis consumed capability #{consumed_capability}, then verified stronger escalation capability "
+                    f"#{escalation_number} for blocker class `{capability_class}`. The parent is re-armed for a fresh "
+                    "autonomous repair epoch."
+                ),
+            )
+            try:
+                request(
+                    repository,
+                    token,
+                    "POST",
+                    "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
+                    {"ref": "main"},
+                )
+            except Exception:
+                pass
+            return {
+                "status": "capability_escalation_already_ready",
+                "issue_number": number,
+                "capability_issue": consumed_capability,
+                "escalation_issue": escalation_number,
+                "reason": capability_class,
+                "released": True,
+            }
+
         ensure_label(
             repository,
             token,
-            NEEDS_HUMAN_LABEL,
-            "b60205",
-            "Autonomous recovery exhausted after a verified capability was already consumed",
+            WAITING_CAPABILITY_LABEL,
+            "fbca04",
+            "Parent Issue is open but paused until a linked Genesis capability is verified",
         )
         request(
             repository,
             token,
             "POST",
             f"/issues/{number}/labels",
-            {"labels": [NEEDS_HUMAN_LABEL, EXHAUSTED_LABEL, AGENTIC_LABEL]},
+            {"labels": [WAITING_CAPABILITY_LABEL, EXHAUSTED_LABEL, AGENTIC_LABEL]},
         )
-        for label in ACTIVE_LABELS | {WAITING_CAPABILITY_LABEL, "genesis-autonomous", "genesis-deferred"}:
+        for label in ACTIVE_LABELS | {"genesis-autonomous", "genesis-deferred", NEEDS_HUMAN_LABEL}:
             remove_label(repository, token, number, label)
-        capability_class = _capability_class(reason)
-        marker = f"<!-- genesis-capability-class-exhausted:{capability_class} -->"
+
+        marker = f"{CAPABILITY_DEPENDENCY_PREFIX}{escalation_number} -->"
         _post_once(
             repository,
             token,
@@ -818,17 +960,42 @@ def pause_for_capability(
             (
                 f"{marker}\n"
                 f"Genesis already consumed verified capability Issue #{consumed_capability} for blocker class "
-                f"`{capability_class}`, but the same parent exhausted that blocker again without new repair "
-                "capability evidence. The parent remains open for maintainer review; no duplicate capability "
-                "Issue or automatic Recovery wake-up is created."
+                f"`{capability_class}`, but the blocker returned. Instead of stopping for maintainer review, "
+                f"Genesis escalated autonomously to stronger reusable capability Issue #{escalation_number}. "
+                "The parent remains open and paused until that capability is independently verified."
             ),
         )
+        escalation_comments = issue_comments(repository, token, escalation_number)
+        parent_marker = f"<!-- genesis-capability-parent:{number} -->"
+        _post_once(
+            repository,
+            token,
+            escalation_number,
+            escalation_comments,
+            parent_marker,
+            (
+                f"{parent_marker}\n"
+                f"Capability escalation #{escalation_number} must unlock parent Issue #{number} after prior verified "
+                f"capability #{consumed_capability} proved insufficient for blocker class `{capability_class}`."
+            ),
+        )
+        try:
+            request(
+                repository,
+                token,
+                "POST",
+                "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
+                {"ref": "main"},
+            )
+        except Exception:
+            pass
         return {
-            "status": "capability_class_exhausted",
+            "status": "waiting_capability_escalation",
             "issue_number": number,
             "capability_issue": consumed_capability,
+            "escalation_issue": escalation_number,
             "reason": capability_class,
-            "requires_human": True,
+            "requires_human": False,
         }
 
     capability = ensure_capability_issue(repository, token, issue, target, reason)
