@@ -720,3 +720,85 @@ def test_reserve_releases_ready_capability_parents_before_selection(monkeypatch)
 
     assert calls == ["release"]
     assert result["status"] == "idle"
+
+
+def test_consumed_capability_escalates_autonomously_instead_of_human_stop(monkeypatch):
+    issue = _issue(1200, extra_labels=(module.AGENTIC_LABEL,))
+    issue["body"] = "- **Target:** `genesis/example.py`\n"
+    comments = [{"body": "<!-- genesis-agentic-capability-release:1190 -->\nreleased"}]
+    calls = []
+
+    monkeypatch.setattr(module, "released_capability_for_reason", lambda comments, reason: 1190)
+    monkeypatch.setattr(
+        module,
+        "ensure_capability_escalation_issue",
+        lambda repository, token, issue, target, reason, consumed: {"number": 1201},
+    )
+    monkeypatch.setattr(module, "capability_ready", lambda repository, token, number: False)
+    monkeypatch.setattr(module, "issue_comments", lambda repository, token, number: [])
+    monkeypatch.setattr(module, "ensure_label", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "remove_label", lambda *args, **kwargs: None)
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+
+    result = module.pause_for_capability(
+        "owner/repo",
+        "token",
+        issue,
+        comments,
+        "genesis/example.py",
+        "retry_pending_capability",
+    )
+
+    assert result["status"] == "waiting_capability_escalation"
+    assert result["escalation_issue"] == 1201
+    assert result["requires_human"] is False
+    assert any(
+        method == "POST"
+        and path == "/issues/1200/labels"
+        and module.WAITING_CAPABILITY_LABEL in (payload or {}).get("labels", [])
+        for method, path, payload in calls
+    )
+    assert not any(
+        method == "POST"
+        and path == "/issues/1200/labels"
+        and module.NEEDS_HUMAN_LABEL in (payload or {}).get("labels", [])
+        for method, path, payload in calls
+    )
+
+
+def test_capability_escalation_issue_is_reusable_and_bounded(monkeypatch):
+    parent = _issue(1300)
+    parent["body"] = "- **Target:** `genesis/example.py`\n"
+    created_payloads = []
+
+    monkeypatch.setattr(module, "_all_issues", lambda repository, token: [])
+    monkeypatch.setattr(module, "ensure_label", lambda *args, **kwargs: None)
+
+    def fake_request(repository, token, method, path, payload=None):
+        if method == "POST" and path == "/issues":
+            created_payloads.append(payload)
+            return {"number": 1301, "body": payload["body"], "state": "open"}
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+
+    result = module.ensure_capability_escalation_issue(
+        "owner/repo",
+        "token",
+        parent,
+        "genesis/example.py",
+        "retry_pending_capability",
+        1299,
+    )
+
+    assert result["number"] == 1301
+    body = created_payloads[0]["body"]
+    assert module.CAPABILITY_WORK_PREFIX in body
+    assert module.CAPABILITY_ESCALATION_PREFIX in body
+    assert "maintainer review" not in body.lower()
+    assert "independent validation" in body.lower()
