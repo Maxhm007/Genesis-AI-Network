@@ -219,6 +219,21 @@ ADMIN_PHRASES = (
 )
 
 
+def source_already_processed(source_comment_id: str) -> bool:
+    """Prevent duplicate routing when a workflow is retried or replayed."""
+    nexus_issue = int(CONFIG["workspaces"]["nexus"])
+    needle = f":{source_comment_id}"
+    markers = (
+        "<!-- genesis-nexus-routing:",
+        "<!-- genesis-nexus-result:",
+        "<!-- genesis-nexus-team-evolution:",
+    )
+    return any(
+        needle in str(row.get("body") or "") and any(marker in str(row.get("body") or "") for marker in markers)
+        for row in issue_comments(nexus_issue)
+    )
+
+
 def should_route_owner_comment(text: str) -> bool:
     """Return True only for owner comments that look like actionable requests.
 
@@ -300,6 +315,28 @@ def casual_response(text: str) -> str | None:
     return "Nexus is available. Submit a request for analysis, planning, implementation, validation, research, or recovery."
 
 
+ENGINEERING_ACTIONS = (
+    "fix", "solve", "implement", "repair", "develop", "change code",
+    "update code", "modify code", "workflow failure", "action failure",
+)
+
+
+def requires_engineering_pipeline(text: str) -> bool:
+    value = (text or "").lower()
+    return any(token in value for token in ENGINEERING_ACTIONS)
+
+
+def next_handoff(agent: str, objective: str) -> str | None:
+    """Return the next independent specialist for engineering work."""
+    if not requires_engineering_pipeline(objective):
+        return None
+    if agent in {"atlas", "scout", "recovery"}:
+        return "forge"
+    if agent == "forge":
+        return "sentinel"
+    return None
+
+
 def classify(text: str) -> str:
     value = text.lower()
     if any(k in value for k in ("stuck", "retry", "recovery", "keeps failing", "failed again", "exhausted", "blocked")):
@@ -363,6 +400,8 @@ def create_execution_issue(agent: str, objective: str, source_comment_id: str) -
 def nexus(objective: str, actor: str, source_comment_id: str) -> None:
     nexus_issue = int(CONFIG["workspaces"]["nexus"])
     if not should_route_owner_comment(objective):
+        return
+    if source_already_processed(source_comment_id):
         return
     casual = casual_response(objective)
     if casual:
@@ -472,6 +511,36 @@ def agent_run(agent: str, objective: str, source_comment_id: str, nexus_issue: i
         + (f"\n\nTeam evolution issue: #{team_change_issue}" if team_change_issue else "")
     )
     comment(nexus_issue, mirror)
+
+    handoff = next_handoff(agent, objective)
+    if handoff:
+        next_workspace = int(CONFIG["workspaces"][handoff])
+        next_workflow = str(CONFIG["workflows"][handoff])
+        comment(
+            workspace,
+            f"<!-- genesis-team-handoff:{source_comment_id}:{agent}:{handoff} -->\n"
+            f"### Handoff to {handoff.title()}\n"
+            f"- **Objective:** {objective}\n"
+            f"- **From:** {agent.title()}\n"
+            f"- **To:** {handoff.title()} (workspace #{next_workspace})\n"
+            "- **Rule:** use the prior specialist result as context, but verify repository evidence independently.",
+        )
+        comment(
+            next_workspace,
+            f"<!-- genesis-team-assignment:{source_comment_id}:{handoff} -->\n"
+            f"### Handoff assignment from {agent.title()}\n"
+            f"- **Objective:** {objective}\n"
+            f"- **Source workspace:** #{workspace}\n"
+            "- **Status:** queued",
+        )
+        dispatch(
+            next_workflow,
+            {
+                "objective": objective[:10000],
+                "source_comment_id": source_comment_id,
+                "nexus_issue": str(nexus_issue),
+            },
+        )
 
 
 def main() -> int:
