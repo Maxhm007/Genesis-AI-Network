@@ -281,6 +281,25 @@ def create_team_evolution_issue(objective: str, source_comment_id: str) -> int:
     return int(result["number"])
 
 
+CASUAL_MESSAGES = {
+    "hi", "hello", "hey", "hi nexus", "hello nexus", "hey nexus",
+    "thanks", "thank you", "thank you nexus", "ok", "okay", "good morning",
+    "good afternoon", "good evening",
+}
+
+
+def casual_response(text: str) -> str | None:
+    value = re.sub(r"[^a-z0-9 ]+", "", (text or "").strip().lower())
+    value = re.sub(r"\s+", " ", value).strip()
+    if value not in CASUAL_MESSAGES:
+        return None
+    if value in {"thanks", "thank you", "thank you nexus"}:
+        return "You’re welcome. I’m here and ready to coordinate the Genesis team whenever you need."
+    if value in {"ok", "okay"}:
+        return "Understood. I’m ready for the next task."
+    return "Hi. I’m Nexus, the Genesis Team Leader. Tell me what you want checked, planned, fixed, researched, or developed, and I’ll coordinate the right teammates."
+
+
 def classify(text: str) -> str:
     value = text.lower()
     if any(k in value for k in ("stuck", "retry", "recovery", "keeps failing", "failed again", "exhausted", "blocked")):
@@ -343,6 +362,15 @@ def create_execution_issue(agent: str, objective: str, source_comment_id: str) -
 def nexus(objective: str, actor: str, source_comment_id: str) -> None:
     nexus_issue = int(CONFIG["workspaces"]["nexus"])
     if not should_route_owner_comment(objective):
+        return
+    casual = casual_response(objective)
+    if casual:
+        comment(
+            nexus_issue,
+            f"<!-- genesis-nexus-result:{source_comment_id}:conversation -->\n"
+            "### Nexus\n"
+            f"{casual}",
+        )
         return
     if is_team_evolution_request(objective):
         evolution_issue = create_team_evolution_issue(objective, source_comment_id)
