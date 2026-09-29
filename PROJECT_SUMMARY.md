@@ -1,5 +1,18 @@
 # Genesis AI Network — Project Summary
 
+## Dashboard navigation validation
+
+The published dashboard validator now parses navigation structurally instead
+of relying on a fixed tab count or exact HTML attribute order. Every
+`section#view-*` target must have exactly one navigable anchor, and every
+`a`/`button[data-view]` control must map back to exactly one target. Missing,
+orphaned, mismatched and duplicate mappings fail publication validation.
+Focused dashboard regression coverage passes (34 passed, 2 skipped on
+Windows). The checked-in `docs/status/index.html` remains a generated artifact
+and currently fails an earlier build-identity check because it still contains
+the loading placeholder; this change does not claim that stale artifact is
+deployable.
+
 ## Manual additional-model task mode
 
 The GitHub-only Qwen3 workflow accepts one optional advisory task, executed once on benchmark_a only after qualification passes. Concurrency serializes these runs. It does not mutate issues, code, or existing worker routing. After activation, inference pins the approved model revision. Initial runs rejected coding JSON scope/newline formatting; a one-line coding probe retains strict functional and safety checks. Activation remains pending passing evidence.

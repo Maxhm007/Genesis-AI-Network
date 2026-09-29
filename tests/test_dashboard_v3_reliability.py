@@ -65,8 +65,9 @@ def test_v3_patch_adds_build_meta_and_mobile_reliability_css(tmp_path: Path):
 
 
 def _artifact_page() -> str:
-    navs = "".join(f'<a data-view="{name}" href="#view-{name}">{name}</a>' for name in ("overview", "evolution", "autonomy", "issues", "tasks", "peers", "activity", "prs", "reports"))
-    views = "".join(f'<section class="view" id="view-{name}">ok</section>' for name in ("overview", "evolution", "autonomy", "issues", "tasks", "peers", "activity", "prs", "reports"))
+    names = ("overview", "evolution", "autonomy", "issues", "tasks", "peers", "activity", "prs", "reports", "chat")
+    navs = "".join(f'<a href="#view-{name}" class="tab" data-view="{name}">{name}</a>' for name in names)
+    views = "".join(f'<section class="view" id="view-{name}">ok</section>' for name in names)
     ids = {
         "heroTitle": "Gene 0 · healthy",
         "ai": "37/100",
@@ -96,6 +97,53 @@ def test_artifact_validator_rejects_empty_tab_content(tmp_path: Path):
     page = tmp_path / "index.html"
     page.write_text(_artifact_page().replace("benchmark evidence", ""), encoding="utf-8")
     with pytest.raises(RuntimeError, match="gapList"):
+        artifact.validate(page)
+
+
+@pytest.mark.parametrize(
+    ("mutate", "message"),
+    [
+        (
+            lambda html: html.replace(
+                '<a href="#view-chat" class="tab" data-view="chat">chat</a>', ""
+            ),
+            "targets without navigable controls: chat",
+        ),
+        (
+            lambda html: html.replace(
+                "</nav>", '<a data-view="orphan" href="#view-orphan">orphan</a></nav>'
+            ),
+            "controls without matching targets: orphan",
+        ),
+        (
+            lambda html: html.replace('href="#view-chat"', 'href="#view-reports"'),
+            "broken tab control",
+        ),
+        (
+            lambda html: html.replace(
+                '<a href="#view-chat" class="tab" data-view="chat">chat</a>',
+                '<button data-view="chat">chat</button>',
+            ),
+            "broken tab control",
+        ),
+        (
+            lambda html: html.replace(
+                "</nav>", '<a href="#view-chat" data-view="chat">duplicate</a></nav>'
+            ),
+            "duplicate tab controls: chat",
+        ),
+        (
+            lambda html: html.replace(
+                "</body>", '<section id="view-chat">duplicate</section></body>'
+            ),
+            "duplicate tab targets: chat",
+        ),
+    ],
+)
+def test_artifact_validator_rejects_broken_tab_mappings(tmp_path: Path, mutate, message: str):
+    page = tmp_path / "index.html"
+    page.write_text(mutate(_artifact_page()), encoding="utf-8")
+    with pytest.raises(RuntimeError, match=message):
         artifact.validate(page)
 
 
