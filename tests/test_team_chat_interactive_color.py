@@ -10,11 +10,11 @@ PAGES = (
 def test_desktop_controls_are_interactive():
     text = Path("web/index.html").read_text(encoding="utf-8")
     for marker in (
-        "data-view="home"",
-        "data-view="chats"",
-        "data-view="teammates"",
-        "data-view="tasks"",
-        "data-view="settings"",
+        'data-view="home"',
+        'data-view="chats"',
+        'data-view="teammates"',
+        'data-view="tasks"',
+        'data-view="settings"',
         "showTeamView",
         "showTaskView",
         "showSettings",
