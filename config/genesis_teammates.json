@@ -1,5 +1,5 @@
 {
-  "version": 1,
+  "version": 2,
   "brain": "Genesis",
   "owner_entrypoint": "nexus",
   "workspaces": {
@@ -21,6 +21,16 @@
     "owner_talks_only_to": "nexus",
     "specialist_work_is_logged_to_workspace": true,
     "specialist_results_are_mirrored_to_nexus": true,
-    "genesis_remains_brain": true
+    "genesis_remains_brain": true,
+    "nexus_can_evolve_team": true,
+    "nexus_team_evolution_scope": "specialist_teammates",
+    "team_evolution_requires_separate_workspace": true,
+    "team_evolution_requires_separate_workflow": true,
+    "protected_authorities": [
+      "Genesis brain identity",
+      "owner control",
+      "Nexus owner entrypoint",
+      "Agentic Lab validation and safety gates"
+    ]
   }
 }
