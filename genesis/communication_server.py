@@ -114,6 +114,27 @@ class GenesisCommunicationHandler(BaseHTTPRequestHandler):
             "capability_growth": capability_growth,
         }
 
+    def _team_status(self) -> dict:
+        config = self._read_json(type(self).root / "config" / "genesis_teammates.json")
+        workspaces = config.get("workspaces", {})
+        rules = config.get("rules", {})
+        roster = [
+            {"id": "nexus", "name": "Nexus", "role": "Team Leader", "workspace_issue": workspaces.get("nexus"), "status": "active"},
+            {"id": "atlas", "name": "Atlas", "role": "Architecture & Planning", "workspace_issue": workspaces.get("atlas"), "status": "ready"},
+            {"id": "forge", "name": "Forge", "role": "Development", "workspace_issue": workspaces.get("forge"), "status": "ready"},
+            {"id": "sentinel", "name": "Sentinel", "role": "Review & QA", "workspace_issue": workspaces.get("sentinel"), "status": "ready"},
+            {"id": "scout", "name": "Scout", "role": "Research", "workspace_issue": workspaces.get("scout"), "status": "ready"},
+            {"id": "recovery", "name": "Recovery", "role": "Troubleshooting", "workspace_issue": workspaces.get("recovery"), "status": "ready"},
+        ]
+        return {
+            "brain": config.get("brain", "Genesis"),
+            "leader": config.get("owner_entrypoint", "nexus"),
+            "version": config.get("version", 1),
+            "autonomous_development": bool(rules.get("team_can_work_independently_for_genesis_development")),
+            "nexus_can_evolve_team": bool(rules.get("nexus_can_evolve_team")),
+            "roster": roster,
+        }
+
     def do_GET(self) -> None:
         if self.path in {"/", "/index.html"}:
             self._serve_html("index.html")
@@ -141,6 +162,9 @@ class GenesisCommunicationHandler(BaseHTTPRequestHandler):
             return
         if self.path == "/v1/modules":
             self._json(200, type(self).communicator.module_status())
+            return
+        if self.path == "/v1/team":
+            self._json(200, self._team_status())
             return
         self._json(404, {"error": "not_found"})
 
