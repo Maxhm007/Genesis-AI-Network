@@ -17,11 +17,11 @@ TOKEN = os.environ.get("GITHUB_TOKEN", "").strip() or os.environ.get("GH_TOKEN",
 API = "https://api.github.com"
 
 ROLE_MAP = {
-    "atlas": ("planner", "Architecture and decomposition. Produce a bounded design, dependencies, risks, and handoff."),
-    "forge": ("engineer", "Implementation and repair. Produce the smallest safe implementation path and execution acceptance criteria."),
-    "sentinel": ("validator", "Independent QA and validation. Define pass/fail evidence and reject unsupported completion claims."),
-    "scout": ("researcher", "Research and investigation. Gather repository evidence, unknowns, and the next evidence-producing action."),
-    "recovery": ("reviewer", "Recovery and troubleshooting. Identify why prior attempts failed and require a materially different next strategy."),
+    "atlas": ("planner", "Architecture and decomposition. Produce a bounded design, dependencies, risks, and handoff in neutral operational language."),
+    "forge": ("engineer", "Implementation and repair. Produce the smallest safe implementation path and execution acceptance criteria in neutral operational language."),
+    "sentinel": ("validator", "Independent QA and validation. Define pass/fail evidence and reject unsupported completion claims in neutral operational language."),
+    "scout": ("researcher", "Research and investigation. Gather repository evidence, unknowns, and the next evidence-producing action in neutral operational language."),
+    "recovery": ("reviewer", "Recovery and troubleshooting. Identify why prior attempts failed and require a materially different next strategy in neutral operational language."),
 }
 
 
@@ -281,6 +281,25 @@ def create_team_evolution_issue(objective: str, source_comment_id: str) -> int:
     return int(result["number"])
 
 
+CASUAL_MESSAGES = {
+    "hi", "hello", "hey", "hi nexus", "hello nexus", "hey nexus",
+    "thanks", "thank you", "ok", "okay", "good morning",
+    "good afternoon", "good evening",
+}
+
+
+def casual_response(text: str) -> str | None:
+    value = re.sub(r"[^a-z0-9 ]+", "", (text or "").strip().lower())
+    value = re.sub(r"\s+", " ", value).strip()
+    if value not in CASUAL_MESSAGES:
+        return None
+    if value in {"thanks", "thank you"}:
+        return "Acknowledged. The team is ready for the next request."
+    if value in {"ok", "okay"}:
+        return "Acknowledged."
+    return "Nexus is available. Submit a request for analysis, planning, implementation, validation, research, or recovery."
+
+
 def classify(text: str) -> str:
     value = text.lower()
     if any(k in value for k in ("stuck", "retry", "recovery", "keeps failing", "failed again", "exhausted", "blocked")):
@@ -308,6 +327,7 @@ def provider_reason(agent: str, objective: str) -> tuple[str, str]:
         f"INSTRUCTION: {instruction}\n"
         f"OBJECTIVE: {objective}\n"
         "Genesis is the Brain. Nexus is the team leader and only owner-facing teammate. "
+        "Use neutral, professional, non-personified language. Avoid emotional, promotional, dramatic, or self-referential phrasing. "
         "Return concise findings, evidence, risks, and the smallest next action. "
         "If the current specialist roster lacks a capability needed to complete the objective safely, "
         "end with exactly: TEAM_CHANGE_REQUIRED: <specialist role>: <reason>. "
@@ -344,6 +364,15 @@ def nexus(objective: str, actor: str, source_comment_id: str) -> None:
     nexus_issue = int(CONFIG["workspaces"]["nexus"])
     if not should_route_owner_comment(objective):
         return
+    casual = casual_response(objective)
+    if casual:
+        comment(
+            nexus_issue,
+            f"<!-- genesis-nexus-result:{source_comment_id}:conversation -->\n"
+            "### Nexus\n"
+            f"{casual}",
+        )
+        return
     if is_team_evolution_request(objective):
         evolution_issue = create_team_evolution_issue(objective, source_comment_id)
         forge_issue = int(CONFIG["workspaces"]["forge"])
@@ -377,7 +406,7 @@ def nexus(objective: str, actor: str, source_comment_id: str) -> None:
         f"- **Owner:** @{actor}\n"
         f"- **Assigned teammate:** **{agent.title()}** (workspace #{agent_issue})\n"
         "- **Status:** delegated\n\n"
-        "I will keep the owner-facing conversation here. Specialist activity is recorded in its own workspace and results are mirrored back to Nexus.",
+        "Owner-facing updates remain in this workspace. Specialist activity is recorded in the assigned workspace and results are mirrored here.",
     )
     comment(
         agent_issue,
@@ -404,7 +433,7 @@ def agent_run(agent: str, objective: str, source_comment_id: str, nexus_issue: i
         f"<!-- genesis-team-start:{source_comment_id}:{agent} -->\n"
         f"### {agent.title()} started\n"
         f"**Objective:** {objective}\n\n"
-        "Reading the current request under Genesis/Nexus authority.",
+        "Processing the request under the Genesis/Nexus authority model.",
     )
     provider, output = provider_reason(agent, objective)
     execution_issue = None
