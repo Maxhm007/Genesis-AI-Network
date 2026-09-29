@@ -58,6 +58,51 @@ def dispatch(workflow: str, inputs: dict[str, str]) -> None:
     request("POST", f"/actions/workflows/{workflow}/dispatches", {"ref": "main", "inputs": inputs})
 
 
+ACTION_TOKENS = (
+    "check", "fix", "solve", "do it", "investigate", "analyze", "analyse",
+    "plan", "implement", "verify", "validate", "review", "research",
+    "find", "compare", "test", "retry", "run", "deploy", "update",
+    "change", "create", "close", "open", "why", "how", "what", "can ",
+    "should ", "please", "?",
+)
+
+ADMIN_PREFIXES = (
+    "### nexus is live",
+    "nexus is live",
+    "status note:",
+    "admin note:",
+    "setup note:",
+    "fyi:",
+    "for information:",
+)
+
+ADMIN_PHRASES = (
+    "use this issue as the **only owner-facing ai team chat**",
+    "use this issue as the only owner-facing ai team chat",
+    "authority model:",
+)
+
+
+def should_route_owner_comment(text: str) -> bool:
+    """Return True only for owner comments that look like actionable requests.
+
+    Explicit Genesis metadata/admin comments are always ignored. Informational
+    notes are ignored unless they also contain a clear action/question token,
+    preserving concise owner requests such as "Genesis is stuck" + "check it".
+    """
+    value = (text or "").strip()
+    lower = value.lower()
+    if not value:
+        return False
+    if "<!-- genesis-" in lower:
+        return False
+    if lower.startswith(ADMIN_PREFIXES):
+        return any(token in lower for token in ACTION_TOKENS)
+    if any(phrase in lower for phrase in ADMIN_PHRASES):
+        return any(token in lower for token in ACTION_TOKENS)
+    return True
+
+
 def classify(text: str) -> str:
     value = text.lower()
     if any(k in value for k in ("stuck", "retry", "recovery", "keeps failing", "failed again", "exhausted", "blocked")):
@@ -117,6 +162,8 @@ def create_execution_issue(agent: str, objective: str, source_comment_id: str) -
 
 def nexus(objective: str, actor: str, source_comment_id: str) -> None:
     nexus_issue = int(CONFIG["workspaces"]["nexus"])
+    if not should_route_owner_comment(objective):
+        return
     agent = classify(objective)
     agent_issue = int(CONFIG["workspaces"][agent])
     workflow = str(CONFIG["workflows"][agent])
