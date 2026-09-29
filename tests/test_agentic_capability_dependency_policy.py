@@ -208,4 +208,9 @@ def test_released_capability_class_cannot_restart_the_same_parent_loop(monkeypat
         and "genesis-needs-human" in (payload or {}).get("labels", [])
         for _repository, method, path, payload in calls
     )
+    assert any(
+        method == "DELETE"
+        and path == "/issues/867/labels/genesis-sequential-focus"
+        for _repository, method, path, _payload in calls
+    )
     assert not any("/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches" in path for _, _, path, _ in calls)

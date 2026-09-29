@@ -129,6 +129,8 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
         if policy._infra_quarantined(repository, token, number):
             continue
         issue_labels = agentic.labels(issue)
+        if agentic.NEEDS_HUMAN_LABEL in issue_labels:
+            continue
         target = agentic.explicit_target(str(issue.get("body") or ""))
         if not agentic.safe_lane(target):
             continue
@@ -185,6 +187,7 @@ def _sequential_routable_issues(repository: str, token: str) -> list[dict]:
         if SEQUENTIAL_FOCUS_LABEL in agentic.labels(issue)
         and str(issue.get("state") or "").lower() != "closed"
         and "genesis-verified" not in agentic.labels(issue)
+        and agentic.NEEDS_HUMAN_LABEL not in agentic.labels(issue)
     ]
     if focused:
         focused.sort(key=lambda issue: (_created_at(issue), int(issue.get("number") or 0)))
@@ -333,6 +336,7 @@ def main() -> int:
         SEQUENTIAL_FOCUS_LABEL in agentic.labels(issue)
         and str(issue.get("state") or "").lower() != "closed"
         and "genesis-verified" not in agentic.labels(issue)
+        and agentic.NEEDS_HUMAN_LABEL not in agentic.labels(issue)
         for issue in all_open
     )
 

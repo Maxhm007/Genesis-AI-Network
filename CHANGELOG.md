@@ -1,5 +1,12 @@
 # Changelog
 
+## v0.1.10 - 29-Sep-2026 - 04:13 PM - Isolate human-escalated Issues from dispatch
+
+- Clear sequential-focus and worker reservation labels when repeated capability exhaustion escalates a parent to maintainer review.
+- Exclude `genesis-needs-human` Issues from focused-chain and fallback autonomous selection.
+- Added regressions for stale focus cleanup, next-Issue selection and fallback candidate exclusion.
+- Focused human-escalation tests pass locally: 18 passed. Live GitHub behavior remains pending deployment verification.
+
 ## v0.1.9 - 29-Sep-2026 - 12:55 PM - Stop repeated capability-release loops
 
 - Added a durable parent-history guard keyed by capability blocker class.

@@ -188,3 +188,68 @@ def test_sequential_focus_executes_unresolved_capability_dependency(monkeypatch)
     assert [row["number"] for row in selected] == [973]
     assert "genesis-sequential-focus" in {row["name"] for row in parent["labels"]}
     assert "genesis-sequential-focus" not in {row["name"] for row in capability["labels"]}
+
+
+def test_sequential_focus_ignores_issue_escalated_to_human(monkeypatch):
+    escalated = _issue(
+        867,
+        "2026-09-18T00:00:00Z",
+        labels=(
+            "agentic-lab",
+            "genesis-solver-exhausted",
+            "genesis-needs-human",
+            "genesis-sequential-focus",
+        ),
+        body="- **Target:** `genesis/example.py`",
+    )
+    next_issue = _issue(
+        868,
+        "2026-09-18T01:00:00Z",
+        labels=("genesis-autonomous", "agentic-lab"),
+        body="- **Target:** `genesis/next_example.py`",
+    )
+    calls: list[tuple[str, str, dict | None]] = []
+
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [escalated, next_issue])
+    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args: [next_issue])
+    monkeypatch.setattr(module.agentic, "ensure_label", lambda *args, **kwargs: None)
+    monkeypatch.setattr(
+        module.agentic,
+        "request",
+        lambda repository, token, method, path, payload=None: calls.append((method, path, payload)) or {},
+    )
+
+    selected = module._sequential_routable_issues("owner/repo", "token")
+
+    assert [row["number"] for row in selected] == [868]
+    assert any(
+        method == "POST"
+        and path == "/issues/868/labels"
+        and "genesis-sequential-focus" in (payload or {}).get("labels", [])
+        for method, path, payload in calls
+    )
+
+
+def test_parallel_candidates_exclude_issue_escalated_to_human(monkeypatch):
+    escalated = _issue(
+        867,
+        "2026-09-18T00:00:00Z",
+        labels=("agentic-lab", "genesis-needs-human"),
+        body="- **Target:** `genesis/example.py`",
+    )
+    eligible = _issue(
+        868,
+        "2026-09-18T01:00:00Z",
+        labels=("genesis-autonomous", "agentic-lab"),
+        body="- **Target:** `genesis/next_example.py`",
+    )
+
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [escalated, eligible])
+    monkeypatch.setattr(module.policy, "_all_issue_comments", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
+    monkeypatch.setattr(module.policy, "_infra_quarantined", lambda *args: False)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: "generic")
+
+    selected = module._parallel_routable_issues("owner/repo", "token")
+
+    assert [row["number"] for row in selected] == [868]
