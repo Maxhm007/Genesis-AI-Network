@@ -25,6 +25,139 @@ ROLE_MAP = {
 }
 
 
+def paged_get(path: str) -> list[dict]:
+    rows: list[dict] = []
+    page = 1
+    while page <= 3:
+        suffix = "&" if "?" in path else "?"
+        batch = request("GET", f"{path}{suffix}per_page=100&page={page}")
+        if not isinstance(batch, list):
+            break
+        rows.extend(batch)
+        if len(batch) < 100:
+            break
+        page += 1
+    return rows
+
+
+def issue_comments(issue_number: int) -> list[dict]:
+    return paged_get(f"/issues/{issue_number}/comments")
+
+
+def open_development_issues() -> list[dict]:
+    protected = set(int(v) for v in CONFIG.get("workspaces", {}).values())
+    rows = paged_get("/issues?state=open")
+    out: list[dict] = []
+    for issue in rows:
+        number = int(issue.get("number") or 0)
+        if number in protected:
+            continue
+        if issue.get("pull_request"):
+            continue
+        title = str(issue.get("title") or "")
+        body = str(issue.get("body") or "")
+        if "<!-- genesis-team-evolution -->" in body:
+            continue
+        if title.startswith("[Genesis Teammate]"):
+            continue
+        out.append(issue)
+    return out
+
+
+def autonomous_claim_exists(issue_number: int) -> bool:
+    marker = f"<!-- genesis-team-autonomous-claim:{issue_number} -->"
+    return any(marker in str(row.get("body") or "") for row in issue_comments(issue_number))
+
+
+def select_autonomous_issue() -> dict | None:
+    candidates = []
+    for issue in open_development_issues():
+        number = int(issue.get("number") or 0)
+        if number <= 0 or autonomous_claim_exists(number):
+            continue
+        labels = {
+            str(item.get("name") or "") if isinstance(item, dict) else str(item)
+            for item in (issue.get("labels") or [])
+        }
+        score = 0
+        if "critical" in labels:
+            score += 100
+        if "owner-priority" in labels or "owner_priority" in labels:
+            score += 80
+        if "bug" in labels:
+            score += 30
+        if "genesis-autonomous" in labels:
+            score += 20
+        if "agentic-lab" in labels:
+            score += 10
+        created = str(issue.get("created_at") or "")
+        candidates.append((score, created, issue))
+    if not candidates:
+        return None
+    candidates.sort(key=lambda row: (-row[0], row[1]))
+    return candidates[0][2]
+
+
+def autonomous_development(run_id: str) -> None:
+    if not CONFIG.get("rules", {}).get("team_can_work_independently_for_genesis_development", False):
+        return
+    nexus_issue = int(CONFIG["workspaces"]["nexus"])
+    issue = select_autonomous_issue()
+    if issue is None:
+        comment(
+            nexus_issue,
+            f"<!-- genesis-team-autonomous-idle:{run_id} -->\n"
+            "### Autonomous team pulse\nNo unclaimed actionable Genesis development issue was found.",
+        )
+        return
+
+    number = int(issue["number"])
+    title = str(issue.get("title") or f"Issue #{number}")
+    body = str(issue.get("body") or "").strip()
+    objective = (
+        f"Autonomous Genesis development task from issue #{number}: {title}. "
+        + (f"Context: {body[:4000]}" if body else "")
+    ).strip()
+    agent = classify(objective)
+    workspace = int(CONFIG["workspaces"][agent])
+    workflow = str(CONFIG["workflows"][agent])
+    marker = f"<!-- genesis-team-autonomous-claim:{number} -->"
+
+    comment(
+        number,
+        f"{marker}\n"
+        f"### Nexus autonomous team claim\n"
+        f"- **Assigned teammate:** {agent.title()} (workspace #{workspace})\n"
+        f"- **Nexus:** #{nexus_issue}\n"
+        "- **Mode:** independent Genesis development\n"
+        "- **Rule:** existing Agentic Lab, validation, and issue-closure authorities remain authoritative.",
+    )
+    comment(
+        nexus_issue,
+        f"<!-- genesis-team-autonomous-route:{run_id}:{number} -->\n"
+        "### Autonomous Genesis development\n"
+        f"- **Source issue:** #{number} — {title}\n"
+        f"- **Assigned teammate:** {agent.title()} (workspace #{workspace})\n"
+        "- **Status:** delegated without owner prompt",
+    )
+    comment(
+        workspace,
+        f"<!-- genesis-team-autonomous-assignment:{number} -->\n"
+        "### Autonomous assignment from Nexus\n"
+        f"- **Source issue:** #{number}\n"
+        f"- **Objective:** {objective}\n"
+        "- **Status:** queued",
+    )
+    dispatch(
+        workflow,
+        {
+            "objective": objective[:10000],
+            "source_comment_id": f"autonomous-{number}-{run_id}",
+            "nexus_issue": str(nexus_issue),
+        },
+    )
+
+
 def request(method: str, path: str, payload: dict | None = None) -> dict:
     if not REPOSITORY or not TOKEN:
         raise RuntimeError("GITHUB_REPOSITORY and GITHUB_TOKEN are required")
@@ -321,6 +454,9 @@ def main() -> int:
     n.add_argument("--actor", required=True)
     n.add_argument("--source-comment-id", required=True)
 
+    auto = sub.add_parser("autonomous")
+    auto.add_argument("--run-id", required=True)
+
     a = sub.add_parser("agent")
     a.add_argument("--agent", required=True, choices=tuple(ROLE_MAP))
     a.add_argument("--objective", required=True)
@@ -330,6 +466,8 @@ def main() -> int:
     args = parser.parse_args()
     if args.command == "nexus":
         nexus(args.objective, args.actor, args.source_comment_id)
+    elif args.command == "autonomous":
+        autonomous_development(args.run_id)
     else:
         agent_run(args.agent, args.objective, args.source_comment_id, args.nexus_issue)
     return 0

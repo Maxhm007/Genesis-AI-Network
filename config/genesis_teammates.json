@@ -1,5 +1,5 @@
 {
-  "version": 2,
+  "version": 3,
   "brain": "Genesis",
   "owner_entrypoint": "nexus",
   "workspaces": {
@@ -31,6 +31,10 @@
       "owner control",
       "Nexus owner entrypoint",
       "Agentic Lab validation and safety gates"
-    ]
+    ],
+    "team_can_work_independently_for_genesis_development": true,
+    "autonomous_development_owner": "nexus",
+    "autonomous_development_max_active_claims": 1,
+    "autonomous_development_source": "open_genesis_issues"
   }
 }

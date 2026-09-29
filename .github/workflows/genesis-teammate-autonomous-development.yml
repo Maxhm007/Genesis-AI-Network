@@ -1,0 +1,32 @@
+name: Genesis Teammate - Autonomous Development
+
+on:
+  schedule:
+    - cron: '17,47 * * * *'
+  workflow_dispatch:
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-teammate-autonomous-development
+  cancel-in-progress: false
+
+jobs:
+  develop:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Let Nexus select one autonomous Genesis development task
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/genesis_teammate.py autonomous --run-id "${{ github.run_id }}"
