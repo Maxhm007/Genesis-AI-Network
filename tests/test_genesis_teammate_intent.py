@@ -25,3 +25,10 @@ def test_nexus_routes_status_prefix_when_it_contains_action():
 
 def test_nexus_routes_implicit_plain_owner_message():
     assert should_route_owner_comment("Genesis is not automatic yet")
+
+
+def test_nexus_recognizes_team_evolution_requests():
+    from scripts.genesis_teammate import is_team_evolution_request
+    assert is_team_evolution_request("Add a new security teammate")
+    assert is_team_evolution_request("Modify agent Forge role")
+    assert not is_team_evolution_request("Check issue #867")
