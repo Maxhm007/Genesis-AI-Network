@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.9 - 29-Sep-2026 - 12:55 PM - Stop repeated capability-release loops
+
+- Added a durable parent-history guard keyed by capability blocker class.
+- A verified capability may re-arm its parent once; exhausting the same blocker again now leaves the parent open for maintainer review.
+- Prevented duplicate capability creation/reuse and automatic Recovery wake-up after the consumed capability proves insufficient.
+- Added regression coverage reproducing the repeated `strategy_set_exhausted` cycle seen on Issue `#867`.
+- Focused capability-loop tests pass: 18 passed across dependency policy and related recovery cases.
+
 ## qwen3-github-v1.0.2 - 13-Sep-2026 - 01:47 AM - Bound one-at-a-time GitHub inference
 
 - Request a valid single-line function to avoid newline over-escaping, retaining strict AST/scope/functional validation.

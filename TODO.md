@@ -15,6 +15,8 @@ This file is a **human-readable near-term backlog**. It is not the authority for
 
 ## Immediate priorities
 
+- [ ] Resolve Issue `#867` against current `main` after deploying the capability-loop guard; require one terminal outcome and no repeated capability dependency for the same blocker class.
+
 - [ ] Benchmark optional Qwen3-4B-Instruct-2507 for compatibility, memory/latency and accepted repairs; retain existing active providers and routing until normal validation/trust evidence and explicit activation approval.
 
 - [ ] Resolve remaining dashboard-script targets through an appropriately safeguarded repair lane; the verified ordinary exception covers only `scripts/self_evaluation_dashboard.py`, not arbitrary or control scripts.
