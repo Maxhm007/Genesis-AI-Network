@@ -525,6 +525,31 @@ def unresolved_capability_dependency(comments: list[dict]) -> int | None:
     return dependency
 
 
+def released_capability_for_reason(comments: list[dict], reason: str) -> int | None:
+    """Return a dependency already consumed for this blocker class.
+
+    A verified capability may re-arm its parent once. If the parent exhausts
+    the same blocker class again without a material repair-engine change, the
+    same capability cannot provide new evidence and must not start another
+    dependency/release loop.
+    """
+    capability_reasons: dict[int, str] = {}
+    released: int | None = None
+    expected = _capability_class(reason)
+    for row in comments:
+        body = str(row.get("body") or "")
+        dependency = _marker_number(body, CAPABILITY_DEPENDENCY_PREFIX)
+        if dependency:
+            match = re.search(r"Blocker:\s*`([^`]+)`", body)
+            if match:
+                capability_reasons[dependency] = _capability_class(match.group(1))
+            continue
+        capability_release = _marker_number(body, CAPABILITY_RELEASE_PREFIX)
+        if capability_release and capability_reasons.get(capability_release) == expected:
+            released = capability_release
+    return released
+
+
 def _latest_release_index(comments: list[dict]) -> int:
     latest = -1
     for index, row in enumerate(comments):
@@ -763,6 +788,48 @@ def pause_for_capability(
             ),
         )
         return {"status": "reroute_capability", "issue_number": number, "reason": reason}
+
+    consumed_capability = released_capability_for_reason(comments, reason)
+    if consumed_capability:
+        ensure_label(
+            repository,
+            token,
+            NEEDS_HUMAN_LABEL,
+            "b60205",
+            "Autonomous recovery exhausted after a verified capability was already consumed",
+        )
+        request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/labels",
+            {"labels": [NEEDS_HUMAN_LABEL, EXHAUSTED_LABEL, AGENTIC_LABEL]},
+        )
+        for label in ACTIVE_LABELS | {WAITING_CAPABILITY_LABEL, "genesis-autonomous", "genesis-deferred"}:
+            remove_label(repository, token, number, label)
+        capability_class = _capability_class(reason)
+        marker = f"<!-- genesis-capability-class-exhausted:{capability_class} -->"
+        _post_once(
+            repository,
+            token,
+            number,
+            comments,
+            marker,
+            (
+                f"{marker}\n"
+                f"Genesis already consumed verified capability Issue #{consumed_capability} for blocker class "
+                f"`{capability_class}`, but the same parent exhausted that blocker again without new repair "
+                "capability evidence. The parent remains open for maintainer review; no duplicate capability "
+                "Issue or automatic Recovery wake-up is created."
+            ),
+        )
+        return {
+            "status": "capability_class_exhausted",
+            "issue_number": number,
+            "capability_issue": consumed_capability,
+            "reason": capability_class,
+            "requires_human": True,
+        }
 
     capability = ensure_capability_issue(repository, token, issue, target, reason)
     capability_number = int(capability.get("number") or 0)

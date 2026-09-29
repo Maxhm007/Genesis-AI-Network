@@ -147,3 +147,65 @@ def test_obsolete_not_planned_capability_is_not_reused(monkeypatch) -> None:
     )
 
     assert reused is canonical
+
+
+def test_released_capability_class_cannot_restart_the_same_parent_loop(monkeypatch) -> None:
+    parent = {
+        "number": 867,
+        "state": "open",
+        "labels": [{"name": "agentic-lab"}],
+        "body": "- **Target:** `genesis/example.py`\n",
+    }
+    comments = [
+        {
+            "body": (
+                "<!-- genesis-capability-dependency:991 -->\n"
+                "Capability Issue #991 must be verified before this Issue resumes. "
+                "Blocker: `strategy_set_exhausted`."
+            )
+        },
+        {
+            "body": (
+                "<!-- genesis-agentic-capability-release:991 -->\n"
+                "Capability Issue #991 is verified/completed."
+            )
+        },
+    ]
+    calls: list[tuple[str, str, str, dict | None]] = []
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((repository, method, path, payload))
+        return {}
+
+    monkeypatch.setattr(dispatcher, "request", fake_request)
+    monkeypatch.setattr(
+        dispatcher,
+        "ensure_capability_issue",
+        lambda *args, **kwargs: (_ for _ in ()).throw(
+            AssertionError("a released blocker class must not create or reuse another capability Issue")
+        ),
+    )
+
+    result = dispatcher.pause_for_capability(
+        "owner/repo",
+        "token",
+        parent,
+        comments,
+        "genesis/example.py",
+        "strategy_set_exhausted",
+    )
+
+    assert result == {
+        "status": "capability_class_exhausted",
+        "issue_number": 867,
+        "capability_issue": 991,
+        "reason": "strategy_set_exhausted",
+        "requires_human": True,
+    }
+    assert any(
+        method == "POST"
+        and path == "/issues/867/labels"
+        and "genesis-needs-human" in (payload or {}).get("labels", [])
+        for _repository, method, path, payload in calls
+    )
+    assert not any("/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches" in path for _, _, path, _ in calls)

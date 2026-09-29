@@ -1,5 +1,16 @@
 # Genesis AI Network — Project Summary
 
+## Agentic capability-loop guard
+
+Agentic Recovery now treats a verified capability dependency as consumable
+once per parent and blocker class. If the same parent exhausts the same blocker
+again after that capability was released, Genesis keeps the parent open,
+labels it for maintainer review and does not create/reuse another capability
+Issue or wake Recovery again. This prevents unchanged capability cycles such
+as the repeated `strategy_set_exhausted` dependencies observed for Issue
+`#867`, while preserving one normal autonomous retry after genuinely new
+capability evidence is verified.
+
 ## Manual additional-model task mode
 
 The GitHub-only Qwen3 workflow accepts one optional advisory task, executed once on benchmark_a only after qualification passes. Concurrency serializes these runs. It does not mutate issues, code, or existing worker routing. After activation, inference pins the approved model revision. Initial runs rejected coding JSON scope/newline formatting; a one-line coding probe retains strict functional and safety checks. Activation remains pending passing evidence.
