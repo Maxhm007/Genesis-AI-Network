@@ -1,5 +1,5 @@
 {
-  "version": 3,
+  "version": 4,
   "brain": "Genesis",
   "owner_entrypoint": "nexus",
   "workspaces": {
@@ -35,6 +35,8 @@
     "team_can_work_independently_for_genesis_development": true,
     "autonomous_development_owner": "nexus",
     "autonomous_development_max_active_claims": 1,
-    "autonomous_development_source": "open_genesis_issues"
+    "autonomous_development_source": "open_genesis_issues",
+    "neutral_operational_language": true,
+    "avoid_personified_or_promotional_language": true
   }
 }
