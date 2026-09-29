@@ -1,0 +1,57 @@
+name: Genesis Teammate - Nexus
+
+on:
+  issue_comment:
+    types: [created]
+  workflow_dispatch:
+    inputs:
+      objective:
+        description: Owner request for Nexus
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-teammate-nexus
+  cancel-in-progress: false
+
+jobs:
+  route:
+    if: >-
+      (github.event_name == 'workflow_dispatch') ||
+      (github.event.issue.number == 1000 &&
+       github.event.comment.user.login == github.repository_owner &&
+       !startsWith(github.event.comment.body, '<!-- genesis-'))
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Route owner request through Nexus
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          OWNER_COMMENT: ${{ github.event.comment.body }}
+          OWNER_LOGIN: ${{ github.event.comment.user.login }}
+          COMMENT_ID: ${{ github.event.comment.id }}
+          MANUAL_OBJECTIVE: ${{ inputs.objective }}
+        run: |
+          objective="$OWNER_COMMENT"
+          actor="$OWNER_LOGIN"
+          cid="$COMMENT_ID"
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            objective="$MANUAL_OBJECTIVE"
+            actor="${{ github.actor }}"
+            cid="manual-${{ github.run_id }}"
+          fi
+          python scripts/genesis_teammate.py nexus \
+            --objective "$objective" \
+            --actor "$actor" \
+            --source-comment-id "$cid"

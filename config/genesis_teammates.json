@@ -1,0 +1,26 @@
+{
+  "version": 1,
+  "brain": "Genesis",
+  "owner_entrypoint": "nexus",
+  "workspaces": {
+    "nexus": 1000,
+    "atlas": 1001,
+    "forge": 1002,
+    "sentinel": 1003,
+    "scout": 1004,
+    "recovery": 1005
+  },
+  "workflows": {
+    "atlas": "genesis-teammate-atlas.yml",
+    "forge": "genesis-teammate-forge.yml",
+    "sentinel": "genesis-teammate-sentinel.yml",
+    "scout": "genesis-teammate-scout.yml",
+    "recovery": "genesis-teammate-recovery.yml"
+  },
+  "rules": {
+    "owner_talks_only_to": "nexus",
+    "specialist_work_is_logged_to_workspace": true,
+    "specialist_results_are_mirrored_to_nexus": true,
+    "genesis_remains_brain": true
+  }
+}

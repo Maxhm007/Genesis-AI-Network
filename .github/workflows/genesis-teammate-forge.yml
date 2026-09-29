@@ -1,0 +1,47 @@
+name: Genesis Teammate - Forge Developer
+
+on:
+  workflow_dispatch:
+    inputs:
+      objective:
+        description: Objective delegated by Nexus
+        required: true
+        type: string
+      source_comment_id:
+        description: Nexus source comment id
+        required: true
+        type: string
+      nexus_issue:
+        description: Nexus workspace issue number
+        required: true
+        type: string
+
+permissions:
+  actions: write
+  contents: read
+  issues: write
+
+concurrency:
+  group: genesis-teammate-forge
+  cancel-in-progress: false
+
+jobs:
+  work:
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Run Forge Developer
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          python scripts/genesis_teammate.py agent \
+            --agent "forge" \
+            --objective "${{ inputs.objective }}" \
+            --source-comment-id "${{ inputs.source_comment_id }}" \
+            --nexus-issue "${{ inputs.nexus_issue }}"
