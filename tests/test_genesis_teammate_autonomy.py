@@ -91,6 +91,24 @@ def test_autonomous_assignment_passes_authoritative_source_issue(monkeypatch):
     assert dispatches[0][1]["source_comment_id"] == "autonomous-912-run-1"
 
 
+def test_autonomous_dispatch_failure_does_not_claim_source_issue(monkeypatch):
+    selected = _issue(number=912, title="Add a bounded capability")
+    comments = []
+    monkeypatch.setattr(genesis_teammate, "open_development_issues", lambda: [selected])
+    monkeypatch.setattr(genesis_teammate, "autonomous_claim_exists", lambda _number: False)
+    monkeypatch.setattr(genesis_teammate, "comment", lambda number, body: comments.append((number, body)))
+
+    def fail_dispatch(*_args):
+        raise RuntimeError("workflow dispatch failed")
+
+    monkeypatch.setattr(genesis_teammate, "dispatch", fail_dispatch)
+
+    with pytest.raises(RuntimeError, match="workflow dispatch failed"):
+        genesis_teammate.autonomous_development("run-failed")
+
+    assert comments == []
+
+
 def test_autonomous_agent_reports_on_source_without_creating_duplicate_issue(monkeypatch):
     comments = []
     monkeypatch.setattr(genesis_teammate, "request", lambda *_args, **_kwargs: _issue(number=912))
@@ -161,3 +179,7 @@ def test_specialist_workflows_accept_source_issue_as_optional_dispatch_input():
         assert "source_issue:" in text
         assert "SOURCE_ISSUE: ${{ inputs.source_issue }}" in text
         assert "--source-issue" in text
+        assert "TEAM_OBJECTIVE: ${{ inputs.objective }}" in text
+        run_script = text.split("        run: |", maxsplit=1)[1]
+        assert "${{ inputs.objective }}" not in run_script
+        assert '--objective "$TEAM_OBJECTIVE"' in run_script

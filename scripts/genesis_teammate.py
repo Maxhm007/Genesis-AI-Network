@@ -135,6 +135,15 @@ def autonomous_development(run_id: str) -> None:
     workflow = str(CONFIG["workflows"][agent])
     marker = f"<!-- genesis-team-autonomous-claim:{number} -->"
 
+    dispatch(
+        workflow,
+        {
+            "objective": objective[:10000],
+            "source_comment_id": f"autonomous-{number}-{run_id}",
+            "nexus_issue": str(nexus_issue),
+            "source_issue": str(number),
+        },
+    )
     comment(
         number,
         f"{marker}\n"
@@ -159,15 +168,6 @@ def autonomous_development(run_id: str) -> None:
         f"- **Source issue:** #{number}\n"
         f"- **Objective:** {objective}\n"
         "- **Status:** queued",
-    )
-    dispatch(
-        workflow,
-        {
-            "objective": objective[:10000],
-            "source_comment_id": f"autonomous-{number}-{run_id}",
-            "nexus_issue": str(nexus_issue),
-            "source_issue": str(number),
-        },
     )
 
 
