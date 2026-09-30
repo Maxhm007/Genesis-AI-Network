@@ -15,6 +15,8 @@ CONFIG = json.loads((ROOT / "config" / "genesis_teammates.json").read_text(encod
 REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "").strip()
 TOKEN = os.environ.get("GITHUB_TOKEN", "").strip() or os.environ.get("GH_TOKEN", "").strip()
 API = "https://api.github.com"
+AUTONOMOUS_SOURCE_LABELS = {"genesis-autonomous", "agentic-lab"}
+AUTONOMOUS_BLOCKING_LABELS = {"genesis-waiting-capability", "genesis-needs-human"}
 
 ROLE_MAP = {
     "atlas": ("planner", "Architecture and decomposition. Produce a bounded design, dependencies, risks, and handoff in neutral operational language."),
@@ -50,18 +52,28 @@ def open_development_issues() -> list[dict]:
     out: list[dict] = []
     for issue in rows:
         number = int(issue.get("number") or 0)
-        if number in protected:
-            continue
-        if issue.get("pull_request"):
-            continue
-        title = str(issue.get("title") or "")
-        body = str(issue.get("body") or "")
-        if "<!-- genesis-team-evolution -->" in body:
-            continue
-        if title.startswith("[Genesis Teammate]"):
+        if number in protected or not is_autonomous_issue(issue):
             continue
         out.append(issue)
     return out
+
+
+def is_autonomous_issue(issue: dict) -> bool:
+    labels = {
+        str(item.get("name") or "") if isinstance(item, dict) else str(item)
+        for item in (issue.get("labels") or [])
+    }
+    title = str(issue.get("title") or "")
+    body = str(issue.get("body") or "")
+    return (
+        str(issue.get("state") or "open").lower() == "open"
+        and not issue.get("pull_request")
+        and bool(labels & AUTONOMOUS_SOURCE_LABELS)
+        and not bool(labels & AUTONOMOUS_BLOCKING_LABELS)
+        and not title.startswith(("[Genesis Teammate]", "[Nexus Task]"))
+        and "<!-- genesis-team-task -->" not in body
+        and "<!-- genesis-team-evolution -->" not in body
+    )
 
 
 def autonomous_claim_exists(issue_number: int) -> bool:
@@ -154,6 +166,7 @@ def autonomous_development(run_id: str) -> None:
             "objective": objective[:10000],
             "source_comment_id": f"autonomous-{number}-{run_id}",
             "nexus_issue": str(nexus_issue),
+            "source_issue": str(number),
         },
     )
 
@@ -465,8 +478,34 @@ def nexus(objective: str, actor: str, source_comment_id: str) -> None:
     )
 
 
-def agent_run(agent: str, objective: str, source_comment_id: str, nexus_issue: int) -> None:
+def agent_run(
+    agent: str,
+    objective: str,
+    source_comment_id: str,
+    nexus_issue: int,
+    source_issue: int | None = None,
+) -> None:
+    if source_issue is not None:
+        try:
+            source_issue = int(source_issue)
+        except (TypeError, ValueError) as exc:
+            raise RuntimeError("source issue must be a positive integer") from exc
+        if source_issue <= 0:
+            raise RuntimeError("source issue must be a positive integer")
+
     workspace = int(CONFIG["workspaces"][agent])
+    if source_issue is not None:
+        issue = request("GET", f"/issues/{source_issue}")
+        if not is_autonomous_issue(issue):
+            message = (
+                f"<!-- genesis-team-autonomous-skip:{source_comment_id}:{agent} -->\n"
+                f"Skipped source issue #{source_issue}: it is closed, not in the autonomous intake, "
+                "or is held by an existing lifecycle gate."
+            )
+            comment(workspace, message)
+            comment(nexus_issue, message)
+            return
+
     comment(
         workspace,
         f"<!-- genesis-team-start:{source_comment_id}:{agent} -->\n"
@@ -476,7 +515,7 @@ def agent_run(agent: str, objective: str, source_comment_id: str, nexus_issue: i
     )
     provider, output = provider_reason(agent, objective)
     execution_issue = None
-    if agent in {"forge", "recovery"}:
+    if agent in {"forge", "recovery"} and source_issue is None:
         execution_issue = create_execution_issue(agent, objective, source_comment_id)
 
     suffix = f"\n\n**Execution issue:** #{execution_issue}" if execution_issue else ""
@@ -488,6 +527,14 @@ def agent_run(agent: str, objective: str, source_comment_id: str, nexus_issue: i
         f"{output}{suffix}"
     )
     comment(workspace, result_body)
+    if source_issue is not None:
+        comment(
+            source_issue,
+            f"<!-- genesis-team-source-result:{source_comment_id}:{agent} -->\n"
+            f"### {agent.title()} autonomous findings\n\n"
+            f"{output[:6000]}\n\n"
+            "These findings are advisory. The existing issue owner and Genesis validation lifecycle remain authoritative.",
+        )
 
     team_change_match = re.search(r"(?im)^TEAM_CHANGE_REQUIRED:\s*(.+)$", output)
     team_change_issue = None
@@ -533,14 +580,14 @@ def agent_run(agent: str, objective: str, source_comment_id: str, nexus_issue: i
             f"- **Source workspace:** #{workspace}\n"
             "- **Status:** queued",
         )
-        dispatch(
-            next_workflow,
-            {
-                "objective": objective[:10000],
-                "source_comment_id": source_comment_id,
-                "nexus_issue": str(nexus_issue),
-            },
-        )
+        handoff_inputs = {
+            "objective": objective[:10000],
+            "source_comment_id": source_comment_id,
+            "nexus_issue": str(nexus_issue),
+        }
+        if source_issue is not None:
+            handoff_inputs["source_issue"] = str(source_issue)
+        dispatch(next_workflow, handoff_inputs)
 
 
 def main() -> int:
@@ -560,6 +607,7 @@ def main() -> int:
     a.add_argument("--objective", required=True)
     a.add_argument("--source-comment-id", required=True)
     a.add_argument("--nexus-issue", required=True, type=int)
+    a.add_argument("--source-issue", type=int)
 
     args = parser.parse_args()
     if args.command == "nexus":
@@ -567,7 +615,7 @@ def main() -> int:
     elif args.command == "autonomous":
         autonomous_development(args.run_id)
     else:
-        agent_run(args.agent, args.objective, args.source_comment_id, args.nexus_issue)
+        agent_run(args.agent, args.objective, args.source_comment_id, args.nexus_issue, args.source_issue)
     return 0
 
 

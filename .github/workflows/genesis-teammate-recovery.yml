@@ -15,6 +15,10 @@ on:
         description: Nexus workspace issue number
         required: true
         type: string
+      source_issue:
+        description: Existing authoritative source issue for autonomous work
+        required: false
+        type: string
 
 permissions:
   actions: write
@@ -42,9 +46,8 @@ jobs:
           TEAM_OBJECTIVE: ${{ inputs.objective }}
           SOURCE_COMMENT_ID: ${{ inputs.source_comment_id }}
           NEXUS_ISSUE: ${{ inputs.nexus_issue }}
+          SOURCE_ISSUE: ${{ inputs.source_issue }}
         run: |
-          python scripts/genesis_teammate.py agent \
-            --agent "recovery" \
-            --objective "$TEAM_OBJECTIVE" \
-            --source-comment-id "$SOURCE_COMMENT_ID" \
-            --nexus-issue "$NEXUS_ISSUE"
+          args=(agent --agent "recovery" --objective "$TEAM_OBJECTIVE" --source-comment-id "$SOURCE_COMMENT_ID" --nexus-issue "$NEXUS_ISSUE")
+          if [ -n "$SOURCE_ISSUE" ]; then args+=(--source-issue "$SOURCE_ISSUE"); fi
+          python scripts/genesis_teammate.py "${args[@]}"
