@@ -59,6 +59,8 @@ def open_development_issues() -> list[dict]:
         body = str(issue.get("body") or "")
         if "<!-- genesis-team-evolution -->" in body:
             continue
+        if "<!-- genesis-team-task -->" in body:
+            continue
         if title.startswith("[Genesis Teammate]"):
             continue
         out.append(issue)
@@ -405,24 +407,61 @@ def clean_title(text: str) -> str:
     return compact[:150] or "Owner request"
 
 
+def execution_task_key(objective: str, source_comment_id: str) -> str:
+    """Return a stable key so one objective maps to one execution issue."""
+    match = re.search(r"(?i)autonomous genesis development task from issue #(\\d+)", objective or "")
+    if match:
+        return f"source-issue-{match.group(1)}"
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(source_comment_id or "").strip()).strip("-")
+    return f"source-comment-{safe or 'unknown'}"
+
+
+def find_open_execution_issue(task_key: str) -> int | None:
+    marker = f"<!-- genesis-team-task-key:{task_key} -->"
+    for issue in paged_get("/issues?state=open"):
+        body = str(issue.get("body") or "")
+        if "<!-- genesis-team-task -->" in body and marker in body:
+            return int(issue.get("number") or 0) or None
+    # Legacy compatibility: older teammate tasks do not have task-key markers.
+    if task_key.startswith("source-issue-"):
+        source_number = task_key.removeprefix("source-issue-")
+        needle = f"Autonomous Genesis development task from issue #{source_number}:"
+        for issue in paged_get("/issues?state=open"):
+            body = str(issue.get("body") or "")
+            if "<!-- genesis-team-task -->" in body and needle in body:
+                return int(issue.get("number") or 0) or None
+    return None
+
+
 def create_execution_issue(agent: str, objective: str, source_comment_id: str) -> int:
-    title = f"[Nexus Task][{agent.title()}] {clean_title(objective)}"
+    task_key = execution_task_key(objective, source_comment_id)
+    existing = find_open_execution_issue(task_key)
+    if existing:
+        comment(
+            existing,
+            f"<!-- genesis-team-task-reuse:{source_comment_id}:{agent} -->\n"
+            f"Nexus reused this execution issue for **{agent.title()}** because task key `{task_key}` is already active.",
+        )
+        return existing
+
+    title = f"[Nexus Task] {clean_title(objective)}"
     body = (
         "<!-- genesis-team-task -->\n"
+        f"<!-- genesis-team-task-key:{task_key} -->\n"
         f"**Requested by:** Nexus\n"
-        f"**Specialist:** {agent}\n"
+        f"**Initial specialist:** {agent}\n"
         f"**Nexus workspace:** #{CONFIG['workspaces']['nexus']}\n"
         f"**Source comment id:** {source_comment_id}\n\n"
         "## Objective\n"
         f"{objective}\n\n"
         "## Operating rule\n"
-        "This is an internal execution issue created by the Genesis teammate system. "
+        "This is the single internal execution issue for this objective. "
+        "Recovery, Forge, Sentinel, and other specialists must reuse this issue rather than create parallel copies. "
         "Existing Agentic Lab, independent validation, safety, and closure authorities remain authoritative.\n"
     )
     labels = ["genesis-autonomous", "agentic-lab"]
     result = request("POST", "/issues", {"title": title, "body": body, "labels": labels})
     return int(result["number"])
-
 
 def nexus(objective: str, actor: str, source_comment_id: str) -> None:
     nexus_issue = int(CONFIG["workspaces"]["nexus"])
