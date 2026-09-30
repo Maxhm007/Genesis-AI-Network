@@ -1,4 +1,5 @@
 from pathlib import Path
+from types import SimpleNamespace
 
 import pytest
 
@@ -71,8 +72,44 @@ def test_open_development_issues_only_returns_intake_eligible_work(monkeypatch):
     assert genesis_teammate.open_development_issues() == [eligible]
 
 
+@pytest.mark.parametrize(
+    ("provider_names", "expected"),
+    [
+        ([], False),
+        (["genesis-bootstrap"], False),
+        (["genesis-bootstrap", "configured-model"], True),
+    ],
+)
+def test_non_bootstrap_provider_detection(monkeypatch, provider_names, expected):
+    registry = SimpleNamespace(
+        available_providers=lambda: [SimpleNamespace(name=name) for name in provider_names]
+    )
+    monkeypatch.setattr(genesis_teammate, "ProviderRegistry", lambda: registry)
+
+    assert genesis_teammate.has_non_bootstrap_provider() is expected
+
+
+def test_autonomous_intake_waits_without_claiming_when_only_bootstrap_is_available(monkeypatch):
+    comments = []
+    monkeypatch.setattr(genesis_teammate, "has_non_bootstrap_provider", lambda: False)
+    monkeypatch.setattr(
+        genesis_teammate,
+        "select_autonomous_issue",
+        lambda: pytest.fail("intake must wait before selecting or claiming work"),
+    )
+    monkeypatch.setattr(genesis_teammate, "comment", lambda number, body: comments.append((number, body)))
+
+    genesis_teammate.autonomous_development("run-bootstrap-only")
+
+    assert len(comments) == 1
+    assert comments[0][0] == genesis_teammate.CONFIG["workspaces"]["nexus"]
+    assert "provider-unavailable:run-bootstrap-only" in comments[0][1]
+    assert "no development issue was claimed" in comments[0][1]
+
+
 def test_autonomous_assignment_passes_authoritative_source_issue(monkeypatch):
     selected = _issue(number=912, title="Add a bounded capability")
+    monkeypatch.setattr(genesis_teammate, "has_non_bootstrap_provider", lambda: True)
     monkeypatch.setattr(genesis_teammate, "open_development_issues", lambda: [selected])
     monkeypatch.setattr(genesis_teammate, "autonomous_claim_exists", lambda _number: False)
     comments = []
@@ -94,6 +131,7 @@ def test_autonomous_assignment_passes_authoritative_source_issue(monkeypatch):
 def test_autonomous_dispatch_failure_does_not_claim_source_issue(monkeypatch):
     selected = _issue(number=912, title="Add a bounded capability")
     comments = []
+    monkeypatch.setattr(genesis_teammate, "has_non_bootstrap_provider", lambda: True)
     monkeypatch.setattr(genesis_teammate, "open_development_issues", lambda: [selected])
     monkeypatch.setattr(genesis_teammate, "autonomous_claim_exists", lambda _number: False)
     monkeypatch.setattr(genesis_teammate, "comment", lambda number, body: comments.append((number, body)))

@@ -81,6 +81,13 @@ def autonomous_claim_exists(issue_number: int) -> bool:
     return any(marker in str(row.get("body") or "") for row in issue_comments(issue_number))
 
 
+def has_non_bootstrap_provider() -> bool:
+    return any(
+        str(getattr(provider, "name", "")) != "genesis-bootstrap"
+        for provider in ProviderRegistry().available_providers()
+    )
+
+
 def select_autonomous_issue() -> dict | None:
     candidates = []
     for issue in open_development_issues():
@@ -114,6 +121,14 @@ def autonomous_development(run_id: str) -> None:
     if not CONFIG.get("rules", {}).get("team_can_work_independently_for_genesis_development", False):
         return
     nexus_issue = int(CONFIG["workspaces"]["nexus"])
+    if not has_non_bootstrap_provider():
+        comment(
+            nexus_issue,
+            f"<!-- genesis-team-autonomous-provider-unavailable:{run_id} -->\n"
+            "### Autonomous team waiting\n"
+            "No non-bootstrap intelligence provider is available; no development issue was claimed.",
+        )
+        return
     issue = select_autonomous_issue()
     if issue is None:
         comment(
