@@ -36,9 +36,12 @@ jobs:
               32215089776,
             ]);
 
-            const runs = await github.paginate(
+            const allRuns = await github.paginate(
               github.rest.actions.listWorkflowRunsForRepo,
-              { owner, repo, status: 'queued', per_page: 100 }
+              { owner, repo, per_page: 100 }
+            );
+            const runs = allRuns.filter(
+              run => ['queued', 'pending', 'waiting'].includes(run.status)
             );
             const inProgress = await github.paginate(
               github.rest.actions.listWorkflowRunsForRepo,
