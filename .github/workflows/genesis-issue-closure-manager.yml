@@ -74,5 +74,14 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          active_count="$(gh run list --repo "$GITHUB_REPOSITORY" \
+            --workflow genesis-agentic-lab-recovery.yml \
+            --limit 20 \
+            --json status \
+            --jq '[.[] | select(.status == "queued" or .status == "pending" or .status == "waiting" or .status == "in_progress")] | length')"
+          if [[ "$active_count" -gt 0 ]]; then
+            echo "Agentic Lab already active ($active_count run(s)); duplicate closure wake skipped."
+            exit 0
+          fi
           echo "Closed issue reconciled; dispatching the next Agentic Lab recovery pass."
           gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
