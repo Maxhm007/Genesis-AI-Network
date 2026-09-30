@@ -40,6 +40,13 @@ jobs:
               github.rest.actions.listWorkflowRunsForRepo,
               { owner, repo, status: 'queued', per_page: 100 }
             );
+            const inProgress = await github.paginate(
+              github.rest.actions.listWorkflowRunsForRepo,
+              { owner, repo, status: 'in_progress', per_page: 100 }
+            );
+            const repairWorkerRunning = inProgress.some(
+              run => run.path === '.github/workflows/genesis-action-repair-worker.yml'
+            );
 
             let cleaned = 0;
             let ghosts = 0;
@@ -52,10 +59,18 @@ jobs:
                 continue;
               }
 
+              const isQueuedRepairDuplicate =
+                repairWorkerRunning &&
+                run.path === '.github/workflows/genesis-action-repair-worker.yml';
+
               const ageMs = now - new Date(run.created_at).getTime();
-              if (ageMs < cutoffMs) {
+              if (!isQueuedRepairDuplicate && ageMs < cutoffMs) {
                 recent++;
                 continue;
+              }
+
+              if (isQueuedRepairDuplicate) {
+                core.notice(`Cancelling duplicate queued Action Repair Worker ${run.id}; another repair worker is already in progress.`);
               }
 
               try {
