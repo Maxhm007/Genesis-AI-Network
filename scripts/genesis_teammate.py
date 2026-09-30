@@ -6,6 +6,7 @@ import os
 import re
 import urllib.error
 import urllib.request
+from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from genesis.providers import ProviderRegistry
@@ -65,8 +66,25 @@ def open_development_issues() -> list[dict]:
 
 
 def autonomous_claim_exists(issue_number: int) -> bool:
+    """Treat only a recent team claim as active.
+
+    Older claims must not permanently blacklist an open issue. If an autonomous
+    attempt stalls, the team may reclaim it after the cooldown and try again.
+    """
     marker = f"<!-- genesis-team-autonomous-claim:{issue_number} -->"
-    return any(marker in str(row.get("body") or "") for row in issue_comments(issue_number))
+    cutoff = datetime.now(timezone.utc) - timedelta(hours=2)
+    for row in reversed(issue_comments(issue_number)):
+        if marker not in str(row.get("body") or ""):
+            continue
+        created = str(row.get("created_at") or "").strip()
+        if not created:
+            return False
+        try:
+            claimed_at = datetime.fromisoformat(created.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        return claimed_at >= cutoff
+    return False
 
 
 def select_autonomous_issue() -> dict | None:
@@ -189,6 +207,15 @@ def comment(issue_number: int, body: str) -> None:
 
 def dispatch(workflow: str, inputs: dict[str, str]) -> None:
     request("POST", f"/actions/workflows/{workflow}/dispatches", {"ref": "main", "inputs": inputs})
+
+
+def wake_agentic_lab() -> None:
+    """Wake the authoritative execution pipeline after teammate task creation."""
+    request(
+        "POST",
+        "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
+        {"ref": "main"},
+    )
 
 
 ACTION_TOKENS = (
@@ -478,6 +505,10 @@ def agent_run(agent: str, objective: str, source_comment_id: str, nexus_issue: i
     execution_issue = None
     if agent in {"forge", "recovery"}:
         execution_issue = create_execution_issue(agent, objective, source_comment_id)
+        # Teammates are planners/coordinators; Agentic Lab is the authoritative
+        # repository executor. Wake it immediately so the execution issue is
+        # not left as a passive comment-only handoff.
+        wake_agentic_lab()
 
     suffix = f"\n\n**Execution issue:** #{execution_issue}" if execution_issue else ""
     result_body = (
