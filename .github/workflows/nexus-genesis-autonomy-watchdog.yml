@@ -4,6 +4,15 @@ on:
   workflow_dispatch: {}
   schedule:
     - cron: '7,17,27,37,47,57 * * * *'
+  # Independent backup wake: the queue cleaner is already a healthy periodic
+  # control-plane heartbeat. This keeps Nexus checking even if GitHub delays
+  # this workflow's own schedule.
+  workflow_run:
+    workflows:
+      - Genesis Action Queue Cleaner
+    types:
+      - completed
+
   push:
     branches: [main]
     paths:
@@ -21,7 +30,7 @@ permissions:
 
 concurrency:
   group: nexus-genesis-autonomy-watchdog
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   verify-autonomy:
