@@ -29,7 +29,7 @@ permissions:
   issues: write
 
 concurrency:
-  group: nexus-genesis-autonomy-watchdog
+  group: nexus-genesis-autonomy-watchdog-v2
   cancel-in-progress: false
 
 jobs:
