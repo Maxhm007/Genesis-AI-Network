@@ -87,6 +87,7 @@ def evaluate(
     team_max_age_minutes: int = 35,
     agentic_max_age_minutes: int = 20,
     stalled_issue_minutes: int = 90,
+    recent_progress_minutes: int = 20,
 ) -> dict:
     faults: list[str] = []
     evidence: dict[str, object] = {}
@@ -117,9 +118,14 @@ def evaluate(
 
     actionable: list[int] = []
     active: list[int] = []
+    recent_progress: list[int] = []
     stalled: list[int] = []
     for issue in issues:
         labels = _labels(issue)
+        body = str(issue.get("body") or "")
+        title = str(issue.get("title") or "")
+        if MARKER in body or title == TITLE:
+            continue
         if "genesis-autonomous" not in labels or "genesis-verified" in labels or labels & IGNORE_LABELS:
             continue
         number = int(issue.get("number") or 0)
@@ -130,18 +136,26 @@ def evaluate(
             active.append(number)
         updated = _parse_time(issue.get("updated_at"))
         age = float("inf") if updated is None else max(0.0, (now - updated).total_seconds() / 60.0)
+        if age <= recent_progress_minutes:
+            recent_progress.append(number)
         if age >= stalled_issue_minutes and not (labels & ACTIVE_LABELS):
             stalled.append(number)
 
-    if actionable and not active:
+    # A repository can be actively progressing between label transitions.
+    # Treat recent issue activity as progress evidence so Nexus does not raise a
+    # false "no worker" fault merely because a short-lived active label was
+    # already removed before this watchdog pass.
+    if actionable and not active and not recent_progress:
         faults.append("actionable_backlog_has_no_active_autonomous_worker")
     if stalled:
         faults.append("stalled_autonomous_issues:" + ",".join(map(str, stalled[:10])))
 
     evidence["actionable_issue_count"] = len(actionable)
     evidence["active_issue_count"] = len(active)
+    evidence["recent_progress_issue_count"] = len(recent_progress)
     evidence["actionable_issues"] = actionable[:20]
     evidence["active_issues"] = active[:20]
+    evidence["recent_progress_issues"] = recent_progress[:20]
     evidence["stalled_issues"] = stalled[:20]
 
     return {"healthy": not faults, "faults": faults, "evidence": evidence}
@@ -189,6 +203,7 @@ def check(
     team_max_age_minutes: int = 35,
     agentic_max_age_minutes: int = 20,
     stalled_issue_minutes: int = 90,
+    recent_progress_minutes: int = 20,
 ) -> dict:
     now = now or datetime.now(timezone.utc)
     issues = _issues(repository)
@@ -200,6 +215,7 @@ def check(
         team_max_age_minutes=team_max_age_minutes,
         agentic_max_age_minutes=agentic_max_age_minutes,
         stalled_issue_minutes=stalled_issue_minutes,
+        recent_progress_minutes=recent_progress_minutes,
     )
     existing = _existing_watchdog(issues)
 
@@ -298,6 +314,7 @@ def main() -> int:
     parser.add_argument("--team-max-age-minutes", type=int, default=35)
     parser.add_argument("--agentic-max-age-minutes", type=int, default=20)
     parser.add_argument("--stalled-issue-minutes", type=int, default=90)
+    parser.add_argument("--recent-progress-minutes", type=int, default=20)
     args = parser.parse_args()
     repository = str(args.repository or "").strip()
     if not repository:
@@ -307,6 +324,7 @@ def main() -> int:
         team_max_age_minutes=max(20, args.team_max_age_minutes),
         agentic_max_age_minutes=max(10, args.agentic_max_age_minutes),
         stalled_issue_minutes=max(45, args.stalled_issue_minutes),
+        recent_progress_minutes=max(5, args.recent_progress_minutes),
     )
     print(json.dumps(result, indent=2, sort_keys=True))
     return 0
