@@ -273,7 +273,9 @@ Restore Genesis autonomous operation end-to-end without requiring a human "check
         bypass_backlog=True,
         labels=["nexus-autonomy-watchdog", "genesis-autonomous", "agentic-lab"],
     )
-    _dispatch(repository, "genesis-agentic-issue-opening.yml")
+    # submit_agentic_candidate already dispatches the single issue-opening
+    # authority with the required candidate payload. Do not dispatch that
+    # workflow a second time without inputs.
     _dispatch(repository, "genesis-agentic-lab-recovery.yml")
     _comment_nexus(
         repository,
