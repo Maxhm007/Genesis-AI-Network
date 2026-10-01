@@ -53,7 +53,7 @@ def test_detects_backlog_without_active_worker():
     result = module.evaluate(
         team_run=_run(module.TEAM_WORKFLOW),
         agentic_run=_run(module.AGENTIC_WORKFLOW),
-        issues=[_issue(20, labels=("genesis-autonomous",))],
+        issues=[_issue(20, labels=("genesis-autonomous",), minutes_ago=30)],
         now=NOW,
     )
     assert result["healthy"] is False
