@@ -52,7 +52,7 @@ jobs:
 
       - name: Validate Nexus autonomy watchdog
         if: github.event_name == 'push'
-        run: python -m pytest -q tests/test_nexus_autonomy_watchdog.py
+        run: python -m pytest -q tests/test_nexus_autonomy_watchdog.py tests/test_genesis_teammate_task_key.py
 
       - name: Verify Genesis autonomous operation
         env:
