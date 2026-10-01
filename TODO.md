@@ -1,5 +1,7 @@
 # Genesis AI Network — TODO
 
+- [ ] Publish the stable teammate execution-key fix, verify an execution-Issue event wakes Agentic Lab with an attributable run, and only then close Issue `#1029`.
+
 - [ ] Confirm Qwen3 single-line qualification and one-task advisory inference before completing activation.
 
 

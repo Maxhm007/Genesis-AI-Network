@@ -409,7 +409,7 @@ def clean_title(text: str) -> str:
 
 def execution_task_key(objective: str, source_comment_id: str) -> str:
     """Return a stable key so one objective maps to one execution issue."""
-    match = re.search(r"(?i)autonomous genesis development task from issue #(\\d+)", objective or "")
+    match = re.match(r"(?i)^autonomous genesis development task from issue #(\d+):", objective or "")
     if match:
         return f"source-issue-{match.group(1)}"
     safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", str(source_comment_id or "").strip()).strip("-")

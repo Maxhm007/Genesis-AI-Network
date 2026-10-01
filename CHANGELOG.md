@@ -1,5 +1,13 @@
 # Changelog
 
+## v0.1.10 - 01-Oct-2026 - 09:26 AM - Reuse teammate execution issues reliably
+
+- Corrected prefix-anchored source-Issue extraction so cross-role teammate handoffs share one stable execution-task key without misclassifying quoted manual requests.
+- Added regression coverage proving Recovery and Forge reuse an existing marked execution Issue instead of creating duplicates.
+- Added regression coverage proving a reused execution Issue still wakes the authoritative Agentic Lab.
+- The focused execution regression file passes all 8 tests; the separate teammate-intent baseline retains one pre-existing unrelated phrase-recognition failure.
+- Live workflow wake attribution remains required before closing Issue `#1029`.
+
 ## v0.1.9 - 29-Sep-2026 - 12:55 PM - Stop repeated capability-release loops
 
 - Added a durable parent-history guard keyed by capability blocker class.
