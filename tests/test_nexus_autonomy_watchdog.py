@@ -82,3 +82,29 @@ def test_ignores_verified_or_non_actionable_issues():
         now=NOW,
     )
     assert result["healthy"] is True
+
+
+def test_recent_issue_progress_prevents_false_no_worker_fault():
+    result = module.evaluate(
+        team_run=_run(module.TEAM_WORKFLOW),
+        agentic_run=_run(module.AGENTIC_WORKFLOW),
+        issues=[_issue(50, labels=("genesis-autonomous",), minutes_ago=8)],
+        now=NOW,
+        recent_progress_minutes=20,
+    )
+    assert result["healthy"] is True
+    assert result["evidence"]["recent_progress_issues"] == [50]
+
+
+def test_watchdog_repair_issue_does_not_count_against_itself():
+    issue = _issue(60, labels=("genesis-autonomous", "agentic-lab"), minutes_ago=200)
+    issue["title"] = module.TITLE
+    issue["body"] = module.MARKER
+    result = module.evaluate(
+        team_run=_run(module.TEAM_WORKFLOW),
+        agentic_run=_run(module.AGENTIC_WORKFLOW),
+        issues=[issue],
+        now=NOW,
+    )
+    assert result["healthy"] is True
+    assert result["evidence"]["actionable_issue_count"] == 0
