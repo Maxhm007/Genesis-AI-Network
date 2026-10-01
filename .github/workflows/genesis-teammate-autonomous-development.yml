@@ -1,9 +1,29 @@
 name: Genesis Teammate - Autonomous Development
 
 on:
+  # Primary autonomous heartbeat: every 15 minutes.
   schedule:
     - cron: '2,17,32,47 * * * *'
-  workflow_dispatch:
+
+  # Manual recovery remains available.
+  workflow_dispatch: {}
+
+  # A change to the team control-plane should immediately prove the lane.
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-teammate-autonomous-development.yml
+      - scripts/genesis_teammate.py
+      - config/genesis_teammates.json
+
+  # Redundant heartbeat. The queue cleaner is independently scheduled and
+  # currently healthy, so a completed cleaner run can wake the team if GitHub
+  # misses or delays this workflow's own scheduled event.
+  workflow_run:
+    workflows:
+      - Genesis Action Queue Cleaner
+    types:
+      - completed
 
 permissions:
   actions: write
@@ -16,6 +36,9 @@ concurrency:
 
 jobs:
   develop:
+    # Do not block the backup wake merely because the upstream cleaner failed;
+    # this workflow has its own authority and validation.
+    if: ${{ github.event_name != 'workflow_run' || github.event.workflow_run.conclusion != 'cancelled' }}
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
