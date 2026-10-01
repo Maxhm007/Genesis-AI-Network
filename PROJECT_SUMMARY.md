@@ -2,12 +2,12 @@
 
 ## Stable teammate execution reuse
 
-Genesis teammate execution now extracts numeric source-Issue identifiers into a
+Genesis teammate execution now extracts canonical, prefix-anchored numeric source-Issue identifiers into a
 stable `source-issue-N` task key. Recovery, Forge, and later handoffs for the
 same authoritative Issue therefore reuse one open execution Issue instead of
 creating parallel wrappers.
 
-The focused execution regression file passes all 7 tests. The separate teammate-
+The focused execution regression file passes all 8 tests. The separate teammate-
 intent baseline still has one pre-existing unrelated failure for the phrase
 "Add a new security teammate." Live Agentic Lab wake attribution for Issue
 `#1029` still requires post-push workflow evidence before that Issue can close.

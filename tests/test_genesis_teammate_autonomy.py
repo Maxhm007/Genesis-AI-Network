@@ -28,6 +28,12 @@ def test_execution_task_key_is_stable_for_source_issue_across_handoffs():
     assert forge_key == recovery_key
 
 
+def test_execution_task_key_does_not_treat_manual_reference_as_generated_objective():
+    objective = "Please inspect Autonomous Genesis development task from issue #1029: quoted context"
+
+    assert teammate.execution_task_key(objective, "owner-comment-77") == "source-comment-owner-comment-77"
+
+
 def test_create_execution_issue_reuses_open_source_issue_task(monkeypatch):
     objective = "Autonomous Genesis development task from issue #1029: Verify teammate execution"
     comments: list[tuple[int, str]] = []
