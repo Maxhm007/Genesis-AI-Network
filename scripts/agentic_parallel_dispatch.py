@@ -259,7 +259,17 @@ def _live_agentic_worker_exists(repository: str, token: str) -> bool:
             return True
         runs = payload.get("workflow_runs", []) if isinstance(payload, dict) else []
         for run in runs:
-            if str(run.get("name") or "") in {
+            # Push invocations only validate the baseline; they own no issue.
+            if run.get("event") != "workflow_dispatch":
+                continue
+            # Actions exposes run-name in `name` (for example Issue #867 —
+            # evidence_first), so recognize the canonical workflow path too.
+            workflow_path = str(run.get("path") or "").split("@", 1)[0]
+            if workflow_path in {
+                ".github/workflows/genesis-agentic-strategy-worker.yml",
+                ".github/workflows/genesis-deepseek-agentic-solver.yml",
+                ".github/workflows/genesis-bounded-repair-worker.yml",
+            } or str(run.get("name") or "") in {
                 "Genesis Agentic Strategy Worker",
                 "Genesis DeepSeek Agentic Solver",
                 "Genesis Bounded Repair Worker",
