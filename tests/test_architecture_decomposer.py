@@ -59,3 +59,12 @@ def test_unknown_architecture_goal_is_not_given_an_invented_path(tmp_path: Path)
         root,
     )
     assert plan is None
+
+
+def test_architecture_source_rejects_placeholders():
+    import pytest
+    from genesis.architecture_decomposer import validate_architecture_source
+    for source in ('...', '"module docs"', 'def health():\n    pass\n', 'def health():\n    "only documentation"\n', 'def health():\n    return None\n', 'def health():\n    raise NotImplementedError\n', 'def health():\n    raise RuntimeError("TODO")\n', 'def health('):
+        with pytest.raises(ValueError):
+            validate_architecture_source(source)
+    validate_architecture_source('def closure_velocity(created, closed):\n    return closed / created if created else None\n')

@@ -436,3 +436,31 @@ def test_architecture_expansion_selects_bounded_new_file_provider(tmp_path: Path
 
     assert isinstance(provider, capability_builder.ArchitectureExpansionProvider)
     assert provider.target_path == "genesis/architecture_extensions/pull_request_maintenance.py"
+
+
+def test_architecture_integration_requires_scoped_added_test(tmp_path, monkeypatch):
+    import json
+    import pytest
+    source = tmp_path / 'genesis/health.py'
+    source.parent.mkdir()
+    source.write_text('def health():\n    return {}\n')
+    test = tmp_path / 'tests/test_health.py'
+    test.parent.mkdir()
+    test.write_text('def test_existing():\n    assert True\n')
+    class FakeHTTPProvider:
+        def __init__(self, *args, **kwargs):
+            self.name = 'fake'
+        def available(self): return True
+        def reason(self, prompt):
+            return json.dumps({'files': {'genesis/health.py': 'def health():\n    return {"velocity": None}\n', 'tests/test_health.py': test.read_text() + '\ndef test_velocity():\n    from genesis.health import health\n    assert "velocity" in health()\n'}})
+    monkeypatch.setenv('GENESIS_REPAIR_PROVIDER_URL', 'http://local')
+    monkeypatch.setattr(capability_builder, 'GenesisHTTPProvider', FakeHTTPProvider)
+    issue = {'title': 'Add autonomous system health controller and closure velocity', 'labels': [{'name': 'genesis-autonomous'}, {'name': 'genesis-architecture-route'}], 'body': 'Health acceptance\n\n### Genesis FIFO decomposition\n<!-- genesis-architecture-plan:x -->\n- **Architecture step:** `2/2`\n- **Target:** `genesis/health.py`\n'}
+    provider = GitHubIssueLearnedCapabilityProvider.for_issue(tmp_path, issue, CodingModule(tmp_path))
+    assert isinstance(provider, capability_builder.ArchitectureExpansionProvider)
+    from scripts.github_issue_autorepair import propose_issue_repair
+    proposal = propose_issue_repair(issue, ['genesis/health.py'], tmp_path)
+    assert set(proposal.files) == {'genesis/health.py', 'tests/test_health.py'}
+    provider.delegate.reason = lambda prompt: json.dumps({'files': {'genesis/health.py': 'def health():\n    return {}', 'tests/test_health.py': 'def test_weakened():\n    assert True\n'}})
+    with pytest.raises(ValueError, match='preserve existing tests'):
+        provider.reason('objective')

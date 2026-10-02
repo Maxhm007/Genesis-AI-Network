@@ -122,6 +122,10 @@ jobs:
         run: |
           set -euo pipefail
           issue_json=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels,body,title)
+          if jq -e '([.labels[].name] | index("genesis-owner-paused")) != null' <<<"$issue_json" >/dev/null; then
+            echo "eligible=false" >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
           state=$(jq -r '.state' <<<"$issue_json")
           reserved=$(jq -r '([.labels[].name] | index("genesis-repair-in-progress")) != null' <<<"$issue_json")
           agentic=$(jq -r '([.labels[].name] | index("agentic-lab")) != null' <<<"$issue_json")
@@ -353,12 +357,25 @@ jobs:
               fi
             fi
             python -m py_compile "$TARGET"
+            if [[ "$TARGET" == genesis/architecture_extensions/*.py ]]; then
+              python -c 'from pathlib import Path; import sys; from genesis.architecture_decomposer import validate_architecture_source; validate_architecture_source(Path(sys.argv[1]).read_text())' "$TARGET"
+            fi
+            if grep -q '<!-- genesis-architecture-plan:' /tmp/genesis-agentic-issue-body.md; then
+              python scripts/issue_acceptance_guard.py \
+                --base-ref HEAD^ \
+                --repository "$GITHUB_REPOSITORY" \
+                --issue-number "$ISSUE_NUMBER"
+            fi
             if [[ -f "$target_test" ]]; then python -m pytest -q "$target_test"; fi
             python -m pytest -q
             git fetch origin main
             integrated_base=$(git rev-parse HEAD^)
             latest_main=$(git rev-parse origin/main)
             if [[ "$integrated_base" != "$latest_main" ]]; then continue; fi
+            if [[ "$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels --jq '(.state == "OPEN") and (([.labels[].name] | index("genesis-owner-paused")) == null)')" != true ]]; then
+              echo "Issue closed or paused before promotion" >&2
+              exit 1
+            fi
             if git push origin HEAD:main; then promoted_sha=$(git rev-parse HEAD); break; fi
           done
 
@@ -432,6 +449,7 @@ jobs:
           for label in genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying genesis-qwen3-agentic; do
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
           done
+          if jq -e '([.labels[].name] | index("genesis-owner-paused")) != null' <<<"$issue_json" >/dev/null; then exit 0; fi
 
           if [[ "$repair_status" == "worker_failed_before_evidence" ]]; then
             recent_pre_evidence_failures=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json comments --jq \

@@ -15,3 +15,11 @@ def test_autonomous_issue_objective_routes_to_atlas_for_architecture():
 
 def test_autonomous_issue_objective_defaults_to_forge():
     assert classify("Autonomous Genesis development task: implement bounded fix") == "forge"
+
+
+def test_teammate_skips_owner_paused_issue(monkeypatch):
+    import scripts.genesis_teammate as module
+    paused = {'number': 867, 'title': 'Health controller', 'body': 'Fix health', 'labels': [{'name': 'genesis-owner-paused'}]}
+    monkeypatch.setattr(module, 'open_development_issues', lambda: [paused])
+    monkeypatch.setattr(module, 'autonomous_claim_exists', lambda number: False)
+    assert module.select_autonomous_issue() is None

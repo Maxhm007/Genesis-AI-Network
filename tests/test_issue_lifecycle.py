@@ -236,3 +236,8 @@ def test_closed_duplicate_label_is_terminal_and_never_reopened():
 
     assert decision.action == "keep_closed"
     assert decision.reason == "explicitly_superseded"
+
+
+def test_owner_pause_prevents_autonomous_claim():
+    from genesis.issue_lifecycle import local_claim_block_reason
+    assert local_claim_block_reason({'state': 'open', 'labels': [{'name': 'genesis-owner-paused'}]}) == 'owner_paused'

@@ -7,6 +7,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from .coding import CodingModule
+from .architecture_decomposer import build_architecture_plan
 from .deterministic_capability_builder import DeterministicLearnedCapabilityProvider
 from .providers import GenesisHTTPProvider, IntelligenceProvider
 
@@ -111,11 +112,14 @@ class EvidenceFirstRepairFollowupProvider:
 class ArchitectureExpansionProvider:
     """Generate exactly one bounded new architecture module from an approved plan."""
 
-    def __init__(self, issue: dict, target_path: str, delegate: IntelligenceProvider) -> None:
+    def __init__(self, issue: dict, target_path: str, delegate: IntelligenceProvider, root: Path | None = None) -> None:
         self.issue = dict(issue)
         self.target_path = str(target_path).replace("\\", "/").lstrip("./")
         self.delegate = delegate
         self.name = f"architecture-expansion:{delegate.name}"
+        self.test_path = f"tests/test_{Path(self.target_path).stem}.py"
+        self.original_source = (root / self.target_path).read_text() if root and (root / self.target_path).is_file() else ""
+        self.original_test = (root / self.test_path).read_text() if root and (root / self.test_path).is_file() else ""
 
     def available(self) -> bool:
         return self.delegate.available()
@@ -128,19 +132,32 @@ class ArchitectureExpansionProvider:
             "ROLE: Genesis bounded architecture module implementer\n"
             f"ISSUE_TITLE: {title}\n"
             f"PLANNED_NEW_PATH: {self.target_path}\n"
-            "AUTHORITY: Create exactly this one new Python module and no other file. "
-            "Do not modify workflows, tests, security controls, credentials, validation, owner controls, or existing files. "
+            "AUTHORITY: Implement only the planned Python module and its matching regression test. "
+            "Preserve existing tests exactly and append new coverage; do not modify other files, workflows, security controls, credentials, validation, or owner controls. "
             "Implement a small but real reusable production capability toward the issue objective; do not emit placeholders, TODOs, pass-only stubs, or issue-specific constants. "
             "Keep dependencies inside the Python standard library or existing Genesis public modules. "
             "The full repository test suite will run before promotion.\n"
             "OUTPUT: Return one JSON object with keys title, rationale, files. "
-            f"The files object must contain exactly one key: {self.target_path!r}, whose value is the complete Python source text.\n"
+            f"The files object must contain exactly these two keys: {self.target_path!r} and "
+            f"{'tests/test_' + Path(self.target_path).stem + '.py'!r}, with complete source text. "
+            "The test must exercise the issue behavior and fail on the old tree. "
+            "Import the new module inside the test function, converting ModuleNotFoundError to an assertion failure; do not import it during collection.\n"
             "ISSUE_EVIDENCE:\n"
             + body
+            + "\nCURRENT_SOURCE_TO_PRESERVE_EXCEPT_FOR_THE_PLANNED_CHANGE:\n" + self.original_source
+            + "\nEXISTING_TESTS_MUST_REMAIN_AN_UNCHANGED_PREFIX:\n" + self.original_test
             + "\nREAD_ONLY_REPOSITORY_CONTEXT:\n"
             + bounded_context
         )
-        return self.delegate.reason(architecture_prompt)
+        raw = self.delegate.reason(architecture_prompt)
+        proposal = CodingModule._extract_json(raw)
+        files = proposal.get("files")
+        if not isinstance(files, dict) or set(files) != {self.target_path, self.test_path}:
+            raise ValueError("architecture candidate must contain its planned source and regression test only")
+        test = files[self.test_path]
+        if not isinstance(test, str) or not test.startswith(self.original_test) or test == self.original_test:
+            raise ValueError("architecture candidate must preserve existing tests and append regression coverage")
+        return raw
 
 
 class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvider):
@@ -513,25 +530,25 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
         }
         if (
             "<!-- genesis-architecture-plan:" not in body
-            or "- **Task type:** `architecture_expansion`" not in body
             or "genesis-architecture-route" not in labels
             or "genesis-autonomous" not in labels
         ):
             return None
         target_match = re.search(r"^- \*\*Target:\*\* `([^`]+)`", body, re.M)
         new_match = re.search(r"^- \*\*Architecture new target:\*\* `([^`]+)`", body, re.M)
-        if target_match is None or new_match is None:
+        if target_match is None:
             return None
         target = target_match.group(1).replace("\\", "/").lstrip("./")
-        planned = new_match.group(1).replace("\\", "/").lstrip("./")
-        if target != planned:
-            return None
-        if (
-            not target.startswith("genesis/architecture_extensions/")
-            or not target.endswith(".py")
-            or ".." in Path(target).parts
-            or (Path(root).resolve() / target).exists()
-        ):
+        if "- **Task type:** `architecture_expansion`" in body:
+            if new_match is None or new_match.group(1) != target or not target.startswith("genesis/architecture_extensions/") or (root / target).exists():
+                return None
+        else:
+            original = dict(issue)
+            original["body"] = body.split("\n\n### Genesis FIFO decomposition\n", 1)[0]
+            plan = build_architecture_plan(original, root)
+            if plan is None or target != plan.integration_target or not re.search(r"^- \*\*Architecture step:\*\* `2/2`$", body, re.M) or not (root / target).is_file():
+                return None
+        if not target.endswith(".py") or ".." in Path(target).parts:
             return None
         coding.executor._validate_paths([target])
         provider_url = os.environ.get("GENESIS_REPAIR_PROVIDER_URL", "").strip()
@@ -546,7 +563,7 @@ class GitHubIssueLearnedCapabilityProvider(DeterministicLearnedCapabilityProvide
             name=os.environ.get("GENESIS_PROVIDER_NAME", "genesis-architecture-expansion"),
             timeout=timeout,
         )
-        return ArchitectureExpansionProvider(issue, target, delegate)
+        return ArchitectureExpansionProvider(issue, target, delegate, root)
 
     @classmethod
     def for_issue(

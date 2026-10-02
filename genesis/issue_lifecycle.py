@@ -267,6 +267,8 @@ def family_status(
 
 
 def local_claim_block_reason(issue: dict, comments: Iterable[dict] = ()) -> str:
+    if "genesis-owner-paused" in labels(issue):
+        return "owner_paused"
     if is_closed(issue):
         return "closed"
     if is_verified(issue):

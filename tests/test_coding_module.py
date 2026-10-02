@@ -282,3 +282,11 @@ def test_coding_prompt_reuses_validated_memory_but_not_superseded_fix(tmp_path: 
     assert "current repository evidence conflicts" in provider.prompt
     assert "Newer repair says preserve current syntax" in provider.prompt
     assert "Old repair said to force VALUE to 3" not in provider.prompt
+
+
+def test_new_architecture_placeholder_is_rejected_before_execution(tmp_path):
+    import pytest
+    from genesis.coding import CodingModule
+    coding = CodingModule(tmp_path)
+    with pytest.raises(ValueError, match='callable capability'):
+        coding.validate_proposal({'files': {'genesis/architecture_extensions/health.py': '...'}}, 'local-coder')

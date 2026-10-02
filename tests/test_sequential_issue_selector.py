@@ -95,3 +95,8 @@ def test_control_plane_issue_prefixes_route_as_architecture():
         assert row is not None
         assert row["kind"] == "architecture"
         assert row["target"] == ""
+
+
+def test_owner_paused_issue_is_not_selected():
+    paused = issue(867, '[Genesis Observability] health', 'genesis/health.py', labels=['genesis-owner-paused'])
+    assert candidate(paused, now=NOW) is None
