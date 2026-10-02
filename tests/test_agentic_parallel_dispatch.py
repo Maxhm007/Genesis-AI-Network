@@ -223,87 +223,91 @@ def test_capability_dependency_is_ranked_before_exhausted_parent(monkeypatch):
     assert [row["number"] for row in ordered[:2]] == [951, 857]
 
 
-def test_sequential_focus_executes_unresolved_capability_dependency(monkeypatch):
-    parent = _issue(
-        857,
-        "2026-09-18T00:00:00Z",
-        labels=("genesis-autonomous", "agentic-lab", "genesis-sequential-focus", "genesis-waiting-capability"),
-        body="- **Target:** `scripts/capability_issue_priority_dispatch.py`",
+def test_recovery_lane_is_reserved_and_selected_first(monkeypatch):
+    active_dev = _issue(
+        10,
+        "2026-09-20T00:00:00Z",
+        labels=("genesis-autonomous", "genesis-repair-in-progress"),
+        body="- **Target:** `genesis/active.py`",
     )
-    capability = _issue(
-        973,
-        "2026-09-27T15:42:00Z",
-        labels=("genesis-autonomous", "agentic-lab", "genesis-capability-gap"),
-        body="<!-- genesis-capability-work:abc -->\n- **Target:** `genesis/github_issue_capability_builder.py`",
+    recovery = _issue(
+        11,
+        "2026-09-20T01:00:00Z",
+        labels=("genesis-autonomous", "genesis-solver-exhausted"),
+        body="- **Target:** `genesis/recovery.py`",
     )
+    development = _issue(
+        12,
+        "2026-09-20T02:00:00Z",
+        labels=("genesis-autonomous",),
+        body="- **Target:** `genesis/development.py`",
+    )
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [active_dev, recovery, development])
+    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args: [development, recovery])
+    selected = module._lane_routable_issues("owner/repo", "token")
+    assert [row["number"] for row in selected] == [11]
 
-    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [parent, capability])
+
+def test_parallel_lane_skips_active_target_collision(monkeypatch):
+    active_recovery = _issue(
+        20,
+        "2026-09-20T00:00:00Z",
+        labels=("genesis-autonomous", "genesis-repair-in-progress", "genesis-solver-exhausted"),
+        body="- **Target:** `genesis/recovery.py`",
+    )
+    active_dev = _issue(
+        21,
+        "2026-09-20T01:00:00Z",
+        labels=("genesis-autonomous", "genesis-repair-in-progress"),
+        body="- **Target:** `genesis/shared.py`",
+    )
+    collision = _issue(
+        22,
+        "2026-09-20T02:00:00Z",
+        labels=("genesis-autonomous",),
+        body="- **Target:** `genesis/shared.py`",
+    )
+    independent = _issue(
+        23,
+        "2026-09-20T03:00:00Z",
+        labels=("genesis-autonomous",),
+        body="- **Target:** `genesis/independent.py`",
+    )
     monkeypatch.setattr(
         module.policy,
-        "_all_issue_comments",
-        lambda repository, token, number: (
-            [{"body": "<!-- genesis-capability-dependency:973 -->"}] if number == 857 else []
-        ),
+        "_all_open_issues_fifo",
+        lambda *args: [active_recovery, active_dev, collision, independent],
     )
-    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
-
-    selected = module._sequential_routable_issues("owner/repo", "token")
-
-    assert [row["number"] for row in selected] == [973]
-    assert "genesis-sequential-focus" in {row["name"] for row in parent["labels"]}
-    assert "genesis-sequential-focus" not in {row["name"] for row in capability["labels"]}
+    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args: [collision, independent])
+    selected = module._lane_routable_issues("owner/repo", "token")
+    assert [row["number"] for row in selected] == [23]
 
 
-def test_focused_dependency_routing_is_serviced_before_dispatch(monkeypatch):
-    parent = _issue(867, "2026-09-18T00:00:00Z", labels=(
-        "genesis-autonomous", "agentic-lab", "genesis-sequential-focus", "genesis-waiting-capability"))
-    dependency = _issue(1022, "2026-09-29T00:00:00Z", labels=(
-        "genesis-autonomous", "agentic-lab", "genesis-needs-routing"),
-        body="<!-- genesis-capability-work:abc -->\n- **Target:** `genesis/github_issue_capability_builder.py`")
-    unrelated = _issue(868, "2026-09-18T01:00:00Z")
-    events = []
-    for attribute in ("issue_comments", "open_agentic_issues", "next_strategy"):
-        monkeypatch.setattr(module.agentic, attribute, getattr(module.agentic, attribute))
+def test_main_refills_three_bounded_lanes(monkeypatch):
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
     monkeypatch.setenv("GITHUB_TOKEN", "token")
-    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [parent, unrelated, dependency])
-    monkeypatch.setattr(module.policy, "_all_issue_comments", lambda repo, token, number:
-                        [{"body": "<!-- genesis-capability-dependency:1022 -->"}] if number == 867 else [])
-    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
-    monkeypatch.setattr(module, "_live_agentic_worker_exists", lambda *args: False)
-    monkeypatch.setattr(module, "_reclaim_stale_sequential_reservation", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_restore_agentic_visibility", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_terminalize_non_actionable_issues", lambda *args: [])
+    monkeypatch.setattr(module.agentic, "release_ready_capability_dependencies", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_decompose_oldest_issue", lambda *args: {"status": "idle"})
     monkeypatch.setattr(module, "_active_issue_numbers", lambda *args: [])
 
-    def route(repo, token, issues):
-        assert [i["number"] for i in issues] == [1022]
-        events.append("route")
-        return {"status": "routing_released", "issue_number": 1022}
-
+    dispatched = []
     def dispatch(*args):
-        assert events == ["route"]
-        events.append("dispatch")
-        return {"status": "dispatched", "issue_number": 1022}
+        number = 100 + len(dispatched)
+        dispatched.append(number)
+        return {"status": "dispatched", "issue_number": number}
 
-    monkeypatch.setattr(module.policy, "_decompose_oldest_issue", route)
     monkeypatch.setattr(module.agentic, "reserve_and_dispatch", dispatch)
     assert module.main() == 0
-    assert events == ["route", "dispatch"]
-    assert "genesis-sequential-focus" in module.agentic.labels(parent)
+    assert dispatched == [100, 101, 102]
+    assert module.MAX_PARALLEL == 3
+    assert module.DEVELOPMENT_SLOTS == 2
+    assert module.RECOVERY_SLOTS == 1
 
 
-def test_focused_legacy_architecture_plan_is_repaired_before_dispatch(monkeypatch):
-    owned = _issue(867, '2026-09-18T00:00:00Z', labels=('genesis-autonomous', 'agentic-lab', 'genesis-sequential-focus'), body='- **Target:** `genesis/architecture_extensions/legacy.py`')
-    calls = []
-    monkeypatch.setenv('GITHUB_REPOSITORY', 'owner/repo')
-    monkeypatch.setenv('GITHUB_TOKEN', 'token')
-    monkeypatch.setattr(module.policy, '_all_open_issues_fifo', lambda *args: [owned])
-    monkeypatch.setattr(module.policy, '_all_issue_comments', lambda *args: [])
-    monkeypatch.setattr(module, '_sequential_routable_issues', lambda *args: [owned])
-    monkeypatch.setattr(module.agentic, 'safe_lane', lambda *args: 'generic')
-    monkeypatch.setattr(module, '_live_agentic_worker_exists', lambda *args: False)
-    monkeypatch.setattr(module, '_reclaim_stale_sequential_reservation', lambda *args: calls.append(('reclaim', 867)) or [867])
-    monkeypatch.setattr(module, '_active_issue_numbers', lambda *args: [])
-    monkeypatch.setattr(module.policy, '_decompose_oldest_issue', lambda repo, token, issues: calls.append(('plan', issues[0]['number'])) or {'status': 'retargeted'})
-    monkeypatch.setattr(module.agentic, 'reserve_and_dispatch', lambda *args: calls.append(('dispatch', 867)) or {'status': 'dispatched', 'issue_number': 867})
-    assert module.main() == 0
-    assert calls == [('reclaim', 867), ('plan', 867), ('dispatch', 867)]
+def test_legacy_sequential_entrypoint_uses_parallel_lane_selector(monkeypatch):
+    expected = [_issue(31, "2026-09-20T00:00:00Z")]
+    monkeypatch.setattr(module, "_lane_routable_issues", lambda *args: expected)
+    assert module._sequential_routable_issues("owner/repo", "token") == expected
