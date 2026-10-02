@@ -122,6 +122,16 @@ REPAIR_EXECUTION_PATHS = (
     "tests/test_system_issue_repair_policy.py",
     ".github/workflows/genesis-agentic-strategy-worker.yml",
     ".github/workflows/genesis-deepseek-agentic-solver.yml",
+    # The worker validates the whole repository before executing a strategy.
+    # Repairs to baseline gates must re-arm attempts that never reached repair.
+    "tests/test_agentic_capability_dependency_policy.py",
+    "tests/test_agentic_lab_recovery_dispatch.py",
+    "tests/test_autonomy_heartbeat.py",
+    "tests/test_live_nexus_pages_chat.py",
+    "tests/test_neutral_team_ui.py",
+    "tests/test_team_chat_web_ui.py",
+    "genesis/communication_server.py",
+    "web/index.html",
 )
 
 
@@ -775,7 +785,7 @@ def ensure_capability_escalation_issue(
         f"{escalation_marker}\n"
         f"<!-- genesis-capability-parent:{parent_number} -->\n"
         "A previously verified repair capability was consumed by the parent but the same blocker class returned. "
-        "Genesis must autonomously improve the reusable repair mechanism rather than stop at maintainer review.\n\n"
+            "Genesis must autonomously improve the reusable repair mechanism through independent validation.\n\n"
         f"- **Parent issue:** #{parent_number}\n"
         f"- **Prior verified capability:** #{int(consumed_capability)}\n"
         f"- **Blocked target:** `{target}`\n"

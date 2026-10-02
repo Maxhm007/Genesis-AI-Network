@@ -115,7 +115,7 @@ class GenesisCommunicationHandler(BaseHTTPRequestHandler):
         }
 
     def _team_status(self) -> dict:
-        config = self._read_json(type(self).root / "config" / "genesis_teammates.json")
+        config = self._read_json(type(self).root / "config/genesis_teammates.json")
         workspaces = config.get("workspaces", {})
         rules = config.get("rules", {})
         roster = [

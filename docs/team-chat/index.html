@@ -58,7 +58,7 @@ body{overflow:hidden}button,input,textarea{font:inherit}.hidden{display:none!imp
 </head>
 <body>
 <div class="app">
-<nav class="rail">
+<nav id="mobileTeam" class="rail">
   <div class="logo" title="Genesis"><svg viewBox="0 0 24 24" fill="none"><path d="M12 3 21 20h-5.2L12 13.2 8.2 20H3L12 3Z" fill="#b9d9ff"/><path d="M12 8.2 15.3 14h-6.6L12 8.2Z" fill="#6fa5ff"/></svg></div>
   <button class="nav" data-view="home"><span class="navIcon">⌂</span><small>Home</small></button>
   <button class="nav active" data-view="chats"><span class="navIcon">●</span><small>Chats</small></button>
@@ -69,7 +69,7 @@ body{overflow:hidden}button,input,textarea{font:inherit}.hidden{display:none!imp
 
 <aside class="left">
   <div class="leftTop"><div><h1>Genesis Team Chat</h1><div class="sub">AI teammates. Real progress.</div></div><button id="openCommand" class="launch" title="Open Command Center">↗</button></div>
-  <div id="workspace" class="workspace"><div class="workIcon tone-nexus">G</div><div><strong>Genesis AI</strong><small>6 members</small></div><span class="chev">⌄</span></div>
+  <div id="workspace" class="workspace"><div class="workIcon tone-nexus">G</div><div><strong>Genesis AI Network</strong><small>6 members</small></div><span class="chev">⌄</span></div>
   <div id="workspaceMenu" class="workspaceMenu hidden"><button data-ws="team">Genesis Team</button><button data-ws="command">Open Command Center</button></div>
   <input id="search" class="search" placeholder="⌕  Search conversations…"/>
   <div class="label">Pinned</div>
@@ -131,9 +131,9 @@ const PUBLIC=location.hostname.endsWith('github.io'),GH_REPO='Maxhm007/Genesis-A
 const connectGithub=$('#connectGithub');let token=sessionStorage.getItem(TOKEN_KEY)||'';
 const roster=[
 {id:'nexus',name:'Nexus',role:'Team Leader',status:'active',tone:'nexus',symbol:'N'},
-{id:'atlas',name:'Atlas',role:'Research & Analysis',status:'working',tone:'atlas',symbol:'◎'},
+{id:'atlas',name:'Atlas',role:'Architecture & Planning',status:'working',tone:'atlas',symbol:'◎'},
 {id:'forge',name:'Forge',role:'Development',status:'working',tone:'forge',symbol:'</>'},
-{id:'sentinel',name:'Sentinel',role:'Monitoring & Reliability',status:'active',tone:'sentinel',symbol:'◇'},
+{id:'sentinel',name:'Sentinel',role:'Validation & QA',status:'active',tone:'sentinel',symbol:'◇'},
 {id:'scout',name:'Scout',role:'Product & Context',status:'waiting',tone:'scout',symbol:'⌕'},
 {id:'recovery',name:'Recovery',role:'Troubleshooting & Fixes',status:'idle',tone:'recovery',symbol:'⌘'}];
 function toast(text){const t=$('#toast');t.textContent=text;t.classList.remove('hidden');clearTimeout(window._toast);window._toast=setTimeout(()=>t.classList.add('hidden'),2200)}
@@ -149,6 +149,8 @@ function cleanNexusResult(body){let s=String(body||'').replace(/<!--[^]*?-->/g,'
 async function postComment(text){const r=await fetch(GH_API+'/issues/'+NEXUS_ISSUE+'/comments',{method:'POST',headers:{...ghHeaders(),'Content-Type':'application/json'},body:JSON.stringify({body:text})});const d=await r.json();if(!r.ok)throw new Error(d.message||('GitHub '+r.status));return d}
 async function comments(){const r=await fetch(GH_API+'/issues/'+NEXUS_ISSUE+'/comments?per_page=100',{headers:ghHeaders(),cache:'no-store'});const d=await r.json();if(!r.ok)throw new Error(d.message||('GitHub '+r.status));return Array.isArray(d)?d:[]}
 async function waitResult(id,timeout=180000){const begin=Date.now(),m1='genesis-nexus-result:'+id+':',m2='genesis-nexus-team-evolution:'+id;while(Date.now()-begin<timeout){const rows=await comments();const hit=rows.find(c=>String(c.body||'').includes(m1)||String(c.body||'').includes(m2));if(hit)return cleanNexusResult(hit.body);await new Promise(r=>setTimeout(r,5000))}throw new Error('Nexus is still processing the request.')}
+async function postNexusComment(text){return postComment(text)}
+async function waitForNexus(id,timeout=180000){return waitResult(id,timeout)}
 function setTeamState(connected){$('#brainLabel').textContent='Genesis Brain active';$('#teamSummary').textContent=connected?'Orchestrating 5 teammates · live':'Orchestrating 5 teammates';$('#convPreview').textContent=connected?'Live Nexus channel connected':'Ready for requests'}
 function setView(view){$$('.nav').forEach(b=>b.classList.toggle('active',b.dataset.view===view));$('#chatView').classList.toggle('hidden',view!=='chats');$('#composerWrap').classList.toggle('hidden',view!=='chats');$('#detailView').classList.toggle('hidden',view==='chats');
   if(view==='home'){location.href='../';return}
@@ -176,9 +178,16 @@ $('#openCommand').onclick=()=>location.href='../';
 $('#addTeam').onclick=()=>{setView('teammates');toast('Team changes are managed through Nexus')};
 $('#attach').onclick=()=>$('#filePicker').click();$('#filePicker').onchange=e=>{if(e.target.files[0])toast('Attachment selected: '+e.target.files[0].name+' · GitHub comment upload is not enabled yet')};
 connectGithub.onclick=async()=>setTeamState(await ensureToken());
-$('#composer').onsubmit=async e=>{e.preventDefault();const text=message.value.trim();if(!text)return;if(PUBLIC&&!(await ensureToken()))return;add('user',text,PUBLIC?'GitHub · Nexus #1000':'Now');$('#convPreview').textContent=text;message.value='';send.disabled=true;const t=typing();try{if(PUBLIC){const posted=await postComment(text);t.querySelector('.meta').textContent='Processing through Nexus…';const result=await waitResult(String(posted.id));t.remove();add('nexus',result,'Live result · Nexus #1000')}else{t.remove();add('nexus','Local runtime connection is required for this build.','Local mode')}}catch(err){t.remove();add('nexus',String(err.message||err),'Nexus channel')}finally{send.disabled=false;message.focus()}};
+$('#composer').onsubmit=async e=>{e.preventDefault();const text=message.value.trim();if(!text)return;if(PUBLIC&&!(await ensureToken()))return;add('user',text,PUBLIC?'GitHub · Nexus #1000':'Now');$('#convPreview').textContent=text;message.value='';send.disabled=true;const t=typing();try{if(PUBLIC){const posted=await postNexusComment(text);t.querySelector('.meta').textContent='Processing through Nexus…';const result=await waitForNexus(String(posted.id));t.remove();add('nexus',result,'Live result · Nexus #1000')}else{t.remove();add('nexus','Local runtime connection is required for this build.','Local mode')}}catch(err){t.remove();add('nexus',String(err.message||err),'Nexus channel')}finally{send.disabled=false;message.focus()}};
 message.oninput=()=>{message.style.height='auto';message.style.height=Math.min(130,message.scrollHeight)+'px'};message.onkeydown=e=>{if(e.key==='Enter'&&!e.shiftKey){e.preventDefault();$('#composer').requestSubmit()}};
-verifyToken().then(setTeamState);message.focus();
+async function loadLocalTeam(){
+  if(PUBLIC)return;
+  try{const response=await fetch('/v1/team',{cache:'no-store'});if(!response.ok)return;
+    const data=await response.json();for(const member of data.roster||[]){const current=roster.find(r=>r.id===member.id);if(current)Object.assign(current,{role:member.role,status:member.status})}
+    renderRoster();
+  }catch{}
+}
+loadLocalTeam();verifyToken().then(setTeamState);message.focus();
 })();
 </script>
 </body>
