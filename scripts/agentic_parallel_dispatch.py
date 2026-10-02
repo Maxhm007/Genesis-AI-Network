@@ -364,7 +364,12 @@ def main() -> int:
         if chain and not _live_agentic_worker_exists(repository, token):
             owned = chain[0]
             target = agentic.explicit_target(str(owned.get("body") or ""))
-            if "genesis-needs-routing" in agentic.labels(owned) or not agentic.safe_lane(target):
+            body = str(owned.get("body") or "")
+            incomplete_architecture = (
+                target.startswith("genesis/architecture_extensions/")
+                and "<!-- genesis-architecture-plan:" not in body
+            )
+            if incomplete_architecture or "genesis-needs-routing" in agentic.labels(owned) or not agentic.safe_lane(target):
                 decomposition = policy._decompose_oldest_issue(repository, token, chain)
                 decomposition_steps.append(decomposition)
     else:

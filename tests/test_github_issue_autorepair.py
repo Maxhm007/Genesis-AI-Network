@@ -301,3 +301,20 @@ def test_safe_script_target_remains_actionable_when_workflows_are_only_evidence(
     assert attempt.status == "candidate_repaired"
     assert attempt.proposal is not None
     assert set(attempt.proposal["files"]) == {"scripts/validate_dashboard_artifact.py"}
+
+
+def test_provider_timeout_preserves_evidence_for_next_attempt(tmp_path):
+    (tmp_path / 'genesis').mkdir()
+    (tmp_path / 'genesis/alpha.py').write_text('VALUE = 1\n')
+    class TimeoutProvider:
+        name = 'bounded-local-coder'
+        def reason(self, prompt):
+            raise TimeoutError('timed out')
+    memory = []
+    result = solve_reported_issue({'number': 867, 'body': '`genesis/alpha.py` needs a fix'}, tmp_path, provider=TimeoutProvider(), repair_memory=memory)
+    assert result.status == 'retry_pending_capability'
+    assert result.proposal is None
+    assert result.provider_failure['outcome'] == 'provider_timeout'
+    assert result.provider_failure['provider'] == 'bounded-local-coder'
+    assert _decode_repair_memory(_encode_repair_memory(memory))[0]['validation'] == 'TimeoutError: timed out'
+    assert 'TimeoutError: timed out' in issue_coding_objective({'body': 'fix alpha'}, memory)

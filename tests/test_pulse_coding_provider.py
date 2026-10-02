@@ -297,3 +297,19 @@ def test_full_file_noop_detection_does_not_strip_whitespace():
     raw = json.dumps({"files": {"docs/note.md": " item"}})
 
     assert module.AdaptiveCodingModel._is_noop_edit(prompt, raw) is False
+
+
+def test_architecture_escalation_keeps_complete_module_budget(monkeypatch):
+    module = _load_provider_module()
+    calls = []
+    class FakeModel:
+        def __init__(self, model_id, *, max_new_tokens):
+            self.model_id = model_id
+        def reason(self, prompt, max_new_tokens=None):
+            calls.append((self.model_id, max_new_tokens))
+            return '{}'
+    monkeypatch.setattr(module, 'LocalReasoningModel', FakeModel)
+    model = module.AdaptiveCodingModel('small', 'strong', max_new_tokens=768, escalation_max_new_tokens=192)
+    model.reason('ROLE: Genesis bounded architecture module implementer\n' + 'x' * 9000)
+    model.reason('ROLE: bounded_coding_engineer\n' + 'x' * 9000)
+    assert calls == [('strong', 768), ('strong', 192)]

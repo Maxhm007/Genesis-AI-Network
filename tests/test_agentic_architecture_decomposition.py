@@ -619,3 +619,21 @@ def test_architecture_metadata_canonicalizes_stale_new_target():
     assert updated.count("- **Task type:** `architecture_expansion`") == 1
     assert updated.count("- **Architecture new target:**") == 1
     assert "- **Architecture new target:** `genesis/architecture_extensions/current.py`" in updated
+
+
+def test_legacy_health_reroute_rebuilds_complete_plan_before_lock(monkeypatch):
+    issue = _issue(867)
+    issue['title'] = '[Genesis Observability] Add autonomous system health controller and closure-velocity metrics'
+    issue['body'] = 'Track health metrics and surface status; preserve original acceptance.\n\n### Genesis FIFO decomposition\n- **Target:** `genesis/architecture_extensions/legacy_health.py`\n'
+    calls = []
+    monkeypatch.setattr(module, '_infra_quarantined', lambda *args: False)
+    monkeypatch.setattr(module.agentic, 'request', lambda repo, token, method, path, payload=None: calls.append((method, path, payload)) or {})
+    monkeypatch.setattr(module.agentic, 'issue_comments', lambda *args: [{'body': '<!-- genesis-agentic-rerouted -->'}])
+    result = module._decompose_oldest_issue('owner/repo', 'token', [issue])
+    assert result['target'] == 'genesis/architecture_extensions/autonomous_system_health_controller.py'
+    body = calls[0][2]['body']
+    assert body.startswith('Track health metrics and surface status; preserve original acceptance.')
+    assert '<!-- genesis-architecture-plan:' in body
+    assert '- **Architecture step:** `1/2`' in body
+    assert '- **Architecture next target:** `genesis/health.py`' in body
+    assert 'legacy_health.py' not in body

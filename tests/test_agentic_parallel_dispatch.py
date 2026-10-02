@@ -289,3 +289,21 @@ def test_focused_dependency_routing_is_serviced_before_dispatch(monkeypatch):
     assert module.main() == 0
     assert events == ["route", "dispatch"]
     assert "genesis-sequential-focus" in module.agentic.labels(parent)
+
+
+def test_focused_legacy_architecture_plan_is_repaired_before_dispatch(monkeypatch):
+    owned = _issue(867, '2026-09-18T00:00:00Z', labels=('genesis-autonomous', 'agentic-lab', 'genesis-sequential-focus'), body='- **Target:** `genesis/architecture_extensions/legacy.py`')
+    calls = []
+    monkeypatch.setenv('GITHUB_REPOSITORY', 'owner/repo')
+    monkeypatch.setenv('GITHUB_TOKEN', 'token')
+    monkeypatch.setattr(module.policy, '_all_open_issues_fifo', lambda *args: [owned])
+    monkeypatch.setattr(module.policy, '_all_issue_comments', lambda *args: [])
+    monkeypatch.setattr(module, '_sequential_routable_issues', lambda *args: [owned])
+    monkeypatch.setattr(module.agentic, 'safe_lane', lambda *args: 'generic')
+    monkeypatch.setattr(module, '_live_agentic_worker_exists', lambda *args: False)
+    monkeypatch.setattr(module, '_reclaim_stale_sequential_reservation', lambda *args: [])
+    monkeypatch.setattr(module, '_active_issue_numbers', lambda *args: [])
+    monkeypatch.setattr(module.policy, '_decompose_oldest_issue', lambda repo, token, issues: calls.append(('plan', issues[0]['number'])) or {'status': 'retargeted'})
+    monkeypatch.setattr(module.agentic, 'reserve_and_dispatch', lambda *args: calls.append(('dispatch', 867)) or {'status': 'dispatched', 'issue_number': 867})
+    assert module.main() == 0
+    assert calls == [('plan', 867), ('dispatch', 867)]

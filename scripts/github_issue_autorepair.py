@@ -455,6 +455,16 @@ def solve_reported_issue(
                 maintainer_guidance=maintainer_guidance,
             )
         except Exception as exc:
+            failure = {
+                "attempt": validation_attempt,
+                "outcome": "provider_timeout" if isinstance(exc, TimeoutError) else "provider_error",
+                "provider": getattr(provider, "name", None) or os.environ.get("GENESIS_PROVIDER_NAME", "genesis-github-issue-repair"),
+                "proposal_files": [],
+                "validation": f"{type(exc).__name__}: {exc}"[-MAX_VALIDATION_MESSAGE_CHARS:],
+                "rejected_change": "",
+            }
+            memory.append(failure)
+            memory[:] = _bounded_repair_memory(memory)
             print(
                 json.dumps(
                     {
@@ -465,7 +475,7 @@ def solve_reported_issue(
                 ),
                 flush=True,
             )
-            return RepairAttempt(diagnosis, last_proposal, last_result, "retry_pending_capability")
+            return RepairAttempt(diagnosis, last_proposal, last_result, "retry_pending_capability", failure)
 
         proposal = {
             "title": f"Genesis issue repair #{issue.get('number')}",
@@ -678,7 +688,12 @@ def run(issue_number: int, repository: str, root: Path = ROOT) -> dict:
     )
     evidence["repair_status"] = attempt.status
     evidence["repair_memory"] = _bounded_repair_memory(repair_memory)
-    evidence["validation_attempts_this_run"] = max(0, len(repair_memory) - prior_memory_count)
+    new_memory = repair_memory[prior_memory_count:]
+    evidence["validation_attempts_this_run"] = sum(
+        row.get("outcome") in {"tests_failed", "candidate_not_committed"} for row in new_memory
+    )
+    if attempt.provider_failure is not None:
+        evidence["provider_failure"] = attempt.provider_failure
     evidence["diagnosis"] = {
         "category": attempt.diagnosis.category,
         "summary": attempt.diagnosis.summary,

@@ -58,9 +58,9 @@ env:
   GENESIS_REPAIR_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_NAME: genesis-agentic-strategy-repair
-  GENESIS_PROVIDER_TIMEOUT_SECONDS: '180'
-  GENESIS_STRATEGY_TIMEOUT_SECONDS: '300'
-  GENESIS_PROVIDER_MAX_NEW_TOKENS: '640'
+  GENESIS_PROVIDER_TIMEOUT_SECONDS: '360'
+  GENESIS_STRATEGY_TIMEOUT_SECONDS: '1800'
+  GENESIS_PROVIDER_MAX_NEW_TOKENS: '768'
   GENESIS_REPAIR_FALLBACK_MODEL: Qwen/Qwen2.5-Coder-0.5B-Instruct
   GENESIS_REPAIR_ESCALATION_MODEL: Qwen/Qwen2.5-Coder-1.5B-Instruct
   GENESIS_QWEN3_FALLBACK_MODEL: Qwen/Qwen3-4B-Instruct-2507
@@ -455,7 +455,7 @@ jobs:
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deferred >/dev/null 2>&1 || true
           failure_evidence='{}'
           if [[ -f runtime/github_issue_autorepair.json ]]; then
-            failure_evidence=$(jq -c '{status,reason,repair_status,diagnosis,provider,proposal_files,validation_attempts_this_run,repair_memory}' runtime/github_issue_autorepair.json 2>/dev/null || echo '{}')
+          failure_evidence=$(jq -c '{status,reason,repair_status,diagnosis,provider,provider_failure,proposal_files,validation_attempts_this_run,repair_memory}' runtime/github_issue_autorepair.json 2>/dev/null || echo '{}')
           fi
           {
             printf '%s\n' "<!-- genesis-agentic-strategy-result:${STRATEGY} -->"

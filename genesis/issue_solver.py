@@ -34,6 +34,7 @@ class RepairAttempt:
     proposal: dict | None
     result: SelfDevResult | None
     status: str
+    provider_failure: dict | None = None
 
 
 class IssueSolver:

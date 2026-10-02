@@ -392,6 +392,33 @@ def _decompose_oldest_issue(repository: str, token: str, issues: list[dict]) -> 
                     "target": capability_target,
                 }
         if explicit.startswith("genesis/architecture_extensions/"):
+            # Legacy reroutes supplied a new-file target without the plan marker
+            # required by the architecture provider. Rebuild a known bounded plan
+            # before the reroute lock can strand this issue on an empty context.
+            original_issue = dict(issue)
+            original_issue["body"] = body.split("\n\n### Genesis FIFO decomposition\n", 1)[0]
+            plan = build_architecture_plan(original_issue, ROOT)
+            if (
+                "<!-- genesis-architecture-plan:" not in body
+                and plan is not None
+                and not (issue_labels & agentic.ACTIVE_LABELS)
+            ):
+                base_body = body.split("\n\n### Genesis FIFO decomposition\n", 1)[0].rstrip()
+                new_body = base_body + (
+                    "\n\n### Genesis FIFO decomposition\n"
+                    f"<!-- genesis-architecture-plan:{plan_fingerprint(plan)} -->\n"
+                    f"- **Architecture step:** `1/{len(plan.targets)}`\n"
+                    f"- **Architecture reason:** `{plan.reason}`\n"
+                    f"- **Target:** `{plan.primary_target}`\n"
+                    "- **Authority:** This remains the same authoritative Issue; no child or successor Issue is created.\n"
+                    "- **Execution:** Complete and verify each planned step before closure.\n"
+                )
+                if plan.integration_target:
+                    new_body += f"- **Architecture next target:** `{plan.integration_target}`\n"
+                if plan.requires_new_file:
+                    new_body = _ensure_architecture_expansion_metadata(new_body, plan.primary_target)
+                agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": new_body})
+                return {"status": "retargeted", "issue_number": number, "target": plan.primary_target, "previous_target": explicit}
             repaired_body = _ensure_architecture_expansion_metadata(body, explicit)
             if repaired_body != body:
                 agentic.request(repository, token, "PATCH", f"/issues/{number}", {"body": repaired_body})
