@@ -444,6 +444,7 @@ def solve_reported_issue(
 
     last_proposal: dict | None = None
     last_result = None
+    validation_runs = 0
     for validation_attempt in range(1, MAX_VALIDATION_ATTEMPTS + 1):
         try:
             coding_proposal = propose_issue_repair(
@@ -475,7 +476,7 @@ def solve_reported_issue(
                 ),
                 flush=True,
             )
-            return RepairAttempt(diagnosis, last_proposal, last_result, "retry_pending_capability", failure)
+            return RepairAttempt(diagnosis, last_proposal, last_result, "retry_pending_capability", failure, validation_runs)
 
         proposal = {
             "title": f"Genesis issue repair #{issue.get('number')}",
@@ -485,9 +486,9 @@ def solve_reported_issue(
         allowed = allowed_issue_repair_paths(context_paths)
         changed = set(proposal["files"])
         if not changed.issubset(allowed):
-            return RepairAttempt(diagnosis, proposal, None, "repair_rejected_scope")
+            return RepairAttempt(diagnosis, proposal, None, "repair_rejected_scope", validation_attempts=validation_runs)
         if not (changed & set(context_paths)):
-            return RepairAttempt(diagnosis, proposal, None, "repair_rejected_test_only")
+            return RepairAttempt(diagnosis, proposal, None, "repair_rejected_test_only", validation_attempts=validation_runs)
 
         proposal["provenance"] = {
             "initiator": f"github.issue.{issue.get('number')}",
@@ -498,11 +499,12 @@ def solve_reported_issue(
             "attribution": "maintainer_authorized_issue_execution",
             "validation_attempt": validation_attempt,
         }
+        validation_runs += 1
         result = executor.execute(proposal)
         last_proposal = proposal
         last_result = result
         if result.tests_passed and result.committed:
-            return RepairAttempt(diagnosis, proposal, result, "candidate_repaired")
+            return RepairAttempt(diagnosis, proposal, result, "candidate_repaired", validation_attempts=validation_runs)
 
         _record_failed_validation(
             memory,
@@ -524,7 +526,7 @@ def solve_reported_issue(
             flush=True,
         )
 
-    return RepairAttempt(diagnosis, last_proposal, last_result, "repair_failed_validation")
+    return RepairAttempt(diagnosis, last_proposal, last_result, "repair_failed_validation", validation_attempts=validation_runs)
 
 
 def _git(*args: str) -> subprocess.CompletedProcess[str]:
@@ -679,7 +681,6 @@ def run(issue_number: int, repository: str, root: Path = ROOT) -> dict:
     repair_memory = load_issue_repair_memory(repository, issue_number)
     maintainer_guidance = load_maintainer_repair_guidance(repository, issue_number)
     evidence["maintainer_guidance_chars"] = len(maintainer_guidance)
-    prior_memory_count = len(repair_memory)
     attempt = solve_reported_issue(
         issue,
         root,
@@ -688,10 +689,7 @@ def run(issue_number: int, repository: str, root: Path = ROOT) -> dict:
     )
     evidence["repair_status"] = attempt.status
     evidence["repair_memory"] = _bounded_repair_memory(repair_memory)
-    new_memory = repair_memory[prior_memory_count:]
-    evidence["validation_attempts_this_run"] = sum(
-        row.get("outcome") in {"tests_failed", "candidate_not_committed"} for row in new_memory
-    )
+    evidence["validation_attempts_this_run"] = attempt.validation_attempts
     if attempt.provider_failure is not None:
         evidence["provider_failure"] = attempt.provider_failure
     evidence["diagnosis"] = {

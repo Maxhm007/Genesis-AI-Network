@@ -35,6 +35,7 @@ class RepairAttempt:
     result: SelfDevResult | None
     status: str
     provider_failure: dict | None = None
+    validation_attempts: int = 0
 
 
 class IssueSolver:

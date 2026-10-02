@@ -351,6 +351,10 @@ def main() -> int:
     # the one issue Genesis already owns. Running broad maintenance first made a
     # simple handoff spend minutes scanning unrelated issues and allowed stale
     # routing work to interfere with the focused parent/dependency chain.
+    # Clear only provably abandoned focus claims before plan reconciliation.
+    # Otherwise stale active labels can suppress the repair and be dispatched
+    # again with incomplete metadata in this same controller invocation.
+    stale_reservations_reclaimed = _reclaim_stale_sequential_reservation(repository, token)
     if focused_chain:
         restored: list[int] = []
         terminalized: list[int] = []
@@ -400,7 +404,6 @@ def main() -> int:
             all_open = policy._all_open_issues_fifo(repository, token)
         decomposition = decomposition_steps[-1] if decomposition_steps else {"status": "idle"}
 
-    stale_reservations_reclaimed = _reclaim_stale_sequential_reservation(repository, token)
     active_before = _active_issue_numbers(repository, token)
     free_slots = max(0, MAX_PARALLEL - len(active_before))
     dispatched: list[dict] = []

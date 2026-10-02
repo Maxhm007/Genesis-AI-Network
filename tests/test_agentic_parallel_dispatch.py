@@ -301,9 +301,9 @@ def test_focused_legacy_architecture_plan_is_repaired_before_dispatch(monkeypatc
     monkeypatch.setattr(module, '_sequential_routable_issues', lambda *args: [owned])
     monkeypatch.setattr(module.agentic, 'safe_lane', lambda *args: 'generic')
     monkeypatch.setattr(module, '_live_agentic_worker_exists', lambda *args: False)
-    monkeypatch.setattr(module, '_reclaim_stale_sequential_reservation', lambda *args: [])
+    monkeypatch.setattr(module, '_reclaim_stale_sequential_reservation', lambda *args: calls.append(('reclaim', 867)) or [867])
     monkeypatch.setattr(module, '_active_issue_numbers', lambda *args: [])
     monkeypatch.setattr(module.policy, '_decompose_oldest_issue', lambda repo, token, issues: calls.append(('plan', issues[0]['number'])) or {'status': 'retargeted'})
     monkeypatch.setattr(module.agentic, 'reserve_and_dispatch', lambda *args: calls.append(('dispatch', 867)) or {'status': 'dispatched', 'issue_number': 867})
     assert module.main() == 0
-    assert calls == [('plan', 867), ('dispatch', 867)]
+    assert calls == [('reclaim', 867), ('plan', 867), ('dispatch', 867)]

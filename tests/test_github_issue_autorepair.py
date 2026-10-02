@@ -224,7 +224,9 @@ def test_failed_candidate_validation_is_fed_back_for_bounded_self_correction(tmp
 
     provider = SequencedProvider()
     executor = SequencedExecutor()
-    memory: list[dict] = []
+    # Retained history is already full; new validation counts must survive
+    # truncation of the bounded memory queue.
+    memory: list[dict] = [{"attempt": i, "outcome": "tests_failed", "validation": "old failure"} for i in range(6)]
     attempt = solve_reported_issue(
         {"number": 8, "title": "Wrong value", "body": "`genesis/alpha.py` should use VALUE = 4."},
         tmp_path,
@@ -235,15 +237,18 @@ def test_failed_candidate_validation_is_fed_back_for_bounded_self_correction(tmp
 
     assert MAX_VALIDATION_ATTEMPTS == 3
     assert attempt.status == "candidate_repaired"
+    assert attempt.validation_attempts == 3
+    assert len(memory) == 6
     assert attempt.result is not None and attempt.result.commit_sha == "a" * 40
     assert len(provider.prompts) == 3
     assert "expected 4, got 2" in provider.prompts[1]
     assert "VALUE = 2" in provider.prompts[1]
     assert "expected 4, got 3" in provider.prompts[2]
     assert "VALUE = 3" in provider.prompts[2]
-    assert len(memory) == 2
-    assert memory[0]["outcome"] == "tests_failed"
-    assert memory[1]["outcome"] == "tests_failed"
+    assert memory[-2]["outcome"] == "tests_failed"
+    assert memory[-1]["outcome"] == "tests_failed"
+    assert memory[-2]["provider"] == "sequenced-provider"
+    assert memory[-1]["provider"] == "sequenced-provider"
 
 
 def test_safe_script_target_remains_actionable_when_workflows_are_only_evidence(tmp_path: Path):
