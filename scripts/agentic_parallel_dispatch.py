@@ -259,6 +259,9 @@ def _live_agentic_worker_exists(repository: str, token: str) -> bool:
             return True
         runs = payload.get("workflow_runs", []) if isinstance(payload, dict) else []
         for run in runs:
+            # Push invocations only validate the baseline; they own no issue.
+            if run.get("event") != "workflow_dispatch":
+                continue
             # Actions exposes run-name in `name` (for example Issue #867 —
             # evidence_first), so recognize the canonical workflow path too.
             workflow_path = str(run.get("path") or "").split("@", 1)[0]

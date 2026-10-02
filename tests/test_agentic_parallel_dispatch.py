@@ -32,6 +32,7 @@ def test_live_worker_with_dynamic_run_name_prevents_reservation_reclaim(monkeypa
     def request(repository, token, method, path, *args):
         return {"workflow_runs": [{
             "name": "Issue #867 — evidence_first",
+            "event": "workflow_dispatch",
             "path": f".github/workflows/{workflow}@refs/heads/main",
         }]} if f"status={status}&" in path else {"workflow_runs": []}
 
@@ -44,9 +45,27 @@ def test_live_worker_with_dynamic_run_name_prevents_reservation_reclaim(monkeypa
 def test_unrelated_live_workflow_does_not_block_recovery(monkeypatch):
     monkeypatch.setattr(module.agentic, "request", lambda *args: {"workflow_runs": [{
         "name": "Genesis Agentic Lab Recovery",
+        "event": "workflow_dispatch",
         "path": ".github/workflows/genesis-agentic-lab-recovery.yml",
     }]})
     assert not module._live_agentic_worker_exists("owner/repo", "token")
+
+
+def test_push_baseline_validation_does_not_block_recovery(monkeypatch):
+    monkeypatch.setattr(module.agentic, "request", lambda *args: {"workflow_runs": [{
+        "name": "Issue #validation — push",
+        "event": "push",
+        "path": ".github/workflows/genesis-agentic-strategy-worker.yml",
+    }]})
+    assert not module._live_agentic_worker_exists("owner/repo", "token")
+
+
+def test_legacy_dispatched_worker_name_keeps_reservation(monkeypatch):
+    monkeypatch.setattr(module.agentic, "request", lambda *args: {"workflow_runs": [{
+        "name": "Genesis DeepSeek Agentic Solver",
+        "event": "workflow_dispatch",
+    }]})
+    assert module._live_agentic_worker_exists("owner/repo", "token")
 
 
 def test_actions_visibility_failure_keeps_worker_reservation(monkeypatch):
