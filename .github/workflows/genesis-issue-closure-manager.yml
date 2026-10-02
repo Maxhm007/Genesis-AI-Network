@@ -102,3 +102,6 @@ jobs:
           fi
           echo "Closed issue reconciled; dispatching the next Agentic Lab recovery pass."
           gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
+
+          echo "Waking Nexus teammate backlog drain for the next open issue."
+          gh workflow run genesis-teammate-autonomous-development.yml --repo "$GITHUB_REPOSITORY" --ref main
