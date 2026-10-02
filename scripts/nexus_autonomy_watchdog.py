@@ -13,6 +13,10 @@ MARKER = "<!-- nexus-autonomy-watchdog -->"
 NEXUS_ISSUE = 1000
 TEAM_WORKFLOW = "Genesis Teammate - Autonomous Development"
 AGENTIC_WORKFLOW = "Genesis Agentic Lab Recovery"
+WORKFLOW_FILES = {
+    TEAM_WORKFLOW: "genesis-teammate-autonomous-development.yml",
+    AGENTIC_WORKFLOW: "genesis-agentic-lab-recovery.yml",
+}
 ACTIVE_LABELS = {
     "genesis-repair-in-progress",
     "genesis-validating",
@@ -53,12 +57,12 @@ def _parse_time(value: object) -> datetime | None:
 
 
 def _latest_run(repository: str, workflow_name: str) -> dict | None:
-    data = _api(repository, "actions/runs?per_page=100")
+    workflow_file = WORKFLOW_FILES.get(workflow_name)
+    if not workflow_file:
+        raise ValueError(f"unknown workflow name: {workflow_name}")
+    data = _api(repository, f"actions/workflows/{workflow_file}/runs?per_page=1")
     rows = data.get("workflow_runs", []) if isinstance(data, dict) else []
-    for row in rows:
-        if str(row.get("name") or "") == workflow_name:
-            return row
-    return None
+    return rows[0] if rows else None
 
 
 def _issues(repository: str) -> list[dict]:
@@ -125,6 +129,10 @@ def evaluate(
         body = str(issue.get("body") or "")
         title = str(issue.get("title") or "")
         if MARKER in body or title == TITLE:
+            continue
+        if "<!-- genesis-team-task -->" in body and "Autonomous Genesis development task from issue #" in body:
+            # Legacy Nexus execution duplicates are reconciled against their
+            # authoritative source issue by the teammate heartbeat.
             continue
         if "genesis-autonomous" not in labels or "genesis-verified" in labels or labels & IGNORE_LABELS:
             continue
