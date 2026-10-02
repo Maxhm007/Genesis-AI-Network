@@ -183,3 +183,29 @@ def test_latest_workflow_run_queries_dedicated_workflow_history(monkeypatch):
 
     assert run["id"] == 321
     assert paths == ["actions/workflows/genesis-issue-closure-manager.yml/runs?per_page=1"]
+
+
+def test_stale_manager_alone_self_heals_without_persistent_escalation():
+    stale = {
+        "faults": ["closing_manager_stale:360.0m>30m"],
+        "evidence": {"closing_run": {"age_minutes": 360.0}, "verified_open_issues_past_grace": []},
+    }
+    assert module._persistent_fault(
+        stale,
+        opening_max_age_minutes=75,
+        closure_max_age_minutes=30,
+        verified_open_grace_minutes=20,
+    ) is False
+
+
+def test_failed_manager_is_persistent():
+    failed = {
+        "faults": ["closing_manager_latest_run_failure"],
+        "evidence": {"closing_run": {"age_minutes": 2.0}, "verified_open_issues_past_grace": []},
+    }
+    assert module._persistent_fault(
+        failed,
+        opening_max_age_minutes=75,
+        closure_max_age_minutes=30,
+        verified_open_grace_minutes=20,
+    ) is True
