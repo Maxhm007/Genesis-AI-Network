@@ -40,6 +40,18 @@ ACTIVE_RESERVATIONS = {
     "genesis-working",
     "genesis-verifying",
 }
+PROBLEM_PATTERNS = (
+    "<!-- genesis-team-current-problem -->",
+    "repair status:",
+    "provider_timeout",
+    "provider_error",
+    "malformed json",
+    "not produce a verified promotion",
+    "retry_pending",
+    "worker failed",
+    "bounded attempt exhausted",
+)
+
 EVIDENCE_PATTERNS = (
     "genesis verification evidence:",
     "genesis verified and promoted",
@@ -52,11 +64,27 @@ EVIDENCE_PATTERNS = (
 SHA_RE = re.compile(r"\b[0-9a-f]{40}\b", re.IGNORECASE)
 
 
+def _latest_problem_index(comments: list[dict]) -> int:
+    latest = -1
+    for index, row in enumerate(comments):
+        body = str(row.get("body") or "")
+        lowered = body.lower()
+        if any(pattern in lowered for pattern in PROBLEM_PATTERNS):
+            latest = index
+    return latest
+
+
 def _verification_evidence(comments: list[dict]) -> tuple[bool, str, str]:
-    for row in reversed(comments):
+    problem_index = _latest_problem_index(comments)
+    for index in range(len(comments) - 1, -1, -1):
+        row = comments[index]
         body = str(row.get("body") or "")
         lowered = body.lower()
         if any(pattern in lowered for pattern in EVIDENCE_PATTERNS):
+            # Never let an old success comment close an issue after a newer
+            # failure/current-problem comment was recorded.
+            if index <= problem_index:
+                return False, "", ""
             matches = SHA_RE.findall(body)
             promoted_sha = matches[-1].lower() if matches else ""
             digest = hashlib.sha256(body.encode("utf-8")).hexdigest()[:20]
