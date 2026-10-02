@@ -6,6 +6,7 @@ SEAL = ROOT / ".github/workflows/genesis-closed-issue-seal.yml"
 BOUNDED = ROOT / ".github/workflows/genesis-bounded-repair-worker.yml"
 SPECIALIST = ROOT / ".github/workflows/genesis-specialist-repair-worker-v2.yml"
 CONTROLLER = ROOT / "scripts/agentic_lab_recovery_dispatch.py"
+CLOSURE = ROOT / ".github/workflows/genesis-issue-closure-manager.yml"
 
 
 def test_global_closure_guard_requires_verification_for_bot_closure() -> None:
@@ -46,3 +47,13 @@ def test_successful_workers_verify_then_delegate_close() -> None:
         verified_at = text.index("genesis-verified")
         close_at = text.index("genesis-issue-closure-manager.yml", verified_at)
         assert verified_at < close_at
+
+
+def test_closure_manager_reacts_to_verification_comments_and_stays_lightweight() -> None:
+    text = CLOSURE.read_text(encoding="utf-8")
+    assert "issue_comment:" in text
+    assert "Genesis verification evidence:" in text
+    assert "Full repository validation passed" in text
+    assert "cancel-in-progress: true" in text
+    assert "if: github.event_name == 'push'" in text
+    assert "-r requirements.txt" not in text
