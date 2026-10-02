@@ -802,3 +802,17 @@ def test_capability_escalation_issue_is_reusable_and_bounded(monkeypatch):
     assert module.CAPABILITY_ESCALATION_PREFIX in body
     assert "maintainer review" not in body.lower()
     assert "independent validation" in body.lower()
+
+
+def test_baseline_validation_repair_rearms_execution_but_controller_edit_does_not(tmp_path):
+    baseline_test = tmp_path / "tests/test_autonomy_heartbeat.py"
+    baseline_test.parent.mkdir(parents=True)
+    baseline_test.write_text("broken baseline")
+    before = module.repair_execution_generation(tmp_path)
+    baseline_test.write_text("repaired baseline with regression coverage")
+    after = module.repair_execution_generation(tmp_path)
+    assert before != after
+    controller = tmp_path / "scripts/agentic_parallel_dispatch.py"
+    controller.parent.mkdir(parents=True)
+    controller.write_text("controller-only refactor")
+    assert module.repair_execution_generation(tmp_path) == after

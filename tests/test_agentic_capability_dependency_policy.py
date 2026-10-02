@@ -149,7 +149,7 @@ def test_obsolete_not_planned_capability_is_not_reused(monkeypatch) -> None:
     assert reused is canonical
 
 
-def test_released_capability_class_cannot_restart_the_same_parent_loop(monkeypatch) -> None:
+def test_released_capability_class_escalates_once_without_repeating_prior_capability(monkeypatch) -> None:
     parent = {
         "number": 867,
         "state": "open",
@@ -186,6 +186,11 @@ def test_released_capability_class_cannot_restart_the_same_parent_loop(monkeypat
         ),
     )
 
+    monkeypatch.setattr(dispatcher, "ensure_capability_escalation_issue",
+                        lambda *args: {"number": 1200, "state": "open"})
+    monkeypatch.setattr(dispatcher, "capability_ready", lambda *args: False)
+    monkeypatch.setattr(dispatcher, "issue_comments", lambda *args: [])
+
     result = dispatcher.pause_for_capability(
         "owner/repo",
         "token",
@@ -196,16 +201,18 @@ def test_released_capability_class_cannot_restart_the_same_parent_loop(monkeypat
     )
 
     assert result == {
-        "status": "capability_class_exhausted",
+        "status": "waiting_capability_escalation",
         "issue_number": 867,
         "capability_issue": 991,
+        "escalation_issue": 1200,
         "reason": "strategy_set_exhausted",
-        "requires_human": True,
+        "requires_human": False,
     }
     assert any(
         method == "POST"
         and path == "/issues/867/labels"
-        and "genesis-needs-human" in (payload or {}).get("labels", [])
+        and "genesis-waiting-capability" in (payload or {}).get("labels", [])
         for _repository, method, path, payload in calls
     )
-    assert not any("/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches" in path for _, _, path, _ in calls)
+    assert any("/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches" in path for _, _, path, _ in calls)
+    assert not any(method == "POST" and path == "/issues" for _, method, path, _ in calls)

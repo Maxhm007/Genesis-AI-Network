@@ -347,6 +347,16 @@ def main() -> int:
         released: list[int] = []
         decomposition_steps: list[dict] = []
         decomposition = {"status": "skipped", "reason": "sequential_focus_has_priority"}
+        # Maintenance for the owned dependency chain is part of solving it.
+        # Skipping a requested reroute here strands an exhausted capability
+        # forever, even though the unrelated backlog must remain untouched.
+        chain = _sequential_routable_issues(repository, token)
+        if chain and not _live_agentic_worker_exists(repository, token):
+            owned = chain[0]
+            target = agentic.explicit_target(str(owned.get("body") or ""))
+            if "genesis-needs-routing" in agentic.labels(owned) or not agentic.safe_lane(target):
+                decomposition = policy._decompose_oldest_issue(repository, token, chain)
+                decomposition_steps.append(decomposition)
     else:
         restored = policy._restore_agentic_visibility(repository, token, all_open)
         terminalized = policy._terminalize_non_actionable_issues(repository, token, all_open)

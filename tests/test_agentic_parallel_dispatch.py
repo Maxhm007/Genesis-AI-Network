@@ -1,6 +1,16 @@
 from datetime import datetime, timezone
 
+import pytest
+
 import scripts.agentic_parallel_dispatch as module
+
+
+@pytest.fixture(autouse=True)
+def restore_dispatch_bindings(monkeypatch):
+    # main() configures the standalone controller; keep those bindings local
+    # to each test when several controller modules share one Python process.
+    for attribute in ("issue_comments", "open_agentic_issues", "next_strategy"):
+        monkeypatch.setattr(module.agentic, attribute, getattr(module.agentic, attribute))
 
 
 def _issue(number: int, created_at: str, *, labels=(), body=""):
@@ -188,3 +198,40 @@ def test_sequential_focus_executes_unresolved_capability_dependency(monkeypatch)
     assert [row["number"] for row in selected] == [973]
     assert "genesis-sequential-focus" in {row["name"] for row in parent["labels"]}
     assert "genesis-sequential-focus" not in {row["name"] for row in capability["labels"]}
+
+
+def test_focused_dependency_routing_is_serviced_before_dispatch(monkeypatch):
+    parent = _issue(867, "2026-09-18T00:00:00Z", labels=(
+        "genesis-autonomous", "agentic-lab", "genesis-sequential-focus", "genesis-waiting-capability"))
+    dependency = _issue(1022, "2026-09-29T00:00:00Z", labels=(
+        "genesis-autonomous", "agentic-lab", "genesis-needs-routing"),
+        body="<!-- genesis-capability-work:abc -->\n- **Target:** `genesis/github_issue_capability_builder.py`")
+    unrelated = _issue(868, "2026-09-18T01:00:00Z")
+    events = []
+    for attribute in ("issue_comments", "open_agentic_issues", "next_strategy"):
+        monkeypatch.setattr(module.agentic, attribute, getattr(module.agentic, attribute))
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [parent, unrelated, dependency])
+    monkeypatch.setattr(module.policy, "_all_issue_comments", lambda repo, token, number:
+                        [{"body": "<!-- genesis-capability-dependency:1022 -->"}] if number == 867 else [])
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
+    monkeypatch.setattr(module, "_live_agentic_worker_exists", lambda *args: False)
+    monkeypatch.setattr(module, "_reclaim_stale_sequential_reservation", lambda *args: [])
+    monkeypatch.setattr(module, "_active_issue_numbers", lambda *args: [])
+
+    def route(repo, token, issues):
+        assert [i["number"] for i in issues] == [1022]
+        events.append("route")
+        return {"status": "routing_released", "issue_number": 1022}
+
+    def dispatch(*args):
+        assert events == ["route"]
+        events.append("dispatch")
+        return {"status": "dispatched", "issue_number": 1022}
+
+    monkeypatch.setattr(module.policy, "_decompose_oldest_issue", route)
+    monkeypatch.setattr(module.agentic, "reserve_and_dispatch", dispatch)
+    assert module.main() == 0
+    assert events == ["route", "dispatch"]
+    assert "genesis-sequential-focus" in module.agentic.labels(parent)
