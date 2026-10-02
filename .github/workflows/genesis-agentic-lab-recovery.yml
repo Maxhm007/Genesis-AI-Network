@@ -1,6 +1,6 @@
 name: Genesis Agentic Lab Recovery
 # canonical-capability-retry-v1
-# sequential-handoff-v6
+# parallel-lanes-v1
 
 on:
   pull_request:
@@ -57,16 +57,13 @@ permissions:
 
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('genesis-agentic-lab-recovery-pr-{0}', github.event.pull_request.number) || 'genesis-agentic-lab-recovery' }}
-  # PR validation has no dispatch authority and must not compete with live
-  # Recovery wake-ups for the single pending controller slot.
-  # Keep exactly one authoritative Recovery controller running at a time, but
-  # never kill active recovery work when another wake-up arrives. GitHub may
-  # coalesce/replace pending wake-ups, while the in-progress controller is
-  # allowed to finish and preserve the sequential issue handoff.
+  # Keep one controller instance running at a time. The controller itself
+  # admits up to three target-safe worker lanes, so overlapping controller
+  # wake-ups are unnecessary and would only race on reservations.
   cancel-in-progress: false
 
 env:
-  GENESIS_AGENTIC_MAX_PARALLEL: '1'
+  GENESIS_AGENTIC_MAX_PARALLEL: '3'
 
 jobs:
   validate-baseline:
@@ -109,7 +106,7 @@ jobs:
         if: github.event_name == 'push'
         run: python -m pytest -q tests/test_gene_backlog_delegation_router.py
 
-      - name: Dispatch authoritative sequential Agentic chain
+      - name: Dispatch bounded parallel Agentic lanes
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python scripts/agentic_parallel_dispatch.py
