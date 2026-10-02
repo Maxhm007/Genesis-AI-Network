@@ -40,13 +40,20 @@ def _api(repository: str, path: str) -> dict | list:
     return data
 
 
+WORKFLOW_FILES = {
+    OPENING_WORKFLOW: "genesis-issue-opening-manager.yml",
+    CLOSURE_WORKFLOW: "genesis-issue-closure-manager.yml",
+    AGENTIC_WORKFLOW: "genesis-agentic-lab-recovery.yml",
+}
+
+
 def _latest_workflow_run(repository: str, workflow_name: str) -> dict | None:
-    data = _api(repository, "actions/runs?per_page=100")
+    workflow_file = WORKFLOW_FILES.get(workflow_name)
+    if not workflow_file:
+        raise ValueError(f"unknown workflow name: {workflow_name}")
+    data = _api(repository, f"actions/workflows/{workflow_file}/runs?per_page=1")
     rows = data.get("workflow_runs", []) if isinstance(data, dict) else []
-    for row in rows:
-        if str(row.get("name") or "") == workflow_name:
-            return row
-    return None
+    return rows[0] if rows else None
 
 
 def _issues(repository: str) -> list[dict]:
