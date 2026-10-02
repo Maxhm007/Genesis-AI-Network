@@ -88,3 +88,21 @@ def test_single_verified_issue_closes_without_full_backlog_scan(monkeypatch):
     assert result["change_count"] == 1
     assert result["changes"][0]["action"] == "close_completed"
     assert ("PATCH", "/issues/1039") in calls
+
+
+def test_verification_must_be_after_latest_problem_comment():
+    comments = [
+        {"body": "Genesis verification evidence: full repository validation passed."},
+        {"body": "<!-- genesis-team-current-problem -->\nprovider_timeout remains unresolved"},
+    ]
+    verified, _, _ = module._verification_evidence(comments)
+    assert verified is False
+
+
+def test_new_verification_after_problem_comment_is_accepted():
+    comments = [
+        {"body": "<!-- genesis-team-current-problem -->\nprovider_timeout remains unresolved"},
+        {"body": "Genesis verification evidence: full repository validation passed."},
+    ]
+    verified, _, _ = module._verification_evidence(comments)
+    assert verified is True
