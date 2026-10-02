@@ -19,6 +19,13 @@ API = "https://api.github.com"
 
 TEAM_TASK_SOURCE_RE = re.compile(r"Autonomous Genesis development task from issue #(\\d+):", re.IGNORECASE)
 
+CURRENT_PROBLEM_MARKER = "<!-- genesis-team-current-problem -->"
+PROBLEM_HINTS = (
+    "repair status:", "provider_timeout", "provider_error", "malformed json",
+    "failed", "failure", "error", "stuck", "blocked", "exhausted",
+    "retry_pending", "not produce a verified promotion",
+)
+
 ROLE_MAP = {
     "atlas": ("planner", "Architecture and decomposition. Produce a bounded design, dependencies, risks, and handoff in neutral operational language."),
     "forge": ("engineer", "Implementation and repair. Produce the smallest safe implementation path and execution acceptance criteria in neutral operational language."),
@@ -45,6 +52,35 @@ def paged_get(path: str) -> list[dict]:
 
 def issue_comments(issue_number: int) -> list[dict]:
     return paged_get(f"/issues/{issue_number}/comments")
+
+
+def latest_problem_comment(comments: list[dict], fallback: str = "") -> str:
+    """Return the newest comment that describes the present unresolved problem."""
+    for row in reversed(comments):
+        body = str(row.get("body") or "").strip()
+        lower = body.lower()
+        if not body:
+            continue
+        if "<!-- genesis-closure-certificate -->" in lower:
+            continue
+        if "genesis verification evidence:" in lower or "verified and promoted" in lower:
+            continue
+        if any(token in lower for token in PROBLEM_HINTS):
+            return body[:3500]
+    return str(fallback or "").strip()[:3500]
+
+
+def current_problem_context(issue: dict) -> str:
+    number = int(issue.get("number") or 0)
+    title = str(issue.get("title") or "")
+    body = str(issue.get("body") or "")
+    latest = latest_problem_comment(issue_comments(number), fallback=body)
+    return (
+        f"Current authoritative problem for issue #{number} ({title}):\n"
+        f"{latest}\n\n"
+        "Rule: solve the newest current problem first. If an attempt fails or the problem changes, "
+        "append a new issue comment describing the exact present failure before retrying."
+    )
 
 
 def reconcile_legacy_team_tasks() -> list[int]:
@@ -192,9 +228,11 @@ def autonomous_development(run_id: str) -> None:
     number = int(issue["number"])
     title = str(issue.get("title") or f"Issue #{number}")
     body = str(issue.get("body") or "").strip()
+    current_problem = current_problem_context(issue)
     objective = (
-        f"Autonomous Genesis development task from issue #{number}: {title}. "
-        + (f"Context: {body[:4000]}" if body else "")
+        f"Autonomous Genesis development task from issue #{number}: {title}.\n\n"
+        f"{current_problem}\n\n"
+        + (f"Original issue context: {body[:2500]}" if body else "")
     ).strip()
     # Acceptance criteria often mention tests/reviews regardless of the task's
     # actual role. Route by the requested work, not incidental body keywords.
@@ -202,6 +240,15 @@ def autonomous_development(run_id: str) -> None:
     workspace = int(CONFIG["workspaces"][agent])
     workflow = str(CONFIG["workflows"][agent])
     marker = f"<!-- genesis-team-autonomous-claim:{number} -->"
+
+    comment(
+        number,
+        f"{CURRENT_PROBLEM_MARKER}\n"
+        "### Current problem selected by Nexus\n"
+        f"{current_problem}\n\n"
+        "This comment is the active problem statement for the current team attempt. "
+        "Later failure comments supersede it.",
+    )
 
     comment(
         nexus_issue,
@@ -639,6 +686,14 @@ def agent_run(agent: str, objective: str, source_comment_id: str, nexus_issue: i
         # Teammates are planners/coordinators; Agentic Lab is the authoritative
         # repository executor. Wake it immediately so the execution issue is
         # not left as a passive comment-only handoff.
+        if execution_issue:
+            comment(
+                execution_issue,
+                f"{CURRENT_PROBLEM_MARKER}\n"
+                f"### {agent.title()} current problem\n"
+                f"{latest_problem_comment(issue_comments(execution_issue), fallback=objective)}\n\n"
+                "If this attempt fails, record the exact new failure on this same issue before the next retry.",
+            )
         wake_agentic_lab()
 
     suffix = f"\n\n**Execution issue:** #{execution_issue}" if execution_issue else ""
