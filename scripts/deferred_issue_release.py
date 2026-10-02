@@ -2,7 +2,6 @@ from __future__ import annotations
 
 import json
 import os
-import re
 import subprocess
 from pathlib import Path
 
@@ -12,6 +11,7 @@ from genesis.issue_governor import (
     equivalent_issue,
     publication_decision,
 )
+from genesis.issue_opening_manager import annotate_body, build_agentic_candidate
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -112,21 +112,32 @@ def release_one(repository: str, *, queue_path: Path = QUEUE_PATH) -> dict:
                 "backlog": health.__dict__,
             }
 
-        args = ["gh", "issue", "create", "--repo", repository, "--title", title, "--body", body]
         labels = [str(x).strip() for x in candidate.get("labels") or [] if str(x).strip()]
-        if labels:
-            args += ["--label", ",".join(labels)]
-        created = _run(args)
-        if created.returncode != 0:
-            raise RuntimeError(f"GitHub deferred issue creation failed: {created.stderr[-1200:]}")
+        lane = "github-issue-discovery-deferred"
+        managed_body = annotate_body(body, lane)
+        opening_candidate = build_agentic_candidate(
+            lane=lane,
+            title=title,
+            body=managed_body,
+            labels=labels,
+            severity=severity,
+            value_score=float(candidate.get("value_score") or 0.0),
+        )
+        dispatched = _run([
+            "gh", "workflow", "run", "genesis-agentic-issue-opening.yml",
+            "--repo", repository,
+            "-f", "candidate_json=" + json.dumps(opening_candidate, separators=(",", ":")),
+        ])
+        if dispatched.returncode != 0:
+            raise RuntimeError(f"GitHub deferred issue opening dispatch failed: {dispatched.stderr[-1200:]}")
         retained.remove(candidate)
         _save_queue(queue_path, retained)
-        url = created.stdout.strip().splitlines()[-1] if created.stdout.strip() else ""
-        match = re.search(r"/issues/(\d+)", url)
         return {
             "status": "released_deferred_candidate",
-            "issue_number": int(match.group(1)) if match else None,
-            "issue_url": url,
+            "issue_number": None,
+            "issue_url": "",
+            "candidate_fingerprint": opening_candidate["candidate_fingerprint"],
+            "opening_status": "agentic_pending",
             "value_score": float(candidate.get("value_score") or 0.0),
             "queued_candidates": len(retained),
             "backlog": health.__dict__,
