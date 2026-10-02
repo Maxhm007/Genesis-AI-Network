@@ -36,3 +36,15 @@ def test_reconcile_legacy_team_tasks_marks_source_duplicates_superseded(monkeypa
     retired = module.reconcile_legacy_team_tasks()
     assert retired == [1033]
     assert ("POST", "/issues/1033/labels", {"labels": ["genesis-superseded"]}) in calls
+
+
+def test_latest_problem_comment_prefers_newest_failure():
+    comments = [
+        {"body": "Genesis verification evidence: old success."},
+        {"body": "repair status: retry_pending_capability; provider_timeout"},
+    ]
+    assert "provider_timeout" in module.latest_problem_comment(comments)
+
+
+def test_latest_problem_comment_falls_back_to_issue_body():
+    assert module.latest_problem_comment([], fallback="Original unresolved problem") == "Original unresolved problem"
