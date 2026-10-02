@@ -17,6 +17,8 @@ REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "").strip()
 TOKEN = os.environ.get("GITHUB_TOKEN", "").strip() or os.environ.get("GH_TOKEN", "").strip()
 API = "https://api.github.com"
 
+TEAM_TASK_SOURCE_RE = re.compile(r"Autonomous Genesis development task from issue #(\\d+):", re.IGNORECASE)
+
 ROLE_MAP = {
     "atlas": ("planner", "Architecture and decomposition. Produce a bounded design, dependencies, risks, and handoff in neutral operational language."),
     "forge": ("engineer", "Implementation and repair. Produce the smallest safe implementation path and execution acceptance criteria in neutral operational language."),
@@ -45,6 +47,45 @@ def issue_comments(issue_number: int) -> list[dict]:
     return paged_get(f"/issues/{issue_number}/comments")
 
 
+def reconcile_legacy_team_tasks() -> list[int]:
+    """Retire old Nexus execution issues that duplicate an authoritative source issue."""
+    protected = set(int(v) for v in CONFIG.get("workspaces", {}).values())
+    retired: list[int] = []
+    for issue in paged_get("/issues?state=open"):
+        number = int(issue.get("number") or 0)
+        if number <= 0 or number in protected or issue.get("pull_request"):
+            continue
+        body = str(issue.get("body") or "")
+        if "<!-- genesis-team-task -->" not in body:
+            continue
+        match = TEAM_TASK_SOURCE_RE.search(body)
+        if not match:
+            continue
+        source_number = int(match.group(1))
+        if source_number == number:
+            continue
+        try:
+            source = request("GET", f"/issues/{source_number}")
+        except RuntimeError:
+            continue
+        if not isinstance(source, dict) or source.get("pull_request"):
+            continue
+        labels = {
+            str(row.get("name") or "") if isinstance(row, dict) else str(row or "")
+            for row in (issue.get("labels") or [])
+        }
+        if "genesis-superseded" not in labels:
+            request("POST", f"/issues/{number}/labels", {"labels": ["genesis-superseded"]})
+            comment(
+                number,
+                "<!-- genesis-team-duplicate-retired -->\n"
+                f"Nexus retired this legacy execution record because authoritative source issue #{source_number} owns the work. "
+                "Closure Manager should close this duplicate automatically.",
+            )
+        retired.append(number)
+    return retired
+
+
 def open_development_issues() -> list[dict]:
     protected = set(int(v) for v in CONFIG.get("workspaces", {}).values())
     rows = paged_get("/issues?state=open")
@@ -57,9 +98,9 @@ def open_development_issues() -> list[dict]:
             continue
         title = str(issue.get("title") or "")
         body = str(issue.get("body") or "")
-        if "<!-- genesis-team-evolution -->" in body:
-            continue
-        if "<!-- genesis-team-task -->" in body:
+        if "<!-- genesis-team-task -->" in body and TEAM_TASK_SOURCE_RE.search(body):
+            # Legacy duplicate execution records are retired by
+            # reconcile_legacy_team_tasks(); work continues on the source issue.
             continue
         if title.startswith("[Genesis Teammate]"):
             continue
@@ -130,6 +171,15 @@ def autonomous_development(run_id: str) -> None:
     if not CONFIG.get("rules", {}).get("team_can_work_independently_for_genesis_development", False):
         return
     nexus_issue = int(CONFIG["workspaces"]["nexus"])
+    retired = reconcile_legacy_team_tasks()
+    if retired:
+        comment(
+            nexus_issue,
+            f"<!-- genesis-team-backlog-reconcile:{run_id} -->\n"
+            "### Autonomous backlog reconciliation\n"
+            f"Retired duplicate legacy execution issues: {', '.join('#' + str(n) for n in retired)}. "
+            "Authoritative source issues remain assigned to the team.",
+        )
     issue = select_autonomous_issue()
     if issue is None:
         comment(
