@@ -100,6 +100,7 @@ def select_autonomous_issue() -> dict | None:
             for item in (issue.get("labels") or [])
         }
         if labels & {
+            "genesis-owner-paused",
             "genesis-verified", "genesis-waiting-capability", "genesis-needs-human",
             "genesis-working", "genesis-verifying", "genesis-repair-in-progress",
             "genesis-validating", "genesis-claimed", "genesis-deepseek-working",

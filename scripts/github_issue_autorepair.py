@@ -12,7 +12,7 @@ import urllib.request
 from pathlib import Path
 
 from genesis.coding import CodingModule, CodingProposal
-from genesis.github_issue_capability_builder import GitHubIssueLearnedCapabilityProvider
+from genesis.github_issue_capability_builder import GitHubIssueLearnedCapabilityProvider, ArchitectureExpansionProvider
 from genesis.issue_solver import Diagnosis, RepairAttempt
 from genesis.providers import GenesisHTTPProvider, IntelligenceProvider
 from genesis.selfdev import ALLOWED_SCRIPT_PATHS, SelfDevelopmentExecutor
@@ -338,9 +338,12 @@ def propose_issue_repair(
             name=os.environ.get("GENESIS_PROVIDER_NAME", "genesis-github-issue-repair"),
             timeout=_provider_timeout_seconds(),
         )
+    coding_paths = list(context_paths)
+    if isinstance(provider, ArchitectureExpansionProvider) and provider.test_path not in coding_paths:
+        coding_paths.append(provider.test_path)
     return coding.propose(
         issue_coding_objective(issue, repair_memory, maintainer_guidance),
-        context_paths,
+        coding_paths,
         provider=provider,
     )
 

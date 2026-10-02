@@ -549,8 +549,9 @@ class CodingModule:
         current_prompt = prompt
         last_error: Exception | None = None
         for attempt in range(1, self.MAX_PROPOSAL_ATTEMPTS + 1):
-            raw = provider.reason(current_prompt)
+            raw = ""
             try:
+                raw = provider.reason(current_prompt)
                 return self.validate_proposal(self._extract_json(raw), provider.name)
             except (ValueError, json.JSONDecodeError) as exc:
                 last_error = exc

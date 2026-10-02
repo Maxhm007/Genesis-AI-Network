@@ -151,6 +151,8 @@ def classify(issue: dict) -> str:
     labels = _labels(issue)
     lower_title = title.lower()
     lower_body = body.lower()
+    if "genesis-owner-paused" in labels:
+        return None
 
     if (
         lower_title.startswith("genesis action failure:")
