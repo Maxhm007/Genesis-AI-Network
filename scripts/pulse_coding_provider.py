@@ -98,10 +98,11 @@ class AdaptiveCodingModel:
         is_escalation = selected_model_id != self.primary_model_id
         selected_prompt = self._compact_escalation_prompt(prompt) if is_escalation else prompt
         selected_budget = max_new_tokens
-        if is_escalation:
-            # New modules require complete source, unlike compact one-line edits.
-            # Keep the configured finite output budget for that explicit role.
-            architecture = prompt.startswith("ROLE: Genesis bounded architecture module implementer\n")
+        # New modules require complete source, unlike compact one-line edits.
+        # Apply this before comparing IDs: the final fallback deliberately uses
+        # the same model for both primary and escalation.
+        architecture = prompt.startswith("ROLE: Genesis bounded architecture module implementer\n")
+        if architecture or is_escalation:
             cap = self.max_new_tokens if architecture else self.escalation_max_new_tokens
             selected_budget = cap if max_new_tokens is None else min(
                 int(max_new_tokens), cap

@@ -8,7 +8,9 @@ REPAIR_ENGINE = Path("scripts/github_issue_autorepair.py")
 
 def test_agentic_lab_is_single_recovery_scheduler() -> None:
     text = CONTROLLER.read_text(encoding="utf-8")
-    assert "group: genesis-agentic-lab-recovery" in text
+    assert "|| 'genesis-agentic-lab-recovery'" in text
+    assert "github.event_name == 'pull_request' && format('genesis-agentic-lab-recovery-pr-{0}', github.event.pull_request.number)" in text
+    assert "cancel-in-progress: false" in text
     assert "agentic_parallel_dispatch.py" in text
     assert "issues: write" in text
     assert "actions: write" in text

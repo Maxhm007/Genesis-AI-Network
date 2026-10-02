@@ -313,3 +313,7 @@ def test_architecture_escalation_keeps_complete_module_budget(monkeypatch):
     model.reason('ROLE: Genesis bounded architecture module implementer\n' + 'x' * 9000)
     model.reason('ROLE: bounded_coding_engineer\n' + 'x' * 9000)
     assert calls == [('strong', 768), ('strong', 192)]
+    fallback = module.AdaptiveCodingModel('qwen3', 'qwen3', max_new_tokens=768, escalation_max_new_tokens=192)
+    fallback.reason('ROLE: Genesis bounded architecture module implementer\nshort context')
+    fallback.reason('ROLE: Genesis bounded architecture module implementer\nshort context', max_new_tokens=96)
+    assert calls[-2:] == [('qwen3', 768), ('qwen3', 96)]
