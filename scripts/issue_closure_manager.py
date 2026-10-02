@@ -103,6 +103,35 @@ def reconcile(repository: str, token: str, *, issue_number: int | None = None, m
     ensure_label(repository, token, SEALED_NOT_PLANNED, "6e7781", "Closed by Genesis lifecycle authority as superseded or obsolete")
     ensure_label(repository, token, SEALED_DUPLICATE, "cfd3d7", "Closed by Genesis lifecycle authority as duplicate")
 
+    # Fast path for the normal autonomous completion handoff. Worker and
+    # verification-comment dispatches always identify one Issue; closing a
+    # verified, unreserved Issue does not require downloading the full backlog.
+    if issue_number is not None:
+        issue = request(repository, token, "GET", f"/issues/{int(issue_number)}")
+        if isinstance(issue, dict) and "pull_request" not in issue:
+            state = str(issue.get("state") or "").lower()
+            issue_labels = labels(issue)
+            if state == "open" and VERIFIED_LABEL in issue_labels and not (issue_labels & ACTIVE_RESERVATIONS):
+                comments = issue_comments(repository, token, int(issue_number))
+                verified, evidence_digest, promoted_sha = _verification_evidence(comments)
+                if verified:
+                    cert = _certificate(
+                        issue,
+                        reason="verified_completion",
+                        reference=None,
+                        evidence_digest=evidence_digest,
+                        promoted_sha=promoted_sha,
+                    )
+                    _post_certificate(repository, token, int(issue_number), cert)
+                    request(repository, token, "PATCH", f"/issues/{int(issue_number)}", {"state": "closed", "state_reason": "completed"})
+                    _clear_active(repository, token, int(issue_number))
+                    _seal(repository, token, int(issue_number), SEALED_COMPLETED)
+                    return {
+                        "status": "ok",
+                        "change_count": 1,
+                        "changes": [{"issue": int(issue_number), "action": "close_completed", "reason": "verified_completion"}],
+                    }
+
     issues = all_issues(repository, token)
     by_number = {int(row.get("number") or 0): row for row in issues if int(row.get("number") or 0) > 0}
     ordered = [issue_number] if issue_number else sorted(by_number)
