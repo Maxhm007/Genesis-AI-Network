@@ -39,9 +39,12 @@ jobs:
       - name: Run Forge Developer
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          OBJECTIVE: ${{ inputs.objective }}
+          SOURCE_COMMENT_ID: ${{ inputs.source_comment_id }}
+          NEXUS_ISSUE: ${{ inputs.nexus_issue }}
         run: |
           python scripts/genesis_teammate.py agent \
             --agent "forge" \
-            --objective "${{ inputs.objective }}" \
-            --source-comment-id "${{ inputs.source_comment_id }}" \
-            --nexus-issue "${{ inputs.nexus_issue }}"
+            --objective="$OBJECTIVE" \
+            --source-comment-id="$SOURCE_COMMENT_ID" \
+            --nexus-issue="$NEXUS_ISSUE"

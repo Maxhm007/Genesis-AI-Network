@@ -1,6 +1,21 @@
 name: Genesis Teammate - Nexus
 
 on:
+  pull_request:
+    paths:
+      - .github/workflows/genesis-teammate-*.yml
+      - scripts/genesis_teammate.py
+      - config/genesis_teammates.json
+      - tests/test_genesis_teammate_*.py
+      - tests/test_nexus_workflow_handoffs.py
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-teammate-*.yml
+      - scripts/genesis_teammate.py
+      - config/genesis_teammates.json
+      - tests/test_genesis_teammate_*.py
+      - tests/test_nexus_workflow_handoffs.py
   issue_comment:
     types: [created]
   workflow_dispatch:
@@ -20,6 +35,27 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate:
+    if: github.event_name == 'pull_request' || github.event_name == 'push'
+    permissions:
+      contents: read
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install Nexus test dependencies
+        run: python -m pip install -r requirements.txt
+      - name: Verify Nexus routing and workflow handoffs
+        run: >-
+          python -m pytest -q
+          tests/test_nexus_workflow_handoffs.py
+          tests/test_genesis_teammate_intent.py
+          tests/test_genesis_teammate_task_key.py
+          tests/test_genesis_teammate_autonomy.py
+
   route:
     if: >-
       (github.event_name == 'workflow_dispatch') ||
@@ -42,16 +78,19 @@ jobs:
           OWNER_LOGIN: ${{ github.event.comment.user.login }}
           COMMENT_ID: ${{ github.event.comment.id }}
           MANUAL_OBJECTIVE: ${{ inputs.objective }}
+          EVENT_NAME: ${{ github.event_name }}
+          ACTOR: ${{ github.actor }}
+          RUN_ID: ${{ github.run_id }}
         run: |
           objective="$OWNER_COMMENT"
           actor="$OWNER_LOGIN"
           cid="$COMMENT_ID"
-          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
             objective="$MANUAL_OBJECTIVE"
-            actor="${{ github.actor }}"
-            cid="manual-${{ github.run_id }}"
+            actor="$ACTOR"
+            cid="manual-$RUN_ID"
           fi
           python scripts/genesis_teammate.py nexus \
-            --objective "$objective" \
-            --actor "$actor" \
-            --source-comment-id "$cid"
+            --objective="$objective" \
+            --actor="$actor" \
+            --source-comment-id="$cid"

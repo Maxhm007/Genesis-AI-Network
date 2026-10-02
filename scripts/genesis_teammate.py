@@ -99,6 +99,13 @@ def select_autonomous_issue() -> dict | None:
             str(item.get("name") or "") if isinstance(item, dict) else str(item)
             for item in (issue.get("labels") or [])
         }
+        if labels & {
+            "genesis-verified", "genesis-waiting-capability", "genesis-needs-human",
+            "genesis-working", "genesis-verifying", "genesis-repair-in-progress",
+            "genesis-validating", "genesis-claimed", "genesis-deepseek-working",
+            "genesis-deepseek-handoff-pending",
+        }:
+            continue
         score = 0
         if "critical" in labels:
             score += 100
@@ -138,27 +145,20 @@ def autonomous_development(run_id: str) -> None:
         f"Autonomous Genesis development task from issue #{number}: {title}. "
         + (f"Context: {body[:4000]}" if body else "")
     ).strip()
-    agent = classify(objective)
+    # Acceptance criteria often mention tests/reviews regardless of the task's
+    # actual role. Route by the requested work, not incidental body keywords.
+    agent = classify(title)
     workspace = int(CONFIG["workspaces"][agent])
     workflow = str(CONFIG["workflows"][agent])
     marker = f"<!-- genesis-team-autonomous-claim:{number} -->"
 
-    comment(
-        number,
-        f"{marker}\n"
-        f"### Nexus autonomous team claim\n"
-        f"- **Assigned teammate:** {agent.title()} (workspace #{workspace})\n"
-        f"- **Nexus:** #{nexus_issue}\n"
-        "- **Mode:** independent Genesis development\n"
-        "- **Rule:** existing Agentic Lab, validation, and issue-closure authorities remain authoritative.",
-    )
     comment(
         nexus_issue,
         f"<!-- genesis-team-autonomous-route:{run_id}:{number} -->\n"
         "### Autonomous Genesis development\n"
         f"- **Source issue:** #{number} — {title}\n"
         f"- **Assigned teammate:** {agent.title()} (workspace #{workspace})\n"
-        "- **Status:** delegated without owner prompt",
+        "- **Status:** preparing delegation without owner prompt",
     )
     comment(
         workspace,
@@ -175,6 +175,15 @@ def autonomous_development(run_id: str) -> None:
             "source_comment_id": f"autonomous-{number}-{run_id}",
             "nexus_issue": str(nexus_issue),
         },
+    )
+    comment(
+        number,
+        f"{marker}\n"
+        f"### Nexus autonomous team claim\n"
+        f"- **Assigned teammate:** {agent.title()} (workspace #{workspace})\n"
+        f"- **Nexus:** #{nexus_issue}\n"
+        "- **Status:** workflow dispatched\n"
+        "- **Rule:** existing Agentic Lab, validation, and issue-closure authorities remain authoritative.",
     )
 
 
@@ -251,15 +260,18 @@ ADMIN_PHRASES = (
 def source_already_processed(source_comment_id: str) -> bool:
     """Prevent duplicate routing when a workflow is retried or replayed."""
     nexus_issue = int(CONFIG["workspaces"]["nexus"])
-    needle = f":{source_comment_id}"
     markers = (
-        "<!-- genesis-nexus-routing:",
+        "<!-- genesis-nexus-dispatched:",
         "<!-- genesis-nexus-result:",
         "<!-- genesis-nexus-team-evolution:",
     )
     return any(
-        needle in str(row.get("body") or "") and any(marker in str(row.get("body") or "") for marker in markers)
+        re.search(
+            re.escape(marker + source_comment_id) + r"(?::| -->)",
+            str(row.get("body") or ""),
+        )
         for row in issue_comments(nexus_issue)
+        for marker in markers
     )
 
 
@@ -296,10 +308,17 @@ TEAM_EVOLUTION_ACTIONS = (
 
 def is_team_evolution_request(text: str) -> bool:
     value = (text or "").lower()
-    return any(token in value for token in TEAM_EVOLUTION_ACTIONS)
+    return any(token in value for token in TEAM_EVOLUTION_ACTIONS) or bool(
+        re.search(r"\b(?:add|new|modify|change|replace|disable|enable|remove)\b[^\n.!?]{0,60}\b(?:teammate|agent|specialist)\b", value)
+    )
 
 
 def create_team_evolution_issue(objective: str, source_comment_id: str) -> int:
+    source = f"**Source comment id:** {source_comment_id}"
+    for issue in paged_get("/issues?state=open"):
+        body = str(issue.get("body") or "")
+        if "<!-- genesis-team-evolution -->" in body and source in body.splitlines():
+            return int(issue["number"])
     title = f"[Nexus Team Evolution] {clean_title(objective)}"
     body = (
         "<!-- genesis-team-evolution -->\n"
@@ -434,6 +453,22 @@ def find_open_execution_issue(task_key: str) -> int | None:
 
 
 def create_execution_issue(agent: str, objective: str, source_comment_id: str) -> int:
+    # Autonomous specialists work on the existing authoritative issue. Creating
+    # another Nexus task here duplicated the backlog without advancing it.
+    source = re.fullmatch(r"autonomous-(\d+)-.+", source_comment_id)
+    if source:
+        number = int(source.group(1))
+        issue = request("GET", f"/issues/{number}")
+        if issue.get("pull_request") or number in CONFIG["workspaces"].values():
+            raise RuntimeError("Autonomous execution requires a task issue")
+        if str(issue.get("state") or "").lower() != "open":
+            raise RuntimeError("Autonomous source issue is no longer open")
+        labels = {str(row.get("name") or "") for row in issue.get("labels") or []}
+        if not {"genesis-autonomous", "agentic-lab"} <= labels:
+            request("POST", f"/issues/{number}/labels", {
+                "labels": ["genesis-autonomous", "agentic-lab"],
+            })
+        return number
     task_key = execution_task_key(objective, source_comment_id)
     existing = find_open_execution_issue(task_key)
     if existing:
@@ -480,6 +515,7 @@ def nexus(objective: str, actor: str, source_comment_id: str) -> None:
         return
     if is_team_evolution_request(objective):
         evolution_issue = create_team_evolution_issue(objective, source_comment_id)
+        wake_agentic_lab()
         forge_issue = int(CONFIG["workspaces"]["forge"])
         comment(
             nexus_issue,
@@ -510,7 +546,7 @@ def nexus(objective: str, actor: str, source_comment_id: str) -> None:
         f"- **Request:** {objective}\n"
         f"- **Owner:** @{actor}\n"
         f"- **Assigned teammate:** **{agent.title()}** (workspace #{agent_issue})\n"
-        "- **Status:** delegated\n\n"
+        "- **Status:** preparing delegation\n\n"
         "Owner-facing updates remain in this workspace. Specialist activity is recorded in the assigned workspace and results are mirrored here.",
     )
     comment(
@@ -528,6 +564,11 @@ def nexus(objective: str, actor: str, source_comment_id: str) -> None:
             "source_comment_id": source_comment_id,
             "nexus_issue": str(nexus_issue),
         },
+    )
+    comment(
+        nexus_issue,
+        f"<!-- genesis-nexus-dispatched:{source_comment_id} -->\n"
+        f"Nexus dispatched {agent.title()}'s workflow for this request.",
     )
 
 
