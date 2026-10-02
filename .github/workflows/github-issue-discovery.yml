@@ -16,7 +16,7 @@ on:
 
 permissions:
   contents: read
-  issues: read
+  issues: write
   actions: write
 
 env:
@@ -32,7 +32,7 @@ env:
 
 concurrency:
   group: genesis-github-issue-discovery-v4
-  cancel-in-progress: true
+  cancel-in-progress: false
 
 jobs:
   policy-tests:
