@@ -169,3 +169,17 @@ def test_healthy_backlog_only_wakes_fifo_when_no_active_work(monkeypatch):
     result = module.check("owner/repo", now=NOW)
     assert result["status"] == "healthy"
     assert dispatched == ["genesis-agentic-lab-recovery.yml"]
+
+
+def test_latest_workflow_run_queries_dedicated_workflow_history(monkeypatch):
+    paths: list[str] = []
+
+    def fake_api(repository: str, path: str):
+        paths.append(path)
+        return {"workflow_runs": [{"id": 321, "name": module.CLOSURE_WORKFLOW}]}
+
+    monkeypatch.setattr(module, "_api", fake_api)
+    run = module._latest_workflow_run("owner/repo", module.CLOSURE_WORKFLOW)
+
+    assert run["id"] == 321
+    assert paths == ["actions/workflows/genesis-issue-closure-manager.yml/runs?per_page=1"]
