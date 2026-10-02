@@ -1,3 +1,4 @@
+import scripts.issue_closure_manager as module
 from scripts.issue_closure_manager import (
     CERT_MARKER,
     EVIDENCE_PATTERNS,
@@ -53,3 +54,37 @@ def test_certificate_is_machine_readable_and_verified():
 def test_certificate_marker_is_stable():
     assert CERT_MARKER == "<!-- genesis-closure-certificate -->"
     assert "full repository validation passed" in EVIDENCE_PATTERNS
+
+
+def test_single_verified_issue_closes_without_full_backlog_scan(monkeypatch):
+    issue = {
+        "number": 1039,
+        "state": "open",
+        "labels": [{"name": "genesis-verified"}],
+        "body": "",
+    }
+    calls: list[tuple[str, str]] = []
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path))
+        if method == "GET" and path == "/issues/1039":
+            return issue
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+    monkeypatch.setattr(
+        module,
+        "issue_comments",
+        lambda repository, token, number: [{"body": "Genesis verification evidence: full repository validation passed."}],
+    )
+    monkeypatch.setattr(module, "all_issues", lambda *args, **kwargs: (_ for _ in ()).throw(AssertionError("full backlog scan used")))
+    monkeypatch.setattr(module, "ensure_label", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "_post_certificate", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "_clear_active", lambda *args, **kwargs: None)
+    monkeypatch.setattr(module, "_seal", lambda *args, **kwargs: None)
+
+    result = module.reconcile("owner/repo", "token", issue_number=1039)
+
+    assert result["change_count"] == 1
+    assert result["changes"][0]["action"] == "close_completed"
+    assert ("PATCH", "/issues/1039") in calls
