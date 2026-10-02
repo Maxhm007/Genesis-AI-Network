@@ -234,9 +234,16 @@ def autonomous_development(run_id: str) -> None:
         f"{current_problem}\n\n"
         + (f"Original issue context: {body[:2500]}" if body else "")
     ).strip()
-    # Acceptance criteria often mention tests/reviews regardless of the task's
-    # actual role. Route by the requested work, not incidental body keywords.
-    agent = classify(title)
+    # Root backlog issues need an implementer first. Incidental words such as
+    # "review", "test", or "validate" in a development title must not route the
+    # whole issue directly to Sentinel. Recovery starts only when current
+    # problem evidence shows a failed/stuck execution; Sentinel remains the
+    # independent post-implementation handoff.
+    problem_lower = current_problem.lower()
+    if any(token in problem_lower for token in ("provider_timeout", "provider_error", "failed", "failure", "stuck", "blocked", "exhausted", "retry_pending")):
+        agent = "recovery"
+    else:
+        agent = "forge"
     workspace = int(CONFIG["workspaces"][agent])
     workflow = str(CONFIG["workflows"][agent])
     marker = f"<!-- genesis-team-autonomous-claim:{number} -->"
