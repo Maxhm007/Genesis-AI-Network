@@ -240,9 +240,11 @@ def _lane_routable_issues(repository: str, token: str) -> list[dict]:
     # Service a recovery lane first when it is free, then normal development.
     # reserve_and_dispatch() is called repeatedly; after each reservation the
     # freshly applied active label makes the next call select another lane.
-    if recovery_free and recovery_candidates:
+    if recovery_free and development_free:
+        return recovery_candidates + development_candidates
+    if recovery_free:
         return recovery_candidates
-    if development_free and development_candidates:
+    if development_free:
         return development_candidates
     return []
 
