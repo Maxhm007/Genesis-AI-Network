@@ -110,6 +110,8 @@ RECOVERY_ENGINE_PATHS = (
 # validate, so exhausted strategies must be re-armed. Controller-only edits are
 # deliberately excluded so orchestration refactors do not erase retry history.
 REPAIR_EXECUTION_PATHS = (
+    "scripts/local_reasoning_provider.py",
+    "scripts/pulse_coding_provider.py",
     "scripts/agentic_strategy_repair.py",
     "scripts/github_issue_autorepair.py",
     "genesis/coding.py",

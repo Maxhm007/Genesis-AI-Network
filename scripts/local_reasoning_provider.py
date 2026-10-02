@@ -3,6 +3,7 @@ from __future__ import annotations
 import argparse
 import json
 import os
+import re
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 DEFAULT_MODEL = "Qwen/Qwen3-0.6B"
@@ -20,6 +21,50 @@ MULTILINE_EDIT_PREFIX = "EDIT_BLOCK|"
 MULTILINE_EDIT_END_MARKER = "END_EDIT"
 SINGLE_LINE_EDIT_PREFIX = "EDIT|"
 COMPACT_EDIT_END_MARKER = "END_NEW"
+ARCHITECTURE_ROLE = "Genesis bounded architecture module implementer"
+
+
+def simplify_architecture_prompt(prompt: str) -> str:
+    if _prompt_role(prompt) != ARCHITECTURE_ROLE:
+        return prompt
+    match = re.search(r"(?m)^PLANNED_NEW_PATH: (.+)$", prompt)
+    if match is None:
+        return prompt
+    path = match.group(1).strip()
+    test = "tests/test_" + path.rsplit("/", 1)[-1].removesuffix(".py") + ".py"
+    rows = [line for line in prompt.splitlines() if not line.startswith(("OUTPUT: Return one JSON object", "The files object must contain exactly these two keys:"))]
+    rows.insert(2, (
+        "OUTPUT: Do not use JSON or markdown. Return exactly two FILE_BLOCKs with complete source; "
+        "each ends with END_FILE on its own line, and END_FILES ends the entire response. "
+        "Preserve existing tests exactly and append a regression test exercising the issue behavior. "
+        "Import new modules inside the test, converting ModuleNotFoundError to an assertion failure.\n"
+        f"FILE_BLOCK|{path}\n<complete production source>\nEND_FILE\n"
+        f"FILE_BLOCK|{test}\n<complete regression test source>\nEND_FILE\nEND_FILES"
+    ))
+    return "\n".join(rows)
+
+
+def parse_architecture_files(text: str) -> dict:
+    rows = text.strip().splitlines()
+    files = {}
+    index = 0
+    while index < len(rows) and rows[index] != "END_FILES":
+        if not rows[index].startswith("FILE_BLOCK|"):
+            raise ValueError("architecture output requires FILE_BLOCK headers")
+        path = rows[index].removeprefix("FILE_BLOCK|")
+        if not re.fullmatch(r"(?:genesis|tests)/[A-Za-z0-9_/]+\.py", path) or path in files:
+            raise ValueError("architecture output has an invalid or duplicate path")
+        index += 1
+        start = index
+        while index < len(rows) and rows[index] != "END_FILE":
+            index += 1
+        if index == len(rows) or index == start:
+            raise ValueError("architecture file is empty or unterminated")
+        files[path] = "\n".join(rows[start:index]) + "\n"
+        index += 1
+    if index != len(rows) - 1 or len(files) != 2 or rows[index] != "END_FILES":
+        raise ValueError("architecture response requires two complete files and END_FILES")
+    return {"files": files}
 
 
 def _prompt_role(prompt: str) -> str | None:
@@ -314,6 +359,12 @@ def compact_edit_block_complete(text: str) -> bool:
 
 def bounded_coding_output_complete(text: str) -> bool:
     """Recognize preferred bounded output first, then compatibility formats."""
+    if text.lstrip().startswith("FILE_BLOCK|"):
+        try:
+            parse_architecture_files(text)
+        except ValueError:
+            return False
+        return True
     stripped = text.lstrip()
     if stripped.startswith(MULTILINE_EDIT_PREFIX):
         return multiline_edit_block_complete(text)
@@ -432,6 +483,7 @@ class LocalReasoningModel:
         initial_role_budget = role_token_budget(prompt)
         completion_role_budget = role_completion_budget(prompt)
         prompt = simplify_bounded_coding_prompt(prompt)
+        prompt = simplify_architecture_prompt(prompt)
         prompt = compact_prompt(prompt)
         messages = [
             {"role": "system", "content": system},
@@ -485,6 +537,8 @@ class LocalReasoningModel:
                 decoded = decoded_raw.strip()
                 generated_tokens = int(generated.shape[-1])
                 ended_with_eos = bool(generated.shape[-1]) and eos_token_id is not None and int(generated[-1]) == int(eos_token_id)
+        if role == ARCHITECTURE_ROLE and decoded.lstrip().startswith("FILE_BLOCK|"):
+            return json.dumps(parse_architecture_files(decoded))
         if role == "bounded_coding_engineer":
             allow_unterminated = ended_with_eos or single_line_edit_complete(decoded_raw)
             return normalize_bounded_coding_output(
