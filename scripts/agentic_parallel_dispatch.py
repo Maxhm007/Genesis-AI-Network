@@ -16,11 +16,21 @@ except ModuleNotFoundError:
 from genesis.issue_governor import issue_value_score
 
 
-# Genesis owns exactly one authoritative issue at a time.  The historical
-# parallel dispatcher name is kept for compatibility with existing workflows
-# and tests, but dispatch capacity is intentionally hard-limited to one.
-MAX_PARALLEL = 1
-SEQUENTIAL_FOCUS_LABEL = "genesis-sequential-focus"
+# Genesis keeps three bounded execution lanes: two normal development lanes
+# plus one recovery/capability lane. Issues targeting the same file/module are
+# never admitted together, so parallelism cannot create same-target edits.
+DEVELOPMENT_SLOTS = 2
+RECOVERY_SLOTS = 1
+MAX_PARALLEL = DEVELOPMENT_SLOTS + RECOVERY_SLOTS
+SEQUENTIAL_FOCUS_LABEL = "genesis-sequential-focus"  # deprecated compatibility label
+
+RECOVERY_LABELS = {
+    "genesis-solver-exhausted",
+    "genesis-capability-gap",
+    "genesis-blocked",
+    "genesis-needs-routing",
+    "genesis-waiting-capability",
+}
 
 if "qwen3_fallback" not in agentic.STRATEGIES:
     agentic.STRATEGIES = (*agentic.STRATEGIES, "qwen3_fallback")
@@ -171,76 +181,75 @@ def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
     return ordered
 
 
-def _sequential_routable_issues(repository: str, token: str) -> list[dict]:
-    """Return only the one issue Genesis currently owns.
+def _is_recovery_issue(issue: dict) -> bool:
+    labels = agentic.labels(issue)
+    title = str(issue.get("title") or "").strip().lower()
+    body = str(issue.get("body") or "").lower()
+    return bool(
+        labels & RECOVERY_LABELS
+        or title.startswith("genesis action failure:")
+        or "action-failure-watcher" in body
+        or "<!-- genesis-capability-work:" in body
+    )
 
-    A focus survives unsuccessful attempts, provider switches, and controller
-    wake-ups.  Genesis may choose a different issue only after the focused issue
-    is no longer open/authoritative (normally because it was verified/closed).
+
+def _lane_routable_issues(repository: str, token: str) -> list[dict]:
+    """Return work for the first free bounded lane without target collisions.
+
+    Development work can occupy two lanes. Recovery/capability work has one
+    reserved lane so broken automation cannot consume all development capacity.
+    Every active target acts as a lock: another issue with that exact target is
+    skipped until the owner leaves its active/validation state.
     """
     all_open = policy._all_open_issues_fifo(repository, token)
-    focused = [
-        issue
-        for issue in all_open
-        if SEQUENTIAL_FOCUS_LABEL in agentic.labels(issue)
-        and str(issue.get("state") or "").lower() != "closed"
-        and "genesis-verified" not in agentic.labels(issue)
-    ]
-    if focused:
-        focused.sort(key=lambda issue: (_created_at(issue), int(issue.get("number") or 0)))
-        parent = focused[0]
+    active_labels = (set(agentic.ACTIVE_LABELS) - {"genesis-deepseek-handoff-pending"}) | {
+        "genesis-claimed",
+        "genesis-deepseek-working",
+    }
+    active = [issue for issue in all_open if agentic.labels(issue) & active_labels]
 
-        # Sequential ownership is a chain, not a deadlock. If the focused
-        # parent is paused on a capability dependency, execute that dependency
-        # as the only temporary child of the same chain while keeping the
-        # parent as the authoritative focus. Unrelated backlog work remains
-        # ineligible until the dependency is verified and the parent resumes.
-        comments = policy._all_issue_comments(
-            repository,
-            token,
-            int(parent.get("number") or 0),
-        )
-        dependency = agentic.unresolved_capability_dependency(comments)
-        if dependency:
-            by_number = {
-                int(issue.get("number") or 0): issue
-                for issue in all_open
-                if int(issue.get("number") or 0) > 0
-            }
-            capability = by_number.get(int(dependency))
-            if capability is not None:
-                capability_labels = agentic.labels(capability)
-                if (
-                    str(capability.get("state") or "").lower() != "closed"
-                    and "genesis-verified" not in capability_labels
-                    and policy._actionable(capability)
-                ):
-                    return [capability]
+    active_recovery = sum(1 for issue in active if _is_recovery_issue(issue))
+    active_development = sum(1 for issue in active if not _is_recovery_issue(issue))
+    recovery_free = max(0, RECOVERY_SLOTS - active_recovery)
+    development_free = max(0, DEVELOPMENT_SLOTS - active_development)
 
-        return [parent]
+    locked_targets = {
+        agentic.explicit_target(str(issue.get("body") or ""))
+        for issue in active
+        if agentic.explicit_target(str(issue.get("body") or ""))
+    }
 
-    candidates = _parallel_routable_issues(repository, token)
-    if not candidates:
-        return []
+    ordered = _parallel_routable_issues(repository, token)
+    recovery_candidates: list[dict] = []
+    development_candidates: list[dict] = []
+    seen_targets = set(locked_targets)
 
-    selected = candidates[0]
-    number = int(selected.get("number") or 0)
-    if number > 0:
-        agentic.ensure_label(
-            repository,
-            token,
-            SEQUENTIAL_FOCUS_LABEL,
-            "1d76db",
-            "Single authoritative issue Genesis must finish before selecting another",
-        )
-        agentic.request(
-            repository,
-            token,
-            "POST",
-            f"/issues/{number}/labels",
-            {"labels": [SEQUENTIAL_FOCUS_LABEL]},
-        )
-    return [selected]
+    for issue in ordered:
+        if agentic.labels(issue) & active_labels:
+            continue
+        target = agentic.explicit_target(str(issue.get("body") or ""))
+        if target and target in seen_targets:
+            continue
+        if target:
+            seen_targets.add(target)
+        if _is_recovery_issue(issue):
+            recovery_candidates.append(issue)
+        else:
+            development_candidates.append(issue)
+
+    # Service a recovery lane first when it is free, then normal development.
+    # reserve_and_dispatch() is called repeatedly; after each reservation the
+    # freshly applied active label makes the next call select another lane.
+    if recovery_free and recovery_candidates:
+        return recovery_candidates
+    if development_free and development_candidates:
+        return development_candidates
+    return []
+
+
+def _sequential_routable_issues(repository: str, token: str) -> list[dict]:
+    """Compatibility alias for older callers; scheduling is no longer global-serial."""
+    return _lane_routable_issues(repository, token)
 
 
 def _live_agentic_worker_exists(repository: str, token: str) -> bool:
@@ -331,78 +340,36 @@ def main() -> int:
         raise RuntimeError("GITHUB_REPOSITORY and GITHUB_TOKEN are required")
 
     agentic.issue_comments = policy._all_issue_comments
-    agentic.open_agentic_issues = _sequential_routable_issues
+    agentic.open_agentic_issues = _lane_routable_issues
     agentic.next_strategy = policy._least_recently_used_strategy
 
-    # Do not override capability escalation here. When every materially different
-    # repair strategy reports a capability blocker, the canonical Agentic recovery
-    # layer must pause the parent and create/reuse one bounded capability Issue.
-    # The former same-Issue override forced endless retries and could never converge.
     all_open = policy._all_open_issues_fifo(repository, token)
-    focused_chain = any(
-        SEQUENTIAL_FOCUS_LABEL in agentic.labels(issue)
-        and str(issue.get("state") or "").lower() != "closed"
-        and "genesis-verified" not in agentic.labels(issue)
-        for issue in all_open
-    )
+    restored = policy._restore_agentic_visibility(repository, token, all_open)
+    terminalized = policy._terminalize_non_actionable_issues(repository, token, all_open)
+    if terminalized:
+        all_open = policy._all_open_issues_fifo(repository, token)
+    released = agentic.release_ready_capability_dependencies(repository, token)
 
-    # The authoritative sequential chain always gets first service. Repository-
-    # wide cleanup/decomposition is maintenance, not a prerequisite to solving
-    # the one issue Genesis already owns. Running broad maintenance first made a
-    # simple handoff spend minutes scanning unrelated issues and allowed stale
-    # routing work to interfere with the focused parent/dependency chain.
-    # Clear only provably abandoned focus claims before plan reconciliation.
-    # Otherwise stale active labels can suppress the repair and be dispatched
-    # again with incomplete metadata in this same controller invocation.
-    stale_reservations_reclaimed = _reclaim_stale_sequential_reservation(repository, token)
-    if focused_chain:
-        restored: list[int] = []
-        terminalized: list[int] = []
-        released: list[int] = []
-        decomposition_steps: list[dict] = []
-        decomposition = {"status": "skipped", "reason": "sequential_focus_has_priority"}
-        # Maintenance for the owned dependency chain is part of solving it.
-        # Skipping a requested reroute here strands an exhausted capability
-        # forever, even though the unrelated backlog must remain untouched.
-        chain = _sequential_routable_issues(repository, token)
-        if chain and not _live_agentic_worker_exists(repository, token):
-            owned = chain[0]
-            target = agentic.explicit_target(str(owned.get("body") or ""))
-            body = str(owned.get("body") or "")
-            incomplete_architecture = (
-                target.startswith("genesis/architecture_extensions/")
-                and "<!-- genesis-architecture-plan:" not in body
-            )
-            if incomplete_architecture or "genesis-needs-routing" in agentic.labels(owned) or not agentic.safe_lane(target):
-                decomposition = policy._decompose_oldest_issue(repository, token, chain)
-                decomposition_steps.append(decomposition)
-    else:
-        restored = policy._restore_agentic_visibility(repository, token, all_open)
-        terminalized = policy._terminalize_non_actionable_issues(repository, token, all_open)
-        if terminalized:
-            all_open = policy._all_open_issues_fifo(repository, token)
-        released = agentic.release_ready_capability_dependencies(repository, token)
-
-        # Reconcile/decompose architecture work only when Genesis is selecting a
-        # new authoritative chain. Once focus exists, target/routing maintenance
-        # cannot preempt that chain.
-        decomposition_steps = []
-        seen_decomposition_actions: set[tuple[str, int, str]] = set()
-        for _ in range(12):
-            step = policy._decompose_oldest_issue(repository, token, all_open)
-            key = (
-                str(step.get("status") or ""),
-                int(step.get("issue_number") or 0),
-                str(step.get("target") or step.get("previous_target") or ""),
-            )
-            if key in seen_decomposition_actions:
-                break
-            seen_decomposition_actions.add(key)
-            decomposition_steps.append(step)
-            if step.get("status") not in {"decomposed", "retargeted", "target_revoked", "routing_released"}:
-                break
-            all_open = policy._all_open_issues_fifo(repository, token)
-        decomposition = decomposition_steps[-1] if decomposition_steps else {"status": "idle"}
+    # Routing/decomposition is bounded per controller pass. Three steps are
+    # enough to prepare one candidate per execution lane without turning every
+    # wake-up into a repository-wide maintenance scan.
+    decomposition_steps: list[dict] = []
+    seen_decomposition_actions: set[tuple[str, int, str]] = set()
+    for _ in range(MAX_PARALLEL):
+        step = policy._decompose_oldest_issue(repository, token, all_open)
+        key = (
+            str(step.get("status") or ""),
+            int(step.get("issue_number") or 0),
+            str(step.get("target") or step.get("previous_target") or ""),
+        )
+        if key in seen_decomposition_actions:
+            break
+        seen_decomposition_actions.add(key)
+        decomposition_steps.append(step)
+        if step.get("status") not in {"decomposed", "retargeted", "target_revoked", "routing_released"}:
+            break
+        all_open = policy._all_open_issues_fifo(repository, token)
+    decomposition = decomposition_steps[-1] if decomposition_steps else {"status": "idle"}
 
     active_before = _active_issue_numbers(repository, token)
     free_slots = max(0, MAX_PARALLEL - len(active_before))
@@ -415,10 +382,11 @@ def main() -> int:
         dispatched.append(result)
 
     result = {
-        "status": "sequential_dispatch_complete",
+        "status": "parallel_dispatch_complete",
         "max_parallel": MAX_PARALLEL,
+        "development_slots": DEVELOPMENT_SLOTS,
+        "recovery_slots": RECOVERY_SLOTS,
         "active_before": active_before,
-        "stale_reservations_reclaimed": stale_reservations_reclaimed,
         "dispatched": [row.get("issue_number") for row in dispatched],
         "active_after": _active_issue_numbers(repository, token),
         "legacy_dependencies_released": released,
