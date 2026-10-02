@@ -22,6 +22,41 @@ def _issue(number: int, created_at: str, *, labels=(), body=""):
     }
 
 
+@pytest.mark.parametrize("status", ["queued", "in_progress", "waiting", "pending", "requested"])
+@pytest.mark.parametrize("workflow", [
+    "genesis-agentic-strategy-worker.yml",
+    "genesis-deepseek-agentic-solver.yml",
+    "genesis-bounded-repair-worker.yml",
+])
+def test_live_worker_with_dynamic_run_name_prevents_reservation_reclaim(monkeypatch, status, workflow):
+    def request(repository, token, method, path, *args):
+        return {"workflow_runs": [{
+            "name": "Issue #867 — evidence_first",
+            "path": f".github/workflows/{workflow}@refs/heads/main",
+        }]} if f"status={status}&" in path else {"workflow_runs": []}
+
+    monkeypatch.setattr(module.agentic, "request", request)
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: pytest.fail("live worker must keep its reservation"))
+    assert module._live_agentic_worker_exists("owner/repo", "token")
+    assert module._reclaim_stale_sequential_reservation("owner/repo", "token") == []
+
+
+def test_unrelated_live_workflow_does_not_block_recovery(monkeypatch):
+    monkeypatch.setattr(module.agentic, "request", lambda *args: {"workflow_runs": [{
+        "name": "Genesis Agentic Lab Recovery",
+        "path": ".github/workflows/genesis-agentic-lab-recovery.yml",
+    }]})
+    assert not module._live_agentic_worker_exists("owner/repo", "token")
+
+
+def test_actions_visibility_failure_keeps_worker_reservation(monkeypatch):
+    def unavailable(*args):
+        raise RuntimeError("Actions unavailable")
+
+    monkeypatch.setattr(module.agentic, "request", unavailable)
+    assert module._live_agentic_worker_exists("owner/repo", "token")
+
+
 def test_dependency_unlock_count_tracks_shared_capability_parent_links():
     issues = [
         _issue(100, "2026-09-20T00:00:00Z"),
