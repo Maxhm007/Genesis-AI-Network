@@ -9,6 +9,7 @@ from pathlib import Path
 
 from .intelligence_router import IntelligenceRouter
 from .memory import GenesisMemory
+from .architecture_decomposer import validate_architecture_source
 from .providers import IntelligenceProvider, ProviderRegistry
 from .self_learning import SelfLearningStore
 from .selfdev import SelfDevelopmentExecutor, SelfDevResult
@@ -425,6 +426,8 @@ class CodingModule:
         if not all(isinstance(content, str) for content in files.values()):
             raise ValueError("coding proposal contents must be text")
         for path, content in files.items():
+            if str(path).startswith("genesis/architecture_extensions/"):
+                validate_architecture_source(content)
             if str(path).endswith(".py"):
                 try:
                     ast.parse(content, filename=str(path))

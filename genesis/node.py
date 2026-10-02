@@ -251,12 +251,15 @@ class GenesisNode:
             "master_ai_objective": self.identity.master_ai_objective,
             "ai_team": self.team.roster(),
         })
-        cycle = 0
+        checkpoint = self.conn.execute("SELECT value FROM node_state WHERE key='cycle'").fetchone()
+        cycle = int(checkpoint[0]) if checkpoint else 0
+        completed_cycles = 0
         try:
-            while cycles is None or cycle < cycles:
+            while cycles is None or completed_cycles < cycles:
                 cycle += 1
                 self.heartbeat(cycle)
-                if cycles is None or cycle < cycles:
+                completed_cycles += 1
+                if cycles is None or completed_cycles < cycles:
                     time.sleep(interval_seconds)
         finally:
             self.audit("node_stopped", {"last_cycle": cycle})

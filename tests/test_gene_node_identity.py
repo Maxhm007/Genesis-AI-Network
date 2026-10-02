@@ -43,3 +43,24 @@ def test_core_node_status_knows_gene_nickname_and_plan(tmp_path: Path) -> None:
         assert payload["system_plan"][0]["name"] == "Self-mastery"
     finally:
         node.conn.close()
+
+
+def test_node_resumes_checkpoint_without_provider_or_research(tmp_path, monkeypatch):
+    import sqlite3
+    from genesis.research import ResearchEngine
+    root = _root(tmp_path)
+    db_path = root / 'state/test.db'
+    def unavailable(*args, **kwargs):
+        raise RuntimeError('research service unavailable')
+    monkeypatch.setattr(ResearchEngine, 'longevity_scan', unavailable)
+    for cycles in (2, 1):
+        node = GenesisNode(root, db_path=db_path, providers=ProviderRegistry(include_bootstrap=False))
+        node.run(interval_seconds=0, cycles=cycles)
+    with sqlite3.connect(db_path) as conn:
+        state = dict(conn.execute('SELECT key, value FROM node_state'))
+        assert state['cycle'] == '3'
+        assert state['operating_mode'] == 'maintenance'
+        heartbeats = [json.loads(row[0]) for row in conn.execute("SELECT payload FROM audit_log WHERE event='heartbeat' ORDER BY id")]
+        assert [row['cycle'] for row in heartbeats] == [1, 2, 3]
+        assert all(row['research']['errors'] == ['research service unavailable'] for row in heartbeats)
+        assert conn.execute("SELECT count(*) FROM audit_log WHERE event='constitution_verified'").fetchone()[0] == 2

@@ -1,9 +1,31 @@
 from __future__ import annotations
 
 import hashlib
+import ast
 import re
 from dataclasses import dataclass
 from pathlib import Path
+
+
+def validate_architecture_source(source: str) -> None:
+    """Reject non-executable scaffolds before they can become trusted modules."""
+    tree = ast.parse(source)
+    functions = [node for node in ast.walk(tree) if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))]
+    if not functions:
+        raise ValueError("architecture module must implement a callable capability")
+    for function in functions:
+        operations = [node for statement in function.body for node in ast.walk(statement)]
+        if not any(
+            isinstance(node, (ast.Call, ast.Assign, ast.AugAssign, ast.Raise))
+            or (isinstance(node, ast.Return) and node.value is not None and not (isinstance(node.value, ast.Constant) and node.value.value is None))
+            for node in operations
+        ):
+            raise ValueError("architecture callable has no implemented behavior")
+    for node in ast.walk(tree):
+        if isinstance(node, ast.Pass) or (isinstance(node, ast.Constant) and node.value is Ellipsis):
+            raise ValueError("architecture module contains a placeholder")
+        if isinstance(node, ast.Name) and node.id == "NotImplementedError":
+            raise ValueError("architecture module contains an unimplemented capability")
 
 
 @dataclass(frozen=True)

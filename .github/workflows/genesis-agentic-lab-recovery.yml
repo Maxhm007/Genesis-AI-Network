@@ -9,6 +9,8 @@ on:
       - scripts/agentic*.py
       - tests/test_agentic*.py
       - genesis/communication_server.py
+      - genesis/node.py
+      - tests/test_gene_node_identity.py
       - web/index.html
       - '**/team-chat/index.html'
   issues:

@@ -353,6 +353,15 @@ jobs:
               fi
             fi
             python -m py_compile "$TARGET"
+            if [[ "$TARGET" == genesis/architecture_extensions/*.py ]]; then
+              python -c 'from pathlib import Path; import sys; from genesis.architecture_decomposer import validate_architecture_source; validate_architecture_source(Path(sys.argv[1]).read_text())' "$TARGET"
+            fi
+            if grep -q '<!-- genesis-architecture-plan:' /tmp/genesis-agentic-issue-body.md; then
+              python scripts/issue_acceptance_guard.py \
+                --base-ref HEAD^ \
+                --repository "$GITHUB_REPOSITORY" \
+                --issue-number "$ISSUE_NUMBER"
+            fi
             if [[ -f "$target_test" ]]; then python -m pytest -q "$target_test"; fi
             python -m pytest -q
             git fetch origin main
