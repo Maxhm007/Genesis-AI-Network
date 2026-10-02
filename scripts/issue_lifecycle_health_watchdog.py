@@ -173,28 +173,31 @@ def _heal_actions(assessment: dict, repository: str) -> dict:
 
 
 def _persistent_fault(assessment: dict, *, opening_max_age_minutes: int, closure_max_age_minutes: int, verified_open_grace_minutes: int) -> bool:
+    faults = list(assessment.get("faults") or [])
     evidence = assessment.get("evidence") or {}
-    opening = evidence.get("opening_run") or {}
-    closing = evidence.get("closing_run") or {}
-    try:
-        if float(opening.get("age_minutes") or 0) > opening_max_age_minutes * 2:
-            return True
-    except (TypeError, ValueError):
-        pass
-    try:
-        if float(closing.get("age_minutes") or 0) > closure_max_age_minutes * 2:
-            return True
-    except (TypeError, ValueError):
-        pass
+
+    # A stale timestamp alone is not a persistent defect. GitHub scheduled
+    # workflows may be delayed, and Closure Manager is now primarily event-driven.
+    # The watchdog should self-heal stale managers by dispatching them, then only
+    # escalate when there is concrete execution failure or verified work remains
+    # stuck after the manager has otherwise been running.
+    if any(
+        "_latest_run_failure" in fault
+        or "_latest_run_cancelled" in fault
+        or "_latest_run_timed_out" in fault
+        for fault in faults
+    ):
+        return True
+
     if evidence.get("verified_open_issues_past_grace"):
-        # These are already beyond one grace period. Treat them as persistent only
-        # when the closure manager itself is stale/failed; otherwise one direct
-        # closure-manager wakeup is enough for this pass.
-        return any(fault.startswith("closing_manager_") for fault in assessment.get("faults") or [])
-    return any(
-        "_latest_run_failure" in fault or "_latest_run_cancelled" in fault or "_latest_run_timed_out" in fault
-        for fault in assessment.get("faults") or []
-    )
+        closing_failed = any(
+            fault.startswith("closing_manager_latest_run_")
+            and not fault.endswith("success")
+            for fault in faults
+        )
+        return closing_failed
+
+    return False
 
 
 def _existing_open_watchdog(issues: list[dict]) -> dict | None:
