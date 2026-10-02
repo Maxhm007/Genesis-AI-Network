@@ -54,7 +54,9 @@ permissions:
   issues: write
 
 concurrency:
-  group: genesis-agentic-lab-recovery
+  group: ${{ github.event_name == 'pull_request' && format('genesis-agentic-lab-recovery-pr-{0}', github.event.pull_request.number) || 'genesis-agentic-lab-recovery' }}
+  # PR validation has no dispatch authority and must not compete with live
+  # Recovery wake-ups for the single pending controller slot.
   # Keep exactly one authoritative Recovery controller running at a time, but
   # never kill active recovery work when another wake-up arrives. GitHub may
   # coalesce/replace pending wake-ups, while the in-progress controller is
