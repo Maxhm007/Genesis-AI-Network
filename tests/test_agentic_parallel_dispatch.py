@@ -311,3 +311,40 @@ def test_legacy_sequential_entrypoint_uses_parallel_lane_selector(monkeypatch):
     expected = [_issue(31, "2026-09-20T00:00:00Z")]
     monkeypatch.setattr(module, "_lane_routable_issues", lambda *args: expected)
     assert module._sequential_routable_issues("owner/repo", "token") == expected
+
+
+def test_main_skips_noop_candidate_and_continues_filling_lanes(monkeypatch):
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    candidates = [
+        _issue(867, "2026-09-18T00:00:00Z", body="- **Target:** `genesis/health.py`"),
+        _issue(992, "2026-09-29T00:00:00Z", body="- **Target:** `genesis/learned_capabilities.py`"),
+        _issue(874, "2026-09-18T01:00:00Z", body="- **Target:** `genesis/capability_routing.py`"),
+    ]
+
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: candidates)
+    monkeypatch.setattr(module.policy, "_restore_agentic_visibility", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_terminalize_non_actionable_issues", lambda *args: [])
+    monkeypatch.setattr(module.agentic, "release_ready_capability_dependencies", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_decompose_oldest_issue", lambda *args: {"status": "idle"})
+    monkeypatch.setattr(module, "_active_issue_numbers", lambda *args: [])
+    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args: candidates)
+
+    seen = []
+    def dispatch(repo, token):
+        available = module.agentic.open_agentic_issues(repo, token)
+        number = available[0]["number"] if available else 0
+        seen.append(number)
+        if number == 867:
+            return {
+                "status": "capability_escalation_already_ready",
+                "issue_number": 867,
+                "reason": "retry_pending_capability",
+            }
+        if number:
+            return {"status": "dispatched", "issue_number": number}
+        return {"status": "idle", "reason": "no_safely_routable_agentic_issue"}
+
+    monkeypatch.setattr(module.agentic, "reserve_and_dispatch", dispatch)
+    assert module.main() == 0
+    assert seen[:3] == [867, 992, 874]
