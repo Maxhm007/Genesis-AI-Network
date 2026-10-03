@@ -342,7 +342,16 @@ def main() -> int:
         raise RuntimeError("GITHUB_REPOSITORY and GITHUB_TOKEN are required")
 
     agentic.issue_comments = policy._all_issue_comments
-    agentic.open_agentic_issues = _lane_routable_issues
+    skipped_this_pass: set[int] = set()
+
+    def routable_without_noops(repo: str, gh_token: str) -> list[dict]:
+        return [
+            issue
+            for issue in _lane_routable_issues(repo, gh_token)
+            if int(issue.get("number") or 0) not in skipped_this_pass
+        ]
+
+    agentic.open_agentic_issues = routable_without_noops
     agentic.next_strategy = policy._least_recently_used_strategy
 
     all_open = policy._all_open_issues_fifo(repository, token)
@@ -377,11 +386,37 @@ def main() -> int:
     free_slots = max(0, MAX_PARALLEL - len(active_before))
     dispatched: list[dict] = []
 
-    for _ in range(free_slots):
+    noops: list[dict] = []
+    attempts = 0
+    max_attempts = max(MAX_PARALLEL, len(_parallel_routable_issues(repository, token)))
+
+    while len(dispatched) < free_slots and attempts < max_attempts:
+        attempts += 1
         result = agentic.reserve_and_dispatch(repository, token)
-        if not isinstance(result, dict) or result.get("status") != "dispatched":
+        if not isinstance(result, dict):
             break
-        dispatched.append(result)
+        if result.get("status") == "dispatched":
+            dispatched.append(result)
+            continue
+
+        issue_number = int(result.get("issue_number") or 0)
+        noops.append({
+            "issue_number": issue_number or None,
+            "status": result.get("status"),
+            "reason": result.get("reason"),
+        })
+
+        # A candidate can legitimately produce a bounded no-op (for example a
+        # capability dependency is already ready). That must not starve other
+        # independent lanes. Exclude only that candidate for this controller
+        # pass, then continue scanning the ranked backlog.
+        if issue_number > 0 and issue_number not in skipped_this_pass:
+            skipped_this_pass.add(issue_number)
+            continue
+
+        # An idle/no-candidate result has nothing concrete to skip, so the
+        # current admission pass is exhausted.
+        break
 
     result = {
         "status": "parallel_dispatch_complete",
@@ -390,6 +425,9 @@ def main() -> int:
         "recovery_slots": RECOVERY_SLOTS,
         "active_before": active_before,
         "dispatched": [row.get("issue_number") for row in dispatched],
+        "skipped_noop_candidates": sorted(skipped_this_pass),
+        "noop_results": noops,
+        "dispatch_attempts": attempts,
         "active_after": _active_issue_numbers(repository, token),
         "legacy_dependencies_released": released,
         "capability_escalation": "enabled",
