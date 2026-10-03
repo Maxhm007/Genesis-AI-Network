@@ -7,6 +7,8 @@ on:
     paths:
       - .github/workflows/genesis-agentic-lab-recovery.yml
       - scripts/agentic*.py
+      - scripts/local_reasoning_provider.py
+      - tests/test_local_reasoning*.py
       - tests/test_agentic*.py
       - genesis/communication_server.py
       - genesis/node.py
@@ -39,6 +41,7 @@ on:
       - scripts/capability_issue_priority_dispatch.py
       - scripts/requeue_exhausted_issues.py
       - scripts/pulse_coding_provider.py
+      - scripts/local_reasoning_provider.py
       - genesis/github_issue_capability_builder.py
       - genesis/anti_stuck.py
       - genesis/architecture_decomposer.py
