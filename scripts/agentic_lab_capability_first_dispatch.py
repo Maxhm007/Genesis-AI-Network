@@ -130,18 +130,31 @@ def _restore_agentic_visibility(repository: str, token: str, issues: list[dict])
     restored: list[int] = []
     for issue in issues:
         number = int(issue.get("number") or 0)
-        if number <= 1 or _persistent_control_issue(issue) or _infra_quarantined(repository, token, number):
+        if number <= 1 or _persistent_control_issue(issue):
             continue
+
         labels = agentic.labels(issue)
         missing = []
         if agentic.AGENTIC_LABEL not in labels:
             missing.append(agentic.AGENTIC_LABEL)
         if "genesis-autonomous" not in labels:
             missing.append("genesis-autonomous")
+
+        # Most open Issues are already visible to Agentic Lab. Avoid reading
+        # their complete comment histories on every recovery heartbeat merely
+        # to re-prove that fact. Comment history is only needed when visibility
+        # actually requires a repair or a legacy deferred label must be cleared.
+        needs_visibility_repair = bool(missing) or "genesis-deferred" in labels
+        if not needs_visibility_repair:
+            continue
+
+        if _infra_quarantined(repository, token, number):
+            continue
         if missing:
             agentic.request(repository, token, "POST", f"/issues/{number}/labels", {"labels": missing})
             restored.append(number)
-        agentic.remove_label(repository, token, number, "genesis-deferred")
+        if "genesis-deferred" in labels:
+            agentic.remove_label(repository, token, number, "genesis-deferred")
     return restored
 
 
