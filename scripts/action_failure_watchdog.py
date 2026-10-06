@@ -580,6 +580,34 @@ def retry_once(repository: str, *, runner: Runner = _default_runner) -> dict:
         if not isinstance(run, dict):
             continue
         if str(run.get("status") or "") == "completed" and str(run.get("conclusion") or "") in FAILURE_CONCLUSIONS and int(run.get("run_attempt") or 1) < 2:
+            # GitHub can report a runner/workflow startup failure before creating
+            # any job. Such runs have no repairable repository evidence and the
+            # Actions API may refuse a rerun entirely. Treat that narrow case as
+            # transient infrastructure noise instead of feeding a false code
+            # repair task into Agentic Lab forever.
+            if str(run.get("conclusion") or "") == "startup_failure":
+                jobs_payload = _run_json(runner, ["gh", "api", f"repos/{repository}/actions/runs/{run_id}/jobs?per_page=1"])
+                jobs = list(jobs_payload.get("jobs") or []) if isinstance(jobs_payload, dict) else []
+                if not jobs:
+                    issue_number = int(issue["number"])
+                    _edit_issue_labels(
+                        repository,
+                        issue_number,
+                        add=["genesis-action-transient"],
+                        remove=["genesis-action-retry", "genesis-action-autonomous", "genesis-action-blocked"],
+                        runner=runner,
+                    )
+                    _close_issue(
+                        repository,
+                        issue_number,
+                        comment=(
+                            "Genesis classified this as a transient GitHub Actions startup failure: "
+                            "the run completed before any job was created, so there is no repository "
+                            "repair evidence and no failed job to rerun."
+                        ),
+                        runner=runner,
+                    )
+                    return {"status": "closed_transient_startup", "run_id": run_id, "issue_number": issue_number}
             result = runner(["gh", "run", "rerun", str(run_id), "--failed", "--repo", repository], text=True, capture_output=True, check=False)
             if result.returncode != 0:
                 return {"status": "retry_unavailable", "run_id": run_id, "error": (result.stderr or result.stdout)[-1000:]}
