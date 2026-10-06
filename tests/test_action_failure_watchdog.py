@@ -146,3 +146,46 @@ def test_action_self_healing_workflows_are_excluded_to_prevent_loops():
     assert not actionable_run(_run(name="Genesis Action Failure Watcher"))
     assert not actionable_run(_run(name="Genesis Action Repair Worker"))
     assert not actionable_run(_run(name="Genesis Action Repair Validator"))
+
+
+def test_retry_once_closes_jobless_startup_failure_as_transient():
+    from scripts.action_failure_watchdog import encode_metadata, retry_once
+
+    metadata = {
+        "workflow_id": 352322041,
+        "workflow_name": "Genesis Agentic Lab Recovery",
+        "workflow_path": ".github/workflows/genesis-agentic-lab-recovery.yml",
+        "run_id": 37373177000,
+        "run_attempt": 1,
+        "head_sha": "d" * 40,
+        "event": "workflow_dispatch",
+        "failed_job": "workflow",
+        "failed_step": "unknown",
+        "phase": "failed",
+        "repair_cycles": 0,
+    }
+    calls = []
+
+    def runner(args, **kwargs):
+        calls.append(args)
+
+        class Result:
+            returncode = 0
+            stderr = ""
+
+        result = Result()
+        if args[:3] == ["gh", "issue", "list"]:
+            result.stdout = '[{"number":1075,"body":' + repr(encode_metadata(metadata)).replace("'", '"') + '}]'
+        elif args[:2] == ["gh", "api"] and args[2].endswith("/actions/runs/37373177000"):
+            result.stdout = '{"id":37373177000,"status":"completed","conclusion":"startup_failure","run_attempt":1}'
+        elif args[:2] == ["gh", "api"] and args[2].endswith("/actions/runs/37373177000/jobs?per_page=1"):
+            result.stdout = '{"jobs":[]}'
+        else:
+            result.stdout = "{}"
+        return result
+
+    result = retry_once("owner/repo", runner=runner)
+    assert result["status"] == "closed_transient_startup"
+    assert result["issue_number"] == 1075
+    assert not any(args[:4] == ["gh", "run", "rerun", "37373177000"] for args in calls)
+    assert any(args[:3] == ["gh", "issue", "close"] for args in calls)
