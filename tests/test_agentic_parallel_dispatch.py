@@ -348,3 +348,47 @@ def test_main_skips_noop_candidate_and_continues_filling_lanes(monkeypatch):
     monkeypatch.setattr(module.agentic, "reserve_and_dispatch", dispatch)
     assert module.main() == 0
     assert seen[:3] == [867, 992, 874]
+
+
+def test_visibility_restore_does_not_scan_comments_for_already_visible_issue(monkeypatch):
+    issue = _issue(
+        867,
+        "2026-09-20T00:00:00Z",
+        labels=("agentic-lab", "genesis-autonomous"),
+    )
+
+    monkeypatch.setattr(
+        module.policy,
+        "_infra_quarantined",
+        lambda *args: pytest.fail("already-visible issue must not fetch quarantine comments"),
+    )
+    monkeypatch.setattr(
+        module.agentic,
+        "request",
+        lambda *args, **kwargs: pytest.fail("already-visible issue must not write GitHub state"),
+    )
+
+    assert module.policy._restore_agentic_visibility("owner/repo", "token", [issue]) == []
+
+
+def test_visibility_restore_checks_quarantine_only_when_repair_is_needed(monkeypatch):
+    issue = _issue(
+        868,
+        "2026-09-20T00:00:00Z",
+        labels=("genesis-autonomous",),
+    )
+    checked = []
+
+    def quarantined(repository, token, number):
+        checked.append(number)
+        return True
+
+    monkeypatch.setattr(module.policy, "_infra_quarantined", quarantined)
+    monkeypatch.setattr(
+        module.agentic,
+        "request",
+        lambda *args, **kwargs: pytest.fail("quarantined issue must not be relabeled"),
+    )
+
+    assert module.policy._restore_agentic_visibility("owner/repo", "token", [issue]) == []
+    assert checked == [868]
