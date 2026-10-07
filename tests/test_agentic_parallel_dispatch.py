@@ -151,7 +151,7 @@ def test_main_decomposes_targetless_work_before_parallel_dispatch(monkeypatch):
 
     monkeypatch.setattr(module.policy, "_decompose_oldest_issue", decompose_once)
     monkeypatch.setattr(module, "_active_issue_numbers", lambda *args: [])
-    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args: [])
+    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args, **kwargs: [])
     monkeypatch.setattr(
         module.agentic,
         "reserve_and_dispatch",
@@ -244,7 +244,7 @@ def test_recovery_lane_is_reserved_and_selected_first(monkeypatch):
         body="- **Target:** `genesis/development.py`",
     )
     monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [active_dev, recovery, development])
-    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args: [development, recovery])
+    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args, **kwargs: [development, recovery])
     selected = module._lane_routable_issues("owner/repo", "token")
     assert [row["number"] for row in selected] == [11, 12]
 
@@ -279,7 +279,7 @@ def test_parallel_lane_skips_active_target_collision(monkeypatch):
         "_all_open_issues_fifo",
         lambda *args: [active_recovery, active_dev, collision, independent],
     )
-    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args: [collision, independent])
+    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args, **kwargs: [collision, independent])
     selected = module._lane_routable_issues("owner/repo", "token")
     assert [row["number"] for row in selected] == [23]
 
@@ -329,7 +329,7 @@ def test_main_skips_noop_candidate_and_continues_filling_lanes(monkeypatch):
     monkeypatch.setattr(module.agentic, "release_ready_capability_dependencies", lambda *args: [])
     monkeypatch.setattr(module.policy, "_decompose_oldest_issue", lambda *args: {"status": "idle"})
     monkeypatch.setattr(module, "_active_issue_numbers", lambda *args: [])
-    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args: candidates)
+    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args, **kwargs: candidates)
 
     seen = []
     def dispatch(repo, token):
