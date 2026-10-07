@@ -283,7 +283,7 @@ def test_parallel_lane_skips_active_target_collision(monkeypatch):
     assert [row["number"] for row in selected] == [23]
 
 
-def test_main_refills_three_bounded_lanes(monkeypatch):
+def test_main_refills_six_bounded_lanes(monkeypatch):
     monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
     monkeypatch.setenv("GITHUB_TOKEN", "token")
     monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [])
@@ -301,10 +301,10 @@ def test_main_refills_three_bounded_lanes(monkeypatch):
 
     monkeypatch.setattr(module.agentic, "reserve_and_dispatch", dispatch)
     assert module.main() == 0
-    assert dispatched == [100, 101, 102]
-    assert module.MAX_PARALLEL == 3
-    assert module.DEVELOPMENT_SLOTS == 2
-    assert module.RECOVERY_SLOTS == 1
+    assert dispatched == [100, 101, 102, 103, 104, 105]
+    assert module.MAX_PARALLEL == 6
+    assert module.DEVELOPMENT_SLOTS == 4
+    assert module.RECOVERY_SLOTS == 2
 
 
 def test_legacy_sequential_entrypoint_uses_parallel_lane_selector(monkeypatch):

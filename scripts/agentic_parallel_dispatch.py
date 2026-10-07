@@ -16,12 +16,28 @@ except ModuleNotFoundError:
 from genesis.issue_governor import issue_value_score
 
 
-# Genesis keeps three bounded execution lanes: two normal development lanes
-# plus one recovery/capability lane. Issues targeting the same file/module are
-# never admitted together, so parallelism cannot create same-target edits.
-DEVELOPMENT_SLOTS = 2
-RECOVERY_SLOTS = 1
-MAX_PARALLEL = DEVELOPMENT_SLOTS + RECOVERY_SLOTS
+# Genesis runs a bounded parallel worker pool. Development and recovery lanes
+# are independently configurable so normal work can continue while automation
+# or capability failures are repaired. Issues targeting the same file/module
+# are never admitted together, so parallelism cannot create same-target edits.
+#
+# Defaults: 4 development + 2 recovery workers = 6 issue workers. The Action
+# Repair Worker is intentionally separate and can run alongside this pool.
+def _positive_int_env(name: str, default: int, *, maximum: int = 12) -> int:
+    raw = os.environ.get(name, "").strip()
+    try:
+        value = int(raw) if raw else default
+    except ValueError:
+        value = default
+    return max(1, min(value, maximum))
+
+
+DEVELOPMENT_SLOTS = _positive_int_env("GENESIS_AGENTIC_DEVELOPMENT_SLOTS", 4)
+RECOVERY_SLOTS = _positive_int_env("GENESIS_AGENTIC_RECOVERY_SLOTS", 2)
+MAX_PARALLEL = min(
+    _positive_int_env("GENESIS_AGENTIC_MAX_PARALLEL", 6),
+    DEVELOPMENT_SLOTS + RECOVERY_SLOTS,
+)
 SEQUENTIAL_FOCUS_LABEL = "genesis-sequential-focus"  # deprecated compatibility label
 
 RECOVERY_LABELS = {
@@ -196,8 +212,8 @@ def _is_recovery_issue(issue: dict) -> bool:
 def _lane_routable_issues(repository: str, token: str) -> list[dict]:
     """Return work for the first free bounded lane without target collisions.
 
-    Development work can occupy two lanes. Recovery/capability work has one
-    reserved lane so broken automation cannot consume all development capacity.
+    Development work and recovery/capability work use separate configurable
+    lane pools so broken automation cannot consume all development capacity.
     Every active target acts as a lock: another issue with that exact target is
     skipped until the owner leaves its active/validation state.
     """
@@ -361,9 +377,9 @@ def main() -> int:
         all_open = policy._all_open_issues_fifo(repository, token)
     released = agentic.release_ready_capability_dependencies(repository, token)
 
-    # Routing/decomposition is bounded per controller pass. Three steps are
-    # enough to prepare one candidate per execution lane without turning every
-    # wake-up into a repository-wide maintenance scan.
+    # Routing/decomposition is bounded per controller pass. One step per
+    # configured worker slot is enough to prepare candidates without turning
+    # every wake-up into an unbounded repository-wide maintenance scan.
     decomposition_steps: list[dict] = []
     seen_decomposition_actions: set[tuple[str, int, str]] = set()
     for _ in range(MAX_PARALLEL):

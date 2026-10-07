@@ -58,12 +58,14 @@ permissions:
 concurrency:
   group: ${{ github.event_name == 'pull_request' && format('genesis-agentic-lab-recovery-pr-{0}', github.event.pull_request.number) || 'genesis-agentic-lab-recovery' }}
   # Keep one controller instance running at a time. The controller itself
-  # admits up to three target-safe worker lanes, so overlapping controller
+  # admits a configurable target-safe worker pool, so overlapping controller
   # wake-ups are unnecessary and would only race on reservations.
   cancel-in-progress: false
 
 env:
-  GENESIS_AGENTIC_MAX_PARALLEL: '3'
+  GENESIS_AGENTIC_MAX_PARALLEL: '6'
+  GENESIS_AGENTIC_DEVELOPMENT_SLOTS: '4'
+  GENESIS_AGENTIC_RECOVERY_SLOTS: '2'
 
 jobs:
   validate-baseline:
