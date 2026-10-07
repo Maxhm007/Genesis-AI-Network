@@ -207,4 +207,13 @@ jobs:
           # Agentic-Lab backlog exists. Wake the single authoritative Agentic
           # controller after every Action-repair pass; its own reservation and
           # concurrency rules decide whether work can safely start.
-          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+          active_count="$(gh run list --repo "$GITHUB_REPOSITORY" \
+            --workflow genesis-agentic-lab-recovery.yml \
+            --limit 20 \
+            --json status \
+            --jq '[.[] | select(.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested")] | length')"
+          if [[ "$active_count" -gt 0 ]]; then
+            echo "Agentic Lab Recovery already active ($active_count run(s)); duplicate Action-repair wake skipped."
+          else
+            gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+          fi
