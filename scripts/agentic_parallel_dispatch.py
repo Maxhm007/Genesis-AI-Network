@@ -137,26 +137,32 @@ def _score_issue(
     }
 
 
-def _parallel_routable_issues(repository: str, token: str) -> list[dict]:
-    """Return safely routable issues ordered by deterministic operational value."""
-    all_open = policy._all_open_issues_fifo(repository, token)
+def _parallel_routable_issues(
+    repository: str,
+    token: str,
+    *,
+    all_open: list[dict] | None = None,
+    comments_cache: dict[int, list[dict]] | None = None,
+) -> list[dict]:
+    """Return safely routable issues ordered by deterministic operational value.
+
+    A controller pass may call this selector several times while filling worker
+    lanes. Reuse the same issue snapshot/comment cache to avoid multiplying
+    GitHub API reads by the number of parallel lanes.
+    """
+    all_open = list(all_open) if all_open is not None else policy._all_open_issues_fifo(repository, token)
+    comments_by_issue = comments_cache if comments_cache is not None else {}
     eligible: list[dict] = []
-    comments_by_issue: dict[int, list[dict]] = {
-        int(issue.get("number") or 0): policy._all_issue_comments(
-            repository, token, int(issue.get("number") or 0)
-        )
-        for issue in all_open
-        if int(issue.get("number") or 0) > 0
-    }
     for issue in all_open:
         if not policy._actionable(issue):
             continue
         number = int(issue.get("number") or 0)
-        if policy._infra_quarantined(repository, token, number):
-            continue
-        issue_labels = agentic.labels(issue)
         target = agentic.explicit_target(str(issue.get("body") or ""))
         if not agentic.safe_lane(target):
+            continue
+        if number not in comments_by_issue:
+            comments_by_issue[number] = policy._all_issue_comments(repository, token, number)
+        if policy._infra_quarantined(repository, token, number):
             continue
         eligible.append(issue)
 
@@ -209,7 +215,13 @@ def _is_recovery_issue(issue: dict) -> bool:
     )
 
 
-def _lane_routable_issues(repository: str, token: str) -> list[dict]:
+def _lane_routable_issues(
+    repository: str,
+    token: str,
+    *,
+    all_open: list[dict] | None = None,
+    comments_cache: dict[int, list[dict]] | None = None,
+) -> list[dict]:
     """Return work for the first free bounded lane without target collisions.
 
     Development work and recovery/capability work use separate configurable
@@ -217,7 +229,7 @@ def _lane_routable_issues(repository: str, token: str) -> list[dict]:
     Every active target acts as a lock: another issue with that exact target is
     skipped until the owner leaves its active/validation state.
     """
-    all_open = policy._all_open_issues_fifo(repository, token)
+    all_open = list(all_open) if all_open is not None else policy._all_open_issues_fifo(repository, token)
     active_labels = (set(agentic.ACTIVE_LABELS) - {"genesis-deepseek-handoff-pending"}) | {
         "genesis-claimed",
         "genesis-deepseek-working",
@@ -235,7 +247,12 @@ def _lane_routable_issues(repository: str, token: str) -> list[dict]:
         if agentic.explicit_target(str(issue.get("body") or ""))
     }
 
-    ordered = _parallel_routable_issues(repository, token)
+    ordered = _parallel_routable_issues(
+        repository,
+        token,
+        all_open=all_open,
+        comments_cache=comments_cache,
+    )
     recovery_candidates: list[dict] = []
     development_candidates: list[dict] = []
     seen_targets = set(locked_targets)
@@ -357,17 +374,16 @@ def main() -> int:
     if not repository or not token:
         raise RuntimeError("GITHUB_REPOSITORY and GITHUB_TOKEN are required")
 
-    agentic.issue_comments = policy._all_issue_comments
     skipped_this_pass: set[int] = set()
+    comments_cache: dict[int, list[dict]] = {}
 
-    def routable_without_noops(repo: str, gh_token: str) -> list[dict]:
-        return [
-            issue
-            for issue in _lane_routable_issues(repo, gh_token)
-            if int(issue.get("number") or 0) not in skipped_this_pass
-        ]
+    def cached_comments(repo: str, gh_token: str, issue_number: int) -> list[dict]:
+        number = int(issue_number)
+        if number not in comments_cache:
+            comments_cache[number] = policy._all_issue_comments(repo, gh_token, number)
+        return comments_cache[number]
 
-    agentic.open_agentic_issues = routable_without_noops
+    agentic.issue_comments = cached_comments
     agentic.next_strategy = policy._least_recently_used_strategy
 
     all_open = policy._all_open_issues_fifo(repository, token)
@@ -398,13 +414,42 @@ def main() -> int:
         all_open = policy._all_open_issues_fifo(repository, token)
     decomposition = decomposition_steps[-1] if decomposition_steps else {"status": "idle"}
 
+    # Freeze one bounded routing snapshot for this controller pass. Newly
+    # dispatched issues are excluded locally through skipped_this_pass; a later
+    # heartbeat gets a fresh repository snapshot.
+    routing_snapshot = list(all_open)
+
+    def routable_without_noops(repo: str, gh_token: str) -> list[dict]:
+        return [
+            issue
+            for issue in _lane_routable_issues(
+                repo,
+                gh_token,
+                all_open=routing_snapshot,
+                comments_cache=comments_cache,
+            )
+            if int(issue.get("number") or 0) not in skipped_this_pass
+        ]
+
+    agentic.open_agentic_issues = routable_without_noops
+
     active_before = _active_issue_numbers(repository, token)
     free_slots = max(0, MAX_PARALLEL - len(active_before))
     dispatched: list[dict] = []
 
     noops: list[dict] = []
     attempts = 0
-    max_attempts = max(MAX_PARALLEL, len(_parallel_routable_issues(repository, token)))
+    max_attempts = max(
+        MAX_PARALLEL,
+        len(
+            _parallel_routable_issues(
+                repository,
+                token,
+                all_open=routing_snapshot,
+                comments_cache=comments_cache,
+            )
+        ),
+    )
 
     while len(dispatched) < free_slots and attempts < max_attempts:
         attempts += 1
