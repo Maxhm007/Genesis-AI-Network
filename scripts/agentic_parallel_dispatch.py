@@ -162,7 +162,14 @@ def _parallel_routable_issues(
             continue
         if number not in comments_by_issue:
             comments_by_issue[number] = policy._all_issue_comments(repository, token, number)
-        if policy._infra_quarantined(repository, token, number):
+        quarantine_marker = (
+            f"{policy.INFRA_QUARANTINE_MARKER[:-4]}:"
+            f"{agentic.recovery_engine_generation()} -->"
+        )
+        if any(
+            quarantine_marker in str(row.get("body") or "")
+            for row in comments_by_issue[number]
+        ):
             continue
         eligible.append(issue)
 
@@ -350,6 +357,21 @@ def _reclaim_stale_sequential_reservation(repository: str, token: str) -> list[i
     return reclaimed
 
 
+
+def _active_issue_numbers_from_issues(issues: list[dict]) -> list[int]:
+    active: list[int] = []
+    active_labels = (set(agentic.ACTIVE_LABELS) - {"genesis-deepseek-handoff-pending"}) | {
+        "genesis-claimed",
+        "genesis-deepseek-working",
+    }
+    for issue in issues:
+        if agentic.labels(issue) & active_labels:
+            number = int(issue.get("number") or 0)
+            if number > 0:
+                active.append(number)
+    return active
+
+
 def _active_issue_numbers(repository: str, token: str) -> list[int]:
     active: list[int] = []
     # A handoff-pending label is only a dispatch reservation, not proof that a
@@ -386,7 +408,18 @@ def main() -> int:
     agentic.issue_comments = cached_comments
     agentic.next_strategy = policy._least_recently_used_strategy
 
-    all_open = policy._all_open_issues_fifo(repository, token)
+    try:
+        all_open = policy._all_open_issues_fifo(repository, token)
+    except RuntimeError as exc:
+        message = str(exc)
+        if "rate limit exceeded" in message.lower() or "http 403" in message.lower():
+            print(json.dumps({
+                "status": "deferred_rate_limit",
+                "reason": "github_api_quota_unavailable",
+                "detail": message[:500],
+            }, sort_keys=True))
+            return 0
+        raise
     restored = policy._restore_agentic_visibility(repository, token, all_open)
     terminalized = policy._terminalize_non_actionable_issues(repository, token, all_open)
     if terminalized:
@@ -433,7 +466,7 @@ def main() -> int:
 
     agentic.open_agentic_issues = routable_without_noops
 
-    active_before = _active_issue_numbers(repository, token)
+    active_before = _active_issue_numbers_from_issues(routing_snapshot)
     free_slots = max(0, MAX_PARALLEL - len(active_before))
     dispatched: list[dict] = []
 
@@ -492,7 +525,7 @@ def main() -> int:
         "skipped_noop_candidates": sorted(skipped_this_pass),
         "noop_results": noops,
         "dispatch_attempts": attempts,
-        "active_after": _active_issue_numbers(repository, token),
+        "active_after": sorted(set(active_before + [int(row.get("issue_number") or 0) for row in dispatched if int(row.get("issue_number") or 0) > 0])),
         "legacy_dependencies_released": released,
         "capability_escalation": "enabled",
         "agentic_visibility_restored": restored,
