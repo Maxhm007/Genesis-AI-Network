@@ -29,4 +29,16 @@ jobs:
       - name: Wake Agentic Lab after worker completion
         env:
           GH_TOKEN: ${{ github.token }}
-        run: gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
+        shell: bash
+        run: |
+          set -euo pipefail
+          active_count="$(gh run list --repo "$GITHUB_REPOSITORY" \
+            --workflow genesis-agentic-lab-recovery.yml \
+            --limit 20 \
+            --json status \
+            --jq '[.[] | select(.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested")] | length')"
+          if [[ "$active_count" -gt 0 ]]; then
+            echo "Agentic Lab Recovery already active ($active_count run(s)); duplicate successor wake skipped."
+            exit 0
+          fi
+          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
