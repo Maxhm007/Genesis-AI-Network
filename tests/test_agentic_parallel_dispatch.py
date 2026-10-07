@@ -151,6 +151,7 @@ def test_main_decomposes_targetless_work_before_parallel_dispatch(monkeypatch):
 
     monkeypatch.setattr(module.policy, "_decompose_oldest_issue", decompose_once)
     monkeypatch.setattr(module, "_active_issue_numbers", lambda *args: [])
+    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args: [])
     monkeypatch.setattr(
         module.agentic,
         "reserve_and_dispatch",
@@ -245,7 +246,7 @@ def test_recovery_lane_is_reserved_and_selected_first(monkeypatch):
     monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [active_dev, recovery, development])
     monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args: [development, recovery])
     selected = module._lane_routable_issues("owner/repo", "token")
-    assert [row["number"] for row in selected] == [11]
+    assert [row["number"] for row in selected] == [11, 12]
 
 
 def test_parallel_lane_skips_active_target_collision(monkeypatch):
