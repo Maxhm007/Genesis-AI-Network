@@ -257,11 +257,11 @@ def _lane_routable_issues(repository: str, token: str) -> list[dict]:
     # reserve_and_dispatch() is called repeatedly; after each reservation the
     # freshly applied active label makes the next call select another lane.
     if recovery_free and development_free:
-        return recovery_candidates + development_candidates
+        return recovery_candidates[:recovery_free] + development_candidates[:development_free]
     if recovery_free:
-        return recovery_candidates
+        return recovery_candidates[:recovery_free]
     if development_free:
-        return development_candidates
+        return development_candidates[:development_free]
     return []
 
 
@@ -413,6 +413,9 @@ def main() -> int:
             break
         if result.get("status") == "dispatched":
             dispatched.append(result)
+            issue_number = int(result.get("issue_number") or 0)
+            if issue_number > 0:
+                skipped_this_pass.add(issue_number)
             continue
 
         issue_number = int(result.get("issue_number") or 0)
