@@ -504,6 +504,12 @@ jobs:
                 "<!-- genesis-agentic-infrastructure-quarantine:${engine_generation} -->" \
                 "Genesis quarantined this Issue for the current repair-engine generation after repeated pre-evidence worker failures. Agentic Lab remains the owner. A repair-engine/workflow change automatically makes the Issue eligible for reclamation. Worker run: ${GITHUB_RUN_ID}." \
                 > /tmp/genesis-agentic-failure.md
+              if [[ -f runtime/github_issue_autorepair.json ]]; then
+                printf '\n%s\n%s\n' '<!-- genesis-agentic-failure-evidence -->' 'Captured diagnostic evidence (sanitized):' >> /tmp/genesis-agentic-failure.md
+                printf '%s\n' '```json' >> /tmp/genesis-agentic-failure.md
+                jq -c '{status,reason,phase,exit_code,diagnosis,failed_tests,run_id}' runtime/github_issue_autorepair.json >> /tmp/genesis-agentic-failure.md
+                printf '%s\n' '```' >> /tmp/genesis-agentic-failure.md
+              fi
               gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-failure.md
               exit 0
             fi
