@@ -1,0 +1,69 @@
+name: Genesis Actions Status Bridge
+
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: "*/15 * * * *"
+  push:
+    paths:
+      - .github/workflows/genesis-actions-status-bridge.yml
+
+permissions:
+  actions: read
+  issues: write
+  contents: read
+
+concurrency:
+  group: genesis-actions-status-bridge
+  cancel-in-progress: false
+
+jobs:
+  publish-status:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Publish recent Actions status to issue 1100
+        uses: actions/github-script@v7
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const { owner, repo } = context.repo;
+            const issue_number = 1100;
+            const { data } = await github.rest.actions.listWorkflowRunsForRepo({
+              owner, repo, per_page: 60
+            });
+            const runs = data.workflow_runs
+              .filter(r => r.name !== 'Genesis Actions Status Bridge')
+              .slice(0, 30);
+            const count = key => runs.filter(r => r.status === key).length;
+            const failed = runs.filter(r => r.conclusion === 'failure').length;
+            const summary = [
+              '# Genesis Actions — Live Status',
+              '',
+              '> Auto-generated every 15 minutes by Genesis Actions Status Bridge. This issue is for observation only, not issue solving.',
+              '',
+              '**Last checked (UTC):** ' + new Date().toISOString(),
+              '**Repository:** ' + owner + '/' + repo,
+              '**Runs inspected:** ' + runs.length + ' (most recent, excluding this monitor)',
+              '**In progress:** ' + count('in_progress') + ' | **Queued:** ' + count('queued') + ' | **Failures:** ' + failed,
+              '',
+              '| Workflow | Status | Conclusion | Started (UTC) | Run |',
+              '| --- | --- | --- | --- | --- |'
+            ];
+            for (const r of runs) {
+              const clean = s => String(s ?? '—').replace(/\\|/g, '/').replace(/[\r\n]/g, ' ');
+              summary.push('| ' + clean(r.name) + ' | ' + clean(r.status) +
+                ' | ' + clean(r.conclusion) + ' | ' + clean(r.created_at) +
+                ' | [#' + r.run_number + '](' + r.html_url + ') |');
+            }
+            summary.push('', '## Recent failures', '');
+            const failures = runs.filter(r => r.conclusion === 'failure').slice(0, 10);
+            if (!failures.length) summary.push('No failed runs among the latest 30.');
+            for (const r of failures) {
+              summary.push('- **' + r.name + '** — [open logs](' + r.html_url + ') (run ID ' + r.id + ')');
+            }
+            await github.rest.issues.update({
+              owner, repo, issue_number,
+              body: summary.join('\n')
+            });
+            core.info('Updated Actions monitoring issue #' + issue_number);
