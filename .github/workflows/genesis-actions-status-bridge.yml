@@ -51,7 +51,7 @@ jobs:
               '| --- | --- | --- | --- | --- |'
             ];
             for (const r of runs) {
-              const clean = s => String(s ?? '—').replace(/\\|/g, '/').replace(/[\r\n]/g, ' ');
+              const clean = s => String(s ?? '—').replace(/[|]/g, '/').replace(/[\r\n]/g, ' ');
               summary.push('| ' + clean(r.name) + ' | ' + clean(r.status) +
                 ' | ' + clean(r.conclusion) + ' | ' + clean(r.created_at) +
                 ' | [#' + r.run_number + '](' + r.html_url + ') |');
