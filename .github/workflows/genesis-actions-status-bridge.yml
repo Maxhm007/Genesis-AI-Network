@@ -3,7 +3,7 @@ name: Genesis Actions Status Bridge
 on:
   workflow_dispatch:
   schedule:
-    - cron: "*/15 * * * *"
+    - cron: "*/5 * * * *"
   push:
     paths:
       - .github/workflows/genesis-actions-status-bridge.yml
@@ -20,7 +20,7 @@ concurrency:
 jobs:
   publish-status:
     runs-on: ubuntu-latest
-    timeout-minutes: 5
+    timeout-minutes: 8
     steps:
       - name: Publish recent Actions status to issue 1100
         uses: actions/github-script@v7
@@ -40,7 +40,7 @@ jobs:
             const summary = [
               '# Genesis Actions — Live Status',
               '',
-              '> Auto-generated every 15 minutes by Genesis Actions Status Bridge. This issue is for observation only, not issue solving.',
+              '> Scheduled every 5 minutes (GitHub may delay scheduled runs) by Genesis Actions Status Bridge. This issue is for observation only, not issue solving.',
               '',
               '**Last checked (UTC):** ' + new Date().toISOString(),
               '**Repository:** ' + owner + '/' + repo,
@@ -57,7 +57,7 @@ jobs:
                 ' | [#' + r.run_number + '](' + r.html_url + ') |');
             }
             summary.push('', '## Recent failures', '');
-            const failures = runs.filter(r => r.conclusion === 'failure').slice(0, 10);
+            const failures = runs.filter(r => r.conclusion === 'failure').slice(0, 5);
             if (!failures.length) summary.push('No failed runs among the latest 30.');
             for (const r of failures) {
               summary.push('- **' + r.name + '** — [run](' + r.html_url + ') (ID ' + r.id + ')');
@@ -65,7 +65,7 @@ jobs:
                 const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
                   owner, repo, run_id: r.id, per_page: 100
                 });
-                for (const job of jobs.filter(j => j.conclusion === 'failure').slice(0, 3)) {
+                for (const job of jobs.filter(j => j.conclusion === 'failure').slice(0, 2)) {
                   const failedSteps = (job.steps || []).filter(step => step.conclusion === 'failure');
                   summary.push('  - Job: **' + job.name + '** (job ID ' + job.id + ')');
                   for (const step of failedSteps.slice(0, 5)) {
