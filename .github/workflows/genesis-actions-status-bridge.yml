@@ -60,7 +60,22 @@ jobs:
             const failures = runs.filter(r => r.conclusion === 'failure').slice(0, 10);
             if (!failures.length) summary.push('No failed runs among the latest 30.');
             for (const r of failures) {
-              summary.push('- **' + r.name + '** — [open logs](' + r.html_url + ') (run ID ' + r.id + ')');
+              summary.push('- **' + r.name + '** — [run](' + r.html_url + ') (ID ' + r.id + ')');
+              try {
+                const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                  owner, repo, run_id: r.id, per_page: 100
+                });
+                for (const job of jobs.filter(j => j.conclusion === 'failure').slice(0, 3)) {
+                  const failedSteps = (job.steps || []).filter(step => step.conclusion === 'failure');
+                  summary.push('  - Job: **' + job.name + '** (job ID ' + job.id + ')');
+                  for (const step of failedSteps.slice(0, 5)) {
+                    summary.push('    - Failed step: **' + step.name + '**');
+                  }
+                  if (!failedSteps.length) summary.push('    - No failed step details returned by GitHub API');
+                }
+              } catch (error) {
+                summary.push('  - Job inspection unavailable: ' + String(error.message).slice(0, 200));
+              }
             }
             await github.rest.issues.update({
               owner, repo, issue_number,
