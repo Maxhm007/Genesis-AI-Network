@@ -17,7 +17,7 @@ REPOSITORY = os.environ.get("GITHUB_REPOSITORY", "").strip()
 TOKEN = os.environ.get("GITHUB_TOKEN", "").strip() or os.environ.get("GH_TOKEN", "").strip()
 API = "https://api.github.com"
 
-TEAM_TASK_SOURCE_RE = re.compile(r"Autonomous Genesis development task from issue #(\\d+):", re.IGNORECASE)
+TEAM_TASK_SOURCE_RE = re.compile(r"Autonomous Genesis development task from issue #(\d+):", re.IGNORECASE)
 
 CURRENT_PROBLEM_MARKER = "<!-- genesis-team-current-problem -->"
 PROBLEM_HINTS = (
