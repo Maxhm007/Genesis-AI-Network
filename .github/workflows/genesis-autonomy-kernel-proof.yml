@@ -1,0 +1,48 @@
+name: Genesis Autonomy Kernel Proof
+
+on:
+  workflow_dispatch: {}
+  schedule:
+    - cron: '23 0 * * *'
+  push:
+    branches: [main]
+    paths:
+      - genesis/autonomy_kernel.py
+      - scripts/genesis_autonomy_kernel_report.py
+      - tests/test_autonomy_kernel.py
+      - .github/workflows/genesis-autonomy-kernel-proof.yml
+
+permissions:
+  contents: read
+  issues: read
+
+concurrency:
+  group: genesis-autonomy-kernel-proof
+  cancel-in-progress: true
+
+jobs:
+  prove:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 1
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: Install focused test dependency
+        run: python -m pip install --disable-pip-version-check pytest
+
+      - name: Validate autonomy kernel
+        run: python -m pytest -q tests/test_autonomy_kernel.py tests/test_autonomy_proof_persistence.py
+
+      - name: Generate autonomy outcome proof
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/genesis_autonomy_kernel_report.py --repository "$GITHUB_REPOSITORY"
