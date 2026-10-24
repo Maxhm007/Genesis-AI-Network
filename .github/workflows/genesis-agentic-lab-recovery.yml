@@ -1,6 +1,7 @@
 name: Genesis Agentic Lab Recovery
 # canonical-capability-retry-v1
 # parallel-lanes-v1
+# controller-validation-recheck: issue-1106
 
 on:
   pull_request:
