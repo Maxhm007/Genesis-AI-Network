@@ -7,6 +7,7 @@ on:
   push:
     paths:
       - .github/workflows/genesis-actions-status-bridge.yml
+      - .github/workflows/genesis-agentic-lab-recovery.yml
 
 permissions:
   actions: read
@@ -55,6 +56,34 @@ jobs:
               summary.push('| ' + clean(r.name) + ' | ' + clean(r.status) +
                 ' | ' + clean(r.conclusion) + ' | ' + clean(r.created_at) +
                 ' | [#' + r.run_number + '](' + r.html_url + ') |');
+            }
+            summary.push('', '## Issue #1106 — push validation evidence', '');
+            try {
+              const response = await github.rest.actions.listWorkflowRuns({
+                owner, repo, workflow_id: 'genesis-agentic-lab-recovery.yml',
+                event: 'push', per_page: 10
+              });
+              const candidate = response.data.workflow_runs.find(r => r.head_branch === 'main');
+              if (!candidate) {
+                summary.push('No recent main-branch push validation run found. Do not close #1106.');
+              } else {
+                summary.push('Latest main push run: [#' + candidate.run_number + '](' + candidate.html_url +
+                  ') — ' + candidate.status + ' / ' + (candidate.conclusion || 'pending') +
+                  ' — SHA ' + candidate.head_sha);
+                const jobs = await github.paginate(github.rest.actions.listJobsForWorkflowRun, {
+                  owner, repo, run_id: candidate.id, per_page: 100
+                });
+                const target = jobs.flatMap(j => (j.steps || []).filter(step =>
+                  step.name === 'Validate parallel controller and cross-Gene delegation'
+                ).map(step => ({job: j, step})));
+                for (const {job, step} of target) {
+                  summary.push('- Validation step in ' + job.name + ': **' +
+                    (step.conclusion || step.status || 'unknown') + '**');
+                }
+                if (!target.length) summary.push('Validation step not reported: not verified.');
+              }
+            } catch (error) {
+              summary.push('Push validation lookup failed: ' + String(error.message).slice(0, 200));
             }
             summary.push('', '## Recent failures', '');
             const failures = runs.filter(r => r.conclusion === 'failure').slice(0, 5);
