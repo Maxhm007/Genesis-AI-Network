@@ -69,6 +69,12 @@ env:
 jobs:
   validate-baseline:
     if: github.event_name == 'pull_request'
+    # Exercise the independently supported parallel scheduler in its regression
+    # tests; production dispatch-agentic-pool retains the one-issue limit.
+    env:
+      GENESIS_AGENTIC_MAX_PARALLEL: '6'
+      GENESIS_AGENTIC_DEVELOPMENT_SLOTS: '4'
+      GENESIS_AGENTIC_RECOVERY_SLOTS: '2'
     permissions:
       contents: read
     runs-on: ubuntu-latest
