@@ -188,7 +188,43 @@ jobs:
 
       - name: Verify clean repository baseline
         if: steps.eligibility.outputs.eligible == 'true'
-        run: python -m pytest -q
+        id: baseline
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p runtime
+          set +e
+          python -m pytest -q > /tmp/genesis-agentic-baseline.log 2>&1
+          result=$?
+          set -e
+          cat /tmp/genesis-agentic-baseline.log
+          if (( result != 0 )); then
+            BASELINE_EXIT_CODE="$result" python - <<'PY'
+          import json
+          import os
+          from pathlib import Path
+
+          lines = Path("/tmp/genesis-agentic-baseline.log").read_text(
+              encoding="utf-8", errors="replace"
+          ).splitlines()
+          failures = [line[:350] for line in lines if line.startswith("FAILED ")][:20]
+          summary = next((line.strip()[:350] for line in reversed(lines)
+                          if " failed" in line or " error" in line), "")
+          payload = {
+              "status": "baseline_failed",
+              "reason": "baseline_tests_failed",
+              "phase": "Verify clean repository baseline",
+              "exit_code": int(os.environ["BASELINE_EXIT_CODE"]),
+              "diagnosis": summary,
+              "failed_tests": failures,
+              "run_id": os.environ.get("GITHUB_RUN_ID", ""),
+          }
+          Path("runtime/github_issue_autorepair.json").write_text(
+              json.dumps(payload, indent=2) + "\n", encoding="utf-8"
+          )
+          PY
+            exit "$result"
+          fi
 
       - name: Hydrate validated Genesis memory
         if: steps.eligibility.outputs.eligible == 'true'
@@ -446,6 +482,10 @@ jobs:
           verified=$(jq -r '([.labels[].name] | index("genesis-verified")) != null' <<<"$issue_json")
           if [[ "$state" == "CLOSED" || "$verified" == "true" ]]; then exit 0; fi
           repair_status="${REASON:-${STATUS:-worker_failed_before_evidence}}"
+          if [[ -f runtime/github_issue_autorepair.json ]]; then
+            repair_status=$(jq -r '.reason // .status // empty' runtime/github_issue_autorepair.json 2>/dev/null || echo "$repair_status")
+            repair_status="${repair_status:-worker_failed_before_evidence}"
+          fi
           for label in genesis-repair-in-progress genesis-validating genesis-claimed genesis-working genesis-verifying genesis-qwen3-agentic; do
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label "$label" >/dev/null 2>&1 || true
           done
@@ -464,6 +504,12 @@ jobs:
                 "<!-- genesis-agentic-infrastructure-quarantine:${engine_generation} -->" \
                 "Genesis quarantined this Issue for the current repair-engine generation after repeated pre-evidence worker failures. Agentic Lab remains the owner. A repair-engine/workflow change automatically makes the Issue eligible for reclamation. Worker run: ${GITHUB_RUN_ID}." \
                 > /tmp/genesis-agentic-failure.md
+              if [[ -f runtime/github_issue_autorepair.json ]]; then
+                printf '\n%s\n%s\n' '<!-- genesis-agentic-failure-evidence -->' 'Captured diagnostic evidence (sanitized):' >> /tmp/genesis-agentic-failure.md
+                printf '%s\n' '```json' >> /tmp/genesis-agentic-failure.md
+                jq -c '{status,reason,phase,exit_code,diagnosis,failed_tests,run_id}' runtime/github_issue_autorepair.json >> /tmp/genesis-agentic-failure.md
+                printf '%s\n' '```' >> /tmp/genesis-agentic-failure.md
+              fi
               gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-failure.md
               exit 0
             fi
@@ -473,7 +519,7 @@ jobs:
           gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deferred >/dev/null 2>&1 || true
           failure_evidence='{}'
           if [[ -f runtime/github_issue_autorepair.json ]]; then
-          failure_evidence=$(jq -c '{status,reason,repair_status,diagnosis,provider,provider_failure,proposal_files,validation_attempts_this_run,repair_memory}' runtime/github_issue_autorepair.json 2>/dev/null || echo '{}')
+            failure_evidence=$(jq -c '{status,reason,phase,exit_code,diagnosis,failed_tests,run_id,repair_status,provider,provider_failure,proposal_files,validation_attempts_this_run,repair_memory}' runtime/github_issue_autorepair.json 2>/dev/null || echo '{}')
           fi
           {
             printf '%s\n' "<!-- genesis-agentic-strategy-result:${STRATEGY} -->"

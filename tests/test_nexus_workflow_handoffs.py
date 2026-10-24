@@ -44,6 +44,8 @@ def test_failed_nexus_dispatch_can_be_retried_then_deduplicated(monkeypatch):
 def test_autonomous_claim_follows_successful_dispatch_and_routes_by_title(monkeypatch):
     comments, dispatched = [], []
     monkeypatch.setattr(team, "select_autonomous_issue", lambda: issue())
+    monkeypatch.setattr(team, "current_problem_context", lambda selected: selected["body"])
+    monkeypatch.setattr(team, "reconcile_legacy_team_tasks", lambda: [])
     monkeypatch.setattr(team, "comment", lambda n, body: comments.append((n, body)))
 
     def dispatch(workflow, inputs):
@@ -83,6 +85,7 @@ def test_autonomous_specialist_reuses_original_issue_and_wakes_executor(monkeypa
     monkeypatch.setattr(team, "request", request)
     monkeypatch.setattr(team, "comment", lambda n, body: comments.append((n, body)))
     monkeypatch.setattr(team, "provider_reason", lambda *args: ("none", "Pending execution"))
+    monkeypatch.setattr(team, "issue_comments", lambda number: [])
     monkeypatch.setattr(team, "dispatch", lambda *args: None)
     team.agent_run("forge", "Autonomous Genesis development task from issue #867: implement metrics",
                    "autonomous-867-12345", 1000)
