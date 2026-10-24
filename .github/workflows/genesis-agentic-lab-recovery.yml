@@ -111,6 +111,12 @@ jobs:
 
       - name: Validate parallel controller and cross-Gene delegation
         if: github.event_name == 'push'
+        # Unit tests exercise the supported six-worker scheduler; the runtime
+        # dispatch step below still inherits the one-issue production limit.
+        env:
+          GENESIS_AGENTIC_MAX_PARALLEL: '6'
+          GENESIS_AGENTIC_DEVELOPMENT_SLOTS: '4'
+          GENESIS_AGENTIC_RECOVERY_SLOTS: '2'
         run: python -m pytest -q tests/test_agentic_parallel_dispatch.py tests/test_gene_backlog_delegation_router.py
 
       - name: Dispatch bounded parallel Agentic lanes
