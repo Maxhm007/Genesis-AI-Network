@@ -45,6 +45,7 @@ def test_autonomous_claim_follows_successful_dispatch_and_routes_by_title(monkey
     comments, dispatched = [], []
     monkeypatch.setattr(team, "select_autonomous_issue", lambda: issue())
     monkeypatch.setattr(team, "current_problem_context", lambda selected: selected["body"])
+    monkeypatch.setattr(team, "reconcile_legacy_team_tasks", lambda: [])
     monkeypatch.setattr(team, "comment", lambda n, body: comments.append((n, body)))
 
     def dispatch(workflow, inputs):
