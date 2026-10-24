@@ -108,7 +108,7 @@ def test_heal_actions_dispatches_stale_opening_and_closing_managers(monkeypatch)
     assert calls == result["dispatched"]
 
 
-def test_persistent_fault_requires_more_than_one_stale_window():
+def test_stale_only_faults_self_heal_even_after_multiple_windows():
     transient = {
         "faults": ["closing_manager_stale:35.0m>30m"],
         "evidence": {"closing_run": {"age_minutes": 35.0}},
@@ -129,7 +129,7 @@ def test_persistent_fault_requires_more_than_one_stale_window():
         opening_max_age_minutes=75,
         closure_max_age_minutes=30,
         verified_open_grace_minutes=20,
-    ) is True
+    ) is False
 
 
 def test_heal_actions_wakes_fifo_controller_for_any_lifecycle_fault(monkeypatch):
