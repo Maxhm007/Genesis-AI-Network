@@ -242,9 +242,20 @@ def check(
             }
         return {"status": "healthy", **assessment}
 
+    # Dispatch only the unhealthy lane. Repeatedly awakening both lanes on
+    # every stagnant issue creates unnecessary runs and can starve the solver.
+    faults = assessment["faults"]
+    needs_team = any(fault.startswith("team_") for fault in faults)
+    needs_agentic = any(
+        fault.startswith(("agentic_lab_", "stalled_autonomous_issues:",
+                          "actionable_backlog_has_no_active_autonomous_worker"))
+        for fault in faults
+    )
     wakes = {
-        "team": _dispatch(repository, "genesis-teammate-autonomous-development.yml"),
-        "agentic_lab": _dispatch(repository, "genesis-agentic-lab-recovery.yml"),
+        "team": _dispatch(repository, "genesis-teammate-autonomous-development.yml")
+        if needs_team else False,
+        "agentic_lab": _dispatch(repository, "genesis-agentic-lab-recovery.yml")
+        if needs_agentic else False,
     }
 
     if existing is not None:
