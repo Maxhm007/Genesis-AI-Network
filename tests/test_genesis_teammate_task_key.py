@@ -12,7 +12,7 @@ def test_execution_task_key_falls_back_to_comment_when_no_source_issue():
 
 
 def test_open_development_issues_keeps_direct_team_task_but_skips_source_duplicate(monkeypatch):
-    module.CONFIG["workspaces"] = {"nexus": 1000, "forge": 1002}
+    monkeypatch.setitem(module.CONFIG, "workspaces", {"nexus": 1000, "forge": 1002})
     rows = [
         {"number": 1029, "title": "[Nexus Task] direct", "body": "<!-- genesis-team-task -->\nDirect task", "labels": []},
         {"number": 1033, "title": "[Nexus Task] duplicate", "body": "<!-- genesis-team-task -->\nAutonomous Genesis development task from issue #867: work", "labels": []},
@@ -23,7 +23,7 @@ def test_open_development_issues_keeps_direct_team_task_but_skips_source_duplica
 
 
 def test_reconcile_legacy_team_tasks_marks_source_duplicates_superseded(monkeypatch):
-    module.CONFIG["workspaces"] = {"nexus": 1000}
+    monkeypatch.setitem(module.CONFIG, "workspaces", {"nexus": 1000})
     issue = {
         "number": 1033,
         "body": "<!-- genesis-team-task -->\nAutonomous Genesis development task from issue #867: work",
