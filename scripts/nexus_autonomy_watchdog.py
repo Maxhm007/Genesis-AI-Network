@@ -6,6 +6,7 @@ import os
 import subprocess
 from datetime import datetime, timezone
 
+from genesis.autonomy_kernel import summarize_issues
 from genesis.issue_opening_manager import annotate_body, submit_agentic_candidate
 
 TITLE = "[Nexus Autonomy] Genesis autonomous loop degraded"
@@ -165,6 +166,35 @@ def evaluate(
     evidence["active_issues"] = active[:20]
     evidence["recent_progress_issues"] = recent_progress[:20]
     evidence["stalled_issues"] = stalled[:20]
+
+    kernel_issues = []
+    for issue in issues:
+        body = str(issue.get("body") or "")
+        title = str(issue.get("title") or "")
+        if MARKER in body or title == TITLE:
+            continue
+        if "<!-- genesis-team-task -->" in body and "Autonomous Genesis development task from issue #" in body:
+            continue
+        kernel_issues.append(issue)
+    kernel = summarize_issues(
+        kernel_issues,
+        now=now,
+        stalled_minutes=stalled_issue_minutes,
+    )
+    evidence["autonomy_kernel"] = {
+        key: value for key, value in kernel.items() if key != "decisions"
+    }
+    kernel_stalled = [
+        number for number in kernel["recovery_issue_numbers"]
+        if number not in stalled
+    ]
+    if kernel_stalled:
+        stalled.extend(kernel_stalled)
+        stalled.sort()
+        evidence["stalled_issues"] = stalled[:20]
+        marker = "stalled_autonomous_issues:"
+        faults = [fault for fault in faults if not fault.startswith(marker)]
+        faults.append(marker + ",".join(map(str, stalled[:10])))
 
     return {"healthy": not faults, "faults": faults, "evidence": evidence}
 
