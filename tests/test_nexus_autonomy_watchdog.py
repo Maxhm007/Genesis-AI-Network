@@ -108,3 +108,19 @@ def test_watchdog_repair_issue_does_not_count_against_itself():
     )
     assert result["healthy"] is True
     assert result["evidence"]["actionable_issue_count"] == 0
+
+
+def test_watchdog_exposes_autonomy_kernel_outcome_metrics():
+    result = module.evaluate(
+        team_run=_run(module.TEAM_WORKFLOW),
+        agentic_run=_run(module.AGENTIC_WORKFLOW),
+        issues=[
+            _issue(70, labels=("genesis-autonomous",), minutes_ago=10),
+            _issue(71, labels=("genesis-autonomous", "genesis-validating"), minutes_ago=10),
+        ],
+        now=NOW,
+    )
+    kernel = result["evidence"]["autonomy_kernel"]
+    assert kernel["ready_issue_numbers"] == [70]
+    assert kernel["validating_issue_numbers"] == [71]
+    assert kernel["autonomous_open_count"] == 2
