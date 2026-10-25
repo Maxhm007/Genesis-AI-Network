@@ -564,3 +564,38 @@ def test_recovery_lane_remains_available_while_development_worker_is_active(monk
     )
 
     assert [row["number"] for row in selected] == [1109]
+
+
+def test_kernel_priority_targetless_issue_is_decomposed_as_singleton(monkeypatch):
+    ordinary = _issue(1100, "2026-10-24T18:00:00Z", labels=("genesis-autonomous",), body="ordinary")
+    recovery = _issue(1109, "2026-10-24T20:30:19Z", labels=("genesis-autonomous", "agentic-lab"), body="recovery")
+    ordinary["updated_at"] = "2026-10-20T00:00:00Z"
+    recovery["updated_at"] = "2026-10-20T00:00:00Z"
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target))
+    seen = []
+    def decompose(repository, token, issues):
+        seen.append([row["number"] for row in issues])
+        return {"status": "decomposed", "issue_number": issues[0]["number"], "target": "genesis/recovery.py"}
+    monkeypatch.setattr(module.policy, "_decompose_oldest_issue", decompose)
+
+    result = module._decompose_kernel_priority_issue("owner/repo", "token", [ordinary, recovery])
+
+    assert seen == [[1109]]
+    assert result["issue_number"] == 1109
+
+
+def test_kernel_priority_routing_failure_is_recorded(monkeypatch):
+    recovery = _issue(1109, "2026-10-24T20:30:19Z", labels=("genesis-autonomous", "agentic-lab"), body="recovery")
+    recovery["updated_at"] = "2026-10-20T00:00:00Z"
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target))
+    monkeypatch.setattr(module.policy, "_decompose_oldest_issue", lambda *args: {"status": "idle", "reason": "test_skip"})
+    monkeypatch.setattr(module.agentic, "issue_comments", lambda *args: [])
+    writes = []
+    monkeypatch.setattr(module.agentic, "request", lambda *args: writes.append(args) or {})
+
+    result = module._decompose_kernel_priority_issue("owner/repo", "token", [recovery])
+
+    assert result == {"status": "routing_failed", "issue_number": 1109, "reason": "test_skip"}
+    assert any("Genesis Kernel routing failure" in str(args[-1]) for args in writes)
