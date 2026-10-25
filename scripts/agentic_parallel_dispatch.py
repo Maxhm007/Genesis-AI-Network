@@ -140,6 +140,46 @@ def _score_issue(
     }
 
 
+def _kernel_decomposition_order(issues: list[dict]) -> list[dict]:
+    """Prioritize targetless work the Autonomy Kernel has already approved.
+
+    Before this guard, a kernel-approved issue could be correctly classified as
+    dispatch/recovery work and then silently disappear because the generic
+    selector requires a safe target. Put those issues at the front of the
+    decomposition pass so they receive a deterministic repository target first.
+
+    Agentic-Lab-owned recovery work is preferred, then other recovery work, then
+    fresh dispatchable work. Original FIFO order is preserved within each class.
+    """
+    now = datetime.now(timezone.utc)
+    ranked: list[tuple[int, int, dict]] = []
+    remainder: list[dict] = []
+    for index, issue in enumerate(issues):
+        if not policy._actionable(issue):
+            remainder.append(issue)
+            continue
+        target = agentic.explicit_target(str(issue.get("body") or ""))
+        if agentic.safe_lane(target):
+            remainder.append(issue)
+            continue
+        decision = decide_issue(issue, now=now)
+        if decision.action not in KERNEL_DISPATCH_ACTIONS:
+            remainder.append(issue)
+            continue
+        labels = agentic.labels(issue)
+        owned = 0 if agentic.AGENTIC_LABEL in labels else 1
+        action_rank = 0 if decision.action == "recover_with_new_strategy" else 1
+        ranked.append((owned * 10 + action_rank, index, issue))
+
+    ranked.sort(key=lambda row: (row[0], row[1]))
+    prioritized = [row[2] for row in ranked]
+    prioritized_numbers = {int(row.get("number") or 0) for row in prioritized}
+    return prioritized + [
+        issue for issue in remainder
+        if int(issue.get("number") or 0) not in prioritized_numbers
+    ]
+
+
 def _parallel_routable_issues(
     repository: str,
     token: str,
@@ -495,7 +535,8 @@ def main() -> int:
     decomposition_steps: list[dict] = []
     seen_decomposition_actions: set[tuple[str, int, str]] = set()
     for _ in range(MAX_PARALLEL):
-        step = policy._decompose_oldest_issue(repository, token, all_open)
+        decomposition_order = _kernel_decomposition_order(all_open)
+        step = policy._decompose_oldest_issue(repository, token, decomposition_order)
         key = (
             str(step.get("status") or ""),
             int(step.get("issue_number") or 0),
