@@ -393,3 +393,72 @@ def test_visibility_restore_checks_quarantine_only_when_repair_is_needed(monkeyp
 
     assert module.policy._restore_agentic_visibility("owner/repo", "token", [issue]) == []
     assert checked == [868]
+
+
+def test_kernel_ready_issue_is_dispatchable(monkeypatch):
+    ready = _issue(
+        1108,
+        "2026-10-24T20:30:17Z",
+        labels=("genesis-autonomous", "agentic-lab"),
+        body="- **Target:** `genesis/example.py`",
+    )
+    ready["updated_at"] = datetime.now(timezone.utc).isoformat()
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [ready])
+    monkeypatch.setattr(module.policy, "_all_issue_comments", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: "generic")
+
+    selected = module._parallel_routable_issues("owner/repo", "token")
+    assert [row["number"] for row in selected] == [1108]
+
+
+def test_kernel_excludes_validating_and_verified_from_fresh_dispatch(monkeypatch):
+    validating = _issue(
+        1110,
+        "2026-10-24T20:30:17Z",
+        labels=("genesis-autonomous", "agentic-lab", "genesis-validating"),
+        body="- **Target:** `genesis/validation.py`",
+    )
+    verified = _issue(
+        1111,
+        "2026-10-24T20:30:17Z",
+        labels=("genesis-autonomous", "agentic-lab", "genesis-verified"),
+        body="- **Target:** `genesis/closure.py`",
+    )
+    for issue in (validating, verified):
+        issue["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [validating, verified])
+    monkeypatch.setattr(module.policy, "_all_issue_comments", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: "generic")
+
+    assert module._parallel_routable_issues("owner/repo", "token") == []
+
+
+def test_kernel_stalled_ready_issue_enters_recovery_lane(monkeypatch):
+    stalled = _issue(
+        1112,
+        "2026-10-20T00:00:00Z",
+        labels=("genesis-autonomous", "agentic-lab"),
+        body="- **Target:** `genesis/failure_memory.py`",
+    )
+    stalled["updated_at"] = "2026-10-20T00:00:00Z"
+
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [stalled])
+    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args, **kwargs: [stalled])
+
+    selected = module._lane_routable_issues("owner/repo", "token")
+    assert [row["number"] for row in selected] == [1112]
+    assert module._is_recovery_issue(stalled) is True
+
+
+def test_kernel_blocked_issue_enters_recovery_even_when_recent():
+    blocked = _issue(
+        1113,
+        "2026-10-24T20:30:17Z",
+        labels=("genesis-autonomous", "agentic-lab", "genesis-blocked"),
+        body="- **Target:** `genesis/metrics.py`",
+    )
+    blocked["updated_at"] = datetime.now(timezone.utc).isoformat()
+    assert module._is_recovery_issue(blocked) is True
