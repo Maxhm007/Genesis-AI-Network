@@ -358,6 +358,44 @@ def _reclaim_stale_sequential_reservation(repository: str, token: str) -> list[i
 
 
 
+def _reclaim_orphaned_reservations(
+    repository: str, token: str, issues: list[dict], *, stale_minutes: int = 90
+) -> list[int]:
+    """Release aged worker labels only when GitHub confirms no live solver.
+
+    An unavailable Actions API fails closed via _live_agentic_worker_exists.
+    No unverified issue is closed and no capability/deferred hold is removed.
+    """
+    active_labels = (set(agentic.ACTIVE_LABELS) - {"genesis-deepseek-handoff-pending"}) | {
+        "genesis-claimed", "genesis-deepseek-working",
+    }
+    now = datetime.now(timezone.utc)
+    stale = []
+    for issue in issues:
+        labels = agentic.labels(issue)
+        if not labels & active_labels:
+            continue
+        try:
+            updated = datetime.fromisoformat(str(issue.get("updated_at") or "").replace("Z", "+00:00"))
+        except ValueError:
+            continue
+        if updated.tzinfo is None:
+            updated = updated.replace(tzinfo=timezone.utc)
+        if (now - updated).total_seconds() < stale_minutes * 60:
+            continue
+        number = int(issue.get("number") or 0)
+        if number > 0:
+            stale.append((number, labels & active_labels))
+    if not stale or _live_agentic_worker_exists(repository, token):
+        return []
+    reclaimed = []
+    for number, labels in stale:
+        for label in sorted(labels):
+            agentic.remove_label(repository, token, number, label)
+        reclaimed.append(number)
+    return reclaimed
+
+
 def _active_issue_numbers_from_issues(issues: list[dict]) -> list[int]:
     active: list[int] = []
     active_labels = (set(agentic.ACTIVE_LABELS) - {"genesis-deepseek-handoff-pending"}) | {
@@ -420,6 +458,9 @@ def main() -> int:
             }, sort_keys=True))
             return 0
         raise
+    reclaimed_orphans = _reclaim_orphaned_reservations(repository, token, all_open)
+    if reclaimed_orphans:
+        all_open = policy._all_open_issues_fifo(repository, token)
     restored = policy._restore_agentic_visibility(repository, token, all_open)
     terminalized = policy._terminalize_non_actionable_issues(repository, token, all_open)
     if terminalized:
@@ -529,6 +570,7 @@ def main() -> int:
         "legacy_dependencies_released": released,
         "capability_escalation": "enabled",
         "agentic_visibility_restored": restored,
+        "orphaned_reservations_reclaimed": reclaimed_orphans,
         "terminalized_non_actionable": terminalized,
         "decomposition": decomposition,
         "decomposition_steps": decomposition_steps,
