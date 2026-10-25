@@ -307,7 +307,8 @@ def _capability_parent_numbers(issue: dict, comments: list[dict]) -> set[int]:
     for text in corpus:
         for match in pattern.finditer(text):
             number = int(match.group(1))
-            if number > 0 and number != int(issue.get("number") or 0):
+            if number > 0 and number != int(issue.get("number", 0)):
+            
                 parents.add(number)
     return parents
 
