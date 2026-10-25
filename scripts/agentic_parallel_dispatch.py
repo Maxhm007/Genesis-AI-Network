@@ -211,20 +211,28 @@ def _decompose_kernel_priority_issue(repository: str, token: str, issues: list[d
 
     reason = str(result.get("reason") or "kernel_priority_targetless_issue_not_routed")
     marker = "<!-- genesis-kernel-routing-failure -->"
-    comments = agentic.issue_comments(repository, token, number)
-    if not any(marker in str(row.get("body") or "") for row in comments):
-        agentic.request(
-            repository,
-            token,
-            "POST",
-            f"/issues/{number}/comments",
-            {"body": (
-                f"{marker}\n"
-                "**Genesis Kernel routing failure**\n\n"
-                "Autonomy Kernel approved this Issue for dispatch/recovery, but target decomposition did not produce a safe target. "
-                f"Reason: `{reason}`. The Issue remains authoritative and must be retried after routing repair; it was not silently skipped."
-            )},
-        )
+    try:
+        comments = agentic.issue_comments(repository, token, number)
+        if not any(marker in str(row.get("body") or "") for row in comments):
+            agentic.request(
+                repository,
+                token,
+                "POST",
+                f"/issues/{number}/comments",
+                {"body": (
+                    f"{marker}\n"
+                    "**Genesis Kernel routing failure**\n\n"
+                    "Autonomy Kernel approved this Issue for dispatch/recovery, but target decomposition did not produce a safe target. "
+                    f"Reason: `{reason}`. The Issue remains authoritative and must be retried after routing repair; it was not silently skipped."
+                )},
+            )
+    except RuntimeError as exc:
+        print(json.dumps({
+            "status": "routing_failure_evidence_deferred",
+            "issue_number": number,
+            "reason": reason,
+            "detail": str(exc)[:300],
+        }, sort_keys=True))
     return {
         "status": "routing_failed",
         "issue_number": number,
