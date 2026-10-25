@@ -535,3 +535,32 @@ def test_lane_selector_excludes_noop_before_single_slot_limit(monkeypatch):
     )
 
     assert [row["number"] for row in selected] == [868]
+
+
+def test_recovery_lane_remains_available_while_development_worker_is_active(monkeypatch):
+    active_dev = _issue(
+        1000,
+        "2026-09-29T13:02:35Z",
+        labels=("genesis-autonomous", "genesis-repair-in-progress"),
+        body="- **Target:** `genesis/development.py`",
+    )
+    recovery = _issue(
+        1109,
+        "2026-10-24T20:30:19Z",
+        labels=("genesis-autonomous", "agentic-lab", "genesis-blocked"),
+        body="- **Target:** `genesis/recovery.py`",
+    )
+    active_dev["updated_at"] = datetime.now(timezone.utc).isoformat()
+    recovery["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    monkeypatch.setattr(module, "DEVELOPMENT_SLOTS", 1)
+    monkeypatch.setattr(module, "RECOVERY_SLOTS", 1)
+    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args, **kwargs: [recovery])
+
+    selected = module._lane_routable_issues(
+        "owner/repo",
+        "token",
+        all_open=[active_dev, recovery],
+    )
+
+    assert [row["number"] for row in selected] == [1109]
