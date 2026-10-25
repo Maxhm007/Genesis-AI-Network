@@ -13,6 +13,7 @@ except ModuleNotFoundError:
     # scripts/ itself on sys.path; package-style imports are then unavailable.
     import agentic_lab_capability_first_dispatch as policy
     import agentic_lab_recovery_dispatch as agentic
+from genesis.autonomy_kernel import decide_issue
 from genesis.issue_governor import issue_value_score
 
 
@@ -47,6 +48,8 @@ RECOVERY_LABELS = {
     "genesis-needs-routing",
     "genesis-waiting-capability",
 }
+
+KERNEL_DISPATCH_ACTIONS = {"dispatch_solver", "recover_with_new_strategy"}
 
 if "qwen3_fallback" not in agentic.STRATEGIES:
     agentic.STRATEGIES = (*agentic.STRATEGIES, "qwen3_fallback")
@@ -153,10 +156,16 @@ def _parallel_routable_issues(
     all_open = list(all_open) if all_open is not None else policy._all_open_issues_fifo(repository, token)
     comments_by_issue = comments_cache if comments_cache is not None else {}
     eligible: list[dict] = []
+    kernel_actions: dict[int, str] = {}
+    now = datetime.now(timezone.utc)
     for issue in all_open:
         if not policy._actionable(issue):
             continue
         number = int(issue.get("number") or 0)
+        kernel_decision = decide_issue(issue, now=now)
+        kernel_actions[number] = kernel_decision.action
+        if kernel_decision.action not in KERNEL_DISPATCH_ACTIONS:
+            continue
         target = agentic.explicit_target(str(issue.get("body") or ""))
         if not agentic.safe_lane(target):
             continue
@@ -174,7 +183,6 @@ def _parallel_routable_issues(
         eligible.append(issue)
 
     unlock_counts = _dependency_unlock_counts(all_open, comments_by_issue)
-    now = datetime.now(timezone.utc)
     scored = [
         (
             issue,
@@ -206,11 +214,25 @@ def _parallel_routable_issues(
         "ranked_candidates": [row[1] for row in scored[:10]],
         "max_parallel": MAX_PARALLEL,
         "strategies": list(agentic.STRATEGIES),
+        "kernel_actions": {str(number): action for number, action in sorted(kernel_actions.items())},
     }, sort_keys=True))
     return ordered
 
 
 def _is_recovery_issue(issue: dict) -> bool:
+    # The kernel is the canonical state interpreter. A real GitHub issue always
+    # carries updated_at; when it declares the issue stalled/blocked, Recovery
+    # owns the next attempt even if legacy labels have not caught up yet.
+    if issue.get("updated_at"):
+        decision = decide_issue(issue, now=datetime.now(timezone.utc))
+        if decision.action == "recover_with_new_strategy":
+            return True
+        if decision.action not in KERNEL_DISPATCH_ACTIONS:
+            return False
+
+    # Compatibility fallback for synthetic/unit-test records that omit GitHub
+    # timestamps, plus capability/action-failure families that are intrinsically
+    # recovery work.
     labels = agentic.labels(issue)
     title = str(issue.get("title") or "").strip().lower()
     body = str(issue.get("body") or "").lower()
