@@ -180,6 +180,57 @@ def _kernel_decomposition_order(issues: list[dict]) -> list[dict]:
     ]
 
 
+def _first_kernel_targetless_issue(issues: list[dict]) -> dict | None:
+    """Return the highest-priority targetless issue the Kernel already approved."""
+    ordered = _kernel_decomposition_order(issues)
+    now = datetime.now(timezone.utc)
+    for issue in ordered:
+        if not policy._actionable(issue):
+            continue
+        target = agentic.explicit_target(str(issue.get("body") or ""))
+        if agentic.safe_lane(target):
+            continue
+        decision = decide_issue(issue, now=now)
+        if decision.action in KERNEL_DISPATCH_ACTIONS:
+            return issue
+    return None
+
+
+def _decompose_kernel_priority_issue(repository: str, token: str, issues: list[dict]) -> dict | None:
+    """Route one Kernel-approved targetless issue before generic FIFO routing."""
+    issue = _first_kernel_targetless_issue(issues)
+    if issue is None:
+        return None
+    number = int(issue.get("number") or 0)
+    result = policy._decompose_oldest_issue(repository, token, [issue])
+    if not isinstance(result, dict):
+        result = {"status": "routing_failed", "issue_number": number, "reason": "invalid_decomposer_result"}
+    status = str(result.get("status") or "")
+    if status in {"decomposed", "retargeted", "target_revoked", "routing_released"}:
+        return result
+
+    reason = str(result.get("reason") or "kernel_priority_targetless_issue_not_routed")
+    marker = "<!-- genesis-kernel-routing-failure -->"
+    comments = agentic.issue_comments(repository, token, number)
+    if not any(marker in str(row.get("body") or "") for row in comments):
+        agentic.request(
+            repository,
+            token,
+            "POST",
+            f"/issues/{number}/comments",
+            {"body": (
+                f"{marker}\n"
+                "**Genesis Kernel routing failure**\n\n"
+                "Autonomy Kernel approved this Issue for dispatch/recovery, but target decomposition did not produce a safe target. "
+                f"Reason: `{reason}`. The Issue remains authoritative and must be retried after routing repair; it was not silently skipped."
+            )},
+        )
+    return {
+        "status": "routing_failed",
+        "issue_number": number,
+        "reason": reason,
+    }
+
 def _parallel_routable_issues(
     repository: str,
     token: str,
@@ -540,8 +591,10 @@ def main() -> int:
     decomposition_steps: list[dict] = []
     seen_decomposition_actions: set[tuple[str, int, str]] = set()
     for _ in range(MAX_PARALLEL):
-        decomposition_order = _kernel_decomposition_order(all_open)
-        step = policy._decompose_oldest_issue(repository, token, decomposition_order)
+        step = _decompose_kernel_priority_issue(repository, token, all_open)
+        if step is None:
+            decomposition_order = _kernel_decomposition_order(all_open)
+            step = policy._decompose_oldest_issue(repository, token, decomposition_order)
         key = (
             str(step.get("status") or ""),
             int(step.get("issue_number") or 0),
