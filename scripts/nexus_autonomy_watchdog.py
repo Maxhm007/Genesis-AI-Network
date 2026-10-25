@@ -316,8 +316,8 @@ Nexus detected that Genesis is not maintaining its autonomous operating loop.
 ```
 
 ### Objective
+### Objective
 Restore Genesis autonomous operation end-to-end without requiring a human "check now" prompt.
-
 ### Acceptance
 - Restore the Genesis teammate heartbeat.
 - Restore the Agentic Lab recovery heartbeat.
