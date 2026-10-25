@@ -290,6 +290,7 @@ def _lane_routable_issues(
     *,
     all_open: list[dict] | None = None,
     comments_cache: dict[int, list[dict]] | None = None,
+    excluded_issue_numbers: set[int] | None = None,
 ) -> list[dict]:
     """Return work for the first free bounded lane without target collisions.
 
@@ -299,6 +300,7 @@ def _lane_routable_issues(
     skipped until the owner leaves its active/validation state.
     """
     all_open = list(all_open) if all_open is not None else policy._all_open_issues_fifo(repository, token)
+    excluded = {int(number) for number in (excluded_issue_numbers or set()) if int(number) > 0}
     active_labels = (set(agentic.ACTIVE_LABELS) - {"genesis-deepseek-handoff-pending"}) | {
         "genesis-claimed",
         "genesis-deepseek-working",
@@ -327,6 +329,9 @@ def _lane_routable_issues(
     seen_targets = set(locked_targets)
 
     for issue in ordered:
+        number = int(issue.get("number") or 0)
+        if number in excluded:
+            continue
         if agentic.labels(issue) & active_labels:
             continue
         target = agentic.explicit_target(str(issue.get("body") or ""))
@@ -557,16 +562,17 @@ def main() -> int:
     routing_snapshot = list(all_open)
 
     def routable_without_noops(repo: str, gh_token: str) -> list[dict]:
-        return [
-            issue
-            for issue in _lane_routable_issues(
-                repo,
-                gh_token,
-                all_open=routing_snapshot,
-                comments_cache=comments_cache,
-            )
-            if int(issue.get("number") or 0) not in skipped_this_pass
-        ]
+        # Exclude bounded no-op candidates *before* lane capacity is applied.
+        # With one production slot, filtering after the lane selector allowed an
+        # older no-op issue to consume the sole candidate position and made the
+        # controller incorrectly report an empty queue.
+        return _lane_routable_issues(
+            repo,
+            gh_token,
+            all_open=routing_snapshot,
+            comments_cache=comments_cache,
+            excluded_issue_numbers=skipped_this_pass,
+        )
 
     agentic.open_agentic_issues = routable_without_noops
 
