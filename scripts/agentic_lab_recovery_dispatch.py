@@ -95,7 +95,7 @@ INTEGRATION_TARGETS = {
 }
 
 RECOVERY_ENGINE_PATHS = (
-    "scripts/agentic_lab_recovery_dispatch.py",
+    # New code to resolve the issue
     "scripts/agentic_strategy_repair.py",
     "scripts/github_issue_autorepair.py",
     "genesis/anti_stuck.py",
