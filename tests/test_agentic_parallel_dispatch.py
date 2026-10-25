@@ -462,3 +462,49 @@ def test_kernel_blocked_issue_enters_recovery_even_when_recent():
     )
     blocked["updated_at"] = datetime.now(timezone.utc).isoformat()
     assert module._is_recovery_issue(blocked) is True
+
+
+def test_kernel_targetless_recovery_is_prioritized_for_decomposition(monkeypatch):
+    ordinary = _issue(
+        1100,
+        "2026-10-24T18:00:00Z",
+        labels=("genesis-autonomous",),
+        body="Monitoring task without a target",
+    )
+    recovery = _issue(
+        1109,
+        "2026-10-24T20:30:19Z",
+        labels=("genesis-autonomous", "agentic-lab"),
+        body="Recovery task without a target",
+    )
+    ordinary["updated_at"] = "2026-10-20T00:00:00Z"
+    recovery["updated_at"] = "2026-10-20T00:00:00Z"
+
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target))
+
+    ordered = module._kernel_decomposition_order([ordinary, recovery])
+    assert [row["number"] for row in ordered[:2]] == [1109, 1100]
+
+
+def test_kernel_targetless_validating_issue_is_not_prioritized(monkeypatch):
+    validating = _issue(
+        1110,
+        "2026-10-24T20:30:21Z",
+        labels=("genesis-autonomous", "agentic-lab", "genesis-validating"),
+        body="Validation work without target",
+    )
+    ready = _issue(
+        1111,
+        "2026-10-24T20:30:22Z",
+        labels=("genesis-autonomous", "agentic-lab"),
+        body="Ready work without target",
+    )
+    validating["updated_at"] = datetime.now(timezone.utc).isoformat()
+    ready["updated_at"] = datetime.now(timezone.utc).isoformat()
+
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target))
+
+    ordered = module._kernel_decomposition_order([validating, ready])
+    assert ordered[0]["number"] == 1111
