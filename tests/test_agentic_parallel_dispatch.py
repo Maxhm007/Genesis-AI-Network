@@ -508,3 +508,30 @@ def test_kernel_targetless_validating_issue_is_not_prioritized(monkeypatch):
 
     ordered = module._kernel_decomposition_order([validating, ready])
     assert ordered[0]["number"] == 1111
+
+
+def test_lane_selector_excludes_noop_before_single_slot_limit(monkeypatch):
+    first = _issue(
+        867,
+        "2026-09-18T00:00:00Z",
+        labels=("genesis-autonomous",),
+        body="- **Target:** `genesis/health.py`",
+    )
+    second = _issue(
+        868,
+        "2026-09-18T00:00:01Z",
+        labels=("genesis-autonomous",),
+        body="- **Target:** `genesis/next.py`",
+    )
+    monkeypatch.setattr(module, "RECOVERY_SLOTS", 1)
+    monkeypatch.setattr(module, "DEVELOPMENT_SLOTS", 1)
+    monkeypatch.setattr(module, "_parallel_routable_issues", lambda *args, **kwargs: [first, second])
+
+    selected = module._lane_routable_issues(
+        "owner/repo",
+        "token",
+        all_open=[first, second],
+        excluded_issue_numbers={867},
+    )
+
+    assert [row["number"] for row in selected] == [868]
