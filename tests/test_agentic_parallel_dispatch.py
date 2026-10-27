@@ -599,3 +599,57 @@ def test_kernel_priority_routing_failure_is_recorded(monkeypatch):
 
     assert result == {"status": "routing_failed", "issue_number": 1109, "reason": "test_skip"}
     assert any("Genesis Kernel routing failure" in str(args[-1]) for args in writes)
+
+def test_kernel_targetless_tie_uses_least_recently_touched_issue(monkeypatch):
+    older_reprocessed = _issue(1100, "2026-10-24T18:00:00Z", labels=("genesis-autonomous", "agentic-lab"), body="monitoring")
+    later_untouched = _issue(1109, "2026-10-24T20:30:19Z", labels=("genesis-autonomous", "agentic-lab"), body="recovery")
+    older_reprocessed["updated_at"] = "2026-10-27T15:00:00Z"
+    later_untouched["updated_at"] = "2026-10-24T20:30:19Z"
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: bool(target))
+
+    ordered = module._kernel_decomposition_order([older_reprocessed, later_untouched])
+
+    assert [row["number"] for row in ordered[:2]] == [1109, 1100]
+
+
+def test_recent_noop_cooldown_temporarily_removes_candidate(monkeypatch):
+    cooled = _issue(867, "2026-09-18T00:00:00Z", labels=("genesis-autonomous",), body="- **Target:** `genesis/health.py`")
+    next_issue = _issue(1109, "2026-10-24T20:30:19Z", labels=("genesis-autonomous", "agentic-lab"), body="- **Target:** `genesis/recovery.py`")
+    for issue in (cooled, next_issue):
+        issue["updated_at"] = "2026-10-20T00:00:00Z"
+    comments = {
+        867: [{"body": module.NOOP_COOLDOWN_MARKER, "created_at": datetime.now(timezone.utc).isoformat()}],
+        1109: [],
+    }
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [cooled, next_issue])
+    monkeypatch.setattr(module.policy, "_all_issue_comments", lambda repository, token, number: comments[number])
+    monkeypatch.setattr(module.policy, "_actionable", lambda issue: True)
+    monkeypatch.setattr(module.agentic, "safe_lane", lambda target: "generic")
+
+    ordered = module._parallel_routable_issues("owner/repo", "token")
+
+    assert [row["number"] for row in ordered] == [1109]
+
+
+def test_noop_cooldown_marker_is_recorded_once_per_window(monkeypatch):
+    comments = {867: []}
+    writes = []
+    monkeypatch.setattr(module.policy, "_all_issue_comments", lambda *args: comments[867])
+    monkeypatch.setattr(module.agentic, "request", lambda *args: writes.append(args) or {})
+
+    module._record_noop_cooldown(
+        "owner/repo", "token", 867,
+        status="capability_already_ready",
+        reason="strategy_set_exhausted",
+        comments_cache=comments,
+    )
+    module._record_noop_cooldown(
+        "owner/repo", "token", 867,
+        status="capability_already_ready",
+        reason="strategy_set_exhausted",
+        comments_cache=comments,
+    )
+
+    assert len(writes) == 1
+    assert module.NOOP_COOLDOWN_MARKER in str(writes[0][-1])
