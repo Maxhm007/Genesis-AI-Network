@@ -68,9 +68,53 @@ def test_existing_problems_are_not_blamed_on_new_edit() -> None:
     assert _code_sanity_problems(old, new) == []
 
 
-def test_syntax_error_and_star_import_are_left_to_other_checks() -> None:
+def test_syntax_error_is_left_to_other_checks() -> None:
     assert _code_sanity_problems("", "def f(:\n") == []
-    assert _code_sanity_problems("", "from os import *\ndef f():\n    return sep\n") == []
+
+
+def test_new_star_import_is_rejected_but_an_existing_one_is_kept() -> None:
+    old = "def f():\n    return 1\n"
+    new = "from os import *\ndef f():\n    return sep\n"
+    assert any("import *" in p for p in _code_sanity_problems(old, new))
+    assert _code_sanity_problems(new, new + "def g():\n    return sep\n") == []
+
+
+@pytest.mark.parametrize(
+    "new",
+    [
+        "class A:\n    def m(self):\n        fresh = 1\n        return fresh\n    def n(self):\n        return fresh\n",
+        "if False:\n    fresh = None\ndef f():\n    return fresh\n",
+        "g = lambda: (fresh := 1)\ndef f():\n    return fresh\n",
+        "def f(rows):\n    if any(row for row in rows):\n        return row\n",
+        "value = missing_name + 1\n",
+        "class A:\n    size = missing_name\n",
+        "names = [missing_name for _ in range(3)]\n",
+    ],
+)
+def test_names_bound_only_elsewhere_are_rejected(new: str) -> None:
+    assert any("undefined name" in p for p in _code_sanity_problems("", new))
+
+
+def test_moving_dead_code_to_a_new_place_is_rejected() -> None:
+    old = "def f():\n    return 1\n    x = 1\ndef g():\n    return 2\n"
+    new = "def f():\n    return 1\ndef g():\n    return 2\n    y = 2\n"
+    assert any("never run" in p for p in _code_sanity_problems(old, new))
+
+
+@pytest.mark.parametrize(
+    "new",
+    [
+        "class A:\n    def m(self):\n        return __class__\n",
+        "where = __cached__\n",
+        "def f[T](x: T) -> T:\n    return x\n",
+        "class A:\n    size = 1\n    double = size * 2\n",
+        "def f(rows):\n    if (n := len(rows)) > 1:\n        return n\n    return [y for x in rows if (y := x)]\n",
+        "def outer():\n    v = 1\n    def inner():\n        nonlocal v\n        v = 2\n        return v\n    return inner\n",
+        "try:\n    import json\nexcept ImportError:\n    json = None\n",
+    ],
+)
+def test_valid_scoping_passes(new: str) -> None:
+    assert _code_sanity_problems("", new) == []
 
 
 def test_class_and_global_names_are_known() -> None:

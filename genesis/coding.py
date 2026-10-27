@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import ast
+import collections
 import json
 import re
 import subprocess
@@ -109,89 +110,218 @@ def _changes_code(old: str, new: str) -> bool:
         return True
 
 
-def _bound_names(node: ast.AST) -> set[str]:
-    names: set[str] = set()
-    for child in ast.walk(node):
-        if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
-            names.add(child.id)
-        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
-            names.add(child.name)
-        elif isinstance(child, (ast.Import, ast.ImportFrom)):
-            names.update((alias.asname or alias.name).split(".")[0] for alias in child.names)
-        elif isinstance(child, ast.arg):
-            names.add(child.arg)
-        elif isinstance(child, ast.ExceptHandler) and child.name:
-            names.add(child.name)
-        elif isinstance(child, (ast.Global, ast.Nonlocal)):
-            names.update(child.names)
-        elif isinstance(child, ast.MatchAs) and child.name:
-            names.add(child.name)
-        elif isinstance(child, ast.MatchStar) and child.name:
-            names.add(child.name)
-        elif isinstance(child, ast.MatchMapping) and child.rest:
-            names.add(child.rest)
-    return names
+_IMPLICIT_NAMES = frozenset(
+    {
+        "__file__", "__name__", "__doc__", "__spec__", "__path__", "__builtins__", "__cached__",
+        "__loader__", "__package__", "__annotations__", "__dict__", "__class__", "__module__", "__qualname__",
+    }
+)
+_COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 
 
-def _code_sanity_facts(source: str) -> tuple[set[tuple[str, str]], int] | None:
-    """Undefined names per function, and statements that can never run."""
+def _is_dead_test(test: ast.AST) -> bool:
+    return isinstance(test, ast.Constant) and not test.value
+
+
+class _Scope:
+    def __init__(self, kind: str, qual: str, parent: "_Scope | None") -> None:
+        self.kind = kind
+        self.qual = qual
+        self.parent = parent
+        self.stores: set[str] = set()
+        self.declared_global: set[str] = set()
+        self.declared_nonlocal: set[str] = set()
+        self.loads: set[str] = set()
+
+
+def _collect_scopes(tree: ast.Module) -> tuple[list[_Scope], bool]:
+    module = _Scope("module", "<module>", None)
+    scopes = [module]
+    star = False
+
+    def child(kind: str, name: str, parent: _Scope) -> _Scope:
+        scope = _Scope(kind, name if parent is module else f"{parent.qual}.{name}", parent)
+        scopes.append(scope)
+        return scope
+
+    def bind(scope: _Scope, name: str, dead: bool) -> None:
+        if not dead:
+            scope.stores.add(name)
+
+    def bind_params(scope: _Scope, node: ast.AST) -> None:
+        for param in getattr(node, "type_params", None) or []:
+            scope.stores.add(param.name)
+
+    def walk_args(args: ast.arguments, outer: _Scope, inner: _Scope, typed: _Scope | None = None) -> None:
+        for default in [*args.defaults, *[d for d in args.kw_defaults if d is not None]]:
+            visit(default, outer, False)
+        for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
+            if arg is not None:
+                inner.stores.add(arg.arg)
+                if arg.annotation is not None:
+                    visit(arg.annotation, typed or outer, False)
+
+    def visit(node: ast.AST, scope: _Scope, dead: bool) -> None:
+        nonlocal star
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            for item in node.decorator_list:
+                visit(item, scope, dead)
+            bind(scope, node.name, dead)
+            inner = child("function", node.name, scope)
+            bind_params(inner, node)
+            typed = inner if getattr(node, "type_params", None) else scope
+            if node.returns is not None:
+                visit(node.returns, typed, dead)
+            walk_args(node.args, scope, inner, typed)
+            for statement in node.body:
+                visit(statement, inner, False)
+        elif isinstance(node, ast.Lambda):
+            inner = child("function", "<lambda>", scope)
+            walk_args(node.args, scope, inner)
+            visit(node.body, inner, False)
+        elif isinstance(node, ast.ClassDef):
+            for item in node.decorator_list:
+                visit(item, scope, dead)
+            bind(scope, node.name, dead)
+            typed = scope
+            if getattr(node, "type_params", None):
+                typed = child("function", f"{node.name}.<type params>", scope)
+                bind_params(typed, node)
+            inner = child("class", node.name, typed)
+            inner.qual = node.name if scope is module else f"{scope.qual}.{node.name}"
+            for item in [*node.bases, *node.keywords]:
+                visit(item, typed, dead)
+            for statement in node.body:
+                visit(statement, inner, False)
+        elif isinstance(node, _COMPREHENSIONS):
+            inner = child("comprehension", type(node).__name__.lower(), scope)
+            for index, generator in enumerate(node.generators):
+                visit(generator.iter, scope if index == 0 else inner, dead)
+                visit(generator.target, inner, False)
+                for condition in generator.ifs:
+                    visit(condition, inner, False)
+            for part in ("elt", "key", "value"):
+                if getattr(node, part, None) is not None:
+                    visit(getattr(node, part), inner, False)
+        elif isinstance(node, ast.NamedExpr):
+            target = scope
+            while target.kind == "comprehension" and target.parent is not None:
+                target = target.parent
+            bind(target, node.target.id, dead)
+            visit(node.value, scope, dead)
+        elif isinstance(node, ast.Name):
+            if isinstance(node.ctx, ast.Load):
+                scope.loads.add(node.id)
+            else:
+                bind(scope, node.id, dead)
+        elif isinstance(node, ast.Global):
+            scope.declared_global.update(node.names)
+        elif isinstance(node, ast.Nonlocal):
+            scope.declared_nonlocal.update(node.names)
+        elif isinstance(node, (ast.Import, ast.ImportFrom)):
+            for alias in node.names:
+                if alias.name == "*":
+                    star = True
+                else:
+                    bind(scope, (alias.asname or alias.name).split(".")[0], dead)
+        elif isinstance(node, (ast.If, ast.While)) and _is_dead_test(node.test):
+            visit(node.test, scope, dead)
+            for statement in node.body:
+                visit(statement, scope, True)
+            for statement in node.orelse:
+                visit(statement, scope, dead)
+        else:
+            if isinstance(node, ast.ExceptHandler) and node.name:
+                bind(scope, node.name, dead)
+            elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
+                bind(scope, node.name, dead)
+            elif isinstance(node, ast.MatchMapping) and node.rest:
+                bind(scope, node.rest, dead)
+            elif type(node).__name__ == "TypeAlias":
+                bind(scope, node.name.id, dead)
+                inner = child("function", node.name.id, scope)
+                bind_params(inner, node)
+                visit(node.value, inner, False)
+                return
+            for sub in ast.iter_child_nodes(node):
+                visit(sub, scope, dead)
+
+    for statement in tree.body:
+        visit(statement, module, False)
+    for scope in scopes[1:]:
+        module.stores |= scope.stores & scope.declared_global
+    return scopes, star
+
+
+def _undefined_names(tree: ast.Module, scopes: list[_Scope]) -> set[tuple[str, str]]:
     import builtins
 
-    try:
-        tree = ast.parse(source)
-    except SyntaxError:
-        return None
-    if any(isinstance(node, ast.ImportFrom) and any(a.name == "*" for a in node.names) for node in ast.walk(tree)):
-        return set(), 0
-    module_level: set[str] = set(dir(builtins)) | {"__file__", "__name__", "__doc__", "__spec__", "__path__", "__builtins__"}
-    for statement in tree.body:
-        if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
-            module_level |= _bound_names(statement)
-        else:
-            module_level.add(statement.name)
-    for node in ast.walk(tree):
-        if isinstance(node, (ast.Global, ast.ClassDef)):
-            module_level |= _bound_names(node) if isinstance(node, ast.ClassDef) else set(node.names)
+    known = set(dir(builtins)) | _IMPLICIT_NAMES | scopes[0].stores
     undefined: set[tuple[str, str]] = set()
+    for scope in scopes:
+        for name in scope.loads:
+            if name in known or name in scope.declared_nonlocal:
+                continue
+            if scope.kind != "module" and name in scope.stores and name not in scope.declared_global:
+                continue
+            outer = scope.parent
+            found = False
+            while outer is not None and outer.kind != "module":
+                if outer.kind != "class" and name in outer.stores and name not in outer.declared_global:
+                    found = True
+                    break
+                outer = outer.parent
+            if not found:
+                undefined.add((scope.qual, name))
+    return undefined
 
-    def visit(node: ast.AST, enclosing: set[str], scope: str) -> None:
-        for child in ast.iter_child_nodes(node):
-            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
-                name = getattr(child, "name", "<lambda>")
-                visible = enclosing | _bound_names(child)
-                for inner in ast.walk(child):
-                    if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Load) and inner.id not in visible:
-                        undefined.add((f"{scope}.{name}", inner.id))
-                visit(child, visible, f"{scope}.{name}")
-            else:
-                visit(child, enclosing, scope)
 
-    visit(tree, module_level, "<module>")
-    unreachable = 0
-    for node in ast.walk(tree):
+def _unreachable_statements(tree: ast.Module) -> collections.Counter:
+    found: collections.Counter = collections.Counter()
+
+    def visit(node: ast.AST, qual: str) -> None:
         for field in ("body", "orelse", "finalbody"):
             body = getattr(node, field, None)
             if not isinstance(body, list):
                 continue
             for index, statement in enumerate(body[:-1]):
                 if isinstance(statement, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
-                    unreachable += len(body) - index - 1
+                    for dead in body[index + 1:]:
+                        found[(qual, ast.dump(dead))] += 1
                     break
-    return undefined, unreachable
+        for sub in ast.iter_child_nodes(node):
+            name = getattr(sub, "name", None)
+            inner = f"{qual}.{name}" if isinstance(sub, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)) else qual
+            visit(sub, inner)
+
+    visit(tree, "<module>")
+    return found
+
+
+def _code_sanity_facts(source: str) -> tuple[set[tuple[str, str]], collections.Counter, bool] | None:
+    """Undefined names per scope, statements that can never run, and whether a star import is present."""
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    scopes, star = _collect_scopes(tree)
+    undefined = set() if star else _undefined_names(tree, scopes)
+    return undefined, _unreachable_statements(tree), star
 
 
 def _code_sanity_problems(old: str, new: str) -> list[str]:
     after = _code_sanity_facts(new)
     if after is None:
         return []
-    before = _code_sanity_facts(old) if old else (set(), 0)
-    if before is None:
-        before = (set(), 0)
-    problems = [
-        f"uses undefined name `{name}` in {scope.removeprefix('<module>.')}"
+    before = (_code_sanity_facts(old) if old else None) or (set(), collections.Counter(), False)
+    problems: list[str] = []
+    if after[2] and not before[2]:
+        problems.append("adds a `from ... import *`, which hides undefined names; import the names you need")
+    problems.extend(
+        f"uses undefined name `{name}` " + ("at module level" if scope == "<module>" else f"in {scope}")
         for scope, name in sorted(after[0] - before[0])
-    ]
-    if after[1] > before[1]:
+    )
+    if after[1] - before[1]:
         problems.append("adds code after a return, raise, continue or break that can never run")
     return problems
 
