@@ -8,6 +8,7 @@ from datetime import datetime, timezone
 
 from genesis.autonomy_kernel import summarize_issues
 from genesis.issue_opening_manager import annotate_body, submit_agentic_candidate
+from genesis.lab_recovery_wake import LAB_RECOVERY_WORKFLOW, wake_lab_recovery_via_gh
 
 TITLE = "[Nexus Autonomy] Genesis autonomous loop degraded"
 MARKER = "<!-- nexus-autonomy-watchdog -->"
@@ -200,6 +201,8 @@ def evaluate(
 
 
 def _dispatch(repository: str, workflow: str) -> bool:
+    if workflow == LAB_RECOVERY_WORKFLOW:
+        return wake_lab_recovery_via_gh(repository, _run)
     result = _run(["gh", "workflow", "run", workflow, "--repo", repository, "--ref", "main"])
     return result.returncode == 0
 

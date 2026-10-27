@@ -25,6 +25,7 @@ from genesis.anti_stuck import (
     state_marker,
 )
 from genesis.issue_lifecycle import local_claim_block_reason
+from genesis.lab_recovery_wake import wake_lab_recovery
 
 
 ROOT = Path(__file__).resolve().parents[1]
@@ -925,13 +926,7 @@ def pause_for_capability(
                 ),
             )
             try:
-                request(
-                    repository,
-                    token,
-                    "POST",
-                    "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
-                    {"ref": "main"},
-                )
+                wake_lab_recovery(lambda method, path, payload: request(repository, token, method, path, payload))
             except Exception:
                 pass
             return {
@@ -990,13 +985,7 @@ def pause_for_capability(
             ),
         )
         try:
-            request(
-                repository,
-                token,
-                "POST",
-                "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
-                {"ref": "main"},
-            )
+            wake_lab_recovery(lambda method, path, payload: request(repository, token, method, path, payload))
         except Exception:
             pass
         return {
@@ -1027,13 +1016,7 @@ def pause_for_capability(
         # issue can remain open with no worker even though its dependency is
         # already verified.
         try:
-            request(
-                repository,
-                token,
-                "POST",
-                "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
-                {"ref": "main"},
-            )
+            wake_lab_recovery(lambda method, path, payload: request(repository, token, method, path, payload))
         except Exception:
             pass
         return {
@@ -1090,13 +1073,7 @@ def pause_for_capability(
     )
 
     try:
-        request(
-            repository,
-            token,
-            "POST",
-            "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
-            {"ref": "main"},
-        )
+        wake_lab_recovery(lambda method, path, payload: request(repository, token, method, path, payload))
     except Exception:
         pass
 

@@ -13,6 +13,7 @@ from genesis.issue_opening_manager import (
 )
 from genesis.issue_governor import OCCURRENCE_MARKER, PROBLEM_MARKER, extract_marker
 from genesis.issue_lifecycle import is_sealed, is_superseded, is_verified
+from genesis.lab_recovery_wake import wake_lab_recovery
 
 
 def _request(repository: str, token: str, method: str, path: str, payload: dict | None = None):
@@ -169,13 +170,7 @@ def run(repository: str, token: str, payload: dict) -> dict:
         raise RuntimeError("Agentic opening authority did not receive a valid created issue")
 
     try:
-        _request(
-            repository,
-            token,
-            "POST",
-            "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
-            {"ref": "main"},
-        )
+        wake_lab_recovery(lambda method, path, payload: _request(repository, token, method, path, payload))
     except Exception:
         pass
 

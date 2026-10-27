@@ -8,6 +8,7 @@ import urllib.request
 from datetime import datetime, timezone
 
 from genesis.issue_governor import issue_value_score
+from genesis.lab_recovery_wake import wake_lab_recovery
 
 try:
     from scripts.requeue_exhausted_issues import engine_generation
@@ -428,13 +429,7 @@ def prioritize(repository: str, token: str) -> dict:
     selected_number = int(selected.get("number") or 0)
     selected_labels = labels(selected)
     if not (selected_labels & ACTIVE_LABELS):
-        request(
-            repository,
-            token,
-            "POST",
-            "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
-            {"ref": "main"},
-        )
+        wake_lab_recovery(lambda method, path, payload: request(repository, token, method, path, payload))
 
     return {
         "status": "prioritized",

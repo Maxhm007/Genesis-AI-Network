@@ -7,6 +7,7 @@ import subprocess
 from datetime import datetime, timezone
 
 from genesis.issue_opening_manager import annotate_body, submit_agentic_candidate
+from genesis.lab_recovery_wake import LAB_RECOVERY_WORKFLOW, wake_lab_recovery_via_gh
 
 TITLE = "[Genesis Lifecycle] Automatic issue opening/closing health degraded"
 MARKER = "<!-- genesis-issue-lifecycle-health-watchdog -->"
@@ -137,6 +138,8 @@ def evaluate(
 
 
 def _dispatch_workflow(repository: str, workflow_file: str) -> bool:
+    if workflow_file == LAB_RECOVERY_WORKFLOW:
+        return wake_lab_recovery_via_gh(repository, _run)
     result = _run([
         "gh", "workflow", "run", workflow_file,
         "--repo", repository,

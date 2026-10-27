@@ -6,6 +6,7 @@ import os
 import urllib.error
 import urllib.parse
 import urllib.request
+from genesis.lab_recovery_wake import wake_lab_recovery
 
 
 AGENTIC_LABEL = "agentic-lab"
@@ -164,13 +165,7 @@ def reactivate(repository: str, token: str, issue_number: int) -> dict:
         )
 
     try:
-        request(
-            repository,
-            token,
-            "POST",
-            "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
-            {"ref": "main"},
-        )
+        wake_lab_recovery(lambda method, path, payload: request(repository, token, method, path, payload))
     except Exception:
         pass
 

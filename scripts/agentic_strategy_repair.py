@@ -12,6 +12,7 @@ import scripts.github_issue_autorepair as base
 from genesis.selfdev import ALLOWED_SCRIPT_PATHS, normalize_selfdev_path
 from genesis.issue_target import extract_issue_target
 from genesis.github_issue_capability_builder import GitHubIssueLearnedCapabilityProvider
+from genesis.lab_recovery_wake import wake_lab_recovery
 
 
 STRATEGY_GUIDANCE = {
@@ -414,10 +415,10 @@ def _close_if_current_main_satisfies(issue_number: int, repository: str, root: P
     # relying only on eventual workflow_run delivery.
     if satisfaction.get("task_type") == "capability_growth":
         try:
-            base._api_json(
-                "POST",
-                f"https://api.github.com/repos/{repository}/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
-                {"ref": "main"},
+            wake_lab_recovery(
+                lambda method, path, payload: base._api_json(
+                    method, f"https://api.github.com/repos/{repository}{path}", payload
+                )
             )
         except Exception:
             # Closure evidence remains authoritative; FIFO/workflow_run recovery

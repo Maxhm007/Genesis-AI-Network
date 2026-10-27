@@ -10,6 +10,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 
 from genesis.providers import ProviderRegistry
+from genesis.lab_recovery_wake import wake_lab_recovery
 
 ROOT = Path(__file__).resolve().parents[1]
 CONFIG = json.loads((ROOT / "config" / "genesis_teammates.json").read_text(encoding="utf-8"))
@@ -327,11 +328,7 @@ def dispatch(workflow: str, inputs: dict[str, str]) -> None:
 
 def wake_agentic_lab() -> None:
     """Wake the authoritative execution pipeline after teammate task creation."""
-    request(
-        "POST",
-        "/actions/workflows/genesis-agentic-lab-recovery.yml/dispatches",
-        {"ref": "main"},
-    )
+    wake_lab_recovery(lambda method, path, payload: request(method, path, payload))
 
 
 ACTION_TOKENS = (
