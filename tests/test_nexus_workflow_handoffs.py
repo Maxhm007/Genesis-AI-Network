@@ -89,7 +89,8 @@ def test_autonomous_specialist_reuses_original_issue_and_wakes_executor(monkeypa
     monkeypatch.setattr(team, "dispatch", lambda *args: None)
     team.agent_run("forge", "Autonomous Genesis development task from issue #867: implement metrics",
                    "autonomous-867-12345", 1000)
-    assert [path for method, path, _ in calls if method == "GET"] == ["/issues/867"]
+    # The guarded Lab Recovery wake also reads its run list; only issue reads matter here.
+    assert [path for method, path, _ in calls if method == "GET" and path.startswith("/issues")] == ["/issues/867"]
     assert not any(method == "POST" and path == "/issues" for method, path, _ in calls)
     assert any("genesis-agentic-lab-recovery.yml/dispatches" in path for _, path, _ in calls)
     assert any("**Execution issue:** #867" in body for _, body in comments)
