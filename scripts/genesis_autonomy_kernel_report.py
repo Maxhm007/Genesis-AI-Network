@@ -47,7 +47,8 @@ def _write_summary(report: dict) -> None:
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Generate a machine-verifiable Genesis autonomy outcome report.")
+    _write_summary(report)
+    return 0
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
     args = parser.parse_args()
     repository = str(args.repository or "").strip()
