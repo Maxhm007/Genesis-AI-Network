@@ -71,6 +71,44 @@ def run_isolated_review(current: dict[str, str], proposed: dict[str, str]) -> No
     raise ValueError(str(verdict.get("error") or "independent change review rejected this proposal"))
 
 
+def _code_shape(source: str) -> str:
+    """AST dump without comments, docstrings, bare values, pass, ... and dead `if False:` blocks."""
+    tree = ast.parse(source)
+    for node in ast.walk(tree):
+        for field in ("body", "orelse", "finalbody"):
+            body = getattr(node, field, None)
+            if not isinstance(body, list):
+                continue
+            kept = [
+                statement
+                for statement in body
+                if not isinstance(statement, ast.Pass)
+                and not (
+                    isinstance(statement, ast.Expr)
+                    and isinstance(statement.value, (ast.Constant, ast.Name, ast.JoinedStr))
+                )
+                and not (
+                    isinstance(statement, ast.If)
+                    and isinstance(statement.test, ast.Constant)
+                    and not statement.test.value
+                    and not statement.orelse
+                )
+            ]
+            setattr(node, field, kept)
+    return ast.dump(tree, include_attributes=False)
+
+
+def _changes_code(old: str, new: str) -> bool:
+    try:
+        empty = _code_shape("")
+        new_shape = _code_shape(new)
+        if not old:
+            return new_shape != empty
+        return _code_shape(old) != new_shape
+    except SyntaxError:
+        return True
+
+
 @dataclass(frozen=True)
 class CodingProposal:
     title: str
@@ -595,6 +633,13 @@ class CodingModule:
                         "Candidate line numbers may differ from repository lines. Apply corrections using "
                         "original NUMBERED_CONTEXT coordinates; preserve complete multiline expressions."
                     ) from exc
+        python_paths = [str(path) for path in files if str(path).endswith(".py")]
+        changed_code = [path for path in python_paths if _changes_code(current_files.get(path, ""), files[path])]
+        if (python_paths or not files) and not changed_code:
+            raise ValueError(
+                "coding proposal only adds or changes comments, docstrings, blank lines, pass or ... placeholders; "
+                "it must change real code that fixes the issue"
+            )
         return CodingProposal(
             title=str(proposal.get("title", "Genesis bounded coding candidate"))[:200],
             rationale=str(proposal.get("rationale", "one bounded repository edit"))[:4000],
@@ -608,6 +653,7 @@ class CodingModule:
             'Return one JSON object with exactly one "edits" array containing exactly one object. '
             'That edit object must contain "path", integer "start_line", integer "end_line", and string "new". '
             'The "new" value must be the actual repository replacement code/content, never an example or placeholder. '
+            'An edit that only adds comments, docstrings, pass or ... is rejected; change real code. '
             'To add new code without replacing any line, use integer "insert_after_line" (0 means the top of the file) '
             'with "new" instead of "start_line"/"end_line"; never send both. Inserted lines are used exactly as written, '
             'so give every inserted line the full leading indentation it needs at that spot in the file '
