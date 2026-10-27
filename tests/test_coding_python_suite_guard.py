@@ -95,3 +95,44 @@ def test_propose_retries_after_comment_only_sole_body_edit(tmp_path: Path) -> No
     rendered = proposal.files["genesis/sample.py"]
     assert "        return 0\n" in rendered
     ast.parse(rendered)
+
+
+def test_sole_body_rejection_names_range_and_statement(tmp_path: Path) -> None:
+    module = _module(tmp_path, "def placeholder():\n    pass\n")
+
+    with pytest.raises(ValueError) as caught:
+        module._apply_line_edit("genesis/sample.py", 2, 2, "# todo")
+
+    message = str(caught.value)
+    assert "genesis/sample.py:2-2" in message
+    assert "'pass'" in message
+    assert "keep that statement" in message
+
+
+def test_keeping_sole_statement_and_adding_code_beside_it_is_allowed(tmp_path: Path) -> None:
+    module = _module(tmp_path, "def choose():\n    return 1\n")
+
+    rendered = module._apply_line_edit("genesis/sample.py", 2, 2, "value = 1\nreturn value")
+
+    ast.parse(rendered)
+    assert "return value" in rendered
+
+
+def test_prompt_allows_keeping_sole_body_statement(tmp_path: Path) -> None:
+    module = _module(tmp_path, "def choose():\n    return 1\n")
+    provider = SequenceProvider([{"edits": [{"path": "genesis/sample.py", "start_line": 2, "end_line": 2, "new": "return 2"}]}])
+
+    module.propose("Return two.", ["genesis/sample.py"], provider=provider)
+
+    assert "keep that statement in new" in provider.prompts[0]
+
+
+def test_failed_proposal_keeps_the_rejected_change(tmp_path: Path) -> None:
+    module = _module(tmp_path, "def placeholder():\n    pass\n")
+    bad = {"edits": [{"path": "genesis/sample.py", "start_line": 2, "end_line": 2, "new": "# nothing"}]}
+    provider = SequenceProvider([bad] * module.MAX_PROPOSAL_ATTEMPTS)
+
+    with pytest.raises(ValueError) as caught:
+        module.propose("Do something.", ["genesis/sample.py"], provider=provider)
+
+    assert "# nothing" in getattr(caught.value, "rejected_change", "")

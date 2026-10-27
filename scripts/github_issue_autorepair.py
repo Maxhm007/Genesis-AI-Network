@@ -465,7 +465,7 @@ def solve_reported_issue(
                 "provider": getattr(provider, "name", None) or os.environ.get("GENESIS_PROVIDER_NAME", "genesis-github-issue-repair"),
                 "proposal_files": [],
                 "validation": f"{type(exc).__name__}: {exc}"[-MAX_VALIDATION_MESSAGE_CHARS:],
-                "rejected_change": "",
+                "rejected_change": str(getattr(exc, "rejected_change", "") or "")[:MAX_REJECTED_CHANGE_CHARS],
             }
             memory.append(failure)
             memory[:] = _bounded_repair_memory(memory)

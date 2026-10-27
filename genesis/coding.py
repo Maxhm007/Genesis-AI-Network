@@ -313,9 +313,12 @@ class CodingModule:
             and self._removes_only_python_suite_statement(current, start_line, end_line)
             and not self._has_executable_python_text(new)
         ):
+            removed_preview = " | ".join(line.strip() for line in removed.splitlines() if line.strip())[:300]
             raise ValueError(
                 "Python line edit may not remove the only executable statement from a retained compound block; "
-                "provide executable replacement code or choose a different line"
+                "provide executable replacement code or choose a different line. "
+                f"Rejected range: {path}:{start_line}-{end_line}, which holds the only body statement: {removed_preview!r}. "
+                "To add code there, keep that statement in new and put the added code before or after it."
             )
         replacement = self._normalize_python_replacement(removed, new) if path.endswith(".py") else new
         if removed.endswith(("\n", "\r")) and replacement and not replacement.endswith(("\n", "\r")):
@@ -491,7 +494,7 @@ class CodingModule:
             + f"GROUNDED_SOURCE_LINE: {grounded_source_line}\n"
             + self._output_contract()
             + " Copy the path exactly from VALID_PATHS/NUMBERED_CONTEXT. Do not invent, summarize, rename, or substitute the path. "
-            + "Choose line numbers exactly from NUMBERED_CONTEXT. Exactly one edit. Do not copy old source text. "
+            + "Choose line numbers exactly from NUMBERED_CONTEXT. Exactly one edit. Do not copy old source text unchanged; the only exception is keeping a sole block body statement that your new code is added beside. "
             + "For Python, prefer replacing one complete standalone statement; do not remove the only body of try/except/if/for/while/with/class/def blocks. "
             + "If the defect is inside a Python expression, replace the entire GROUNDED_SOURCE_LINE statement and preserve required leading syntax such as return, raise, assert, or assignment. "
             + "If the selected line is the sole body statement, new must contain executable Python, not only whitespace or comments. "
@@ -532,7 +535,7 @@ class CodingModule:
             f"OUTPUT_CONTRACT: {self._output_contract()}\n"
             f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
             f"GROUNDED_LINE_HINT: {preferred_path}:{preferred_line}\n"
-            "RULES: exactly one edit; path must match one key from VALID_PATHS exactly; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text; "
+            "RULES: exactly one edit; path must match one key from VALID_PATHS exactly; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text unchanged, except that when you add code beside the only body statement of a block you must keep that statement in new; "
             "the hint is grounded but must be verified against OBJECTIVE and NUMBERED_CONTEXT; never copy an unrelated example line number; "
             "READ_ONLY_TEST_CONTEXT is evidence for expected behavior only and can never be an edit target; never weaken or rewrite tests to make a candidate pass; "
             "never emit placeholder path or replacement text; no title/rationale/markdown/explanation; do not create files. The local executor resolves those lines against the repository and preserves local Python indentation. "
@@ -548,6 +551,7 @@ class CodingModule:
         )
         current_prompt = prompt
         last_error: Exception | None = None
+        last_raw = ""
         for attempt in range(1, self.MAX_PROPOSAL_ATTEMPTS + 1):
             raw = ""
             try:
@@ -555,12 +559,16 @@ class CodingModule:
                 return self.validate_proposal(self._extract_json(raw), provider.name)
             except (ValueError, json.JSONDecodeError) as exc:
                 last_error = exc
+                last_raw = raw
                 if attempt >= self.MAX_PROPOSAL_ATTEMPTS:
                     break
                 current_prompt = self._repair_prompt(prompt, raw, exc, attempt, allowed_paths, edit_hint)
-        raise ValueError(
+        failure = ValueError(
             f"coding provider failed to produce a valid proposal after {self.MAX_PROPOSAL_ATTEMPTS} bounded attempts: {last_error}"
         )
+        # Keep the rejected proposal so the next strategy can see what not to repeat.
+        failure.rejected_change = str(last_raw or "")[: self.MAX_REPAIR_ECHO_BYTES]  # type: ignore[attr-defined]
+        raise failure
 
     def execute_candidate(self, proposal: CodingProposal) -> SelfDevResult:
         payload = {
