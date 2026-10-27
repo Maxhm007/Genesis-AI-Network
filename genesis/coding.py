@@ -285,7 +285,9 @@ class CodingModule:
                     return True
         return False
 
-    def _apply_line_edit(self, path: str, start_line: object, end_line: object, new: object) -> str:
+    def _apply_line_edit(
+        self, path: str, start_line: object, end_line: object, new: object, current: str | None = None
+    ) -> str:
         if not isinstance(start_line, int) or isinstance(start_line, bool):
             raise ValueError("line edit start_line must be an integer")
         if not isinstance(end_line, int) or isinstance(end_line, bool):
@@ -297,10 +299,8 @@ class CodingModule:
         if start_line < 1 or end_line < start_line:
             raise ValueError("line edit range is invalid")
 
-        target = (self.root / path).resolve()
-        if not target.is_file():
-            raise ValueError(f"edit target does not exist: {path}")
-        current = target.read_text(encoding="utf-8")
+        if current is None:
+            current = self._read_edit_target(path)
         lines = current.splitlines(keepends=True)
         if end_line > len(lines):
             raise ValueError(f"line edit range exceeds file length: {path}")
@@ -318,18 +318,96 @@ class CodingModule:
                 "Python line edit may not remove the only executable statement from a retained compound block; "
                 "provide executable replacement code or choose a different line. "
                 f"Rejected range: {path}:{start_line}-{end_line}, which holds the only body statement: {removed_preview!r}. "
-                "To add code there, keep that statement in new and put the added code before or after it."
+                "To add code there, use insert_after_line instead, or keep that statement in new and put the added code before or after it."
             )
         replacement = self._normalize_python_replacement(removed, new) if path.endswith(".py") else new
         if removed.endswith(("\n", "\r")) and replacement and not replacement.endswith(("\n", "\r")):
             replacement += "\n"
         return "".join(lines[: start_line - 1]) + replacement + "".join(lines[end_line:])
 
+    def _read_edit_target(self, path: str) -> str:
+        target = (self.root / path).resolve()
+        if not target.is_file():
+            raise ValueError(f"edit target does not exist: {path}")
+        return target.read_text(encoding="utf-8")
+
+    def _apply_insert_edit(self, path: str, after_line: object, new: object, current: str) -> str:
+        """Add code after a line without removing anything (0 inserts at the top)."""
+        if not isinstance(after_line, int) or isinstance(after_line, bool):
+            raise ValueError("insert edit insert_after_line must be an integer")
+        if not isinstance(new, str) or not new.strip():
+            raise ValueError("insert edit new text must be non-empty code")
+        if self._is_placeholder_replacement(new) or new.strip() in {"...", "pass"}:
+            raise ValueError("insert edit must be real repository code/content, not placeholder text")
+        lines = current.splitlines(keepends=True)
+        if after_line < 0 or after_line > len(lines):
+            raise ValueError(f"insert edit line is outside the file: {path}")
+        if path.endswith(".py"):
+            future_lines = [
+                index + 1 for index, line in enumerate(lines) if line.lstrip().startswith("from __future__ import")
+            ]
+            if future_lines and after_line < max(future_lines):
+                raise ValueError(
+                    f"insert edit in {path} must go after line {max(future_lines)}; "
+                    "code cannot be placed above `from __future__` imports"
+                )
+        # Inserted text keeps the indentation the model wrote. Guessing the
+        # block from a neighbouring line can silently move code into or out
+        # of an if/def/except body, so the caller states it explicitly.
+        inserted = new
+        if path.endswith(".py") and after_line and not new[:1].isspace():
+            anchor = lines[after_line - 1].split("#", 1)[0].rstrip()
+            if anchor.endswith(":") and after_line < len(lines):
+                # Only place where the block is certain: right after a line
+                # that opens one, code must sit at the body's indentation.
+                inserted = self._normalize_python_replacement(lines[after_line], new)
+        if not inserted.endswith(("\n", "\r")):
+            inserted += "\n"
+        if after_line and lines and not lines[after_line - 1].endswith(("\n", "\r")):
+            inserted = "\n" + inserted
+        return "".join(lines[:after_line]) + inserted + "".join(lines[after_line:])
+
+    def _apply_positioned_edits(self, path: str, edits: list[dict], current: str) -> str:
+        """Apply several line/insert edits to one file using the original line numbers.
+
+        Edits are applied bottom-up so earlier edits do not shift later ones,
+        and overlapping ranges are rejected instead of guessed.
+        """
+        spans: list[tuple[int, int, dict]] = []
+        for edit in edits:
+            if "insert_after_line" in edit:
+                if "start_line" in edit or "end_line" in edit:
+                    raise ValueError(
+                        f"edit in {path} has both insert_after_line and start_line/end_line; use one or the other"
+                    )
+                after = edit.get("insert_after_line")
+                if not isinstance(after, int) or isinstance(after, bool):
+                    raise ValueError("insert edit insert_after_line must be an integer")
+                spans.append((after + 1, after, edit))
+            else:
+                start, end = edit.get("start_line"), edit.get("end_line")
+                if not isinstance(start, int) or not isinstance(end, int) or isinstance(start, bool) or isinstance(end, bool):
+                    raise ValueError("line edit start_line and end_line must be integers")
+                spans.append((start, end, edit))
+        ordered = sorted(spans, key=lambda row: (row[0], row[1]))
+        for (s1, e1, _), (s2, e2, _) in zip(ordered, ordered[1:]):
+            if s2 <= max(e1, s1 - 1) or (s1 == s2 and e1 == e2):
+                raise ValueError(f"edits overlap in {path}; merge them into one edit")
+        rendered = current
+        for start, end, edit in sorted(spans, key=lambda row: (row[0], row[1]), reverse=True):
+            if "insert_after_line" in edit:
+                rendered = self._apply_insert_edit(path, edit.get("insert_after_line"), edit.get("new"), rendered)
+            else:
+                rendered = self._apply_line_edit(path, start, end, edit.get("new"), current=rendered)
+        return rendered
+
     def _files_from_edits(self, edits: object) -> dict[str, str]:
         if not isinstance(edits, list) or not edits or len(edits) > self.MAX_EDITS:
             raise ValueError("coding proposal edits count out of bounds")
         total = 0
         rendered: dict[str, str] = {}
+        positioned: dict[str, list[dict]] = {}
+        legacy_paths: set[str] = set()
         for edit in edits:
             if not isinstance(edit, dict):
                 raise ValueError("each coding edit must be an object")
@@ -339,14 +417,19 @@ class CodingModule:
             path = path_value.replace("\\", "/").lstrip("./")
             self.executor._validate_paths([path])
 
-            if "start_line" in edit or "end_line" in edit:
+            if "start_line" in edit or "end_line" in edit or "insert_after_line" in edit:
                 new = edit.get("new")
                 if isinstance(new, str):
                     total += len(new.encode("utf-8"))
                 if total > self.MAX_EDIT_BYTES:
                     raise ValueError("coding proposal edits exceed byte limit")
-                rendered[path] = self._apply_line_edit(path, edit.get("start_line"), edit.get("end_line"), new)
+                if path in legacy_paths:
+                    raise ValueError(f"do not mix line edits and old/new edits in {path}")
+                positioned.setdefault(path, []).append(edit)
                 continue
+            if path in positioned:
+                raise ValueError(f"do not mix line edits and old/new edits in {path}")
+            legacy_paths.add(path)
 
             old = edit.get("old")
             new = edit.get("new")
@@ -366,6 +449,8 @@ class CodingModule:
             if current.count(old) != 1:
                 raise ValueError(f"edit old text must match exactly once: {path}")
             rendered[path] = current.replace(old, new, 1)
+        for path, path_edits in positioned.items():
+            rendered[path] = self._apply_positioned_edits(path, path_edits, self._read_edit_target(path))
         return rendered
 
     @staticmethod
@@ -377,7 +462,8 @@ class CodingModule:
         line_shape = isinstance(value.get("start_line"), int) and not isinstance(value.get("start_line"), bool)
         line_shape = line_shape and isinstance(value.get("end_line"), int) and not isinstance(value.get("end_line"), bool)
         legacy_shape = isinstance(value.get("old"), str) and bool(value.get("old"))
-        return line_shape or legacy_shape
+        insert_shape = isinstance(value.get("insert_after_line"), int) and not isinstance(value.get("insert_after_line"), bool)
+        return line_shape or legacy_shape or insert_shape
 
     @classmethod
     def _normalize_proposal_shape(cls, proposal: dict) -> dict:
@@ -460,7 +546,11 @@ class CodingModule:
         return (
             'Return one JSON object with exactly one "edits" array containing exactly one object. '
             'That edit object must contain "path", integer "start_line", integer "end_line", and string "new". '
-            'The "new" value must be the actual repository replacement code/content, never an example or placeholder.'
+            'The "new" value must be the actual repository replacement code/content, never an example or placeholder. '
+            'To add new code without replacing any line, use integer "insert_after_line" (0 means the top of the file) '
+            'with "new" instead of "start_line"/"end_line"; never send both. Inserted lines are used exactly as written, '
+            'so give every inserted line the full leading indentation it needs at that spot in the file '
+            '(unindented text right after a line ending in a colon is indented into that block).'
         )
 
     def _repair_prompt(
@@ -497,7 +587,7 @@ class CodingModule:
             + "Choose line numbers exactly from NUMBERED_CONTEXT. Exactly one edit. Do not copy old source text unchanged; the only exception is keeping a sole block body statement that your new code is added beside. "
             + "For Python, prefer replacing one complete standalone statement; do not remove the only body of try/except/if/for/while/with/class/def blocks. "
             + "If the defect is inside a Python expression, replace the entire GROUNDED_SOURCE_LINE statement and preserve required leading syntax such as return, raise, assert, or assignment. "
-            + "If the selected line is the sole body statement, new must contain executable Python, not only whitespace or comments. "
+            + "If the selected line is the sole body statement, new must contain executable Python, not only whitespace or comments. To add code without removing lines, use insert_after_line. "
             + "No title, rationale, markdown, commentary, new files, policy changes, test weakening, or protected paths.\n"
         )
 
