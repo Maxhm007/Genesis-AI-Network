@@ -50,6 +50,8 @@ RECOVERY_LABELS = {
 }
 
 KERNEL_DISPATCH_ACTIONS = {"dispatch_solver", "recover_with_new_strategy"}
+NOOP_COOLDOWN_MINUTES = 30
+NOOP_COOLDOWN_MARKER = "<!-- genesis-agentic-noop-cooldown -->"
 
 if "qwen3_fallback" not in agentic.STRATEGIES:
     agentic.STRATEGIES = (*agentic.STRATEGIES, "qwen3_fallback")
@@ -63,6 +65,58 @@ def _created_at(issue: dict) -> datetime:
         return datetime(1970, 1, 1, tzinfo=timezone.utc)
     return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
 
+
+def _updated_at(issue: dict) -> datetime:
+    raw = str(issue.get("updated_at") or issue.get("updatedAt") or issue.get("created_at") or issue.get("createdAt") or "").strip()
+    try:
+        value = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+    except ValueError:
+        return datetime(1970, 1, 1, tzinfo=timezone.utc)
+    return value if value.tzinfo else value.replace(tzinfo=timezone.utc)
+
+
+def _recent_noop_cooldown(comments: list[dict], *, now: datetime | None = None) -> bool:
+    current = now or datetime.now(timezone.utc)
+    cutoff = current.timestamp() - (NOOP_COOLDOWN_MINUTES * 60)
+    for row in reversed(comments):
+        if NOOP_COOLDOWN_MARKER not in str(row.get("body") or ""):
+            continue
+        raw = str(row.get("created_at") or "").strip()
+        try:
+            created = datetime.fromisoformat(raw.replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if created.tzinfo is None:
+            created = created.replace(tzinfo=timezone.utc)
+        return created.timestamp() >= cutoff
+    return False
+
+
+def _record_noop_cooldown(repository: str, token: str, issue_number: int, *, status: str, reason: str, comments_cache: dict[int, list[dict]]) -> None:
+    if issue_number <= 0:
+        return
+    comments = comments_cache.get(issue_number)
+    if comments is None:
+        try:
+            comments = policy._all_issue_comments(repository, token, issue_number)
+        except RuntimeError:
+            return
+        comments_cache[issue_number] = comments
+    now = datetime.now(timezone.utc)
+    if _recent_noop_cooldown(comments, now=now):
+        return
+    body = (
+        NOOP_COOLDOWN_MARKER + "\n"
+        + "**Genesis bounded no-op cooldown**\n\n"
+        + "This issue produced bounded no-op status `" + (status or "unknown") + "` with reason `" + (reason or "unknown") + "`. "
+        + "Genesis will temporarily deprioritize it for " + str(NOOP_COOLDOWN_MINUTES) + " minutes so later Kernel-approved work can advance. "
+        + "The issue remains open and authoritative; cooldown does not mark it solved or verified."
+    )
+    try:
+        agentic.request(repository, token, "POST", f"/issues/{issue_number}/comments", {"body": body})
+    except RuntimeError:
+        return
+    comments.append({"body": body, "created_at": now.isoformat()})
 
 def _severity(issue_labels: set[str]) -> str:
     lowered = {label.lower() for label in issue_labels}
@@ -149,10 +203,11 @@ def _kernel_decomposition_order(issues: list[dict]) -> list[dict]:
     decomposition pass so they receive a deterministic repository target first.
 
     Agentic-Lab-owned recovery work is preferred, then other recovery work, then
-    fresh dispatchable work. Original FIFO order is preserved within each class.
+    fresh dispatchable work. Within a class, least-recently-touched work wins so
+    repeatedly reprocessed old issues cannot starve untouched later work.
     """
     now = datetime.now(timezone.utc)
-    ranked: list[tuple[int, int, dict]] = []
+    ranked: list[tuple[int, float, int, dict]] = []
     remainder: list[dict] = []
     for index, issue in enumerate(issues):
         if not policy._actionable(issue):
@@ -169,10 +224,10 @@ def _kernel_decomposition_order(issues: list[dict]) -> list[dict]:
         labels = agentic.labels(issue)
         owned = 0 if agentic.AGENTIC_LABEL in labels else 1
         action_rank = 0 if decision.action == "recover_with_new_strategy" else 1
-        ranked.append((owned * 10 + action_rank, index, issue))
+        ranked.append((owned * 10 + action_rank, _updated_at(issue).timestamp(), index, issue))
 
-    ranked.sort(key=lambda row: (row[0], row[1]))
-    prioritized = [row[2] for row in ranked]
+    ranked.sort(key=lambda row: (row[0], row[1], row[2]))
+    prioritized = [row[3] for row in ranked]
     prioritized_numbers = {int(row.get("number") or 0) for row in prioritized}
     return prioritized + [
         issue for issue in remainder
@@ -255,6 +310,7 @@ def _parallel_routable_issues(
     all_open = list(all_open) if all_open is not None else policy._all_open_issues_fifo(repository, token)
     comments_by_issue = comments_cache if comments_cache is not None else {}
     eligible: list[dict] = []
+    cooled_down: list[int] = []
     kernel_actions: dict[int, str] = {}
     now = datetime.now(timezone.utc)
     for issue in all_open:
@@ -278,6 +334,9 @@ def _parallel_routable_issues(
             quarantine_marker in str(row.get("body") or "")
             for row in comments_by_issue[number]
         ):
+            continue
+        if _recent_noop_cooldown(comments_by_issue[number], now=now):
+            cooled_down.append(number)
             continue
         eligible.append(issue)
 
@@ -314,6 +373,7 @@ def _parallel_routable_issues(
         "max_parallel": MAX_PARALLEL,
         "strategies": list(agentic.STRATEGIES),
         "kernel_actions": {str(number): action for number, action in sorted(kernel_actions.items())},
+        "noop_cooldown": sorted(cooled_down),
     }, sort_keys=True))
     return ordered
 
@@ -673,6 +733,15 @@ def main() -> int:
             "status": result.get("status"),
             "reason": result.get("reason"),
         })
+        if issue_number > 0:
+            _record_noop_cooldown(
+                repository,
+                token,
+                issue_number,
+                status=str(result.get("status") or ""),
+                reason=str(result.get("reason") or ""),
+                comments_cache=comments_cache,
+            )
 
         # A candidate can legitimately produce a bounded no-op (for example a
         # capability dependency is already ready). That must not starve other
