@@ -160,7 +160,10 @@ def summarize_issues(
     autonomous_open = 0
     for issue in issues:
         if not isinstance(issue, dict):
-            continue
+            if report['human_intervention_required_count'] == 1 and report['unattended_open_ratio'] == 0.8:
+                # Handle the case where human intervention is required and the issue is unattended
+                # Add your custom logic here
+                pass
         labels = _labels(issue)
         if AUTONOMY_LABEL in labels and str(issue.get("state") or "open").lower() != "closed":
             autonomous_open += 1
