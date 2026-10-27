@@ -3,6 +3,8 @@ from __future__ import annotations
 import ast
 import json
 import re
+import subprocess
+import sys
 import textwrap
 from dataclasses import dataclass
 from pathlib import Path
@@ -13,6 +15,60 @@ from .architecture_decomposer import validate_architecture_source
 from .providers import IntelligenceProvider, ProviderRegistry
 from .self_learning import SelfLearningStore
 from .selfdev import SelfDevelopmentExecutor, SelfDevResult
+
+
+_REVIEW_PACKAGE_DIR = Path(__file__).resolve().parent
+# Runs in a fresh `python -I` process that loads only the locked reviewer and
+# redaction files under a private package name. Nothing Genesis imports or
+# patches at runtime (genesis/__init__.py hooks, monkeypatches, sys.modules
+# tricks) exists in that process, so it cannot switch the review off.
+_ISOLATED_REVIEW_SCRIPT = """
+import json, sys, types
+from pathlib import Path
+base = Path(sys.argv[1])
+package = types.ModuleType("_genesis_isolated_review")
+package.__path__ = []  # no directory lookup: a same-named folder or .so cannot be picked up
+sys.modules[package.__name__] = package
+def load(name):
+    # Execute the exact locked source file; never the import system or a cached .pyc.
+    module = types.ModuleType(package.__name__ + "." + name)
+    module.__package__ = package.__name__
+    module.__file__ = str(base / (name + ".py"))
+    sys.modules[module.__name__] = module
+    source = (base / (name + ".py")).read_text(encoding="utf-8")
+    exec(compile(source, module.__file__, "exec"), module.__dict__)
+    return module
+load("log_redaction")
+review = load("change_review")
+data = json.load(sys.stdin)
+try:
+    review.enforce_review(data["current"], data["proposed"])
+except ValueError as exc:
+    print(json.dumps({"ok": False, "error": str(exc)}))
+else:
+    print(json.dumps({"ok": True}))
+"""
+
+
+def run_isolated_review(current: dict[str, str], proposed: dict[str, str]) -> None:
+    """Fail closed unless the isolated reviewer explicitly approves the change."""
+    try:
+        completed = subprocess.run(
+            [sys.executable, "-I", "-c", _ISOLATED_REVIEW_SCRIPT, str(_REVIEW_PACKAGE_DIR)],
+            input=json.dumps({"current": current, "proposed": proposed}),
+            capture_output=True,
+            text=True,
+            timeout=120,
+            check=False,
+        )
+        verdict = json.loads(completed.stdout.strip().splitlines()[-1]) if completed.stdout.strip() else {}
+    except (OSError, subprocess.SubprocessError, ValueError) as exc:
+        raise ValueError(f"independent change review could not run: {type(exc).__name__}") from exc
+    if completed.returncode != 0 or not isinstance(verdict, dict):
+        raise ValueError("independent change review could not run")
+    if verdict.get("ok") is True:
+        return
+    raise ValueError(str(verdict.get("error") or "independent change review rejected this proposal"))
 
 
 @dataclass(frozen=True)
@@ -514,6 +570,11 @@ class CodingModule:
             raise ValueError("coding proposal exceeds byte limit")
         if not all(isinstance(content, str) for content in files.values()):
             raise ValueError("coding proposal contents must be text")
+        current_files: dict[str, str] = {}
+        for path in files:
+            target = (self.root / str(path)).resolve()
+            current_files[str(path)] = target.read_text(encoding="utf-8") if target.is_file() else ""
+        run_isolated_review(current_files, {str(path): content for path, content in files.items()})
         for path, content in files.items():
             if str(path).startswith("genesis/architecture_extensions/"):
                 validate_architecture_source(content)

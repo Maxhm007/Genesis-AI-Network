@@ -147,4 +147,3 @@ def test_insert_placeholder_is_rejected(tmp_path, text):
     module = _module_with(tmp_path, "A = 1\n")
     with pytest.raises(ValueError, match="placeholder"):
         module._files_from_edits([{"path": "genesis/sample.py", "insert_after_line": 1, "new": text}])
-        

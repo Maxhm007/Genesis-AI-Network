@@ -20,6 +20,16 @@ PROTECTED_PATHS = {
     "scripts/verify_validator_votes.py",
     "scripts/action_repair_guard.py",
     "scripts/issue_acceptance_guard.py",
+    "genesis/change_review.py",
+    "genesis/comment_trust.py",
+    "genesis/log_redaction.py",
+    "genesis/selfdev.py",
+    "genesis/coding.py",
+    "genesis/__init__.py",
+    "genesis/coding_provider_policy.py",
+    "tests/conftest.py",
+    "tests/test_change_review.py",
+    "tests/test_comment_trust.py",
 }
 ALLOWED_PREFIXES = ("genesis/", "scripts/", "tests/", "docs/", "config/", "desktop/", "mobile/", ".github/")
 ALLOWED_SCRIPT_PATHS = frozenset({
@@ -49,6 +59,18 @@ def normalize_selfdev_path(root: Path, path: str, *, allow_privileged: bool = Fa
         raise RuntimeError("invalid self-development path")
     if normalized in PROTECTED_PATHS:
         raise RuntimeError(f"protected path cannot be changed: {normalized}")
+    if (
+        "__pycache__" in candidate.parts
+        or normalized.endswith((".pyc", ".pyo", ".so", ".pyd", ".pth"))
+        or candidate.name in {"sitecustomize.py", "usercustomize.py"}
+    ):
+        raise RuntimeError(f"compiled or path-hook files cannot be changed: {normalized}")
+    for protected in PROTECTED_PATHS:
+        if protected.endswith(".py"):
+            stem = protected[:-3]
+            # A same-named package folder or sibling file would shadow the locked module.
+            if normalized == stem or normalized.startswith((stem + "/", stem + ".")):
+                raise RuntimeError(f"path would shadow protected module {protected}: {normalized}")
     if normalized == ".git" or normalized.startswith(".git/"):
         raise RuntimeError("self-development may not modify Git metadata")
     if normalized.startswith(".github/") and not allow_privileged:
