@@ -6,13 +6,14 @@ import json
 import os
 import re
 
+from genesis.comment_trust import trusted_comments
 from genesis.issue_lifecycle import family_id, lifecycle_decision, labels
 try:
     from scripts.issue_lifecycle_reconcile import (
         ACTIVE_LABELS,
         all_issues,
         ensure_label,
-        issue_comments,
+        issue_comments as _all_comments,
         post_comment,
         remove_label,
         request,
@@ -22,7 +23,7 @@ except ModuleNotFoundError:
         ACTIVE_LABELS,
         all_issues,
         ensure_label,
-        issue_comments,
+        issue_comments as _all_comments,
         post_comment,
         remove_label,
         request,
@@ -63,6 +64,11 @@ EVIDENCE_PATTERNS = (
 )
 SHA_RE = re.compile(r"\b[0-9a-f]{40}\b", re.IGNORECASE)
 
+
+
+def issue_comments(repository: str, token: str, number: int) -> list[dict]:
+    """Only Genesis automation and maintainers can prove or block a close."""
+    return trusted_comments(_all_comments(repository, token, number))
 
 RESULT_MARKER = "<!-- genesis-agentic-strategy-result:"
 CURRENT_PROBLEM_MARKER = "<!-- genesis-team-current-problem -->"

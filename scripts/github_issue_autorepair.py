@@ -11,6 +11,7 @@ import urllib.parse
 import urllib.request
 from pathlib import Path
 
+from genesis.comment_trust import is_automation_comment
 from genesis.coding import CodingModule, CodingProposal
 from genesis.github_issue_capability_builder import GitHubIssueLearnedCapabilityProvider, ArchitectureExpansionProvider
 from genesis.issue_solver import Diagnosis, RepairAttempt
@@ -609,7 +610,9 @@ def load_issue_repair_memory(repository: str, issue_number: int) -> list[dict]:
     # repair memory from prior material states and must not drive the next retry.
     for row in reversed(comments):
         existing = str(row.get("body") or "")
-        if existing.startswith(STATUS_MARKER):
+        # Only Genesis's own automation writes status; a forged status from a
+        # stranger on this public repo must never steer the next proposal.
+        if existing.startswith(STATUS_MARKER) and is_automation_comment(row):
             return _decode_repair_memory(existing)
     return []
 
@@ -645,7 +648,7 @@ def _upsert_status_comment(
     # authoritative even on long-lived issues with more than 100 comments.
     for row in reversed(comments):
         existing = str(row.get("body") or "")
-        if existing.startswith(STATUS_MARKER):
+        if existing.startswith(STATUS_MARKER) and is_automation_comment(row):
             _api_json("PATCH", f"{base}/issues/comments/{row['id']}", {"body": body})
             return
     _api_json("POST", f"{base}/issues/{issue_number}/comments", {"body": body})
