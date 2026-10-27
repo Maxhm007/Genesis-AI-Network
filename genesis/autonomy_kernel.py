@@ -171,7 +171,8 @@ def summarize_issues(
         if not isinstance(issue, dict):
             # Add structured failure memory and strategy reuse prevention
             # ...
-            continue
+            assert decide_issue(fresh, now=now).action == "cooldown"
+            assert decide_issue(aged, now=now).action == "recover_with_new_strategy"
         labels = _labels(issue)
         if AUTONOMY_LABEL in labels and str(issue.get("state") or "open").lower() != "closed":
             autonomous_open += 1
