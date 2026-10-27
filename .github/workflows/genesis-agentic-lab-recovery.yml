@@ -63,7 +63,9 @@ concurrency:
   cancel-in-progress: false
 
 env:
-  GENESIS_AGENTIC_MAX_PARALLEL: '2'
+  # One issue at a time in production: the controller dispatches a new solver
+  # only when no issue holds an active/claimed label.
+  GENESIS_AGENTIC_MAX_PARALLEL: '1'
   GENESIS_AGENTIC_DEVELOPMENT_SLOTS: '1'
   GENESIS_AGENTIC_RECOVERY_SLOTS: '1'
 
@@ -113,8 +115,7 @@ jobs:
       - name: Validate parallel controller and cross-Gene delegation
         if: github.event_name == 'push'
         # Unit tests exercise the supported six-worker scheduler; the runtime
-        # dispatch step below uses a bounded two-slot production policy: one
-        # development worker plus one independently reserved recovery worker.
+        # dispatch step below runs one solver at a time (MAX_PARALLEL=1).
         env:
           GENESIS_AGENTIC_MAX_PARALLEL: '6'
           GENESIS_AGENTIC_DEVELOPMENT_SLOTS: '4'

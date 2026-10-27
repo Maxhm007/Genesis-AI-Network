@@ -50,7 +50,10 @@ permissions:
   actions: write
 
 concurrency:
-  group: genesis-agentic-strategy-${{ inputs.issue_number }}
+  # One solver at a time: every dispatched issue worker shares one fixed group
+  # (never cancelled in progress). Push validation keeps its own group so it
+  # cannot displace a pending issue worker.
+  group: ${{ github.event_name == 'workflow_dispatch' && 'genesis-agentic-solver-single-lane' || format('genesis-agentic-strategy-{0}', inputs.issue_number) }}
   cancel-in-progress: false
 
 env:
@@ -462,7 +465,13 @@ jobs:
           # The verified worker owns the transition and immediately wakes the
           # controller; Recovery will ignore this issue once Closure Manager
           # closes it and claim the next sequential focus.
-          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+          # Skip redundant wakes: a queued/running controller pass (or one woken <2 min ago) already covers this.
+          lab_skip="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-agentic-lab-recovery.yml --limit 20 --json databaseId,status,createdAt,event --jq '[.[] | select(.event != "push" and .event != "pull_request") | select(.status != "completed" or (now - (.createdAt | fromdateiso8601)) < 120)] | if length > 0 then "run \(.[0].databaseId) \(.[0].status)" else "" end' 2>/dev/null || true)"
+          if [[ -n "$lab_skip" ]]; then
+            echo "Agentic Lab Recovery wake skipped (already active or recently woken): $lab_skip"
+          else
+            gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+          fi
           echo "Verified evidence recorded; closure and next Agentic recovery dispatched."
           git push origin --delete "$CANDIDATE_BRANCH" >/dev/null 2>&1 || true
 
@@ -531,7 +540,13 @@ jobs:
             printf '%s\n' '```'
           } > /tmp/genesis-agentic-failure.md
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-failure.md
-          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+          # Skip redundant wakes: a queued/running controller pass (or one woken <2 min ago) already covers this.
+          lab_skip="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-agentic-lab-recovery.yml --limit 20 --json databaseId,status,createdAt,event --jq '[.[] | select(.event != "push" and .event != "pull_request") | select(.status != "completed" or (now - (.createdAt | fromdateiso8601)) < 120)] | if length > 0 then "run \(.[0].databaseId) \(.[0].status)" else "" end' 2>/dev/null || true)"
+          if [[ -n "$lab_skip" ]]; then
+            echo "Agentic Lab Recovery wake skipped (already active or recently woken): $lab_skip"
+          else
+            gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
+          fi
 
       - name: Preserve Agentic repair evidence
         if: always()

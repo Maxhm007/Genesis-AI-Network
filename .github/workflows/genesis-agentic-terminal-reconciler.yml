@@ -29,5 +29,11 @@ jobs:
           echo "Agentic Terminal Reconciler is safety-only."
           echo "Unresolved issue authority: Agentic Lab."
           echo "Verified terminal authority: Closure Manager."
-          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
+          # Skip redundant wakes: a queued/running controller pass (or one woken <2 min ago) already covers this.
+          lab_skip="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-agentic-lab-recovery.yml --limit 20 --json databaseId,status,createdAt,event --jq '[.[] | select(.event != "push" and .event != "pull_request") | select(.status != "completed" or (now - (.createdAt | fromdateiso8601)) < 120)] | if length > 0 then "run \(.[0].databaseId) \(.[0].status)" else "" end' 2>/dev/null || true)"
+          if [[ -n "$lab_skip" ]]; then
+            echo "Agentic Lab Recovery wake skipped (already active or recently woken): $lab_skip"
+          else
+            gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
+          fi
           gh workflow run genesis-issue-closure-manager.yml --repo "$GITHUB_REPOSITORY" --ref main

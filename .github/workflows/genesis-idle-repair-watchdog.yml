@@ -29,5 +29,11 @@ jobs:
           active_count=$(gh api "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-repair-in-progress&per_page=1" --jq '.total_count')
           validating_count=$(gh api "search/issues?q=repo:${REPO}+is:issue+is:open+label:genesis-validating&per_page=1" --jq '.total_count')
           if [[ "$open_count" -gt 0 && "$active_count" -eq 0 && "$validating_count" -eq 0 ]]; then
-            gh workflow run genesis-agentic-lab-recovery.yml --repo "$REPO" --ref main
+            # Skip redundant wakes: a queued/running controller pass (or one woken <2 min ago) already covers this.
+            lab_skip="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-agentic-lab-recovery.yml --limit 20 --json databaseId,status,createdAt,event --jq '[.[] | select(.event != "push" and .event != "pull_request") | select(.status != "completed" or (now - (.createdAt | fromdateiso8601)) < 120)] | if length > 0 then "run \(.[0].databaseId) \(.[0].status)" else "" end' 2>/dev/null || true)"
+            if [[ -n "$lab_skip" ]]; then
+              echo "Agentic Lab Recovery wake skipped (already active or recently woken): $lab_skip"
+            else
+              gh workflow run genesis-agentic-lab-recovery.yml --repo "$REPO" --ref main
+            fi
           fi
