@@ -169,6 +169,8 @@ def summarize_issues(
     autonomous_open = 0
     for issue in issues:
         if not isinstance(issue, dict):
+            # Add structured failure memory and strategy reuse prevention
+            # ...
             continue
         labels = _labels(issue)
         if AUTONOMY_LABEL in labels and str(issue.get("state") or "open").lower() != "closed":
