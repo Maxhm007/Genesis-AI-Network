@@ -109,6 +109,93 @@ def _changes_code(old: str, new: str) -> bool:
         return True
 
 
+def _bound_names(node: ast.AST) -> set[str]:
+    names: set[str] = set()
+    for child in ast.walk(node):
+        if isinstance(child, ast.Name) and isinstance(child.ctx, (ast.Store, ast.Del)):
+            names.add(child.id)
+        elif isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            names.add(child.name)
+        elif isinstance(child, (ast.Import, ast.ImportFrom)):
+            names.update((alias.asname or alias.name).split(".")[0] for alias in child.names)
+        elif isinstance(child, ast.arg):
+            names.add(child.arg)
+        elif isinstance(child, ast.ExceptHandler) and child.name:
+            names.add(child.name)
+        elif isinstance(child, (ast.Global, ast.Nonlocal)):
+            names.update(child.names)
+        elif isinstance(child, ast.MatchAs) and child.name:
+            names.add(child.name)
+        elif isinstance(child, ast.MatchStar) and child.name:
+            names.add(child.name)
+        elif isinstance(child, ast.MatchMapping) and child.rest:
+            names.add(child.rest)
+    return names
+
+
+def _code_sanity_facts(source: str) -> tuple[set[tuple[str, str]], int] | None:
+    """Undefined names per function, and statements that can never run."""
+    import builtins
+
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return None
+    if any(isinstance(node, ast.ImportFrom) and any(a.name == "*" for a in node.names) for node in ast.walk(tree)):
+        return set(), 0
+    module_level: set[str] = set(dir(builtins)) | {"__file__", "__name__", "__doc__", "__spec__", "__path__", "__builtins__"}
+    for statement in tree.body:
+        if not isinstance(statement, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            module_level |= _bound_names(statement)
+        else:
+            module_level.add(statement.name)
+    for node in ast.walk(tree):
+        if isinstance(node, (ast.Global, ast.ClassDef)):
+            module_level |= _bound_names(node) if isinstance(node, ast.ClassDef) else set(node.names)
+    undefined: set[tuple[str, str]] = set()
+
+    def visit(node: ast.AST, enclosing: set[str], scope: str) -> None:
+        for child in ast.iter_child_nodes(node):
+            if isinstance(child, (ast.FunctionDef, ast.AsyncFunctionDef, ast.Lambda)):
+                name = getattr(child, "name", "<lambda>")
+                visible = enclosing | _bound_names(child)
+                for inner in ast.walk(child):
+                    if isinstance(inner, ast.Name) and isinstance(inner.ctx, ast.Load) and inner.id not in visible:
+                        undefined.add((f"{scope}.{name}", inner.id))
+                visit(child, visible, f"{scope}.{name}")
+            else:
+                visit(child, enclosing, scope)
+
+    visit(tree, module_level, "<module>")
+    unreachable = 0
+    for node in ast.walk(tree):
+        for field in ("body", "orelse", "finalbody"):
+            body = getattr(node, field, None)
+            if not isinstance(body, list):
+                continue
+            for index, statement in enumerate(body[:-1]):
+                if isinstance(statement, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
+                    unreachable += len(body) - index - 1
+                    break
+    return undefined, unreachable
+
+
+def _code_sanity_problems(old: str, new: str) -> list[str]:
+    after = _code_sanity_facts(new)
+    if after is None:
+        return []
+    before = _code_sanity_facts(old) if old else (set(), 0)
+    if before is None:
+        before = (set(), 0)
+    problems = [
+        f"uses undefined name `{name}` in {scope.removeprefix('<module>.')}"
+        for scope, name in sorted(after[0] - before[0])
+    ]
+    if after[1] > before[1]:
+        problems.append("adds code after a return, raise, continue or break that can never run")
+    return problems
+
+
 @dataclass(frozen=True)
 class CodingProposal:
     title: str
@@ -634,6 +721,10 @@ class CodingModule:
                         "original NUMBERED_CONTEXT coordinates; preserve complete multiline expressions."
                     ) from exc
         python_paths = [str(path) for path in files if str(path).endswith(".py")]
+        for path in python_paths:
+            problems = _code_sanity_problems(current_files.get(path, ""), files[path])
+            if problems:
+                raise ValueError(f"coding proposal breaks {path}: " + "; ".join(problems[:5]))
         changed_code = [path for path in python_paths if _changes_code(current_files.get(path, ""), files[path])]
         if (python_paths or not files) and not changed_code:
             raise ValueError(
@@ -654,6 +745,7 @@ class CodingModule:
             'That edit object must contain "path", integer "start_line", integer "end_line", and string "new". '
             'The "new" value must be the actual repository replacement code/content, never an example or placeholder. '
             'An edit that only adds comments, docstrings, pass or ... is rejected; change real code. '
+            'Every name you use must already be defined in that scope, and never leave code after return. '
             'To add new code without replacing any line, use integer "insert_after_line" (0 means the top of the file) '
             'with "new" instead of "start_line"/"end_line"; never send both. Inserted lines are used exactly as written, '
             'so give every inserted line the full leading indentation it needs at that spot in the file '
