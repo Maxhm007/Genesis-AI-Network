@@ -9,6 +9,7 @@ import sys
 from pathlib import Path
 
 import scripts.github_issue_autorepair as base
+from genesis.log_redaction import redact_secrets
 from genesis.selfdev import ALLOWED_SCRIPT_PATHS, normalize_selfdev_path
 from genesis.issue_target import extract_issue_target
 from genesis.github_issue_capability_builder import GitHubIssueLearnedCapabilityProvider
@@ -349,7 +350,8 @@ def _full_suite_passes(root: Path) -> tuple[bool, str]:
         stderr=subprocess.STDOUT,
         check=False,
     )
-    output = completed.stdout.strip()
+    # The tail is stored in runtime JSON that is uploaded as an artifact.
+    output = redact_secrets(completed.stdout.strip())
     return completed.returncode == 0, output[-4000:]
 
 

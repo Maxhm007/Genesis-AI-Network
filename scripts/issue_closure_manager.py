@@ -64,12 +64,45 @@ EVIDENCE_PATTERNS = (
 SHA_RE = re.compile(r"\b[0-9a-f]{40}\b", re.IGNORECASE)
 
 
+RESULT_MARKER = "<!-- genesis-agentic-strategy-result:"
+CURRENT_PROBLEM_MARKER = "<!-- genesis-team-current-problem -->"
+COMPLETED_STATUS = "repair status: `completed`"
+STALE_DECLINE_STATUS = "repair status: `blocked_protected_or_unsupported_target`"
+
+
+def _has_problem(lowered: str) -> bool:
+    return any(pattern in lowered for pattern in PROBLEM_PATTERNS)
+
+
+def _is_success_result(lowered: str) -> bool:
+    """A strategy-result comment that reports a completed, verified repair."""
+    if CURRENT_PROBLEM_MARKER in lowered or not lowered.lstrip().startswith(RESULT_MARKER):
+        return False
+    if COMPLETED_STATUS not in lowered:
+        return False
+    return not _has_problem(lowered.replace(COMPLETED_STATUS, ""))
+
+
+def _is_stale_decline(lowered: str) -> bool:
+    """The exact worker note posted when it wakes on an already-finished reservation."""
+    if CURRENT_PROBLEM_MARKER in lowered or not lowered.lstrip().startswith(RESULT_MARKER):
+        return False
+    if "declined this reservation" not in lowered or STALE_DECLINE_STATUS not in lowered:
+        return False
+    return not _has_problem(lowered.replace(STALE_DECLINE_STATUS, ""))
+
+
 def _latest_problem_index(comments: list[dict]) -> int:
     latest = -1
+    seen_success = False
     for index, row in enumerate(comments):
-        body = str(row.get("body") or "")
-        lowered = body.lower()
-        if any(pattern in lowered for pattern in PROBLEM_PATTERNS):
+        lowered = str(row.get("body") or "").lower()
+        if _is_success_result(lowered):
+            seen_success = True
+            continue
+        if seen_success and _is_stale_decline(lowered):
+            continue
+        if _has_problem(lowered):
             latest = index
     return latest
 

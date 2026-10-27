@@ -199,7 +199,7 @@ def issue_task_type(body: str) -> str:
 def actionable_issue(issue: dict) -> bool:
     title = str(issue.get("title") or "").strip().lower()
     body = str(issue.get("body") or "")
-    if title.startswith("[performance indicator]"):
+    if title.startswith("[performance indicator]") or title.startswith("[monitoring]"):
         return False
     if NON_ACTIONABLE_MARKER in body:
         return False

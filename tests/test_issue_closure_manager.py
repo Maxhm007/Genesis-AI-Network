@@ -106,3 +106,50 @@ def test_new_verification_after_problem_comment_is_accepted():
     ]
     verified, _, _ = module._verification_evidence(comments)
     assert verified is True
+
+
+def test_verified_result_with_completed_status_and_stale_decline_still_closes():
+    sha = "5fccf2d63d58c97c0bcb73b3b53e87169a1b2c3d"
+    comments = [
+        {"body": "Agentic Lab strategy `x` did not produce a verified promotion. repair status: `strategy_requires_more_methods`."},
+        {"body": f"<!-- genesis-agentic-strategy-result:evidence_first --> Agentic Lab strategy `evidence_first` produced a verified repair. Promoted main SHA: `{sha}`. repair status: `completed`."},
+        {"body": "<!-- genesis-agentic-strategy-result:evidence_first --> Agentic Lab strategy worker declined this reservation because the Issue is not open/owned. repair status: `blocked_protected_or_unsupported_target`."},
+    ]
+    ok, _, promoted = _verification_evidence(comments)
+    assert ok is True
+    assert promoted == sha
+
+
+def test_real_failure_after_verified_result_still_blocks_close():
+    comments = [
+        {"body": "Agentic Lab strategy produced a verified repair. repair status: `completed`."},
+        {"body": "Agentic Lab strategy did not produce a verified promotion. repair status: `tests_failed`."},
+    ]
+    ok, _, _ = _verification_evidence(comments)
+    assert ok is False
+
+
+_SUCCESS = "<!-- genesis-agentic-strategy-result:evidence_first --> Agentic Lab strategy `evidence_first` produced a verified repair. repair status: `completed`."
+_DECLINE = "<!-- genesis-agentic-strategy-result:evidence_first --> Agentic Lab strategy worker declined this reservation because the Issue is not open/owned. repair status: `blocked_protected_or_unsupported_target`."
+
+
+def test_current_problem_quoting_decline_note_blocks_close():
+    comments = [{"body": _SUCCESS}, {"body": "<!-- genesis-team-current-problem --> Still broken. Quoted: " + _DECLINE}]
+    assert _verification_evidence(comments)[0] is False
+
+
+def test_current_problem_quoting_success_blocks_close():
+    comments = [{"body": _SUCCESS}, {"body": "<!-- genesis-team-current-problem --> Regressed after: " + _SUCCESS}]
+    assert _verification_evidence(comments)[0] is False
+
+
+def test_decline_note_with_failure_blocks_close():
+    comments = [{"body": _SUCCESS}, {"body": _DECLINE + " Worker failed: provider_timeout."}]
+    assert _verification_evidence(comments)[0] is False
+
+
+def test_decline_note_before_any_success_still_counts_as_problem():
+    comments = [{"body": _DECLINE}, {"body": "Genesis verification evidence: ok"}]
+    assert _verification_evidence(comments)[0] is True
+    comments = [{"body": _DECLINE}]
+    assert _verification_evidence(comments)[0] is False

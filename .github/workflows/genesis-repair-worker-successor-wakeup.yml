@@ -35,10 +35,10 @@ jobs:
           active_count="$(gh run list --repo "$GITHUB_REPOSITORY" \
             --workflow genesis-agentic-lab-recovery.yml \
             --limit 20 \
-            --json status \
-            --jq '[.[] | select(.status == "queued" or .status == "in_progress" or .status == "pending" or .status == "waiting" or .status == "requested")] | length')"
+            --json status,createdAt,event \
+            --jq '[.[] | select(.event != "push" and .event != "pull_request") | select(.status != "completed" or (now - (.createdAt | fromdateiso8601)) < 120)] | length')"
           if [[ "$active_count" -gt 0 ]]; then
-            echo "Agentic Lab Recovery already active ($active_count run(s)); duplicate successor wake skipped."
+            echo "Agentic Lab Recovery already active or woken <2 min ago ($active_count run(s)); duplicate successor wake skipped."
             exit 0
           fi
           gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main

@@ -11,6 +11,8 @@ def restore_dispatch_bindings(monkeypatch):
     # to each test when several controller modules share one Python process.
     for attribute in ("issue_comments", "open_agentic_issues", "next_strategy"):
         monkeypatch.setattr(module.agentic, attribute, getattr(module.agentic, attribute))
+    # Tests that exercise main() opt in to the pending-run guard explicitly.
+    monkeypatch.setattr(module, "_pending_solver_run_exists", lambda *args: False)
 
 
 def _issue(number: int, created_at: str, *, labels=(), body=""):
@@ -653,3 +655,37 @@ def test_noop_cooldown_marker_is_recorded_once_per_window(monkeypatch):
 
     assert len(writes) == 1
     assert module.NOOP_COOLDOWN_MARKER in str(writes[0][-1])
+
+@pytest.mark.parametrize("status,expected", [("queued", True), ("waiting", True), ("in_progress", False)])
+def test_pending_solver_run_detection_ignores_running_workers(monkeypatch, status, expected):
+    def request(_repo, _token, _method, path):
+        if f"status={status}" in path:
+            return {"workflow_runs": [{
+                "event": "workflow_dispatch",
+                "path": ".github/workflows/genesis-agentic-strategy-worker.yml@refs/heads/main",
+            }]}
+        return {"workflow_runs": []}
+
+    monkeypatch.setattr(module.agentic, "request", request)
+    assert module._live_agentic_worker_exists("o/r", "t", statuses=module.WAITING_RUN_STATUSES) is expected
+
+
+def test_main_does_not_dispatch_over_a_waiting_solver_run(monkeypatch):
+    monkeypatch.setenv("GITHUB_REPOSITORY", "owner/repo")
+    monkeypatch.setenv("GITHUB_TOKEN", "token")
+    monkeypatch.setattr(module.policy, "_all_open_issues_fifo", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_restore_agentic_visibility", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_terminalize_non_actionable_issues", lambda *args: [])
+    monkeypatch.setattr(module.agentic, "release_ready_capability_dependencies", lambda *args: [])
+    monkeypatch.setattr(module.policy, "_decompose_oldest_issue", lambda *args: {"status": "idle"})
+    monkeypatch.setattr(module, "_active_issue_numbers", lambda *args: [])
+    monkeypatch.setattr(module, "_pending_solver_run_exists", lambda *args: True)
+
+    dispatched = []
+    monkeypatch.setattr(
+        module.agentic,
+        "reserve_and_dispatch",
+        lambda *args: dispatched.append(1) or {"status": "dispatched", "issue_number": 1},
+    )
+    assert module.main() == 0
+    assert dispatched == []

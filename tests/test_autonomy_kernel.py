@@ -70,3 +70,26 @@ def test_summary_tracks_outcomes_and_human_intervention():
     assert report["verified_to_close_issue_numbers"] == [13]
     assert report["human_intervention_required_count"] == 1
     assert report["unattended_open_ratio"] == 0.8
+
+
+def test_monitoring_issue_is_not_solver_work():
+    from datetime import datetime, timezone
+    from genesis.autonomy_kernel import decide_issue
+
+    now = datetime(2026, 10, 27, 12, 0, tzinfo=timezone.utc)
+    issue = {"number": 1100, "state": "open", "updated_at": "2026-10-26T00:00:00Z",
+             "title": "[Monitoring] Live Genesis Actions status report",
+             "labels": [{"name": "genesis-autonomous"}, {"name": "genesis-solver-exhausted"}, {"name": "agentic-lab"}]}
+    assert decide_issue(issue, now=now).action == "none"
+
+
+def test_exhausted_issue_waits_for_cooldown_before_retry():
+    from datetime import datetime, timezone
+    from genesis.autonomy_kernel import decide_issue
+
+    now = datetime(2026, 10, 27, 12, 0, tzinfo=timezone.utc)
+    labels = [{"name": "genesis-autonomous"}, {"name": "genesis-solver-exhausted"}]
+    fresh = {"number": 8, "state": "open", "updated_at": "2026-10-27T11:50:00Z", "labels": labels}
+    aged = {"number": 9, "state": "open", "updated_at": "2026-10-27T11:20:00Z", "labels": labels}
+    assert decide_issue(fresh, now=now).action == "cooldown"
+    assert decide_issue(aged, now=now).action == "recover_with_new_strategy"

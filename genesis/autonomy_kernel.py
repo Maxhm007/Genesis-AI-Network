@@ -40,6 +40,11 @@ IGNORED_LABELS = {
 }
 AUTONOMY_LABEL = "genesis-autonomous"
 HUMAN_LABELS = {"genesis-human-required", "human-intervention-required"}
+# Observation-only issues (for example the Actions status report) are never solver work.
+MONITORING_TITLE_PREFIXES = ("[monitoring]",)
+# A blocked/exhausted issue waits this long after its last update before a new
+# strategy is tried, so a failed issue is not re-sent to the solver at once.
+BLOCKED_RETRY_COOLDOWN_MINUTES = 30
 
 
 @dataclass(frozen=True)
@@ -82,6 +87,8 @@ def issue_state(issue: dict) -> IssueState:
         return IssueState.CLOSED
     if labels & IGNORED_LABELS:
         return IssueState.IGNORED
+    if str(issue.get("title") or "").strip().lower().startswith(MONITORING_TITLE_PREFIXES):
+        return IssueState.IGNORED
     if labels & VERIFIED_LABELS:
         return IssueState.VERIFIED
     if labels & VALIDATING_LABELS:
@@ -121,6 +128,8 @@ def decide_issue(
         action, reason = "await_independent_validation", "solver must not self-approve"
     elif state == IssueState.WORKING:
         action, reason = "continue_work", "an autonomous worker is active"
+    elif state == IssueState.BLOCKED and age < BLOCKED_RETRY_COOLDOWN_MINUTES:
+        action, reason = "cooldown", "issue recently failed; waiting before a new strategy"
     elif stalled or state == IssueState.BLOCKED:
         action, reason = "recover_with_new_strategy", "issue is blocked or stale and needs a materially different strategy"
     else:
@@ -160,10 +169,7 @@ def summarize_issues(
     autonomous_open = 0
     for issue in issues:
         if not isinstance(issue, dict):
-            if report['human_intervention_required_count'] == 1 and report['unattended_open_ratio'] == 0.8:
-                # Handle the case where human intervention is required and the issue is unattended
-                # Add your custom logic here
-                pass
+            continue
         labels = _labels(issue)
         if AUTONOMY_LABEL in labels and str(issue.get("state") or "open").lower() != "closed":
             autonomous_open += 1

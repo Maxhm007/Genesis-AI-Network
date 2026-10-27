@@ -384,7 +384,9 @@ def _is_recovery_issue(issue: dict) -> bool:
     # owns the next attempt even if legacy labels have not caught up yet.
     if issue.get("updated_at"):
         decision = decide_issue(issue, now=datetime.now(timezone.utc))
-        if decision.action == "recover_with_new_strategy":
+        # A recently failed issue cooling down is still recovery work; the
+        # routable selector keeps it out until the cooldown ends.
+        if decision.action in {"recover_with_new_strategy", "cooldown"}:
             return True
         if decision.action not in KERNEL_DISPATCH_ACTIONS:
             return False
@@ -480,9 +482,25 @@ def _sequential_routable_issues(repository: str, token: str) -> list[dict]:
     return _lane_routable_issues(repository, token)
 
 
-def _live_agentic_worker_exists(repository: str, token: str) -> bool:
+LIVE_RUN_STATUSES = ("queued", "in_progress", "waiting", "pending", "requested")
+WAITING_RUN_STATUSES = ("queued", "waiting", "pending", "requested")
+
+
+def _pending_solver_run_exists(repository: str, token: str) -> bool:
+    """Return whether a solver run is already waiting for the single lane.
+
+    GitHub keeps only one pending run per concurrency group; dispatching
+    another would cancel the waiting one before it starts and leave its Issue
+    reserved until the orphan reclaim runs.
+    """
+    return _live_agentic_worker_exists(repository, token, statuses=WAITING_RUN_STATUSES)
+
+
+def _live_agentic_worker_exists(
+    repository: str, token: str, *, statuses: tuple[str, ...] = LIVE_RUN_STATUSES
+) -> bool:
     """Return whether the single sequential lane has a queued/running worker."""
-    for status in ("queued", "in_progress", "waiting", "pending", "requested"):
+    for status in statuses:
         try:
             payload = agentic.request(
                 repository,
@@ -699,6 +717,9 @@ def main() -> int:
 
     active_before = _active_issue_numbers_from_issues(routing_snapshot)
     free_slots = max(0, MAX_PARALLEL - len(active_before))
+    pending_solver_run = bool(free_slots) and _pending_solver_run_exists(repository, token)
+    if pending_solver_run:
+        free_slots = 0
     dispatched: list[dict] = []
 
     noops: list[dict] = []
@@ -765,6 +786,7 @@ def main() -> int:
         "skipped_noop_candidates": sorted(skipped_this_pass),
         "noop_results": noops,
         "dispatch_attempts": attempts,
+        "pending_solver_run_blocked_dispatch": pending_solver_run,
         "active_after": sorted(set(active_before + [int(row.get("issue_number") or 0) for row in dispatched if int(row.get("issue_number") or 0) > 0])),
         "legacy_dependencies_released": released,
         "capability_escalation": "enabled",
