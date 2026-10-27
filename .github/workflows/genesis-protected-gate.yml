@@ -1,0 +1,101 @@
+name: Genesis Protected Gate
+
+# Stage 1 (report-only): reports findings, changes nothing, never fails the run.
+# Note: workflow_run and repository_dispatch only use workflow files from the
+# default branch, so this gate always runs the reviewed copy on main.
+on:
+  workflow_run:
+    types: [completed]
+    workflows:
+      - "Agentic Lab Manual Issue Solver"
+      - "Deploy Genesis Pages"
+      - "Gene Pulse"
+      - "Genesis Action Failure Watcher"
+      - "Genesis Action Queue Cleaner"
+      - "Genesis Action Repair Validator"
+      - "Genesis Action Repair Worker"
+      - "Genesis Actions Status Bridge"
+      - "Genesis Additional Qwen3 Activation"
+      - "Genesis Agentic Issue Opening Authority"
+      - "Genesis Agentic Lab Recovery"
+      - "Genesis Agentic Strategy Worker"
+      - "Genesis Agentic Terminal Reconciler"
+      - "Genesis Android Issue Worker"
+      - "Genesis Autonomy Kernel Proof"
+      - "Genesis Bounded Repair Worker"
+      - "Genesis Capability Priority"
+      - "Genesis Closed Issue Seal"
+      - "Genesis Dashboard Successor Identity"
+      - "Genesis DeepSeek Agentic Solver"
+      - "Genesis DeepSeek Recovery Dispatcher"
+      - "Genesis DeepSeek Self Development Discovery"
+      - "Genesis Discovery Silence Watchdog"
+      - "Genesis Exhausted Issue Requeue"
+      - "Genesis FIFO Handoff"
+      - "Genesis Gene Peer Issue Sync"
+      - "Genesis GitHub Issue Discovery"
+      - "Genesis Hourly Whole-Dashboard Review"
+      - "Genesis Idle Repair Watchdog"
+      - "Genesis Integration Issue Router"
+      - "Genesis Issue Closure Manager"
+      - "Genesis Issue Lifecycle Health Watchdog"
+      - "Genesis Issue Opening Manager"
+      - "Genesis Issue Tag Manager"
+      - "Genesis Missing Qwen Capability Discovery"
+      - "Genesis Pull Request Maintenance"
+      - "Genesis Recent AI Capability Discovery"
+      - "Genesis Record Validated Update"
+      - "Genesis Recovery Solver"
+      - "Genesis Repair Worker Successor Wakeup"
+      - "Genesis Restore Bot-Reopened Issues"
+      - "Genesis Self Healing"
+      - "Genesis Sequential Agentic Bypass"
+      - "Genesis Sequential Issue Controller"
+      - "Genesis Solver Wake"
+      - "Genesis Specialist Issue Controller"
+      - "Genesis Specialist Reactivation"
+      - "Genesis Specialist Repair Worker v2"
+      - "Genesis Stuck Issue Watchdog"
+      - "Genesis Teammate - Atlas Architect"
+      - "Genesis Teammate - Autonomous Development"
+      - "Genesis Teammate - Forge Developer"
+      - "Genesis Teammate - Nexus"
+      - "Genesis Teammate - Recovery Troubleshooter"
+      - "Genesis Teammate - Scout Researcher"
+      - "Genesis Teammate - Sentinel Reviewer QA"
+      - "Genesis Terminal Issue Reconciler"
+      - "Genesis Throughput Issue Controller"
+      - "Genesis Tiny Problem Detection Test"
+      - "Genesis Unsolved Issue Reactivation"
+      - "Genesis Worker Safety Cancel"
+      - "Genesis Workflow Governor"
+      - "Genesis Workflow Governor Validator"
+      - "Nexus Genesis Autonomy Watchdog"
+  schedule:
+    - cron: "17,47 * * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: genesis-protected-gate
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.event.repository.default_branch }}
+          fetch-depth: 60
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+      - name: Run gate (report-only)
+        run: python -I .github/workflows/gate/protected_gate.py --root . --limit 30 --report-only

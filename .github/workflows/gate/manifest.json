@@ -1,0 +1,22 @@
+{
+  "note": "sha256 of every locked file. Only maintainers update this (it sits under .github/workflows/, which the bot token cannot write).",
+  "files": {
+    "GENESIS_BLOCK.json": "47671ab61ecad61391886d430ccb832c1e24a7ed543376c647aa3808b0c892f3",
+    "GENESIS_CONSTITUTION.md": "e61dc0ff29f791c666b69a16bc5d2f3939d8a75be1a17f6aa4c501416962f4e4",
+    "genesis/__init__.py": "c5827b62befddf2e07e31defff4542cb4788385e5f9c6b3a72c6989a67bc1f6a",
+    "genesis/change_review.py": "d20577544ec705fcc91647fbb4f796fd4608b591bc4082cc9e702ea0e7183568",
+    "genesis/coding.py": "5102b48fc9216cc5112caf3d0e7098ec3c098c06f9d1167640b61a1cd1435b83",
+    "genesis/coding_provider_policy.py": "78e828397d4145ef681a4312d44b2c7ba4946feff0d811d006e0247d91fd837e",
+    "genesis/comment_trust.py": "0da12008747f9decf3dc95b537bec3ba77d0b7368669d2331fd3c032d78a40ff",
+    "genesis/log_redaction.py": "c38653a28edc2eeda3755f71aaac69f02f5b91d7ff133a0d8c9f82637376c024",
+    "genesis/selfdev.py": "c92eb8f4d4a121c16ede25c156d089af3d9f2fbb31bf1f0a148a8fb19bd8676e",
+    "scripts/action_repair_guard.py": "5d55ab204eaca5a8ef6693ac106b348e185668fb7290d225bc8ecf392b4a4b04",
+    "scripts/issue_acceptance_guard.py": "f54c5955737a44c5151f16997fedd2d272d6ecd2643500bb355606c75c5eea1e",
+    "scripts/privileged_change_gate.py": "3ed47920e55248457f9b13b2e899f661f163eb506d25928a12edc88816a20c05",
+    "scripts/secret_guard.py": "4790e59d238731c59c73d2ee6699036ed651219838f25b28a654a357721b0234",
+    "scripts/verify_validator_votes.py": "8211ad96716b01695f2c2d5f0dde8611e053cf3a66243af4abde0af51cf1fda4",
+    "tests/conftest.py": "621847b59281f4d774635bdbf8cec265a8a776e3ea93f7459c1481659fbf7eec",
+    "tests/test_change_review.py": "6ea47fb2a5b47ba1ebf9ffcf2aba14749de76839490e063af540c465bc83accb",
+    "tests/test_comment_trust.py": "fc7bd8ec5e4423501b8b2c801a855a7f161112543d077c42e841f90f00aa96ea"
+  }
+}
