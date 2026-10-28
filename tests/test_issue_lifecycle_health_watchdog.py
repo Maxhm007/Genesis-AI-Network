@@ -209,3 +209,39 @@ def test_failed_manager_is_persistent():
         closure_max_age_minutes=30,
         verified_open_grace_minutes=20,
     ) is True
+
+def test_issue_inventory_paginates_and_includes_old_verified_issues(monkeypatch):
+    calls = []
+    first = [_issue(number, labels=("genesis-autonomous",)) for number in range(1, 101)]
+    old_verified = _issue(857, labels=("genesis-verified",), minutes_ago=45)
+
+    def fake_api(repository, path):
+        calls.append(path)
+        return first if "page=1" in path else [old_verified]
+
+    monkeypatch.setattr(module, "_api", fake_api)
+    issues = module._issues("owner/repo")
+    assert len(issues) == 101
+    assert issues[-1]["number"] == 857
+    assert calls == [
+        "issues?state=open&per_page=100&page=1",
+        "issues?state=open&per_page=100&page=2",
+    ]
+    assessment = module.evaluate(
+        opening_run=_run(module.OPENING_WORKFLOW),
+        closure_run=_run(module.CLOSURE_WORKFLOW),
+        issues=issues,
+        now=NOW,
+        opening_max_age_minutes=75,
+        closure_max_age_minutes=30,
+        verified_open_grace_minutes=20,
+    )
+    assert "verified_issues_not_auto_closed:857" in assessment["faults"]
+
+
+def test_issue_inventory_rejects_malformed_api_response(monkeypatch):
+    import pytest
+
+    monkeypatch.setattr(module, "_api", lambda repository, path: {"message": "error"})
+    with pytest.raises(RuntimeError, match="Unexpected GitHub issues response"):
+        module._issues("owner/repo")
