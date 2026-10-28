@@ -105,3 +105,23 @@ The first real pass requires evidence of one learning-driven task completing:
 `external learning -> grounded Genesis opportunity -> implementation -> independent internal review -> independent validation -> main promotion -> closed`
 
 After repeated successful cycles, the same evidence can be used to improve provider selection, benchmarks, learning-source quality, and eventually Genesis-owned model/data evolution.
+
+## 7. Evidence-based learning scorecard
+
+The learning cycle now includes `learning_metrics` in its JSON output, computed
+from the durable SQLite learning database without modifying source evidence.
+It reports the number of research records, upgrade opportunities, opportunity
+states, promoted/closed outcomes, and recent explicit failure reasons. When the
+database is absent or there are no opportunities, the promotion rate is `null`
+rather than a fabricated zero or success.
+
+A promoted upgrade is not proof of an intelligence gain. Compare measured
+pre/post benchmarks and task outcomes before describing an upgrade as better.
+Investigate repeating failure reasons, revise the strategy, and retain
+independent review, Security, protected-file, and promotion gates.
+
+To validate the new scorecard run:
+`python -m pytest -q tests/test_learning_metrics.py`
+
+Metrics must not be interpreted as proof that live learning workflows ran:
+runtime output and CI evidence must be checked separately.
