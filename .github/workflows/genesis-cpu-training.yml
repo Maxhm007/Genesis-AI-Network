@@ -1,0 +1,79 @@
+name: Genesis CPU Training Experiment
+# Experimental, bounded CPU-only training. Never deploy or activate models.
+on:
+  workflow_dispatch:
+  schedule:
+    - cron: '25 4 * * *'
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-cpu-training.yml
+      - scripts/run_genesis_cpu_experiment.py
+      - tests/test_cpu_experiment_workflow.py
+
+permissions:
+  contents: read
+
+concurrency:
+  group: genesis-cpu-training
+  cancel-in-progress: false
+
+jobs:
+  cpu-experiment:
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    env:
+      HF_HUB_DISABLE_TELEMETRY: '1'
+      TOKENIZERS_PARALLELISM: 'false'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Validate CPU workflow guards
+        if: github.event_name == 'push'
+        run: |
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest -q tests/test_cpu_experiment_workflow.py tests/test_cpu_model_training.py
+      - name: Build verified dataset and gate experiment
+        if: github.event_name != 'push'
+        id: readiness
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p runtime/model_datasets runtime/cpu_experiment
+          if [[ ! -s network/blockchain.jsonl ]]; then
+            echo '{"status":"no_validation_evidence"}' > runtime/cpu_experiment/status.json
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          python scripts/build_genesis_training_dataset.py --max-examples 2000 > runtime/cpu_experiment/dataset_manifest.json
+          dataset="$(find runtime/model_datasets -maxdepth 1 -name 'genesis-validated-autonomous-*.jsonl' -type f | head -n 1)"
+          python scripts/prepare_genesis_training_holdout.py --dataset "$dataset" > runtime/cpu_experiment/readiness.json
+          if [[ "$(python -c 'import json;print(json.load(open("runtime/cpu_experiment/readiness.json"))["status"])')" != "holdout_ready" ]]; then
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            exit 0
+          fi
+          echo "train_path=${dataset%.jsonl}.train.jsonl" >> "$GITHUB_OUTPUT"
+          echo "holdout_path=${dataset%.jsonl}.holdout.jsonl" >> "$GITHUB_OUTPUT"
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+      - name: Install bounded CPU training dependencies
+        if: steps.readiness.outputs.ready == 'true'
+        run: |
+          python -m pip install --disable-pip-version-check 'torch>=2.3,<3' 'transformers>=4.45,<5' 'peft>=0.12,<1' 'accelerate>=0.34,<2' 'safetensors>=0.4,<1' 'huggingface_hub>=0.25,<2'
+      - name: Run CPU training with Model Lab safeguards
+        if: steps.readiness.outputs.ready == 'true'
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m scripts.run_genesis_cpu_experiment --train "${{ steps.readiness.outputs.train_path }}" --holdout "${{ steps.readiness.outputs.holdout_path }}"
+      - name: Save reports (no weights or source dataset)
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: genesis-cpu-experiment-${{ github.run_id }}
+          path: runtime/cpu_experiment/
+          retention-days: 14
+          if-no-files-found: warn
