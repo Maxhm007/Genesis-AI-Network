@@ -149,16 +149,6 @@ register_capability(
 )
 
 
-def learned_d00770f16537d2ca(self):
-    # Your implementation here
-    pass
-
-def learned_8b7a22c14b8a383e(self):
-    # Your implementation here
-    pass
-
-pass
-
 def _learned_27322463c7e3(
     requested: str | None,
     available,

@@ -5,7 +5,7 @@
     "GENESIS_CONSTITUTION.md": "e61dc0ff29f791c666b69a16bc5d2f3939d8a75be1a17f6aa4c501416962f4e4",
     "genesis/__init__.py": "c5827b62befddf2e07e31defff4542cb4788385e5f9c6b3a72c6989a67bc1f6a",
     "genesis/change_review.py": "d20577544ec705fcc91647fbb4f796fd4608b591bc4082cc9e702ea0e7183568",
-    "genesis/coding.py": "bcaa227b1d9c303dcf3383fb090557b5394a1df6c76e027f7f2f01f0df246485",
+    "genesis/coding.py": "d13bec4b325053fc2822f4dc413fbdec74004fc589d3e411ea4b302ca4eab274",
     "genesis/coding_provider_policy.py": "78e828397d4145ef681a4312d44b2c7ba4946feff0d811d006e0247d91fd837e",
     "genesis/comment_trust.py": "0da12008747f9decf3dc95b537bec3ba77d0b7368669d2331fd3c032d78a40ff",
     "genesis/log_redaction.py": "c38653a28edc2eeda3755f71aaac69f02f5b91d7ff133a0d8c9f82637376c024",

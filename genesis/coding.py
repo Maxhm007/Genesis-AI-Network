@@ -119,8 +119,50 @@ _IMPLICIT_NAMES = frozenset(
 _COMPREHENSIONS = (ast.ListComp, ast.SetComp, ast.GeneratorExp, ast.DictComp)
 
 
-def _is_dead_test(test: ast.AST) -> bool:
-    return isinstance(test, ast.Constant) and not test.value
+_COMPARE = {
+    ast.Eq: lambda a, b: a == b, ast.NotEq: lambda a, b: a != b, ast.Lt: lambda a, b: a < b,
+    ast.LtE: lambda a, b: a <= b, ast.Gt: lambda a, b: a > b, ast.GtE: lambda a, b: a >= b,
+    ast.Is: lambda a, b: a is b, ast.IsNot: lambda a, b: a is not b,
+    ast.In: lambda a, b: a in b, ast.NotIn: lambda a, b: a not in b,
+}
+
+
+def _static_value(node: ast.AST):
+    """Value of an expression built only from literals, or raise ValueError."""
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+        return not _static_value(node.operand)
+    if isinstance(node, ast.BoolOp):
+        values = [_static_value(value) for value in node.values]
+        if isinstance(node.op, ast.And):
+            return all(values)
+        return any(values)
+    if isinstance(node, ast.Compare):
+        left = _static_value(node.left)
+        for op, comparator in zip(node.ops, node.comparators):
+            right = _static_value(comparator)
+            if not _COMPARE[type(op)](left, right):
+                return False
+            left = right
+        return True
+    return ast.literal_eval(node)
+
+
+def _static_truth(test: ast.AST) -> bool | None:
+    try:
+        return bool(_static_value(test))
+    except Exception:
+        return None
+
+
+def _is_empty_literal(node: ast.AST) -> bool:
+    try:
+        value = ast.literal_eval(node)
+    except Exception:
+        return False
+    try:
+        return len(value) == 0
+    except TypeError:
+        return False
 
 
 class _Scope:
@@ -132,6 +174,10 @@ class _Scope:
         self.declared_global: set[str] = set()
         self.declared_nonlocal: set[str] = set()
         self.loads: set[str] = set()
+        self.first_store: dict[str, tuple[int, int]] = {}
+        self.load_events: list[tuple[str, tuple[int, int], tuple[int, ...]]] = []
+        self.loop_stack: list[int] = []
+        self.loop_stores: dict[int, set[str]] = {}
 
 
 def _collect_scopes(tree: ast.Module) -> tuple[list[_Scope], bool]:
@@ -144,20 +190,29 @@ def _collect_scopes(tree: ast.Module) -> tuple[list[_Scope], bool]:
         scopes.append(scope)
         return scope
 
-    def bind(scope: _Scope, name: str, dead: bool) -> None:
-        if not dead:
-            scope.stores.add(name)
+    def bind(scope: _Scope, name: str, dead: bool, node: ast.AST | None = None) -> None:
+        if dead:
+            return
+        scope.stores.add(name)
+        position = (getattr(node, "lineno", 0), getattr(node, "col_offset", 0)) if node is not None else (0, 0)
+        scope.first_store[name] = min(scope.first_store.get(name, position), position)
+        for loop in scope.loop_stack:
+            scope.loop_stores.setdefault(loop, set()).add(name)
+
+    def load(scope: _Scope, name: str, node: ast.AST) -> None:
+        scope.loads.add(name)
+        scope.load_events.append((name, (node.lineno, node.col_offset), tuple(scope.loop_stack)))
 
     def bind_params(scope: _Scope, node: ast.AST) -> None:
         for param in getattr(node, "type_params", None) or []:
-            scope.stores.add(param.name)
+            bind(scope, param.name, False)
 
     def walk_args(args: ast.arguments, outer: _Scope, inner: _Scope, typed: _Scope | None = None) -> None:
         for default in [*args.defaults, *[d for d in args.kw_defaults if d is not None]]:
             visit(default, outer, False)
         for arg in [*args.posonlyargs, *args.args, *args.kwonlyargs, args.vararg, args.kwarg]:
             if arg is not None:
-                inner.stores.add(arg.arg)
+                bind(inner, arg.arg, False)
                 if arg.annotation is not None:
                     visit(arg.annotation, typed or outer, False)
 
@@ -207,13 +262,13 @@ def _collect_scopes(tree: ast.Module) -> tuple[list[_Scope], bool]:
             target = scope
             while target.kind == "comprehension" and target.parent is not None:
                 target = target.parent
-            bind(target, node.target.id, dead)
             visit(node.value, scope, dead)
+            bind(target, node.target.id, dead, node.target)
         elif isinstance(node, ast.Name):
-            if isinstance(node.ctx, ast.Load):
-                scope.loads.add(node.id)
+            if isinstance(node.ctx, (ast.Load, ast.Del)):
+                load(scope, node.id, node)
             else:
-                bind(scope, node.id, dead)
+                bind(scope, node.id, dead, node)
         elif isinstance(node, ast.Global):
             scope.declared_global.update(node.names)
         elif isinstance(node, ast.Nonlocal):
@@ -223,22 +278,38 @@ def _collect_scopes(tree: ast.Module) -> tuple[list[_Scope], bool]:
                 if alias.name == "*":
                     star = True
                 else:
-                    bind(scope, (alias.asname or alias.name).split(".")[0], dead)
-        elif isinstance(node, (ast.If, ast.While)) and _is_dead_test(node.test):
+                    bind(scope, (alias.asname or alias.name).split(".")[0], dead, node)
+        elif isinstance(node, (ast.If, ast.While)):
+            truth = _static_truth(node.test)
+            loop = isinstance(node, ast.While)
+            if loop:
+                scope.loop_stack.append(id(node))
             visit(node.test, scope, dead)
             for statement in node.body:
-                visit(statement, scope, True)
+                visit(statement, scope, dead or truth is False)
+            if loop:
+                scope.loop_stack.pop()
+            for statement in node.orelse:
+                visit(statement, scope, dead or (truth is True and not loop))
+        elif isinstance(node, (ast.For, ast.AsyncFor)):
+            visit(node.iter, scope, dead)
+            empty = dead or _is_empty_literal(node.iter)
+            scope.loop_stack.append(id(node))
+            visit(node.target, scope, empty)
+            for statement in node.body:
+                visit(statement, scope, empty)
+            scope.loop_stack.pop()
             for statement in node.orelse:
                 visit(statement, scope, dead)
         else:
             if isinstance(node, ast.ExceptHandler) and node.name:
-                bind(scope, node.name, dead)
+                bind(scope, node.name, dead, node)
             elif isinstance(node, (ast.MatchAs, ast.MatchStar)) and node.name:
-                bind(scope, node.name, dead)
+                bind(scope, node.name, dead, node)
             elif isinstance(node, ast.MatchMapping) and node.rest:
-                bind(scope, node.rest, dead)
+                bind(scope, node.rest, dead, node)
             elif type(node).__name__ == "TypeAlias":
-                bind(scope, node.name.id, dead)
+                bind(scope, node.name.id, dead, node)
                 inner = child("function", node.name.id, scope)
                 bind_params(inner, node)
                 visit(node.value, inner, False)
@@ -276,6 +347,24 @@ def _undefined_names(tree: ast.Module, scopes: list[_Scope]) -> set[tuple[str, s
     return undefined
 
 
+def _used_before_assignment(scopes: list[_Scope]) -> set[tuple[str, str]]:
+    """Function-local names read on a line before any assignment, outside loops that assign them."""
+    early: set[tuple[str, str]] = set()
+    for scope in scopes:
+        if scope.kind != "function":
+            continue
+        for name, position, loops in scope.load_events:
+            if name in scope.declared_global or name in scope.declared_nonlocal:
+                continue
+            first = scope.first_store.get(name)
+            if first is None or first <= position:
+                continue
+            if any(name in scope.loop_stores.get(loop, set()) for loop in loops):
+                continue
+            early.add((scope.qual, name))
+    return early
+
+
 def _unreachable_statements(tree: ast.Module) -> collections.Counter:
     found: collections.Counter = collections.Counter()
 
@@ -287,7 +376,7 @@ def _unreachable_statements(tree: ast.Module) -> collections.Counter:
             for index, statement in enumerate(body[:-1]):
                 if isinstance(statement, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
                     for dead in body[index + 1:]:
-                        found[(qual, ast.dump(dead))] += 1
+                        found[ast.dump(dead)] += 1
                     break
         for sub in ast.iter_child_nodes(node):
             name = getattr(sub, "name", None)
@@ -298,7 +387,9 @@ def _unreachable_statements(tree: ast.Module) -> collections.Counter:
     return found
 
 
-def _code_sanity_facts(source: str) -> tuple[set[tuple[str, str]], collections.Counter, bool] | None:
+def _code_sanity_facts(
+    source: str,
+) -> tuple[set[tuple[str, str]], collections.Counter, bool, set[tuple[str, str]]] | None:
     """Undefined names per scope, statements that can never run, and whether a star import is present."""
     try:
         tree = ast.parse(source)
@@ -306,20 +397,24 @@ def _code_sanity_facts(source: str) -> tuple[set[tuple[str, str]], collections.C
         return None
     scopes, star = _collect_scopes(tree)
     undefined = set() if star else _undefined_names(tree, scopes)
-    return undefined, _unreachable_statements(tree), star
+    return undefined, _unreachable_statements(tree), star, _used_before_assignment(scopes)
 
 
 def _code_sanity_problems(old: str, new: str) -> list[str]:
     after = _code_sanity_facts(new)
     if after is None:
         return []
-    before = (_code_sanity_facts(old) if old else None) or (set(), collections.Counter(), False)
+    before = (_code_sanity_facts(old) if old else None) or (set(), collections.Counter(), False, set())
     problems: list[str] = []
     if after[2] and not before[2]:
         problems.append("adds a `from ... import *`, which hides undefined names; import the names you need")
     problems.extend(
         f"uses undefined name `{name}` " + ("at module level" if scope == "<module>" else f"in {scope}")
         for scope, name in sorted(after[0] - before[0])
+    )
+    problems.extend(
+        f"uses `{name}` before it is assigned " + ("at module level" if scope == "<module>" else f"in {scope}")
+        for scope, name in sorted(after[3] - before[3])
     )
     if after[1] - before[1]:
         problems.append("adds code after a return, raise, continue or break that can never run")

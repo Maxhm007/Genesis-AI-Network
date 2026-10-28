@@ -124,3 +124,42 @@ def test_class_and_global_names_are_known() -> None:
         "def h():\n    return COUNT\n"
     )
     assert _code_sanity_problems("", new) == []
+
+
+@pytest.mark.parametrize(
+    "new",
+    [
+        "if not True:\n    fresh = None\ndef f():\n    return fresh\n",
+        "if 0 == 1:\n    fresh = None\ndef f():\n    return fresh\n",
+        "if True:\n    pass\nelse:\n    fresh = 1\nvalue = fresh\n",
+        "for fresh in ():\n    pass\ndef f():\n    return fresh\n",
+        "def f():\n    del fresh\n",
+    ],
+)
+def test_bindings_that_never_happen_do_not_count(new: str) -> None:
+    assert any("undefined name `fresh`" in p for p in _code_sanity_problems("", new))
+
+
+def test_use_before_assignment_is_rejected() -> None:
+    new = "def f():\n    x = fresh\n    fresh = 1\n    return x\n"
+    assert any("before it is assigned" in p for p in _code_sanity_problems("", new))
+
+
+@pytest.mark.parametrize(
+    "new",
+    [
+        "def f(rows):\n    for r in rows:\n        if r:\n            print(prev)\n        prev = r\n",
+        "def f():\n    x = 1\n    del x\n",
+        "def f():\n    n = 0\n    n += 1\n    return n\n",
+        "def f():\n    while True:\n        try:\n            v = 1\n        except Exception:\n            continue\n        return v\n",
+        "def f(flag):\n    if flag:\n        v = 1\n    else:\n        v = 2\n    return v\n",
+    ],
+)
+def test_valid_flow_passes(new: str) -> None:
+    assert _code_sanity_problems("", new) == []
+
+
+def test_renaming_a_function_with_existing_dead_code_passes() -> None:
+    old = "def a():\n    return 1\n    x = 2\n"
+    new = "def b():\n    return 1\n    x = 2\n"
+    assert _code_sanity_problems(old, new) == []
