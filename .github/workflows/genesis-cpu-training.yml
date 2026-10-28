@@ -56,7 +56,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          python scripts/run_genesis_cpu_experiment.py --train "${{ steps.readiness.outputs.train_path }}" --holdout "${{ steps.readiness.outputs.holdout_path }}"
+          python -m scripts.run_genesis_cpu_experiment --train "${{ steps.readiness.outputs.train_path }}" --holdout "${{ steps.readiness.outputs.holdout_path }}"
       - name: Save reports (no weights or source dataset)
         if: always()
         uses: actions/upload-artifact@v4
