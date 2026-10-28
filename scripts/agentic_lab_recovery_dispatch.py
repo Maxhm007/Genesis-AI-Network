@@ -1137,7 +1137,39 @@ def release_ready_capability_dependencies(repository: str, token: str) -> list[i
     return released
 
 
+DISPATCH_WORKFLOWS = (
+    "genesis-agentic-strategy-worker.yml",
+    "genesis-deepseek-agentic-solver.yml",
+)
+
+
+def inactive_dispatch_workflows(repository: str, token: str) -> list[str]:
+    """Return the dispatch target workflows that are not currently active.
+
+    Anything other than an explicit state "active" is treated as inactive (fail closed),
+    so Recovery never reserves, labels or comments on an Issue it cannot hand off.
+    """
+    inactive: list[str] = []
+    for workflow in DISPATCH_WORKFLOWS:
+        try:
+            info = request(repository, token, "GET", f"/actions/workflows/{workflow}")
+        except Exception:
+            inactive.append(workflow)
+            continue
+        if not isinstance(info, dict) or info.get("state") != "active":
+            inactive.append(workflow)
+    return inactive
+
+
 def reserve_and_dispatch(repository: str, token: str) -> dict:
+    inactive = inactive_dispatch_workflows(repository, token)
+    if inactive:
+        # A disabled worker cannot accept a reservation. Stop before any label,
+        # comment or capability write so a paused worker cannot cause a loop.
+        result = {"status": "idle", "reason": "dispatch_workflow_inactive", "workflows": inactive}
+        print(json.dumps(result, sort_keys=True))
+        return result
+
     released_parents = release_ready_capability_dependencies(repository, token)
     if released_parents:
         print(json.dumps({

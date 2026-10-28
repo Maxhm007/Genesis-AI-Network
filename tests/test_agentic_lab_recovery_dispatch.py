@@ -1,4 +1,15 @@
+import pytest
+
 import scripts.agentic_lab_recovery_dispatch as module
+
+_REAL_INACTIVE_DISPATCH_WORKFLOWS = module.inactive_dispatch_workflows
+
+
+@pytest.fixture(autouse=True)
+def _workflows_active(monkeypatch):
+    # Most tests exercise routing; treat dispatch targets as active unless a
+    # test restores the real workflow-state check.
+    monkeypatch.setattr(module, "inactive_dispatch_workflows", lambda repository, token: [])
 
 
 def _issue(number: int, state: str = "open", *, body: str | None = None, extra_labels: tuple[str, ...] = ()) -> dict:
@@ -816,3 +827,89 @@ def test_baseline_validation_repair_rearms_execution_but_controller_edit_does_no
     controller.parent.mkdir(parents=True)
     controller.write_text("controller-only refactor")
     assert module.repair_execution_generation(tmp_path) == after
+
+
+def test_inactive_dispatch_workflow_returns_idle_without_writes(monkeypatch):
+    monkeypatch.setattr(module, "inactive_dispatch_workflows", _REAL_INACTIVE_DISPATCH_WORKFLOWS)
+    calls: list[tuple[str, str, dict | None]] = []
+    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [_issue(44, "open")])
+    monkeypatch.setattr(module, "safe_lane", lambda target: "generic")
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        if path == "/actions/workflows/genesis-agentic-strategy-worker.yml":
+            return {"state": "disabled_manually"}
+        if path == "/actions/workflows/genesis-deepseek-agentic-solver.yml":
+            return {"state": "active"}
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+
+    result = module.reserve_and_dispatch("owner/repo", "token")
+
+    assert result == {
+        "status": "idle",
+        "reason": "dispatch_workflow_inactive",
+        "workflows": ["genesis-agentic-strategy-worker.yml"],
+    }
+    assert all(method == "GET" for method, _, _ in calls)
+    assert all(path.startswith("/actions/workflows/") for _, path, _ in calls)
+
+
+def test_unreadable_workflow_state_fails_closed(monkeypatch):
+    monkeypatch.setattr(module, "inactive_dispatch_workflows", _REAL_INACTIVE_DISPATCH_WORKFLOWS)
+    calls: list[tuple[str, str]] = []
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path))
+        if path.startswith("/actions/workflows/"):
+            raise RuntimeError("GitHub HTTP 404")
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+
+    result = module.reserve_and_dispatch("owner/repo", "token")
+
+    assert result["status"] == "idle"
+    assert result["reason"] == "dispatch_workflow_inactive"
+    assert all(method == "GET" for method, _ in calls)
+
+
+def test_active_workflows_still_dispatch(monkeypatch):
+    monkeypatch.setattr(module, "inactive_dispatch_workflows", _REAL_INACTIVE_DISPATCH_WORKFLOWS)
+    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [_issue(45, "open")])
+    monkeypatch.setattr(module, "safe_lane", lambda target: "generic")
+
+    def fake_request(repository, token, method, path, payload=None):
+        if path.startswith("/actions/workflows/") and method == "GET":
+            return {"state": "active"}
+        if method == "GET" and path == "/issues/45/comments?per_page=100":
+            return []
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+
+    result = module.reserve_and_dispatch("owner/repo", "token")
+
+    assert result["status"] == "dispatched"
+    assert result["workflow"] == "genesis-agentic-strategy-worker.yml"
+
+
+@pytest.mark.parametrize("response", [{}, [], {"name": "worker"}, {"state": ""}, {"state": None}, "active"])
+def test_workflow_state_without_explicit_active_fails_closed(monkeypatch, response):
+    monkeypatch.setattr(module, "inactive_dispatch_workflows", _REAL_INACTIVE_DISPATCH_WORKFLOWS)
+    calls: list[tuple[str, str]] = []
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path))
+        if path.startswith("/actions/workflows/"):
+            return response
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+
+    result = module.reserve_and_dispatch("owner/repo", "token")
+
+    assert result["status"] == "idle"
+    assert result["reason"] == "dispatch_workflow_inactive"
+    assert all(method == "GET" for method, _ in calls)
