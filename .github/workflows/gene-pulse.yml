@@ -91,6 +91,12 @@ jobs:
           cat runtime/deepseek-provider.log || true
           exit 1
 
+      - name: Validate learning integration
+        if: github.event_name == 'push'
+        run: |
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest -q tests/test_learning_metrics.py tests/test_gene_pulse_learning_alignment.py
+
       - name: Execute one pulse
         run: python scripts/gene_pulse.py --gene "$GENE_ID" --output runtime/pulse_result.json
 
@@ -112,6 +118,8 @@ jobs:
           name: gene-pulse-${{ env.GENE_ID }}-${{ github.run_id }}
           path: |
             runtime/pulse_result.json
+            runtime/learning_preferences.json
+            runtime/evolution/upgrade_process.json
             runtime/deepseek-health.json
             runtime/deepseek-provider.log
           if-no-files-found: warn
