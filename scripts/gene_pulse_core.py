@@ -792,6 +792,28 @@ def main() -> int:
     result = GenePulse(ROOT, args.gene).report()
     result["learning_evolution"] = learning
 
+    # Keep outcome learning and the evidence scorecard in the same durable
+    # Pulse report, rather than in an unconnected optional entry point.
+    from genesis.adaptive_learning import AdaptiveLearningEngine
+    from genesis.learning_metrics import learning_metrics
+
+    try:
+        result["adaptive_feedback"] = AdaptiveLearningEngine(ROOT).run_once()
+    except Exception as exc:
+        result["adaptive_feedback"] = {
+            "status": "adaptive_learning_error",
+            "error": f"{type(exc).__name__}: {exc}"[:1000],
+        }
+    try:
+        result["learning_metrics"] = learning_metrics(
+            ROOT / "runtime" / "evolution" / "evolution_learning.sqlite3"
+        )
+    except Exception as exc:
+        result["learning_metrics"] = {
+            "status": "learning_metrics_error",
+            "error": f"{type(exc).__name__}: {exc}"[:1000],
+        }
+
     process_log = ROOT / "runtime" / "evolution" / "upgrade_process.json"
     if process_log.is_file():
         try:
