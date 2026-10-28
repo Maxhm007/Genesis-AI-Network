@@ -50,10 +50,10 @@ def prepare(dataset: Path, *, min_examples: int = MIN_EXAMPLES) -> dict:
             path = dataset.parent / (dataset.stem + f".{name}.jsonl")
             if path.exists():
                 raise FileExistsError(f"refusing to overwrite split: {path}")
-            path.write_text("".join(json.dumps(item, sort_keys=True) + "\\n" for item in records), encoding="utf-8")
+            path.write_text("".join(json.dumps(item, sort_keys=True) + "\n" for item in records), encoding="utf-8")
         result.update({"train_examples": len(training), "holdout_examples": len(holdout)})
     output = dataset.parent / (dataset.stem + ".readiness.json")
-    output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\\n", encoding="utf-8")
+    output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
     return result
 
 
