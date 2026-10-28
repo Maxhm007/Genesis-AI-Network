@@ -26,6 +26,8 @@ def main() -> None:
         provider=provider,
     )
     result = engine.run_once()
+    from genesis.learning_metrics import learning_metrics
+    result["learning_metrics"] = learning_metrics(root / "runtime" / "evolution" / "evolution_learning.sqlite3")
     output = root / args.output
     output.parent.mkdir(parents=True, exist_ok=True)
     output.write_text(json.dumps(result, indent=2, sort_keys=True) + "\n", encoding="utf-8")
