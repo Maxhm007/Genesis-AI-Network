@@ -197,11 +197,12 @@ jobs:
         if: always()
         env:
           GH_TOKEN: ${{ github.token }}
+          SELECTED_ISSUE: ${{ steps.select.outputs.issue_number }}
         shell: bash
         run: |
           set -euo pipefail
           # Keep Action-failure discovery alive when this pass selected work.
-          if [[ -n "${{ steps.select.outputs.issue_number }}" ]]; then
+          if [[ -n "$SELECTED_ISSUE" ]]; then
             gh workflow run genesis-action-failure-watcher.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
           fi
 

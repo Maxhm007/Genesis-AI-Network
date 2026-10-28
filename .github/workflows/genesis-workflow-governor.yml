@@ -6,6 +6,8 @@ on:
       apply:
         description: Create one safe autonomous workflow candidate
         required: false
+        type: choice
+        options: ['true', 'false']
         default: 'true'
   schedule:
     - cron: '3,13,23,33,43,53 * * * *'
@@ -52,12 +54,14 @@ jobs:
           GH_TOKEN: ${{ github.token }}
           GITHUB_TOKEN: ${{ github.token }}
           GENESIS_WORKFLOW_TOKEN: ${{ secrets.GENESIS_WORKFLOW_TOKEN }}
+          EVENT_NAME: ${{ github.event_name }}
+          APPLY_INPUT: ${{ inputs.apply }}
         shell: bash
         run: |
           set -euo pipefail
           apply='true'
-          if [[ "${{ github.event_name }}" == "workflow_dispatch" ]]; then
-            apply="${{ inputs.apply }}"
+          if [[ "$EVENT_NAME" == "workflow_dispatch" ]]; then
+            apply="$APPLY_INPUT"
           fi
           if [[ "$apply" == "true" ]]; then
             python scripts/workflow_governor.py --apply

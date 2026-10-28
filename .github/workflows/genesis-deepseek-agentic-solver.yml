@@ -146,6 +146,9 @@ jobs:
           if [[ "$eligible" != true ]]; then
             reason=$(jq -r '.reason // "anti_stuck_not_eligible"' <<<"$plan")
             token=$(jq -r '.state_token // ""' <<<"$plan")
+            # Keep the hidden marker intact and the log free of workflow commands.
+            token=$(printf '%s' "$token" | tr -cd 'A-Za-z0-9._:-')
+            reason=$(printf '%s' "$reason" | tr '\r\n`' '   ' | sed 's/-->/-- >/g; s/^::*//')
             printf '%s\n%s\n' \
               "<!-- genesis-deepseek-handoff-rejected:${token} -->" \
               "DeepSeek rejected this reserved handoff because \`${reason}\`. The reservation is released and Agentic Lab may choose another bounded action." \
