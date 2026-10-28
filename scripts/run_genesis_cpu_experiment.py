@@ -17,6 +17,7 @@ from genesis.model_training import (
 
 ROOT = Path(__file__).resolve().parents[1]
 MODEL_REPO = "HuggingFaceTB/SmolLM2-135M"
+MODEL_REVISION = "93efa2f097d58c2a74874c7e644dbc9b0cee75a2"
 
 
 def score(model_path: Path, holdout: Path) -> float:
@@ -65,6 +66,7 @@ def run(train: Path, holdout: Path) -> dict:
     base_path.mkdir(parents=True, exist_ok=True)
     snapshot_download(
         repo_id=MODEL_REPO,
+        revision=MODEL_REVISION,
         local_dir=str(base_path),
         allow_patterns=["*.json", "*.safetensors", "tokenizer.*", "*.model", "*.txt"],
     )
@@ -99,6 +101,7 @@ def run(train: Path, holdout: Path) -> dict:
     report = {
         "status": "cpu_training_experiment_completed",
         "base_model": MODEL_REPO,
+        "base_model_revision": MODEL_REVISION,
         "training_examples": len(train_rows),
         "holdout_examples": len(holdout_rows),
         "train_sha256": sha256_file(train),
