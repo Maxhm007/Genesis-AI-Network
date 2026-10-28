@@ -29,8 +29,13 @@ def train(args: argparse.Namespace) -> dict:
     from torch.utils.data import Dataset
     from transformers import AutoModelForCausalLM, AutoTokenizer, Trainer, TrainingArguments
 
-    if not torch.cuda.is_available():
-        raise RuntimeError("CUDA GPU is required for the bounded Model Lab trainer")
+    device = getattr(args, "device", "cuda")
+    if device not in {"cuda", "cpu"}:
+        raise ValueError("training device must be cuda or cpu")
+    if device == "cuda" and not torch.cuda.is_available():
+        raise RuntimeError("CUDA GPU is required for GPU Model Lab training")
+    if device == "cpu" and (args.max_steps > 20 or args.max_sequence_length > 512 or args.lora_rank > 8):
+        raise ValueError("CPU training budget exceeds safe limits")
 
     base_path = Path(args.base_path).resolve()
     dataset_path = Path(args.dataset_path).resolve()
@@ -48,7 +53,7 @@ def train(args: argparse.Namespace) -> dict:
             raise RuntimeError("base tokenizer requires an eos or pad token")
         tokenizer.pad_token = tokenizer.eos_token
 
-    dtype = torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16
+    dtype = torch.float32 if device == "cpu" else (torch.bfloat16 if torch.cuda.is_bf16_supported() else torch.float16)
     model = AutoModelForCausalLM.from_pretrained(
         str(base_path),
         local_files_only=True,
@@ -57,6 +62,8 @@ def train(args: argparse.Namespace) -> dict:
         low_cpu_mem_usage=True,
     )
     model.config.use_cache = False
+    if device == "cpu":
+        model.to("cpu")
     if hasattr(model, "gradient_checkpointing_enable"):
         model.gradient_checkpointing_enable()
 
@@ -121,8 +128,9 @@ def train(args: argparse.Namespace) -> dict:
         save_strategy="no",
         report_to=[],
         remove_unused_columns=False,
-        bf16=torch.cuda.is_bf16_supported(),
-        fp16=not torch.cuda.is_bf16_supported(),
+        bf16=(device == "cuda" and torch.cuda.is_bf16_supported()),
+        fp16=(device == "cuda" and not torch.cuda.is_bf16_supported()),
+        use_cpu=(device == "cpu"),
         dataloader_num_workers=0,
     )
     trainer = Trainer(
@@ -145,7 +153,8 @@ def train(args: argparse.Namespace) -> dict:
         "examples": len(examples),
         "max_steps": args.max_steps,
         "train_loss": getattr(train_result, "training_loss", None),
-        "cuda_device": torch.cuda.get_device_name(0),
+        "training_device": device,
+        "cuda_device": torch.cuda.get_device_name(0) if device == "cuda" else None,
         "torch_version": torch.__version__,
     }
     (output_dir / "genesis_training_metadata.json").write_text(
@@ -157,6 +166,7 @@ def train(args: argparse.Namespace) -> dict:
 
 def main() -> None:
     parser = argparse.ArgumentParser(description="Bounded local Genesis LoRA trainer")
+    parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
     parser.add_argument("--base-path", required=True)
     parser.add_argument("--dataset-path", required=True)
     parser.add_argument("--output-dir", required=True)

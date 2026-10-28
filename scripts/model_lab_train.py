@@ -5,7 +5,7 @@ import json
 from pathlib import Path
 import sys
 
-from genesis.model_training import ModelTrainingLane, TrainingBudget, TrainingRequest
+from genesis.model_training import LocalLoraSubprocessBackend, ModelTrainingLane, TrainingBudget, TrainingRequest
 
 
 def main() -> int:
@@ -23,6 +23,7 @@ def main() -> int:
     parser.add_argument("--gradient-accumulation-steps", type=int, default=8)
     parser.add_argument("--lora-rank", type=int, default=16)
     parser.add_argument("--lora-alpha", type=int, default=32)
+    parser.add_argument("--device", choices=("cuda", "cpu"), default="cuda")
     parser.add_argument("--dry-run", action="store_true")
     args = parser.parse_args()
 
@@ -45,7 +46,7 @@ def main() -> int:
         capabilities=tuple(args.capabilities or ["reasoning", "coding"]),
         budget=budget,
     )
-    lane = ModelTrainingLane(root)
+    lane = ModelTrainingLane(root, backend=LocalLoraSubprocessBackend(root, device=args.device))
     readiness = lane.readiness(request)
     if args.dry_run or not readiness["ready"]:
         print(json.dumps({"status": "ready" if readiness["ready"] else "not_ready", "readiness": readiness}, indent=2, sort_keys=True))

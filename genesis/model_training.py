@@ -116,8 +116,11 @@ class LocalLoraSubprocessBackend:
 
     name = "local_lora_subprocess"
 
-    def __init__(self, root: Path) -> None:
+    def __init__(self, root: Path, *, device: str = "cuda") -> None:
         self.root = Path(root).resolve()
+        if device not in {"cuda", "cpu"}:
+            raise ValueError("device must be cuda or cpu")
+        self.device = device
 
     def probe(self) -> dict[str, Any]:
         missing = [
@@ -133,13 +136,14 @@ class LocalLoraSubprocessBackend:
                 cuda_available = bool(torch.cuda.is_available())
             except Exception:
                 cuda_available = False
-        if not cuda_available:
+        if self.device == "cuda" and not cuda_available:
             missing.append("cuda_gpu")
         return {
             "ready": not missing,
             "missing": sorted(set(missing)),
             "backend": self.name,
             "requires_self_hosted_compute": True,
+            "device": self.device,
         }
 
     def run(
@@ -150,6 +154,10 @@ class LocalLoraSubprocessBackend:
         output_dir: Path,
         budget: TrainingBudget,
     ) -> dict[str, Any]:
+        if self.device == "cpu" and (budget.max_steps > 20 or budget.max_sequence_length > 512 or budget.lora_rank > 8):
+            raise ValueError("CPU training budget exceeds safe limits (20 steps, 512 tokens, rank 8)")
+        if self.device == "cpu" and directory_size(base_path) > 400 * 1024 * 1024:
+            raise ValueError("CPU base model must be <= 400 MiB")
         log_dir = self.root / "runtime" / "model_training_logs"
         log_dir.mkdir(parents=True, exist_ok=True)
         log_path = log_dir / f"{output_dir.name}.log"
@@ -157,6 +165,8 @@ class LocalLoraSubprocessBackend:
             sys.executable,
             "-m",
             "genesis.model_training_backend",
+            "--device",
+            self.device,
             "--base-path",
             str(base_path),
             "--dataset-path",
