@@ -122,6 +122,29 @@ jobs:
           GENESIS_AGENTIC_RECOVERY_SLOTS: '2'
         run: python -m pytest -q tests/test_agentic_parallel_dispatch.py tests/test_gene_backlog_delegation_router.py
 
+      - name: Restore canonical Agentic Strategy Worker if disabled
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          workflow=genesis-agentic-strategy-worker.yml
+          state="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow" --jq '.state')"
+          if [[ "$state" == "active" ]]; then
+            echo "Canonical worker is active."
+          elif [[ "$state" == "disabled_manually" || "$state" == "disabled_inactivity" ]]; then
+            echo "Restoring canonical worker from state: $state"
+            gh api -X PUT "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow/enable"
+            state="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/$workflow" --jq '.state')"
+            if [[ "$state" != "active" ]]; then
+              echo "::error::Worker enable did not reach active state: $state"
+              exit 1
+            fi
+          else
+            echo "::error::Unexpected worker state: $state; refusing unsafe dispatch"
+            exit 1
+          fi
+
       - name: Dispatch bounded parallel Agentic lanes
         env:
           GITHUB_TOKEN: ${{ github.token }}
