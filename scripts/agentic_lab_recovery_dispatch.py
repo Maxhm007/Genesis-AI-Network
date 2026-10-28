@@ -1681,10 +1681,29 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
                     )
                     raise
             else:
+                # A disabled worker or transport failure is NOT a failed code
+                # repair. Release the reservation without exhausting the Issue.
+                # Keep the diagnostic on the authoritative Issue for recovery.
                 remove_label(repository, token, number, "genesis-repair-in-progress")
                 remove_label(repository, token, number, "genesis-autonomous")
-                request(repository, token, "POST", f"/issues/{number}/labels", {"labels": [EXHAUSTED_LABEL, AGENTIC_LABEL]})
-                raise
+                request(
+                    repository, token, "POST", f"/issues/{number}/comments",
+                    {"body": (
+                        "<!-- genesis-agentic-dispatch-unavailable -->\\n"
+                        f"Agentic worker dispatch unavailable for \`{workflow}\`. "
+                        "No candidate was executed or validated. The reservation "
+                        "was released; the Issue remains open for an enabled lane. "
+                        f"Reason: {type(exc).__name__}."
+                    )},
+                )
+                result = {
+                    "status": "dispatch_unavailable",
+                    "issue_number": number,
+                    "workflow": workflow,
+                    "reason": type(exc).__name__,
+                }
+                print(json.dumps(result, sort_keys=True))
+                return result
 
         result = {
             "status": "dispatched",
