@@ -1690,7 +1690,7 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
                     repository, token, "POST", f"/issues/{number}/comments",
                     {"body": (
                         "<!-- genesis-agentic-dispatch-unavailable -->\\n"
-                        f"Agentic worker dispatch unavailable for \`{workflow}\`. "
+                        f"Agentic worker dispatch unavailable for `{workflow}`. "
                         "No candidate was executed or validated. The reservation "
                         "was released; the Issue remains open for an enabled lane. "
                         f"Reason: {type(exc).__name__}."
