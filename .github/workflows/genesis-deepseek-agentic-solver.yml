@@ -119,7 +119,7 @@ jobs:
           if [[ "$state" != OPEN || "$conflict" == true ]]; then
             printf '%s\n%s\n' \
               "<!-- genesis-deepseek-handoff-rejected:availability -->" \
-              "DeepSeek rejected the handoff before claim: state=`${state}`, conflicting_active_label=`${conflict}`." \
+              "DeepSeek rejected the handoff before claim: state=\`${state}\`, conflicting_active_label=\`${conflict}\`." \
               > /tmp/deepseek-reject.md
             gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body-file /tmp/deepseek-reject.md >/dev/null 2>&1 || true
             gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deepseek-handoff-pending >/dev/null 2>&1 || true
@@ -148,7 +148,7 @@ jobs:
             token=$(jq -r '.state_token // ""' <<<"$plan")
             printf '%s\n%s\n' \
               "<!-- genesis-deepseek-handoff-rejected:${token} -->" \
-              "DeepSeek rejected this reserved handoff because `${reason}`. The reservation is released and Agentic Lab may choose another bounded action." \
+              "DeepSeek rejected this reserved handoff because \`${reason}\`. The reservation is released and Agentic Lab may choose another bounded action." \
               > /tmp/deepseek-exhausted.md
             gh issue comment "$number" --repo "$GITHUB_REPOSITORY" --body-file /tmp/deepseek-exhausted.md >/dev/null 2>&1 || true
             gh issue edit "$number" --repo "$GITHUB_REPOSITORY" --remove-label genesis-deepseek-handoff-pending >/dev/null 2>&1 || true

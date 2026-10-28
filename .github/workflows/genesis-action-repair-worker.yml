@@ -146,7 +146,8 @@ jobs:
           status="$(jq -r '.status // ""' runtime/action_repair_candidate.json)"
           if [[ "$status" != "candidate_created" ]]; then
             reason="$(jq -r '.reason // .error // .status // "no candidate"' runtime/action_repair_candidate.json)"
-            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"               --body "Genesis Action Repair Worker produced no promotable candidate: `$reason`. The same failure Issue remains authoritative for a later bounded method."
+            printf 'Genesis Action Repair Worker produced no promotable candidate: `%s`. The same failure Issue remains authoritative for a later bounded method.\n' "$reason" > /tmp/action-repair-comment.md
+            gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/action-repair-comment.md
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"               --remove-label genesis-action-verifying --add-label genesis-action-autonomous >/dev/null 2>&1 || true
             exit 0
           fi
@@ -161,15 +162,15 @@ jobs:
 
           existing="$(gh pr list --repo "$GITHUB_REPOSITORY" --state open --head "$branch" --json number --jq '.[0].number // empty')"
           if [[ -z "$existing" ]]; then
-            cat > /tmp/action-repair-pr.md <<EOF
-          <!-- genesis-action-repair-candidate -->
-          Repairs authoritative Action failure #$ISSUE_NUMBER.
-
-          Candidate SHA: `$sha`
-          Failed workflow: `$workflow_path`
-
-          Promotion requires Genesis Action Repair Validator. The repair worker cannot approve its own candidate.
-          EOF
+            printf '%s\n' \
+              '<!-- genesis-action-repair-candidate -->' \
+              "Repairs authoritative Action failure #${ISSUE_NUMBER}." \
+              '' \
+              "Candidate SHA: \`${sha}\`" \
+              "Failed workflow: \`${workflow_path}\`" \
+              '' \
+              'Promotion requires Genesis Action Repair Validator. The repair worker cannot approve its own candidate.' \
+              > /tmp/action-repair-pr.md
             pr_url="$(gh pr create --repo "$GITHUB_REPOSITORY" --base main --head "$branch"               --title "Genesis Action repair #$ISSUE_NUMBER"               --body-file /tmp/action-repair-pr.md)"
             pr_number="${pr_url##*/}"
             gh pr edit "$pr_number" --repo "$GITHUB_REPOSITORY" --add-label genesis-action-repair >/dev/null
@@ -177,7 +178,8 @@ jobs:
             pr_number="$existing"
           fi
 
-          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY"             --body "Genesis created privileged Action repair candidate `$sha` in PR #$pr_number. Independent Action Repair Validator now owns validation and promotion."
+          printf 'Genesis created privileged Action repair candidate `%s` in PR #%s. Independent Action Repair Validator now owns validation and promotion.\n' "$sha" "$pr_number" > /tmp/action-repair-comment.md
+          gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/action-repair-comment.md
 
       - name: Preserve repair evidence
         if: always()

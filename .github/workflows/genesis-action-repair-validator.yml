@@ -111,7 +111,7 @@ jobs:
           issue_number="$(printf '%s\n' "$body" | sed -nE 's/.*failure #([0-9]+).*/\1/p' | head -n1)"
           if [[ -n "$issue_number" ]]; then
             gh issue edit "$issue_number" --repo "$GITHUB_REPOSITORY"               --add-label genesis-action-verifying --remove-label genesis-action-autonomous >/dev/null 2>&1 || true
-            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY"               --body "Genesis independently validated and promoted Action repair `$PROMOTED_SHA`. Fresh workflow verification is now required before this failure Issue closes."
+            gh issue comment "$issue_number" --repo "$GITHUB_REPOSITORY"               --body "Genesis independently validated and promoted Action repair \`$PROMOTED_SHA\`. Fresh workflow verification is now required before this failure Issue closes."
           fi
-          gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"             --comment "Exact candidate independently validated and promoted to main as `$PROMOTED_SHA`." >/dev/null || true
+          gh pr close "$PR_NUMBER" --repo "$GITHUB_REPOSITORY"             --comment "Exact candidate independently validated and promoted to main as \`$PROMOTED_SHA\`." >/dev/null || true
           gh workflow run genesis-action-failure-watcher.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
