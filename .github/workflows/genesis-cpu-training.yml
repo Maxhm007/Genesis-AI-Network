@@ -10,7 +10,6 @@ on:
       - .github/workflows/genesis-cpu-training.yml
       - scripts/run_genesis_cpu_experiment.py
       - tests/test_cpu_experiment_workflow.py
-      - tests/test_cpu_experiment_workflow.py
 
 permissions:
   contents: read
@@ -53,7 +52,7 @@ jobs:
           python scripts/build_genesis_training_dataset.py --max-examples 2000 > runtime/cpu_experiment/dataset_manifest.json
           dataset="$(find runtime/model_datasets -maxdepth 1 -name 'genesis-validated-autonomous-*.jsonl' -type f | head -n 1)"
           python scripts/prepare_genesis_training_holdout.py --dataset "$dataset" > runtime/cpu_experiment/readiness.json
-          if [[ "$(python -c 'import json,sys; print(json.load(open(sys.argv[1]))["status"])' runtime/cpu_experiment/readiness.json)" != "holdout_ready" ]]; then
+          if [[ "$(python -c 'import json,sys; print(json.load(open(sys.argv[1])).get("status"))' runtime/cpu_experiment/readiness.json)" != "holdout_ready" ]]; then
             echo 'ready=false' >> "$GITHUB_OUTPUT"
             exit 0
           fi
