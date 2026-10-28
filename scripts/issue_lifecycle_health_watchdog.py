@@ -58,11 +58,22 @@ def _latest_workflow_run(repository: str, workflow_name: str) -> dict | None:
 
 
 def _issues(repository: str) -> list[dict]:
-    data = _api(repository, "issues?state=all&per_page=100&sort=updated&direction=desc")
-    return [
-        row for row in (data if isinstance(data, list) else [])
-        if isinstance(row, dict) and not row.get("pull_request")
-    ]
+    # Inspect the complete open backlog, not merely the 100 most recently
+    # updated items. Older verified issues otherwise escape closure monitoring.
+    issues: list[dict] = []
+    page = 1
+    while True:
+        data = _api(repository, f"issues?state=open&per_page=100&page={page}")
+        if not isinstance(data, list):
+            raise RuntimeError("Unexpected GitHub issues response; cannot verify lifecycle health")
+        issues.extend(
+            row for row in data
+            if isinstance(row, dict) and not row.get("pull_request")
+        )
+        if len(data) < 100:
+            break
+        page += 1
+    return issues
 
 
 def _labels(issue: dict) -> set[str]:
