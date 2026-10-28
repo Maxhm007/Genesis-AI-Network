@@ -4,6 +4,12 @@ on:
   workflow_dispatch:
   schedule:
     - cron: '25 4 * * *'
+  push:
+    branches: [main]
+    paths:
+      - .github/workflows/genesis-cpu-training.yml
+      - scripts/run_genesis_cpu_experiment.py
+      - tests/test_cpu_experiment_workflow.py
 
 permissions:
   contents: read
@@ -26,7 +32,13 @@ jobs:
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
+      - name: Validate CPU workflow guards
+        if: github.event_name == 'push'
+        run: |
+          python -m pip install --disable-pip-version-check pytest
+          python -m pytest -q tests/test_cpu_experiment_workflow.py tests/test_cpu_model_training.py
       - name: Build verified dataset and gate experiment
+        if: github.event_name != 'push'
         id: readiness
         shell: bash
         run: |
