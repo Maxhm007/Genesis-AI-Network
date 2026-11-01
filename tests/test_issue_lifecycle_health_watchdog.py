@@ -217,7 +217,9 @@ def test_issue_inventory_paginates_and_includes_old_verified_issues(monkeypatch)
 
     def fake_api(repository, path):
         calls.append(path)
-        return first if "page=1" in path else [old_verified]
+        # Match the page parameter exactly: "per_page=100" also contains
+        # "page=1", which made every page look like page 1 and never ended.
+        return first if path.endswith("&page=1") else [old_verified]
 
     monkeypatch.setattr(module, "_api", fake_api)
     issues = module._issues("owner/repo")
@@ -237,6 +239,15 @@ def test_issue_inventory_paginates_and_includes_old_verified_issues(monkeypatch)
         verified_open_grace_minutes=20,
     )
     assert "verified_issues_not_auto_closed:857" in assessment["faults"]
+
+
+def test_issue_inventory_stops_at_page_cap(monkeypatch):
+    import pytest
+
+    full_page = [_issue(number, labels=("genesis-autonomous",)) for number in range(1, 101)]
+    monkeypatch.setattr(module, "_api", lambda repository, path: full_page)
+    with pytest.raises(RuntimeError, match="page cap"):
+        module._issues("owner/repo")
 
 
 def test_issue_inventory_rejects_malformed_api_response(monkeypatch):
