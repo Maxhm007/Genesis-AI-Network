@@ -193,5 +193,6 @@ def main() -> None:
     subprocess.run(["git", "checkout", "main"], cwd=root, check=False, capture_output=True, text=True)
 
 
-if __name__ == "__main__":
+    if __name__ == "__main__":
+        main()
     main()
