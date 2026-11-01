@@ -57,12 +57,20 @@ def _latest_workflow_run(repository: str, workflow_name: str) -> dict | None:
     return rows[0] if rows else None
 
 
+# A hard stop so a bad API response (or test double) can never loop forever.
+MAX_ISSUE_PAGES = 50
+
+
 def _issues(repository: str) -> list[dict]:
     # Inspect the complete open backlog, not merely the 100 most recently
     # updated items. Older verified issues otherwise escape closure monitoring.
     issues: list[dict] = []
     page = 1
     while True:
+        if page > MAX_ISSUE_PAGES:
+            raise RuntimeError(
+                f"Open issue inventory exceeded page cap ({MAX_ISSUE_PAGES} pages); refusing to loop forever"
+            )
         data = _api(repository, f"issues?state=open&per_page=100&page={page}")
         if not isinstance(data, list):
             raise RuntimeError("Unexpected GitHub issues response; cannot verify lifecycle health")
