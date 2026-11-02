@@ -32,6 +32,8 @@ env:
 
 jobs:
   repair-and-promote-system-script:
+    # Paused 2026-11-02 until the test-first gate (part 3) is on. Delete this line and the next to resume.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:

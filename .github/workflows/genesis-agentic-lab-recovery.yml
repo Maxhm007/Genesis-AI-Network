@@ -47,8 +47,9 @@ on:
       - genesis/architecture_extensions/architecture_route_gene_0_backlog_work_to_idle_gene_002_and_gene_003.py
       - genesis/pulse.py
       - tests/test_gene_backlog_delegation_router.py
-  schedule:
-    - cron: '*/5 * * * *'
+  # Paused 2026-11-02 until the test-first gate (part 3) is on. Uncomment to resume.
+  # schedule:
+  #   - cron: '*/5 * * * *'
   workflow_dispatch:
 
 permissions:
