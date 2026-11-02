@@ -47,7 +47,7 @@ def test_action_failure_watcher_reconciles_fresh_success_before_detection_retry(
     text = WATCHER.read_text(encoding="utf-8")
 
     assert "schedule:" in text
-    assert "cron: '*/10 * * * *'" in text
+    assert "cron: '5-59/10 * * * *'" in text
     assert "actions: write" in text
     assert "issues: write" in text
     first_fresh = text.index("python scripts/action_failure_fresh_reconcile.py")

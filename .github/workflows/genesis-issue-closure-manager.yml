@@ -12,7 +12,7 @@ on:
   issue_comment:
     types: [created, edited]
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '8-59/15 * * * *'
   push:
     branches: [main]
     paths:
@@ -41,19 +41,22 @@ jobs:
        contains(fromJSON('["genesis-verified","genesis-superseded"]'), github.event.label.name))
       &&
       (github.event_name != 'issue_comment' ||
-       contains(github.event.comment.body, 'Genesis verification evidence:') ||
+       (github.event.comment.user.login == 'github-actions[bot]' ||
+        contains(fromJSON('["OWNER","MEMBER","COLLABORATOR"]'), github.event.comment.author_association)) &&
+       (contains(github.event.comment.body, 'Genesis verification evidence:') ||
        contains(github.event.comment.body, 'Genesis verified and promoted') ||
        contains(github.event.comment.body, 'independently verified this issue') ||
        contains(github.event.comment.body, 'independently validated and promoted') ||
        contains(github.event.comment.body, 'Verified repair') ||
        contains(github.event.comment.body, 'Full repository validation passed') ||
-       contains(github.event.comment.body, 'Focused and full repository validation passed'))
+       contains(github.event.comment.body, 'Focused and full repository validation passed')))
     runs-on: ubuntu-latest
     timeout-minutes: 8
     steps:
       - name: Checkout current main
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ref: main
           fetch-depth: 1
 
@@ -91,17 +94,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          active_count="$(gh run list --repo "$GITHUB_REPOSITORY" \
-            --workflow genesis-agentic-lab-recovery.yml \
-            --limit 20 \
-            --json status,createdAt,event \
-            --jq '[.[] | select(.event != "push" and .event != "pull_request") | select(.status != "completed" or (now - (.createdAt | fromdateiso8601)) < 120)] | length')"
-          if [[ "$active_count" -gt 0 ]]; then
-            echo "Agentic Lab already active or woken <2 min ago ($active_count run(s)); duplicate closure wake skipped."
-            exit 0
-          fi
-          echo "Closed issue reconciled; dispatching the next Agentic Lab recovery pass."
-          gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main
-
+          # Agentic Lab Recovery is no longer woken here (its own schedule picks
+          # up the queue); waking it closed the Lab -> solver -> closure loop.
           echo "Waking Nexus teammate backlog drain for the next open issue."
           gh workflow run genesis-teammate-autonomous-development.yml --repo "$GITHUB_REPOSITORY" --ref main

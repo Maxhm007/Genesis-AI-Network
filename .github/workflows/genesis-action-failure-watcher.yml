@@ -10,7 +10,7 @@ on:
     branches:
       - main
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '5-59/10 * * * *'
   push:
     branches: [main]
     paths:
@@ -38,6 +38,7 @@ jobs:
       - name: Checkout current main
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ref: main
           fetch-depth: 1
 
@@ -102,6 +103,12 @@ jobs:
           issue_number="$(gh issue list --repo "$GITHUB_REPOSITORY" --state open --label genesis-action-autonomous --limit 1 --json number --jq '.[0].number // empty')"
           if [[ -z "$issue_number" ]]; then
             echo "No authorized Action repair issue; worker dispatch skipped."
+            exit 0
+          fi
+
+          worker_state="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/genesis-action-repair-worker.yml" --jq '.state' 2>/dev/null || echo unknown)"
+          if [[ "$worker_state" != "active" ]]; then
+            echo "Action Repair Worker is $worker_state; worker dispatch skipped."
             exit 0
           fi
 

@@ -2,7 +2,7 @@ name: Genesis Pull Request Maintenance
 
 on:
   schedule:
-    - cron: '17 * * * *'
+    - cron: '37 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -23,6 +23,7 @@ jobs:
       - name: Checkout current main
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ref: main
           fetch-depth: 0
 

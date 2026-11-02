@@ -55,6 +55,7 @@ def install_coding_valid_paths() -> None:
         context_paths: list[str] | None = None,
         *,
         provider=None,
+        require_regression_test: bool = False,
     ):
         # Keep a reference to the caller-owned list. The installed coding provider
         # policy may safely re-ground that same list before the original proposal
@@ -63,7 +64,8 @@ def install_coding_valid_paths() -> None:
         previous = getattr(self, ACTIVE_PATHS_ATTR, _MISSING)
         setattr(self, ACTIVE_PATHS_ATTR, active_paths)
         try:
-            return original_propose(self, objective, context_paths, provider=provider)
+            flag = {"require_regression_test": True} if require_regression_test else {}
+            return original_propose(self, objective, context_paths, provider=provider, **flag)
         finally:
             if previous is _MISSING:
                 self.__dict__.pop(ACTIVE_PATHS_ATTR, None)
@@ -74,18 +76,28 @@ def install_coding_valid_paths() -> None:
         self: CodingModule,
         proposal: dict,
         provider_name: str,
+        *,
+        require_regression_test: bool = False,
     ):
         active = getattr(self, ACTIVE_PATHS_ATTR, _MISSING)
         if active is not _MISSING and isinstance(proposal, dict):
             allowed = {_normalize_path(path) for path in active}
             declared = _declared_proposal_paths(self, proposal)
-            invalid = tuple(path for path in declared if path not in allowed)
+            invalid = [path for path in declared if path not in allowed]
+            if require_regression_test:
+                # Test-first mode adds exactly one new regression test outside VALID_PATHS;
+                # CodingModule then checks it is an insert-only tests/test_*.py edit.
+                test_paths = [path for path in invalid if self._is_test_path(path)]
+                if len(test_paths) == 1:
+                    invalid.remove(test_paths[0])
+            invalid = tuple(invalid)
             if invalid:
                 raise ValueError(
                     "coding proposal path must match VALID_PATHS exactly: "
                     + ", ".join(invalid)
                 )
-        return original_validate(self, proposal, provider_name)
+        flag = {"require_regression_test": True} if require_regression_test else {}
+        return original_validate(self, proposal, provider_name, **flag)
 
     CodingModule.propose = propose_with_active_valid_paths
     CodingModule.validate_proposal = validate_with_active_valid_paths

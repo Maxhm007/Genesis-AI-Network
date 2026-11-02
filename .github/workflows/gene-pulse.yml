@@ -29,11 +29,14 @@ concurrency:
 jobs:
   pulse:
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     env:
       GENE_ID: ${{ inputs.gene || github.event.client_payload.gene || 'gene-node-1' }}
       PYTHONPATH: ${{ github.workspace }}
     steps:
       - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:

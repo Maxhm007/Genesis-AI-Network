@@ -9,3 +9,13 @@ def test_agentic_controller_can_restore_disabled_canonical_worker():
     assert '/actions/workflows/$workflow/enable' in workflow
     assert workflow.index("Restore canonical Agentic Strategy Worker if disabled") < workflow.index("Dispatch bounded parallel Agentic lanes")
     assert 'state" != "active"' in workflow
+
+
+def test_agentic_controller_never_reenables_manually_disabled_worker():
+    workflow = Path(".github/workflows/genesis-agentic-lab-recovery.yml").read_text(encoding="utf-8")
+    step = workflow[workflow.index("Restore canonical Agentic Strategy Worker if disabled"):workflow.index("Dispatch bounded parallel Agentic lanes")]
+    manual = step[step.index('state" == "disabled_manually"'):step.index('state" == "disabled_inactivity"')]
+    assert "/enable" not in manual
+    assert "skip=true" in manual
+    dispatch = workflow[workflow.index("Dispatch bounded parallel Agentic lanes"):]
+    assert "if: steps.worker_state.outputs.skip != 'true'" in dispatch.splitlines()[1]

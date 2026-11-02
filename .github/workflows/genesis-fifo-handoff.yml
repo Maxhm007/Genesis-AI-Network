@@ -6,14 +6,9 @@ on:
     # Independent watchdog: if no worker completion event fires, periodically
     # wake the authoritative Agentic controller so an idle backlog cannot stall.
     - cron: '2,12,22,32,42,52 * * * *'
-  workflow_run:
-    workflows:
-      - Genesis Bounded Repair Worker
-      - Genesis Agentic Strategy Worker
-      - Genesis DeepSeek Agentic Solver
-      - Genesis Action Repair Worker
-    types:
-      - completed
+  # No workflow_run trigger: waking Lab Recovery whenever a worker it started
+  # finished formed loops (LR -> worker -> FIFO -> LR). The schedule above
+  # already wakes it when the backlog is idle.
   push:
     branches: [main]
     paths:
@@ -41,6 +36,12 @@ jobs:
           set -euo pipefail
           echo "Genesis handoff event: ${GITHUB_EVENT_NAME}"
 
+          lr_state="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/genesis-agentic-lab-recovery.yml" --jq '.state')"
+          if [[ "$lr_state" != "active" ]]; then
+            echo "Agentic Lab Recovery is not active (state: $lr_state); wake skipped."
+            exit 0
+          fi
+
           active_count="$(gh run list --repo "$GITHUB_REPOSITORY" \
             --workflow genesis-agentic-lab-recovery.yml \
             --limit 20 \
@@ -58,5 +59,5 @@ jobs:
           echo 'Agentic Lab recovery dispatched.'
 
 # This workflow does not select, repair, validate, promote, or close issues.
-# It only wakes the single authoritative Agentic Lab control plane after workers finish.
+# It only wakes the single authoritative Agentic Lab control plane on its schedule.
 # Agentic Lab owns scheduling/claim authority; workers and validators keep their existing bounded roles.

@@ -4,10 +4,7 @@ name: Genesis Action Repair Worker
   workflow_dispatch:
 
 permissions:
-  contents: write
-  issues: write
-  pull-requests: write
-  actions: write
+  contents: read
 
 concurrency:
   group: genesis-action-repair-worker
@@ -25,6 +22,8 @@ env:
 
 jobs:
   stale-queue-cleanup:
+    permissions:
+      actions: write
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
@@ -37,6 +36,11 @@ jobs:
           done
 
   repair-one-action-failure:
+    permissions:
+      contents: write
+      issues: write
+      pull-requests: write
+      actions: write
     needs: stale-queue-cleanup
     runs-on: ubuntu-latest
     timeout-minutes: 120
@@ -201,22 +205,7 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
-          # Keep Action-failure discovery alive when this pass selected work.
-          if [[ -n "$SELECTED_ISSUE" ]]; then
-            gh workflow run genesis-action-failure-watcher.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
-          fi
-
-          # An idle/completed Action lane must never leave Genesis idle while
-          # Agentic-Lab backlog exists. Wake the single authoritative Agentic
-          # controller after every Action-repair pass; its own reservation and
-          # concurrency rules decide whether work can safely start.
-          active_count="$(gh run list --repo "$GITHUB_REPOSITORY" \
-            --workflow genesis-agentic-lab-recovery.yml \
-            --limit 20 \
-            --json status,createdAt,event \
-            --jq '[.[] | select(.event != "push" and .event != "pull_request") | select(.status != "completed" or (now - (.createdAt | fromdateiso8601)) < 120)] | length')"
-          if [[ "$active_count" -gt 0 ]]; then
-            echo "Agentic Lab Recovery already active or woken <2 min ago ($active_count run(s)); duplicate Action-repair wake skipped."
-          else
-            gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
-          fi
+          # No re-dispatch: the Failure Watcher (every 10 min) and Agentic Lab
+          # Recovery (own schedule) pick up the next work. Waking them here
+          # formed the Watcher <-> Repair Worker loop (#1129).
+          echo "Action-repair pass finished (issue: ${SELECTED_ISSUE:-none}); no follow-up dispatch."

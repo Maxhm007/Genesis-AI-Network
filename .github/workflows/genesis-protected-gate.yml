@@ -79,7 +79,9 @@ permissions:
   contents: read
 
 concurrency:
-  group: genesis-protected-gate
+  # One queue per commit being checked, so a burst on one change can't
+  # cancel the pending check for another change.
+  group: genesis-protected-gate-${{ github.event.workflow_run.head_sha || github.sha }}
   cancel-in-progress: false
 
 jobs:

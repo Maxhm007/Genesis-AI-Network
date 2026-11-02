@@ -5,7 +5,8 @@ on:
   workflow_run:
     workflows:
       - Genesis Specialist Repair Worker v2
-      - Genesis DeepSeek Agentic Solver
+      # DeepSeek is left out: Lab Recovery starts it, so waking Lab Recovery
+      # when it finishes formed the LR -> DeepSeek -> wakeup -> LR loop.
     types:
       - completed
   push:

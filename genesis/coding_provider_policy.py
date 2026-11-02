@@ -277,18 +277,20 @@ def _propose_with_scoped_http_edit_budget(
     context_paths: list[str] | None = None,
     *,
     provider=None,
+    require_regression_test: bool = False,
 ):
     """Permit at most two compact edits only for the bounded HTTP repair lane."""
+    flag = {"require_regression_test": True} if require_regression_test else {}
     selected = provider or self._provider()
     if selected is None or not isinstance(selected, GenesisHTTPProvider):
-        return _ORIGINAL_CODING_PROPOSE(self, objective, context_paths, provider=selected)
+        return _ORIGINAL_CODING_PROPOSE(self, objective, context_paths, provider=selected, **flag)
 
     grounded_paths = _ground_issue_context_paths(self, objective, context_paths)
     had_override = "MAX_EDITS" in self.__dict__
     previous_override = self.__dict__.get("MAX_EDITS")
     self.MAX_EDITS = MAX_BOUNDED_EDITS
     try:
-        return _ORIGINAL_CODING_PROPOSE(self, objective, grounded_paths, provider=selected)
+        return _ORIGINAL_CODING_PROPOSE(self, objective, grounded_paths, provider=selected, **flag)
     finally:
         if had_override:
             self.__dict__["MAX_EDITS"] = previous_override

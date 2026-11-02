@@ -39,15 +39,18 @@ def test_agentic_lab_is_authoritative_recovery_scheduler() -> None:
     assert "actions: write" in text
 
 
-def test_worker_completion_returns_control_to_agentic_lab() -> None:
+def test_worker_completion_does_not_rewake_agentic_lab() -> None:
+    # Workers Lab Recovery starts must not wake it again when they finish;
+    # that formed LR -> worker -> FIFO/successor -> LR loops. FIFO's schedule
+    # still wakes Lab Recovery when the backlog is idle.
     fifo = FIFO.read_text(encoding="utf-8")
     successor = WAKEUP.read_text(encoding="utf-8")
-    assert "workflow_run:" in fifo
-    assert "Genesis Bounded Repair Worker" in fifo
-    assert "Genesis Agentic Strategy Worker" in fifo
+    assert "workflow_run:" not in fifo
+    assert "schedule:" in fifo
     assert "gh workflow run genesis-agentic-lab-recovery.yml" in fifo
-    assert "Genesis Bounded Repair Worker" not in successor
-    assert "Genesis Agentic Strategy Worker" not in successor
+    assert 'lr_state" != "active"' in fifo
+    for worker in ("Genesis Bounded Repair Worker", "Genesis Agentic Strategy Worker", "Genesis DeepSeek Agentic Solver"):
+        assert worker not in successor
 
 
 def test_bounded_worker_does_not_duplicate_fifo_handoff_wake() -> None:

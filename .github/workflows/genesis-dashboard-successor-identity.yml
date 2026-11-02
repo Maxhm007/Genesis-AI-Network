@@ -8,6 +8,10 @@ permissions:
   contents: read
   issues: write
 
+concurrency:
+  group: genesis-dashboard-successor-identity-${{ github.event.issue.number }}
+  cancel-in-progress: false
+
 jobs:
   inherit-dashboard-identity:
     if: ${{ github.event.issue.body != null && contains(github.event.issue.body, 'genesis-unsolved-successor-of:') }}
@@ -16,6 +20,8 @@ jobs:
     steps:
       - name: Check out repository
         uses: actions/checkout@v4
+        with:
+          persist-credentials: false
 
       - name: Inherit dashboard problem identity
         env:

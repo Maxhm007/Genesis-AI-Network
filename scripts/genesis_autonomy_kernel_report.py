@@ -54,7 +54,7 @@ def main() -> int:
     if not repository:
         raise SystemExit("repository is required")
     report = build_report(repository)
-    report['unattended_open_ratio'] = float(len(report['unattended_open_issue_numbers']) / len(report['issues']))
+    print(json.dumps(report, indent=2, sort_keys=True))
     _write_summary(report)
     return 0
 

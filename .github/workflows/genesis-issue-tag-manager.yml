@@ -5,7 +5,7 @@ on:
     types: [opened, reopened, closed, labeled, unlabeled, edited]
   workflow_dispatch:
   schedule:
-    - cron: '*/10 * * * *'
+    - cron: '11-59/15 * * * *'
   push:
     branches: [main]
     paths:
@@ -29,6 +29,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ref: main
           fetch-depth: 1
       - uses: actions/setup-python@v5

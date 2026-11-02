@@ -42,10 +42,11 @@ def test_agentic_strategy_worker_allows_declared_architecture_extension_new_file
     assert '$target" != genesis/architecture_extensions/*.py' in text
 
 
-def test_failed_strategy_immediately_wakes_agentic_recovery() -> None:
+def test_strategy_worker_never_wakes_agentic_recovery() -> None:
+    # Waking Lab Recovery from the worker formed a dispatch loop; Recovery's
+    # own schedule picks up the next issue instead.
     text = WORKER.read_text(encoding="utf-8")
-    release = text[text.index("Release unsuccessful Agentic reservation without closing Issue") :]
-    assert "gh workflow run genesis-agentic-lab-recovery.yml" in release
+    assert "gh workflow run genesis-agentic-lab-recovery.yml" not in text
 
 
 def test_infrastructure_quarantine_keeps_agentic_ownership_and_is_generation_scoped() -> None:

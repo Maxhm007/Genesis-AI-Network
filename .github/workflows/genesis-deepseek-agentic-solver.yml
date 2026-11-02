@@ -49,6 +49,8 @@ env:
 
 jobs:
   solve:
+    # Paused 2026-11-02 until the test-first gate (part 3) is on. Delete this line to resume.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:

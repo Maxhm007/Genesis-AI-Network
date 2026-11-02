@@ -3,7 +3,7 @@ name: Genesis Hourly Whole-Dashboard Review
 on:
   workflow_dispatch:
   schedule:
-    - cron: '17 * * * *'
+    - cron: '27 * * * *'
   push:
     branches: [main]
     paths:
@@ -30,6 +30,7 @@ jobs:
       - name: Checkout authoritative main
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ref: main
           fetch-depth: 1
 

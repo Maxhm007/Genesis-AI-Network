@@ -26,8 +26,6 @@ class ResourceModule:
                  battery_percent: float | None = None, network_available: bool = True) -> ResourceSnapshot:
         if not isinstance(network_available, bool):
             raise TypeError("network_available must be a boolean")
-        if isinstance(network_available, str):
-            raise ValueError("network_available must be a boolean, received string: '" + network_available + "'")
         battery = None if battery_percent is None else self._pct(battery_percent)
         return ResourceSnapshot(
             self._pct(cpu_percent),

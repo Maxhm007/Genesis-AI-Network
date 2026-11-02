@@ -21,6 +21,7 @@ jobs:
       - name: Checkout current main
         uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ref: main
           fetch-depth: 0
 

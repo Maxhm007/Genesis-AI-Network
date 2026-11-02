@@ -11,6 +11,8 @@ def _validate_proposal_with_compact_edit_materialization_budget(
     self: CodingModule,
     proposal: dict,
     provider_name: str,
+    *,
+    require_regression_test: bool = False,
 ):
     """Keep provider byte limits strict without charging compact edits for existing source.
 
@@ -22,24 +24,29 @@ def _validate_proposal_with_compact_edit_materialization_budget(
     validator so path, file-count, text, Python syntax, and all downstream review and
     promotion gates still run unchanged.
     """
+    flag = {"require_regression_test": True} if require_regression_test else {}
     if not isinstance(proposal, dict):
-        return _ORIGINAL_VALIDATE_PROPOSAL(self, proposal, provider_name)
+        return _ORIGINAL_VALIDATE_PROPOSAL(self, proposal, provider_name, **flag)
 
     normalized = self._normalize_proposal_shape(proposal)
     if isinstance(normalized.get("files"), dict) or "edits" not in normalized:
-        return _ORIGINAL_VALIDATE_PROPOSAL(self, normalized, provider_name)
+        return _ORIGINAL_VALIDATE_PROPOSAL(self, normalized, provider_name, **flag)
 
-    files = self._files_from_edits(normalized.get("edits"))
-    materialized = dict(normalized)
-    materialized["files"] = files
-    materialized.pop("edits", None)
+    files = self._files_from_edits(normalized.get("edits"), with_regression_test=require_regression_test)
+    if require_regression_test:
+        # Test-first proposals must reach the validator as edits so it can check the test edit's shape.
+        materialized = normalized
+    else:
+        materialized = dict(normalized)
+        materialized["files"] = files
+        materialized.pop("edits", None)
 
     materialized_total = sum(len(content.encode("utf-8")) for content in files.values())
     had_override = "MAX_TOTAL_BYTES" in self.__dict__
     previous_override = self.__dict__.get("MAX_TOTAL_BYTES")
     self.MAX_TOTAL_BYTES = max(int(self.MAX_TOTAL_BYTES), materialized_total)
     try:
-        return _ORIGINAL_VALIDATE_PROPOSAL(self, materialized, provider_name)
+        return _ORIGINAL_VALIDATE_PROPOSAL(self, materialized, provider_name, **flag)
     finally:
         if had_override:
             self.__dict__["MAX_TOTAL_BYTES"] = previous_override

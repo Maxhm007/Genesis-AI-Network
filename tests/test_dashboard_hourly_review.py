@@ -129,7 +129,7 @@ def test_current_repository_dashboard_has_tabs_and_each_target_exists():
 
 def test_hourly_workflow_contract():
     workflow = Path(".github/workflows/genesis-hourly-dashboard-review.yml").read_text(encoding="utf-8")
-    assert "cron: '17 * * * *'" in workflow
+    assert "cron: '27 * * * *'" in workflow
     assert "workflow_dispatch:" in workflow
     assert "contents: read" in workflow
     assert "issues: read" in workflow

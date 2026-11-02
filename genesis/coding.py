@@ -127,6 +127,12 @@ _COMPARE = {
 }
 
 
+_ARITHMETIC = {
+    ast.Add: lambda a, b: a + b, ast.Sub: lambda a, b: a - b, ast.Mult: lambda a, b: a * b,
+    ast.FloorDiv: lambda a, b: a // b, ast.Mod: lambda a, b: a % b,
+}
+
+
 def _static_value(node: ast.AST):
     """Value of an expression built only from literals, or raise ValueError."""
     if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
@@ -136,6 +142,14 @@ def _static_value(node: ast.AST):
         if isinstance(node.op, ast.And):
             return all(values)
         return any(values)
+    if isinstance(node, ast.UnaryOp) and isinstance(node.op, (ast.USub, ast.UAdd)):
+        value = _static_value(node.operand)
+        return -value if isinstance(node.op, ast.USub) else +value
+    if isinstance(node, ast.BinOp) and type(node.op) in _ARITHMETIC:
+        left, right = _static_value(node.left), _static_value(node.right)
+        if not all(isinstance(v, (int, float)) and not isinstance(v, bool) for v in (left, right)):
+            raise ValueError("only numeric literal arithmetic is folded")
+        return _ARITHMETIC[type(node.op)](left, right)
     if isinstance(node, ast.Compare):
         left = _static_value(node.left)
         for op, comparator in zip(node.ops, node.comparators):
@@ -148,6 +162,19 @@ def _static_value(node: ast.AST):
 
 
 def _static_truth(test: ast.AST) -> bool | None:
+    if isinstance(test, ast.BoolOp):
+        # One literal operand can decide the whole test: `0 and x` is always
+        # false and `1 or x` is always true, whatever `x` is.
+        truths = [_static_truth(value) for value in test.values]
+        decisive = False if isinstance(test.op, ast.And) else True
+        if decisive in truths:
+            return decisive
+        if None in truths:
+            return None
+        return not decisive
+    if isinstance(test, ast.UnaryOp) and isinstance(test.op, ast.Not):
+        truth = _static_truth(test.operand)
+        return None if truth is None else not truth
     try:
         return bool(_static_value(test))
     except Exception:
@@ -155,8 +182,22 @@ def _static_truth(test: ast.AST) -> bool | None:
 
 
 def _is_empty_literal(node: ast.AST) -> bool:
+    if (
+        isinstance(node, ast.Call)
+        and isinstance(node.func, ast.Name)
+        and node.func.id == "range"
+        and not node.keywords
+        and 1 <= len(node.args) <= 3
+    ):
+        try:
+            bounds = [_static_value(arg) for arg in node.args]
+            if all(isinstance(b, int) and not isinstance(b, bool) for b in bounds) and (len(bounds) < 3 or bounds[2] != 0):
+                return len(range(*bounds)) == 0
+        except Exception:
+            return False
+        return False
     try:
-        value = ast.literal_eval(node)
+        value = _static_value(node)
     except Exception:
         return False
     try:
@@ -178,6 +219,8 @@ class _Scope:
         self.load_events: list[tuple[str, tuple[int, int], tuple[int, ...]]] = []
         self.loop_stack: list[int] = []
         self.loop_stores: dict[int, set[str]] = {}
+        self.store_positions: dict[str, list[tuple[int, int]]] = {}
+        self.deletes: list[tuple[str, tuple[int, int]]] = []
 
 
 def _collect_scopes(tree: ast.Module) -> tuple[list[_Scope], bool]:
@@ -190,14 +233,28 @@ def _collect_scopes(tree: ast.Module) -> tuple[list[_Scope], bool]:
         scopes.append(scope)
         return scope
 
-    def bind(scope: _Scope, name: str, dead: bool, node: ast.AST | None = None) -> None:
+    # While inside an assignment statement, names it binds take effect at the
+    # end of that statement, so `nv = nv + 1` reads `nv` before binding it.
+    store_at: list[tuple[int, int]] = []
+    # How many branches, loops or try blocks wrap the current statement within
+    # its function; only an unconditional `del` is known to unbind a name.
+    branch_depth = [0]
+
+    def bind(scope: _Scope, name: str, dead: bool, node: ast.AST | None = None, loop_exempt: bool = True) -> None:
         if dead:
             return
         scope.stores.add(name)
         position = (getattr(node, "lineno", 0), getattr(node, "col_offset", 0)) if node is not None else (0, 0)
+        if store_at and node is not None:
+            position = store_at[-1]
         scope.first_store[name] = min(scope.first_store.get(name, position), position)
-        for loop in scope.loop_stack:
-            scope.loop_stores.setdefault(loop, set()).add(name)
+        scope.store_positions.setdefault(name, []).append(position)
+        if loop_exempt:
+            for loop in scope.loop_stack:
+                scope.loop_stores.setdefault(loop, set()).add(name)
+
+    def statement_end(node: ast.AST) -> tuple[int, int]:
+        return (getattr(node, "end_lineno", None) or node.lineno, getattr(node, "end_col_offset", None) or node.col_offset)
 
     def load(scope: _Scope, name: str, node: ast.AST) -> None:
         scope.loads.add(name)
@@ -228,8 +285,10 @@ def _collect_scopes(tree: ast.Module) -> tuple[list[_Scope], bool]:
             if node.returns is not None:
                 visit(node.returns, typed, dead)
             walk_args(node.args, scope, inner, typed)
+            saved, branch_depth[0] = branch_depth[0], 0
             for statement in node.body:
                 visit(statement, inner, False)
+            branch_depth[0] = saved
         elif isinstance(node, ast.Lambda):
             inner = child("function", "<lambda>", scope)
             walk_args(node.args, scope, inner)
@@ -264,9 +323,45 @@ def _collect_scopes(tree: ast.Module) -> tuple[list[_Scope], bool]:
                 target = target.parent
             visit(node.value, scope, dead)
             bind(target, node.target.id, dead, node.target)
+        elif isinstance(node, ast.Assign):
+            visit(node.value, scope, dead)
+            store_at.append(statement_end(node))
+            for target in node.targets:
+                visit(target, scope, dead)
+            store_at.pop()
+        elif isinstance(node, ast.AugAssign):
+            visit(node.value, scope, dead)
+            if isinstance(node.target, ast.Name):
+                # `x += 1` reads x first; it never creates a value on its own.
+                load(scope, node.target.id, node.target)
+                if node.target.id in scope.declared_global:
+                    # `global x; x += 1` does not define a module-level `x`.
+                    return
+                store_at.append(statement_end(node))
+                bind(scope, node.target.id, dead, node.target, loop_exempt=False)
+                store_at.pop()
+            else:
+                visit(node.target, scope, dead)
+        elif isinstance(node, ast.AnnAssign):
+            visit(node.annotation, scope, dead)
+            if node.value is not None:
+                visit(node.value, scope, dead)
+                store_at.append(statement_end(node))
+                visit(node.target, scope, dead)
+                store_at.pop()
+            elif not isinstance(node.target, ast.Name):
+                visit(node.target, scope, dead)
+            # A bare `name: int` declares a type but binds no value.
+        elif isinstance(node, ast.IfExp):
+            truth = _static_truth(node.test)
+            visit(node.test, scope, dead)
+            visit(node.body, scope, dead or truth is False)
+            visit(node.orelse, scope, dead or truth is True)
         elif isinstance(node, ast.Name):
             if isinstance(node.ctx, (ast.Load, ast.Del)):
                 load(scope, node.id, node)
+                if isinstance(node.ctx, ast.Del) and not dead and branch_depth[0] == 0:
+                    scope.deletes.append((node.id, statement_end(node)))
             else:
                 bind(scope, node.id, dead, node)
         elif isinstance(node, ast.Global):
@@ -285,22 +380,31 @@ def _collect_scopes(tree: ast.Module) -> tuple[list[_Scope], bool]:
             if loop:
                 scope.loop_stack.append(id(node))
             visit(node.test, scope, dead)
+            branch_depth[0] += 1
             for statement in node.body:
                 visit(statement, scope, dead or truth is False)
             if loop:
                 scope.loop_stack.pop()
             for statement in node.orelse:
                 visit(statement, scope, dead or (truth is True and not loop))
+            branch_depth[0] -= 1
         elif isinstance(node, (ast.For, ast.AsyncFor)):
             visit(node.iter, scope, dead)
             empty = dead or _is_empty_literal(node.iter)
             scope.loop_stack.append(id(node))
+            branch_depth[0] += 1
             visit(node.target, scope, empty)
             for statement in node.body:
                 visit(statement, scope, empty)
             scope.loop_stack.pop()
             for statement in node.orelse:
                 visit(statement, scope, dead)
+            branch_depth[0] -= 1
+        elif isinstance(node, (ast.Try, getattr(ast, "TryStar", ast.Try), ast.Match, ast.With, ast.AsyncWith)):
+            branch_depth[0] += 1
+            for sub in ast.iter_child_nodes(node):
+                visit(sub, scope, dead)
+            branch_depth[0] -= 1
         else:
             if isinstance(node, ast.ExceptHandler) and node.name:
                 bind(scope, node.name, dead, node)
@@ -365,6 +469,67 @@ def _used_before_assignment(scopes: list[_Scope]) -> set[tuple[str, str]]:
     return early
 
 
+def _used_after_delete(scopes: list[_Scope]) -> set[tuple[str, str]]:
+    """Function-local names read after an unconditional `del` with no new assignment in between."""
+    gone: set[tuple[str, str]] = set()
+    for scope in scopes:
+        if scope.kind != "function":
+            continue
+        for name, deleted in scope.deletes:
+            if name in scope.declared_global or name in scope.declared_nonlocal:
+                continue
+            for loaded, position, loops in scope.load_events:
+                if loaded != name or position <= deleted:
+                    continue
+                if any(name in scope.loop_stores.get(loop, set()) for loop in loops):
+                    continue
+                if any(deleted < stored <= position for stored in scope.store_positions.get(name, [])):
+                    continue
+                gone.add((scope.qual, name))
+    return gone
+
+
+def _always_exits(statements: list[ast.stmt]) -> bool:
+    """True when running these statements in order can never fall through to the next one."""
+    for statement in statements:
+        if isinstance(statement, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
+            return True
+        if isinstance(statement, ast.Assert) and _static_truth(statement.test) is False:
+            return True
+        if isinstance(statement, ast.If):
+            truth = _static_truth(statement.test)
+            if truth is True and _always_exits(statement.body):
+                return True
+            if truth is False and _always_exits(statement.orelse):
+                return True
+        if isinstance(statement, (ast.Try, getattr(ast, "TryStar", ast.Try))):
+            if _always_exits(statement.finalbody):
+                return True
+            # Only a handler-free try is certain to exit when its body does.
+            if not statement.handlers and _always_exits(statement.body):
+                return True
+    return False
+
+
+def _no_op_assignments(tree: ast.Module) -> collections.Counter:
+    """Assignments that leave a name unchanged, such as `a = a` or `a = a + 0`."""
+    found: collections.Counter = collections.Counter()
+    for node in ast.walk(tree):
+        if not (isinstance(node, ast.Assign) and len(node.targets) == 1 and isinstance(node.targets[0], ast.Name)):
+            continue
+        name, value = node.targets[0].id, node.value
+        same = isinstance(value, ast.Name) and value.id == name
+        if isinstance(value, ast.BinOp) and isinstance(value.left, ast.Name) and value.left.id == name:
+            right = value.right
+            literal = right.value if isinstance(right, ast.Constant) and type(right.value) in (int, float) else None
+            same = (isinstance(value.op, (ast.Add, ast.Sub)) and literal == 0) or (
+                isinstance(value.op, (ast.Mult, ast.FloorDiv)) and literal == 1
+            )
+        if same:
+            found[name] += 1
+    return found
+
+
 def _unreachable_statements(tree: ast.Module) -> collections.Counter:
     found: collections.Counter = collections.Counter()
 
@@ -374,7 +539,7 @@ def _unreachable_statements(tree: ast.Module) -> collections.Counter:
             if not isinstance(body, list):
                 continue
             for index, statement in enumerate(body[:-1]):
-                if isinstance(statement, (ast.Return, ast.Raise, ast.Continue, ast.Break)):
+                if _always_exits([statement]):
                     for dead in body[index + 1:]:
                         found[ast.dump(dead)] += 1
                     break
@@ -387,9 +552,7 @@ def _unreachable_statements(tree: ast.Module) -> collections.Counter:
     return found
 
 
-def _code_sanity_facts(
-    source: str,
-) -> tuple[set[tuple[str, str]], collections.Counter, bool, set[tuple[str, str]]] | None:
+def _code_sanity_facts(source: str) -> tuple | None:
     """Undefined names per scope, statements that can never run, and whether a star import is present."""
     try:
         tree = ast.parse(source)
@@ -397,14 +560,23 @@ def _code_sanity_facts(
         return None
     scopes, star = _collect_scopes(tree)
     undefined = set() if star else _undefined_names(tree, scopes)
-    return undefined, _unreachable_statements(tree), star, _used_before_assignment(scopes)
+    return (
+        undefined,
+        _unreachable_statements(tree),
+        star,
+        _used_before_assignment(scopes),
+        _used_after_delete(scopes),
+        _no_op_assignments(tree),
+    )
 
 
 def _code_sanity_problems(old: str, new: str) -> list[str]:
     after = _code_sanity_facts(new)
     if after is None:
         return []
-    before = (_code_sanity_facts(old) if old else None) or (set(), collections.Counter(), False, set())
+    before = (_code_sanity_facts(old) if old else None) or (
+        set(), collections.Counter(), False, set(), set(), collections.Counter()
+    )
     problems: list[str] = []
     if after[2] and not before[2]:
         problems.append("adds a `from ... import *`, which hides undefined names; import the names you need")
@@ -416,8 +588,15 @@ def _code_sanity_problems(old: str, new: str) -> list[str]:
         f"uses `{name}` before it is assigned " + ("at module level" if scope == "<module>" else f"in {scope}")
         for scope, name in sorted(after[3] - before[3])
     )
+    problems.extend(
+        f"uses `{name}` after `del` removed it " + ("at module level" if scope == "<module>" else f"in {scope}")
+        for scope, name in sorted(after[4] - before[4])
+    )
     if after[1] - before[1]:
-        problems.append("adds code after a return, raise, continue or break that can never run")
+        problems.append("adds code after a return, raise, continue, break or `assert False` that can never run")
+    problems.extend(
+        f"adds an assignment to `{name}` that leaves it unchanged" for name in sorted(after[5] - before[5])
+    )
     return problems
 
 
@@ -440,6 +619,8 @@ class CodingModule:
     MAX_TOTAL_BYTES = 80_000
     MAX_EDITS = 1
     MAX_EDIT_BYTES = 4_000
+    # Test-first mode: one fix edit plus one new regression test, which gets its own budget.
+    MAX_TEST_EDIT_BYTES = 3_000
     MAX_PROPOSAL_ATTEMPTS = 3
     MAX_REPAIR_ECHO_BYTES = 2_000
     MAX_LONG_TERM_MEMORY_CHARS = 3_500
@@ -807,7 +988,157 @@ class CodingModule:
                 rendered = self._apply_line_edit(path, start, end, edit.get("new"), current=rendered)
         return rendered
 
-    def _files_from_edits(self, edits: object) -> dict[str, str]:
+    @staticmethod
+    def _is_test_path(path: str) -> bool:
+        # Same rule the promotion gate uses: one file directly in tests/, no sub-folders, no "..".
+        return re.fullmatch(r"tests/test_[A-Za-z0-9_]+\.py", path) is not None
+
+    @staticmethod
+    def _plain_test_code_problem(text: str) -> str | None:
+        """New regression test code may only be imports and plain test functions."""
+        try:
+            tree = ast.parse(textwrap.dedent(text))
+        except SyntaxError as exc:
+            return f"is not valid Python ({exc.msg})"
+        has_test = False
+        for item in tree.body:
+            if isinstance(item, (ast.Import, ast.ImportFrom)):
+                continue
+            if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)) and item.name.startswith("test"):
+                if item.args.defaults or any(default is not None for default in item.args.kw_defaults):
+                    return f"gives default values to `{item.name}` arguments"
+                if item.decorator_list:
+                    return f"decorates `{item.name}`; regression tests must be plain functions"
+                if any(isinstance(node, (ast.Try, getattr(ast, "TryStar", ast.Try))) for node in ast.walk(item)):
+                    return f"uses try/except in `{item.name}`; let the old code fail on its own"
+                if not CodingModule._has_real_check(item):
+                    return f"`{item.name}` asserts nothing"
+                has_test = True
+                continue
+            return f"adds non-test code at line {getattr(item, 'lineno', 0)}; only imports and test functions are allowed"
+        if not has_test:
+            return "defines no `test_` function"
+        return None
+
+    @staticmethod
+    def _has_real_check(node: ast.AST) -> bool:
+        """A non-literal assert, or a `with pytest.raises(...)` block."""
+        for sub in ast.walk(node):
+            if isinstance(sub, ast.Assert):
+                try:
+                    ast.literal_eval(sub.test)
+                except ValueError:
+                    return True
+            elif isinstance(sub, ast.With):
+                for item in sub.items:
+                    func = item.context_expr.func if isinstance(item.context_expr, ast.Call) else None
+                    if (
+                        isinstance(func, ast.Attribute)
+                        and func.attr == "raises"
+                        and isinstance(func.value, ast.Name)
+                        and func.value.id == "pytest"
+                    ):
+                        return True
+        return False
+
+    @staticmethod
+    def _bound_names(item: ast.stmt) -> list[str]:
+        if isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef, ast.ClassDef)):
+            return [item.name]
+        if isinstance(item, (ast.Import, ast.ImportFrom)):
+            return [(alias.asname or alias.name).split(".")[0] for alias in item.names]
+        targets = item.targets if isinstance(item, ast.Assign) else [getattr(item, "target", None)]
+        return [sub.id for target in targets if target is not None for sub in ast.walk(target) if isinstance(sub, ast.Name)]
+
+    @staticmethod
+    def _import_bindings(item: ast.stmt) -> set[tuple]:
+        if not isinstance(item, (ast.Import, ast.ImportFrom)):
+            return set()
+        module = item.module if isinstance(item, ast.ImportFrom) else None
+        level = item.level if isinstance(item, ast.ImportFrom) else 0
+        return {(module, level, alias.name, alias.asname) for alias in item.names}
+
+    @classmethod
+    def _whole_test_file_problem(cls, path: str, before: str, after: str) -> str | None:
+        """Check the test file as pytest will see it, not just the inserted text.
+
+        Every existing top-level statement must still be there, unchanged and in order (so a new test
+        cannot slide under an existing decorator), and no new statement may rebind a name the file
+        already uses (a same-name test would silently replace the old one).
+        """
+        try:
+            old = ast.parse(before) if before else ast.Module(body=[], type_ignores=[])
+            new = ast.parse(after)
+        except SyntaxError as exc:
+            return f"makes {path} invalid Python ({exc.msg})"
+        added: list[ast.stmt] = []
+        position = 0
+        for item in new.body:
+            if position < len(old.body) and ast.dump(item) == ast.dump(old.body[position]):
+                position += 1
+            else:
+                added.append(item)
+        if position != len(old.body):
+            return f"changes an existing test in {path}; insert the new test between top-level statements"
+        existing = {name for item in old.body for name in cls._bound_names(item)}
+        same_imports = set().union(*(cls._import_bindings(item) for item in old.body)) if old.body else set()
+        seen: set[str] = set()
+        for item in added:
+            bindings = cls._import_bindings(item)
+            if bindings and bindings <= same_imports:
+                continue
+            for name in cls._bound_names(item):
+                if name in existing or name in seen:
+                    return f"reuses the name `{name}` in {path}; give the new test a name the file does not have"
+                seen.add(name)
+        return None
+
+    def _split_regression_test_edit(self, edits: object) -> tuple[list[dict], dict]:
+        """Separate the one fix edit from the one new-test edit in test-first mode."""
+        if not isinstance(edits, list) or len(edits) != 2 or not all(isinstance(edit, dict) for edit in edits):
+            raise ValueError(
+                "test-first proposal needs exactly two edits: one fix edit and one new regression test edit"
+            )
+        paths = [str(edit.get("path", "")).replace("\\", "/").lstrip("./") for edit in edits]
+        test_edits = [edit for edit, path in zip(edits, paths) if path.startswith("tests/")]
+        fix_edits = [edit for edit, path in zip(edits, paths) if not path.startswith("tests/")]
+        if len(test_edits) != 1 or len(fix_edits) != 1:
+            raise ValueError("test-first proposal needs one edit under tests/ and one fix edit outside tests/")
+        test = test_edits[0]
+        path = str(test.get("path")).replace("\\", "/").lstrip("./")
+        if not self._is_test_path(path):
+            raise ValueError(f"regression test must go in a tests/test_*.py file, not {path}")
+        if "start_line" in test or "end_line" in test or "old" in test or "insert_after_line" not in test:
+            raise ValueError(
+                "regression test edit must use insert_after_line only; existing tests can never be replaced or removed"
+            )
+        new = test.get("new")
+        if not isinstance(new, str) or len(new.encode("utf-8")) > self.MAX_TEST_EDIT_BYTES:
+            raise ValueError("regression test edit must be text within the test byte limit")
+        problem = self._plain_test_code_problem(new)
+        if problem:
+            raise ValueError(f"regression test {problem}")
+        return fix_edits, {**test, "path": path}
+
+    def _render_regression_test(self, test: dict) -> dict[str, str]:
+        path = test["path"]
+        target = (self.root / path).resolve()
+        self.executor._validate_paths([path])
+        current = target.read_text(encoding="utf-8") if target.is_file() else ""
+        if not current and test.get("insert_after_line") != 0:
+            raise ValueError(f"{path} is a new test file, so insert_after_line must be 0")
+        rendered = self._apply_insert_edit(path, test.get("insert_after_line"), test.get("new"), current)
+        problem = self._whole_test_file_problem(path, current, rendered)
+        if problem:
+            raise ValueError(f"regression test {problem}")
+        return {path: rendered}
+
+    def _files_from_edits(self, edits: object, *, with_regression_test: bool = False) -> dict[str, str]:
+        if with_regression_test:
+            fix_edits, test = self._split_regression_test_edit(edits)
+            files = self._files_from_edits(fix_edits)
+            files.update(self._render_regression_test(test))
+            return files
         if not isinstance(edits, list) or not edits or len(edits) > self.MAX_EDITS:
             raise ValueError("coding proposal edits count out of bounds")
         total = 0
@@ -900,12 +1231,18 @@ class CodingModule:
             return normalized
         return proposal
 
-    def validate_proposal(self, proposal: dict, provider_name: str) -> CodingProposal:
+    def validate_proposal(
+        self, proposal: dict, provider_name: str, *, require_regression_test: bool = False
+    ) -> CodingProposal:
         if not isinstance(proposal, dict):
             raise ValueError("coding proposal must be a JSON object")
         proposal = self._normalize_proposal_shape(proposal)
         raw_files = proposal.get("files")
-        if isinstance(raw_files, dict):
+        if require_regression_test:
+            if "edits" not in proposal:
+                raise ValueError("test-first proposal must use the edits list, not a files mapping")
+            files = self._files_from_edits(proposal.get("edits"), with_regression_test=True)
+        elif isinstance(raw_files, dict):
             files = raw_files
         elif "edits" in proposal:
             files = self._files_from_edits(proposal.get("edits"))
@@ -956,11 +1293,26 @@ class CodingModule:
                 "coding proposal only adds or changes comments, docstrings, blank lines, pass or ... placeholders; "
                 "it must change real code that fixes the issue"
             )
+        if require_regression_test and not [path for path in changed_code if not path.startswith("tests/")]:
+            raise ValueError("test-first proposal must also change real code outside tests/ that fixes the issue")
         return CodingProposal(
             title=str(proposal.get("title", "Genesis bounded coding candidate"))[:200],
             rationale=str(proposal.get("rationale", "one bounded repository edit"))[:4000],
             files={str(path): content for path, content in files.items()},
             provider=provider_name,
+        )
+
+    @staticmethod
+    def _regression_test_contract() -> str:
+        return (
+            'TEST-FIRST: "edits" must hold exactly TWO objects. The first is the one fix edit described above. '
+            'The second adds ONE new regression test: "path" is a tests/test_*.py file (an existing one from '
+            'READ_ONLY_TEST_CONTEXT or a new tests/test_<topic>_regression.py), "insert_after_line" (0 for a new file, '
+            'otherwise after the last line of that file), and "new" with imports plus one plain test function. '
+            'Write the test first: it must call the existing function or class your fix changes, assert the correct '
+            'behaviour the issue asks for, FAIL with an AssertionError (or pytest.raises for the expected exception) on '
+            'the current code, and pass after your fix. It must not rely on a name that only your fix adds. Never replace '
+            'or delete existing test lines; no module-level code, fixtures, decorators or default arguments in the test.'
         )
 
     @staticmethod
@@ -1021,6 +1373,7 @@ class CodingModule:
         context_paths: list[str] | None = None,
         *,
         provider: IntelligenceProvider | None = None,
+        require_regression_test: bool = False,
     ) -> CodingProposal:
         objective = objective.strip()
         if not objective:
@@ -1063,6 +1416,9 @@ class CodingModule:
             "READ_ONLY_TEST_CONTEXT, and current validation. Ignore a remembered fix when current repository evidence conflicts.\n"
             f"VALIDATED_LONG_TERM_MEMORY: {memory_text}\n"
         )
+        if require_regression_test:
+            # The fix edit stays bound to VALID_PATHS; the test edit is the only write allowed under tests/.
+            prompt += f"{self._regression_test_contract()}\n"
         current_prompt = prompt
         last_error: Exception | None = None
         last_raw = ""
@@ -1070,13 +1426,17 @@ class CodingModule:
             raw = ""
             try:
                 raw = provider.reason(current_prompt)
-                return self.validate_proposal(self._extract_json(raw), provider.name)
+                # Pass the flag only when set, so older validate_proposal wrappers keep working unchanged.
+                flag = {"require_regression_test": True} if require_regression_test else {}
+                return self.validate_proposal(self._extract_json(raw), provider.name, **flag)
             except (ValueError, json.JSONDecodeError) as exc:
                 last_error = exc
                 last_raw = raw
                 if attempt >= self.MAX_PROPOSAL_ATTEMPTS:
                     break
                 current_prompt = self._repair_prompt(prompt, raw, exc, attempt, allowed_paths, edit_hint)
+                if require_regression_test:
+                    current_prompt += self._regression_test_contract() + "\n"
         failure = ValueError(
             f"coding provider failed to produce a valid proposal after {self.MAX_PROPOSAL_ATTEMPTS} bounded attempts: {last_error}"
         )

@@ -163,3 +163,68 @@ def test_renaming_a_function_with_existing_dead_code_passes() -> None:
     old = "def a():\n    return 1\n    x = 2\n"
     new = "def b():\n    return 1\n    x = 2\n"
     assert _code_sanity_problems(old, new) == []
+
+
+# --- code-check v4: fake fixes that v3 let through ---------------------------
+
+V4_BASE = "def f(rows):\n    total = len(rows)\n    return total\n"
+
+
+@pytest.mark.parametrize(
+    "new, problem",
+    [
+        # AugAssign on a brand-new local reads it before any value exists.
+        ("def f(rows):\n    total = len(rows)\n    nv += 1\n    return total\n", "`nv` before it is assigned"),
+        # The binding lands at the end of the statement, so the right side reads it first.
+        ("def f(rows):\n    total = len(rows)\n    nv = nv + 1\n    return total\n", "`nv` before it is assigned"),
+        # A bare annotation declares a type but binds no value.
+        ("def f(rows):\n    total = len(rows)\n    ann: int\n    total = total + ann\n    return total\n", "undefined name `ann`"),
+        # A walrus in the never-taken branch of a literal ternary binds nothing.
+        ("def f(rows):\n    total = len(rows)\n    _ = (w := 1) if False else 0\n    return total + w\n", "undefined name `w`"),
+        # Code after `assert False` can never run.
+        ("def f(rows):\n    total = len(rows)\n    assert False\n    total = 0\n    return total\n", "can never run"),
+        # Loops over range(0) and branches under `if 1 - 1:` never run, so their bindings don't count.
+        ("def f(rows):\n    total = len(rows)\n    for i in range(0):\n        q = i\n    return total + q\n", "undefined name `q`"),
+        ("def f(rows):\n    total = len(rows)\n    if 1 - 1:\n        q = 1\n    return total + q\n", "undefined name `q`"),
+        # One literal operand decides `0 and x`, so the branch never runs.
+        ("def f(rows):\n    total = len(rows)\n    if 0 and rows:\n        q = 1\n    return total + q\n", "undefined name `q`"),
+        # A name read after an unconditional `del` has no value.
+        ("def f(rows):\n    total = len(rows)\n    del total\n    return total\n", "after `del`"),
+        # `global zz; zz += 1` never creates `zz`.
+        ("def f(rows):\n    global zz\n    zz += 1\n    total = len(rows)\n    return total\n", "undefined name `zz`"),
+        # A branch that always returns makes what follows unreachable.
+        ("def f(rows):\n    total = len(rows)\n    if True:\n        return total\n    total = 0\n    return total\n", "can never run"),
+        ("def f(rows):\n    try:\n        return len(rows)\n    finally:\n        pass\n    total = 0\n    return total\n", "can never run"),
+        # No-op assignments change nothing.
+        ("def f(rows):\n    total = len(rows)\n    total = total\n    return total\n", "leaves it unchanged"),
+        ("def f(rows):\n    total = len(rows)\n    total = total + 0\n    return total\n", "leaves it unchanged"),
+    ],
+)
+def test_v4_fake_fixes_are_flagged(new: str, problem: str) -> None:
+    problems = _code_sanity_problems(V4_BASE, new)
+    assert any(problem in item for item in problems), problems
+
+
+@pytest.mark.parametrize(
+    "new",
+    [
+        "def f(rows):\n    total = len(rows)\n    total += 1\n    return total\n",
+        "def f(rows):\n    total = 0\n    for row in rows:\n        total += len(row)\n    return total\n",
+        "def f(rows):\n    total: int = len(rows)\n    return total\n",
+        "def f(rows):\n    total = len(rows)\n    total = total + 1\n    return total\n",
+        "def f(rows):\n    total = len(rows)\n    _ = (w := 1) if True else 0\n    return total + w\n",
+        "def f(rows):\n    total = len(rows)\n    for i in range(1):\n        total = total + i\n    return total\n",
+        "def f(rows):\n    total = len(rows)\n    if 2 - 1:\n        total = total + 1\n    return total\n",
+        "def f(rows):\n    total = len(rows)\n    assert total >= 0\n    return total\n",
+        "def f(rows):\n    total = len(rows)\n    for i in range(len(rows)):\n        total = total + i\n    return total\n",
+        "def f(rows):\n    total = len(rows)\n    if 1 or rows:\n        total = total + 1\n    return total\n",
+        "def f(rows):\n    total = len(rows)\n    del total\n    total = 0\n    return total\n",
+        "def f(rows):\n    total = len(rows)\n    if rows:\n        del total\n        total = 1\n    return total\n",
+        "COUNT = 0\n\ndef f(rows):\n    global COUNT\n    COUNT += 1\n    total = len(rows)\n    return total\n",
+        "def f(rows):\n    total = len(rows)\n    if rows:\n        return total\n    total = 0\n    return total\n",
+        "def f(rows):\n    try:\n        total = len(rows)\n    except TypeError:\n        return 0\n    return total\n",
+        "def f(rows):\n    total = len(rows)\n    total = total + 1\n    return total\n",
+    ],
+)
+def test_v4_real_changes_still_pass(new: str) -> None:
+    assert _code_sanity_problems(V4_BASE, new) == []

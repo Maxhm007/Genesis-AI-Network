@@ -73,6 +73,8 @@ env:
 
 jobs:
   repair-and-promote:
+    # Paused 2026-11-02 until the test-first gate (part 3) is on. Delete this line to resume.
+    if: false
     runs-on: ubuntu-latest
     timeout-minutes: 120
     steps:
@@ -465,14 +467,9 @@ jobs:
           # The verified worker owns the transition and immediately wakes the
           # controller; Recovery will ignore this issue once Closure Manager
           # closes it and claim the next sequential focus.
-          # Skip redundant wakes: a queued/running controller pass (or one woken <2 min ago) already covers this.
-          lab_skip="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-agentic-lab-recovery.yml --limit 20 --json databaseId,status,createdAt,event --jq '[.[] | select(.event != "push" and .event != "pull_request") | select(.status != "completed" or (now - (.createdAt | fromdateiso8601)) < 120)] | if length > 0 then "run \(.[0].databaseId) \(.[0].status)" else "" end' 2>/dev/null || true)"
-          if [[ -n "$lab_skip" ]]; then
-            echo "Agentic Lab Recovery wake skipped (already active or recently woken): $lab_skip"
-          else
-            gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
-          fi
-          echo "Verified evidence recorded; closure and next Agentic recovery dispatched."
+          # No Lab Recovery wake: its own schedule picks up the next issue.
+          # Waking it here formed the Lab Recovery <-> Strategy Worker loop.
+          echo "Verified evidence recorded; closure dispatched."
           git push origin --delete "$CANDIDATE_BRANCH" >/dev/null 2>&1 || true
 
       - name: Release unsuccessful Agentic reservation without closing Issue
@@ -540,13 +537,8 @@ jobs:
             printf '%s\n' '```'
           } > /tmp/genesis-agentic-failure.md
           gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-failure.md
-          # Skip redundant wakes: a queued/running controller pass (or one woken <2 min ago) already covers this.
-          lab_skip="$(gh run list --repo "$GITHUB_REPOSITORY" --workflow genesis-agentic-lab-recovery.yml --limit 20 --json databaseId,status,createdAt,event --jq '[.[] | select(.event != "push" and .event != "pull_request") | select(.status != "completed" or (now - (.createdAt | fromdateiso8601)) < 120)] | if length > 0 then "run \(.[0].databaseId) \(.[0].status)" else "" end' 2>/dev/null || true)"
-          if [[ -n "$lab_skip" ]]; then
-            echo "Agentic Lab Recovery wake skipped (already active or recently woken): $lab_skip"
-          else
-            gh workflow run genesis-agentic-lab-recovery.yml --repo "$GITHUB_REPOSITORY" --ref main >/dev/null 2>&1 || true
-          fi
+          # No Lab Recovery wake: its own schedule picks up the next issue.
+          # Waking it here formed the Lab Recovery <-> Strategy Worker loop.
 
       - name: Preserve Agentic repair evidence
         if: always()

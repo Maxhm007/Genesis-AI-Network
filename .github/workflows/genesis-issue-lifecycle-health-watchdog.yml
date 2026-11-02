@@ -3,7 +3,7 @@ name: Genesis Issue Lifecycle Health Watchdog
 on:
   workflow_dispatch:
   schedule:
-    - cron: '*/5 * * * *'
+    - cron: '4-59/15 * * * *'
   push:
     branches: [main]
     paths:
@@ -30,6 +30,7 @@ jobs:
     steps:
       - uses: actions/checkout@v4
         with:
+          persist-credentials: false
           ref: main
           fetch-depth: 1
 
