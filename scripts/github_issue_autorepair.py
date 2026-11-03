@@ -1,11 +1,14 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import json
 import os
 import re
 import subprocess
+import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -351,6 +354,76 @@ def propose_issue_repair(
     )
 
 
+
+def verify_regression_fails_on_baseline(
+    root: Path, proposal_files: dict[str, str],
+) -> tuple[bool, str]:
+    """Fail closed unless the ONE newly added regression fails on unchanged HEAD.
+
+    The test runs in a disposable detached worktree; generated source fixes are
+    never written into that baseline. A collection error, infrastructure error,
+    passing baseline, timeout, or ambiguous result is not red-phase evidence.
+    """
+    test_paths = [path for path in proposal_files if path.startswith("tests/test_") and path.endswith(".py")]
+    if len(test_paths) != 1:
+        return False, "expected exactly one regression test file"
+    test_path = test_paths[0]
+    try:
+        original_path = root / test_path
+        old_text = original_path.read_text(encoding="utf-8") if original_path.is_file() else ""
+        old_names = {
+            node.name for node in ast.parse(old_text).body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        new_names = {
+            node.name for node in ast.parse(proposal_files[test_path]).body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        added = new_names - old_names
+        if len(added) != 1 or not next(iter(added)).startswith("test_"):
+            return False, "regression must introduce exactly one new test function"
+        test_name = next(iter(added))
+    except (OSError, SyntaxError, ValueError) as exc:
+        return False, f"cannot inspect regression test: {type(exc).__name__}"
+
+    with tempfile.TemporaryDirectory(prefix="genesis-red-phase-") as temp:
+        checkout = Path(temp) / "baseline"
+        created = False
+        try:
+            add = subprocess.run(
+                ["git", "worktree", "add", "--detach", str(checkout), "HEAD"],
+                cwd=root, capture_output=True, text=True, timeout=45, check=False,
+            )
+            if add.returncode != 0:
+                return False, "baseline worktree unavailable"
+            created = True
+            test_target = checkout / test_path
+            test_target.parent.mkdir(parents=True, exist_ok=True)
+            test_target.write_text(proposal_files[test_path], encoding="utf-8")
+            result = subprocess.run(
+                [sys.executable, "-m", "pytest", "-q", "--tb=short", f"{test_path}::{test_name}"],
+                cwd=checkout, capture_output=True, text=True, timeout=120, check=False,
+                env={**os.environ, "PYTHONPATH": str(checkout)},
+            )
+            output = (result.stdout + "\n" + result.stderr)[-4000:]
+            # Pytest's "1 failed" and the exact node ID demonstrate an
+            # assertion failure, not a collection/import/runner failure.
+            node_id = f"{test_path}::{test_name}"
+            if result.returncode != 1 or "1 failed" not in output or f"FAILED {node_id}" not in output:
+                return False, "regression did not produce an isolated failing baseline test"
+            if "AssertionError" not in output and "DID NOT RAISE" not in output:
+                return False, "baseline failure was not an assertion or expected-exception failure"
+            return True, f"baseline regression {node_id} failed as required"
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return False, f"baseline regression check unavailable: {type(exc).__name__}"
+        finally:
+            if created:
+                subprocess.run(
+                    ["git", "worktree", "remove", "--force", str(checkout)],
+                    cwd=root, capture_output=True, text=True, timeout=45, check=False,
+                )
+
+
 def _proposal_change_excerpt(root: Path, files: dict[str, str]) -> str:
     for relative, proposed in files.items():
         path = root / relative
@@ -505,6 +578,15 @@ def solve_reported_issue(
             len([path for path in changed if path in context_paths and not path.startswith("tests/")]) != 1
         ):
             return RepairAttempt(diagnosis, proposal, None, "repair_rejected_missing_regression_test", validation_attempts=validation_runs)
+
+        if require_regression_test:
+            red_ok, red_evidence = verify_regression_fails_on_baseline(root, proposal["files"])
+            if not red_ok:
+                return RepairAttempt(
+                    diagnosis, proposal, None, "repair_rejected_regression_not_red",
+                    {"outcome": "regression_not_red", "validation": red_evidence},
+                    validation_runs,
+                )
 
         proposal["provenance"] = {
             "initiator": f"github.issue.{issue.get('number')}",
