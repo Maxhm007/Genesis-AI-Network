@@ -2,6 +2,8 @@
 
 from pathlib import Path
 
+import scripts.github_issue_autorepair as autorepair
+
 from scripts.agentic_strategy_repair import _micro_repair_or_original
 from scripts.github_issue_autorepair import (
     allowed_issue_repair_paths,
@@ -98,3 +100,31 @@ def test_agentic_micro_repair_cannot_bypass_test_first(monkeypatch, tmp_path):
     )
     assert outcome == "strict-proposal"
     assert calls == [{"require_regression_test": True}]
+
+
+def test_test_first_mode_rejects_non_red_regression_before_executor(monkeypatch, tmp_path):
+    issue = _fixture(tmp_path)
+    monkeypatch.setenv("GENESIS_REQUIRE_REGRESSION_TEST", "1")
+    monkeypatch.setattr(
+        autorepair, "verify_regression_fails_on_baseline",
+        lambda root, files: (False, "test unexpectedly passed on baseline"),
+    )
+
+    class NeverExecute:
+        def execute(self, proposal):
+            raise AssertionError("non-red regression must not execute a fix")
+
+    result = solve_reported_issue(
+        issue, tmp_path, provider=_PairedProvider(), executor=NeverExecute()
+    )
+    assert result.status == "repair_rejected_regression_not_red"
+    assert result.provider_failure["outcome"] == "regression_not_red"
+
+
+def test_red_phase_only_checks_an_added_test_function(tmp_path):
+    issue = _fixture(tmp_path)
+    # The code-only path is rejected before any Git worktree is created.
+    passed, reason = autorepair.verify_regression_fails_on_baseline(
+        tmp_path, {"genesis/alpha.py": "VALUE = 2\\n"}
+    )
+    assert not passed and "one regression test" in reason
