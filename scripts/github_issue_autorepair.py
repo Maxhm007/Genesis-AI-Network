@@ -212,7 +212,7 @@ def allowed_issue_repair_paths(context_paths: list[str]) -> set[str]:
     allowed = set(context_paths)
     for relative in context_paths:
         path = Path(relative)
-        if relative.startswith("genesis/") and path.suffix == ".py":
+        if (relative.startswith("genesis/") or relative.startswith("scripts/")) and path.suffix == ".py":
             allowed.add(f"tests/test_{path.stem}.py")
     return allowed
 
@@ -325,6 +325,7 @@ def propose_issue_repair(
     provider: IntelligenceProvider | None = None,
     repair_memory: list[dict] | None = None,
     maintainer_guidance: str = "",
+    require_regression_test: bool = False,
 ) -> CodingProposal:
     coding = CodingModule(root)
     deterministic = GitHubIssueLearnedCapabilityProvider.for_issue(root, issue, coding)
@@ -346,6 +347,7 @@ def propose_issue_repair(
         issue_coding_objective(issue, repair_memory, maintainer_guidance),
         coding_paths,
         provider=provider,
+        **({"require_regression_test": True} if require_regression_test else {}),
     )
 
 
@@ -445,6 +447,9 @@ def solve_reported_issue(
 
     memory = repair_memory if repair_memory is not None else []
     executor = executor or SelfDevelopmentExecutor(root)
+    # A paused production worker must not resume until it explicitly opts into
+    # the fail-closed paired code + regression-test proposal contract.
+    require_regression_test = os.environ.get("GENESIS_REQUIRE_REGRESSION_TEST") == "1"
 
     last_proposal: dict | None = None
     last_result = None
@@ -458,6 +463,7 @@ def solve_reported_issue(
                 provider=provider,
                 repair_memory=memory,
                 maintainer_guidance=maintainer_guidance,
+                **({"require_regression_test": True} if require_regression_test else {}),
             )
         except Exception as exc:
             failure = {
@@ -493,6 +499,12 @@ def solve_reported_issue(
             return RepairAttempt(diagnosis, proposal, None, "repair_rejected_scope", validation_attempts=validation_runs)
         if not (changed & set(context_paths)):
             return RepairAttempt(diagnosis, proposal, None, "repair_rejected_test_only", validation_attempts=validation_runs)
+        if require_regression_test and (
+            len(changed) != 2 or
+            len([path for path in changed if path.startswith("tests/test_") and path.endswith(".py")]) != 1 or
+            len([path for path in changed if path in context_paths and not path.startswith("tests/")]) != 1
+        ):
+            return RepairAttempt(diagnosis, proposal, None, "repair_rejected_missing_regression_test", validation_attempts=validation_runs)
 
         proposal["provenance"] = {
             "initiator": f"github.issue.{issue.get('number')}",
