@@ -477,6 +477,9 @@ def _navigation_landmark_micro_repair(issue: dict, context_paths: list[str], roo
 
 
 def _micro_repair_or_original(original, issue: dict, context_paths: list[str], root: Path = base.ROOT, **kwargs):
+    # Deterministic code-only shortcuts may not bypass the enforced test-first gate.
+    if kwargs.get("require_regression_test"):
+        return original(issue, context_paths, root, **kwargs)
     micro = _navigation_landmark_micro_repair(issue, context_paths, root)
     if micro is not None:
         return micro
