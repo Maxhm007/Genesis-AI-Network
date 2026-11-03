@@ -62,6 +62,8 @@ env:
   GENESIS_PROVIDER_URL: http://127.0.0.1:8766
   GENESIS_PROVIDER_NAME: genesis-agentic-strategy-repair
   GENESIS_PROVIDER_TIMEOUT_SECONDS: '360'
+  # Required when this job is re-enabled after validation; reject code-only proposals.
+  GENESIS_REQUIRE_REGRESSION_TEST: '1'
   GENESIS_STRATEGY_TIMEOUT_SECONDS: '1800'
   GENESIS_PROVIDER_MAX_NEW_TOKENS: '768'
   GENESIS_REPAIR_FALLBACK_MODEL: Qwen/Qwen2.5-Coder-0.5B-Instruct
