@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from genesis.coding import CodingModule, CodingProposal
+from scripts.agentic_strategy_repair import _micro_repair_or_original
 from scripts.github_issue_autorepair import (
     allowed_issue_repair_paths,
     propose_issue_repair,
@@ -82,3 +82,19 @@ def test_script_target_supports_conventional_regression_test():
     assert "tests/test_example.py" in allowed_issue_repair_paths(
         ["scripts/example.py"]
     )
+
+
+def test_agentic_micro_repair_cannot_bypass_test_first(monkeypatch, tmp_path):
+    calls = []
+
+    def original(issue, paths, root, **kwargs):
+        calls.append(kwargs)
+        return "strict-proposal"
+
+    outcome = _micro_repair_or_original(
+        original, {"title": "navigation landmark aria-label"},
+        ["scripts/render_static_dashboard.py"], tmp_path,
+        require_regression_test=True,
+    )
+    assert outcome == "strict-proposal"
+    assert calls == [{"require_regression_test": True}]
