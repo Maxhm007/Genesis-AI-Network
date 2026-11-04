@@ -1,0 +1,127 @@
+name: Genesis Models Trial 843
+# Manual, push-free trial: can Genesis's own CodingModule, backed by a free GitHub Models
+# model, write a fix for issue #843 that passes its regression test and the acceptance guard?
+# Nothing here pushes, comments, labels or closes anything.
+
+on:
+  workflow_dispatch:
+    inputs:
+      model:
+        description: GitHub Models model id
+        required: true
+        type: choice
+        default: openai/gpt-4.1
+        options:
+          - openai/gpt-4.1
+          - openai/gpt-4.1-mini
+          - openai/gpt-4o
+          - openai/gpt-4o-mini
+
+permissions: {}
+
+concurrency:
+  group: genesis-models-trial-843
+  cancel-in-progress: false
+
+jobs:
+  propose:
+    # Reads untrusted issue text and talks to the model, so it gets no write access at all.
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      models: read
+    env:
+      PYTHONPATH: ${{ github.workspace }}
+      GENESIS_PROVIDER_URL: http://127.0.0.1:8766
+      GENESIS_PROVIDER_NAME: genesis-github-models-trial
+      GENESIS_PROVIDER_TIMEOUT_SECONDS: '420'
+      TRIAL_MODEL: ${{ inputs.model }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt pytest
+      - name: Fetch issue 843 as data
+        run: curl -fsSL https://api.github.com/repos/${GITHUB_REPOSITORY}/issues/843 -o /tmp/issue-843.json
+      - name: Start localhost provider
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          nohup python scripts/github_models_provider.py --model "$TRIAL_MODEL" --port 8766 > /tmp/provider.log 2>&1 &
+          for i in $(seq 1 30); do curl -sf http://127.0.0.1:8766/health >/dev/null && exit 0; sleep 1; done
+          cat /tmp/provider.log; exit 1
+      - name: Ask Genesis for a fix
+        run: python scripts/models_trial_propose.py --issue-json /tmp/issue-843.json --out /tmp/fix.patch --attempts 3
+      - name: Provider log
+        if: always()
+        run: cat /tmp/provider.log || true
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: trial-843-proposal
+          path: |
+            /tmp/fix.patch
+            /tmp/fix.patch.json
+          if-no-files-found: warn
+
+  gate:
+    # Checks the proposed patch as plain data. Read-only; nothing is pushed.
+    needs: propose
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      issues: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - run: python -m pip install --disable-pip-version-check -r requirements.txt pytest
+      - uses: actions/download-artifact@v4
+        with:
+          name: trial-843-proposal
+          path: /tmp/proposal
+      - name: Apply the proposal as a patch and run the acceptance guard
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          base=$(git rev-parse HEAD)
+          if [ ! -s /tmp/proposal/fix.patch ]; then
+            echo "### #843 trial: no passing proposal from the model" >> "$GITHUB_STEP_SUMMARY"
+            exit 1
+          fi
+          paths=$(git apply --numstat /tmp/proposal/fix.patch | cut -f3 | sort -u)
+          if [ "$paths" != "genesis/memory.py" ]; then
+            echo "Proposal touches unexpected paths"; exit 1
+          fi
+          git apply --check /tmp/proposal/fix.patch
+          cp .github/trials/843/test_memory_metadata_validation.py tests/test_memory_metadata_validation.py
+          git apply /tmp/proposal/fix.patch
+          git add genesis/memory.py tests/test_memory_metadata_validation.py
+          git -c user.name=trial -c user.email=trial@localhost commit -qm "trial 843 candidate (local only)"
+          set +e
+          python scripts/issue_acceptance_guard.py --base-ref "$base" --issue-number 843 > /tmp/guard.json
+          guard=$?
+          env -u GH_TOKEN python -m pytest -q -p no:cacheprovider > /tmp/suite.txt 2>&1
+          suite=$?
+          set -e
+          {
+            echo "### #843 trial"
+            echo "- acceptance guard exit: $guard"
+            echo "- full suite exit: $suite ($(tail -1 /tmp/suite.txt))"
+            echo '```diff'; cat /tmp/proposal/fix.patch; echo '```'
+            echo '```json'; cat /tmp/guard.json; echo '```'
+          } >> "$GITHUB_STEP_SUMMARY"
+          [ "$guard" = 0 ] && [ "$suite" = 0 ]
