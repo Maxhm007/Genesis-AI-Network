@@ -84,6 +84,12 @@ def test_script_target_supports_conventional_regression_test():
     assert "tests/test_example.py" in allowed_issue_repair_paths(
         ["scripts/example.py"]
     )
+    assert "tests/test_example_regression.py" in allowed_issue_repair_paths(
+        ["scripts/example.py"]
+    )
+    assert "tests/test_other_regression.py" not in allowed_issue_repair_paths(
+        ["scripts/example.py"]
+    )
 
 
 def test_agentic_micro_repair_cannot_bypass_test_first(monkeypatch, tmp_path):
