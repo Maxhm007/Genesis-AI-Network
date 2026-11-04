@@ -402,10 +402,25 @@ def verify_regression_fails_on_baseline(
             test_target = checkout / test_path
             test_target.parent.mkdir(parents=True, exist_ok=True)
             test_target.write_text(proposal_files[test_path], encoding="utf-8")
+            # Generated regression code is untrusted. Do not inherit GH_TOKEN,
+            # Actions credentials, arbitrary Python startup hooks, or plugin
+            # autoload configuration from the privileged controller process.
+            test_home = Path(temp) / "home"
+            test_home.mkdir()
+            test_env = {
+                "PATH": os.defpath,
+                "HOME": str(test_home),
+                "PYTHONPATH": str(checkout),
+                "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
+                "PYTHONDONTWRITEBYTECODE": "1",
+                "PYTHONNOUSERSITE": "1",
+                "PYTHONSAFEPATH": "1",
+                "LANG": "C.UTF-8",
+            }
             result = subprocess.run(
                 [sys.executable, "-m", "pytest", "-q", "--tb=short", f"{test_path}::{test_name}"],
                 cwd=checkout, capture_output=True, text=True, timeout=120, check=False,
-                env={**os.environ, "PYTHONPATH": str(checkout)},
+                env=test_env,
             )
             output = (result.stdout + "\n" + result.stderr)[-4000:]
             # Pytest's "1 failed" and the exact node ID demonstrate an
