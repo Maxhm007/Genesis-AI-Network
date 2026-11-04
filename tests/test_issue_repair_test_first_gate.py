@@ -1,6 +1,7 @@
 """Regression coverage for the staged Agentic Lab test-first proposal gate."""
 
 from pathlib import Path
+from types import SimpleNamespace
 
 import scripts.github_issue_autorepair as autorepair
 
@@ -134,3 +135,40 @@ def test_red_phase_only_checks_an_added_test_function(tmp_path):
         tmp_path, {"genesis/alpha.py": "VALUE = 2\\n"}
     )
     assert not passed and "one regression test" in reason
+
+
+def test_red_phase_does_not_inherit_github_credentials(monkeypatch, tmp_path):
+    _fixture(tmp_path)
+    monkeypatch.setenv("GH_TOKEN", "not-a-real-secret")
+    monkeypatch.setenv("GITHUB_TOKEN", "not-a-real-secret")
+    monkeypatch.setenv("PYTEST_ADDOPTS", "--unexpected-option")
+    seen = []
+
+    def fake_run(command, **kwargs):
+        if command[:3] == ["git", "worktree", "add"]:
+            return SimpleNamespace(returncode=0)
+        if command[:3] == ["git", "worktree", "remove"]:
+            return SimpleNamespace(returncode=0)
+        if len(command) >= 3 and command[1:3] == ["-m", "pytest"]:
+            env = kwargs["env"]
+            seen.append(env)
+            return SimpleNamespace(
+                returncode=1,
+                stdout="FAILED tests/test_alpha.py::test_clamp_caps_large_values - AssertionError\n1 failed\n",
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(autorepair.subprocess, "run", fake_run)
+    passed, message = autorepair.verify_regression_fails_on_baseline(
+        tmp_path,
+        {"tests/test_alpha.py": (
+            "from genesis.alpha import clamp\n\ndef test_clamp_caps_large_values():\n"
+            "    assert clamp(50) == 10\n"
+        )},
+    )
+    assert passed, message
+    assert len(seen) == 1
+    assert "GH_TOKEN" not in seen[0] and "GITHUB_TOKEN" not in seen[0]
+    assert "PYTEST_ADDOPTS" not in seen[0]
+    assert seen[0]["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
