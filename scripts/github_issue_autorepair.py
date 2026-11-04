@@ -217,6 +217,8 @@ def allowed_issue_repair_paths(context_paths: list[str]) -> set[str]:
         path = Path(relative)
         if (relative.startswith("genesis/") or relative.startswith("scripts/")) and path.suffix == ".py":
             allowed.add(f"tests/test_{path.stem}.py")
+            # Test-first coding contract explicitly offers a new *_regression.py file.
+            allowed.add(f"tests/test_{path.stem}_regression.py")
     return allowed
 
 
