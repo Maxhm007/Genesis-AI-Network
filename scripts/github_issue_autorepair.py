@@ -430,7 +430,7 @@ def verify_regression_fails_on_baseline(
                     "--mount", f"type=bind,source={checkout},target=/workspace,readonly",
                     "--workdir", "/workspace",
                     "--env", "HOME=/tmp",
-                    "--env", "PYTHONPATH=/workspace",
+                    "--env", "PYTHONPATH=/workspace:/opt/genesis",
                     "--env", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
                     "--env", "PYTHONDONTWRITEBYTECODE=1",
                     "--env", "PYTHONNOUSERSITE=1",
@@ -445,12 +445,27 @@ def verify_regression_fails_on_baseline(
             node_id = f"{test_path}::{test_name}"
             if result.returncode != 1 or "1 failed" not in output or f"FAILED {node_id}" not in output:
                 return False, "regression did not produce an isolated failing baseline test"
-            # Under pytest assertion rewriting, a normal `assert x == y`
-            # failure often appears as "E assert ..." without the literal
-            # "AssertionError". Keep the exact node-id + one-failed gates above.
-            rewritten_assertion = re.search(r"(?m)^E\s+assert\b", output) is not None
-            if not (rewritten_assertion or "AssertionError" in output or "DID NOT RAISE" in output):
-                return False, "baseline failure was not an assertion or expected-exception failure"
+            # This verdict comes from the trusted plugin's actual
+            # pytest call.excinfo, not from traceback/source text.
+            # Never accept a merely textual "AssertionError" in test output.
+            verdicts = []
+            for line in result.stderr.splitlines():
+                prefix = "GENESIS_RED_PHASE_VERDICT:"
+                if not line.startswith(prefix):
+                    continue
+                try:
+                    verdicts.append(json.loads(line[len(prefix):]))
+                except (ValueError, TypeError):
+                    return False, "malformed trusted red-phase verdict"
+            if (
+                len(verdicts) != 1
+                or verdicts[0] != {
+                    "nodeid": node_id, "phase": "call",
+                    "category": verdicts[0].get("category"),
+                }
+                or verdicts[0]["category"] not in ("assertion", "missing_exception")
+            ):
+                return False, "baseline failure was not a classified assertion or expected-exception failure"
             return True, f"baseline regression {node_id} failed as required"
         except (OSError, subprocess.TimeoutExpired) as exc:
             return False, f"baseline regression check unavailable: {type(exc).__name__}"
