@@ -428,7 +428,11 @@ def verify_regression_fails_on_baseline(
             node_id = f"{test_path}::{test_name}"
             if result.returncode != 1 or "1 failed" not in output or f"FAILED {node_id}" not in output:
                 return False, "regression did not produce an isolated failing baseline test"
-            if "AssertionError" not in output and "DID NOT RAISE" not in output:
+            # Under pytest assertion rewriting, a normal `assert x == y`
+            # failure often appears as "E assert ..." without the literal
+            # "AssertionError". Keep the exact node-id + one-failed gates above.
+            rewritten_assertion = re.search(r"(?m)^E\\s+assert\\b", output) is not None
+            if not (rewritten_assertion or "AssertionError" in output or "DID NOT RAISE" in output):
                 return False, "baseline failure was not an assertion or expected-exception failure"
             return True, f"baseline regression {node_id} failed as required"
         except (OSError, subprocess.TimeoutExpired) as exc:
