@@ -357,6 +357,94 @@ def propose_issue_repair(
 
 
 
+
+def _safe_red_phase_regression(
+    source: str, test_name: str, code_target: str,
+) -> bool:
+    """Conservatively allow only simple assertions calling the existing target.
+
+    This is a syntax safety filter, NOT a general Python sandbox. It prevents
+    generated tests from using fixtures, capfd.disabled(), os._exit(),
+    dynamic execution, stdout writes, pytest hooks, or arbitrary imports to
+    impersonate trusted evidence. Unsupported tests fail closed.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    imported: set[str] = set()
+    target_module = code_target.removesuffix(".py").replace("/", ".")
+    for item in tree.body:
+        if isinstance(item, ast.ImportFrom):
+            if item.module != target_module or item.level:
+                return False
+            for alias in item.names:
+                if alias.name == "*":
+                    return False
+                imported.add(alias.asname or alias.name)
+        elif isinstance(item, ast.Import):
+            if any(alias.name != "pytest" or alias.asname for alias in item.names):
+                return False
+        elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Existing tests are trustworthy baseline material. The newly
+            # introduced test alone gets this restrictive syntax policy.
+            if item.name != test_name:
+                continue
+            if not isinstance(item, ast.FunctionDef) or item.decorator_list:
+                return False
+            if item.args.posonlyargs or item.args.args or item.args.kwonlyargs or item.args.vararg or item.args.kwarg:
+                return False
+            if not item.body or len(item.body) > 5:
+                return False
+            def safe_expr(node: ast.AST) -> bool:
+                if isinstance(node, (ast.Constant, ast.Name)):
+                    return not isinstance(node, ast.Name) or (
+                        node.id in imported or node.id in {"True", "False", "None"}
+                        or node.id in assigned
+                    )
+                if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+                    return all(safe_expr(v) for v in node.elts)
+                if isinstance(node, ast.Dict):
+                    return all(k is not None and safe_expr(k) and safe_expr(v)
+                               for k, v in zip(node.keys, node.values))
+                if isinstance(node, ast.Compare):
+                    return safe_expr(node.left) and all(safe_expr(x) for x in node.comparators) and all(
+                        isinstance(op, (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Is, ast.IsNot, ast.In, ast.NotIn))
+                        for op in node.ops
+                    )
+                if isinstance(node, ast.BoolOp):
+                    return all(safe_expr(x) for x in node.values)
+                if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+                    return safe_expr(node.operand)
+                if isinstance(node, ast.Call):
+                    # Only call trusted code imported from the target module;
+                    # never arbitrary builtins, pytest utilities or attributes.
+                    return (
+                        isinstance(node.func, ast.Name)
+                        and node.func.id in imported
+                        and not node.keywords
+                        and all(safe_expr(x) for x in node.args)
+                    )
+                return False
+            assigned: set[str] = set()
+            found_assert = False
+            for statement in item.body:
+                if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name):
+                    if not safe_expr(statement.value) or statement.targets[0].id in imported:
+                        return False
+                    assigned.add(statement.targets[0].id)
+                elif isinstance(statement, ast.Assert):
+                    if not safe_expr(statement.test) or statement.msg is not None:
+                        return False
+                    found_assert = True
+                else:
+                    return False
+            return found_assert
+        elif not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return False
+    return False
+
+
 def verify_regression_fails_on_baseline(
     root: Path, proposal_files: dict[str, str],
 ) -> tuple[bool, str]:
@@ -370,6 +458,13 @@ def verify_regression_fails_on_baseline(
     if len(test_paths) != 1:
         return False, "expected exactly one regression test file"
     test_path = test_paths[0]
+    code_targets = [
+        path for path in proposal_files
+        if (path.startswith("genesis/") or path.startswith("scripts/"))
+        and path.endswith(".py")
+    ]
+    if len(code_targets) != 1:
+        return False, "expected exactly one source target"
     try:
         original_path = root / test_path
         old_text = original_path.read_text(encoding="utf-8") if original_path.is_file() else ""
@@ -385,6 +480,20 @@ def verify_regression_fails_on_baseline(
         if len(added) != 1 or not next(iter(added)).startswith("test_"):
             return False, "regression must introduce exactly one new test function"
         test_name = next(iter(added))
+        # Validate ONLY the inserted test, not trusted existing baseline code.
+        new_nodes = [
+            item for item in ast.parse(proposal_files[test_path]).body
+            if isinstance(item, ast.FunctionDef) and item.name == test_name
+        ]
+        # Existing regression files may contain trusted imports and other
+        # tests. Limit new imports to the target module and pytest.
+        new_imports = [
+            item for item in ast.parse(proposal_files[test_path]).body
+            if isinstance(item, (ast.Import, ast.ImportFrom))
+        ]
+        restricted_source = ast.unparse(ast.Module(body=[*new_imports, *new_nodes], type_ignores=[]))
+        if not _safe_red_phase_regression(restricted_source, test_name, code_targets[0]):
+            return False, "generated regression uses unsafe or unsupported syntax"
     except (OSError, SyntaxError, ValueError) as exc:
         return False, f"cannot inspect regression test: {type(exc).__name__}"
 
