@@ -1,6 +1,7 @@
 """Regression coverage for the staged Agentic Lab test-first proposal gate."""
 
 from pathlib import Path
+import subprocess
 from types import SimpleNamespace
 
 import scripts.github_issue_autorepair as autorepair
@@ -203,3 +204,24 @@ def test_red_phase_rejects_runtime_errors_even_with_failed_node(monkeypatch, tmp
     )
     assert not ok
     assert "not an assertion" in detail
+
+
+def test_real_pytest_rewritten_assertion_is_accepted_as_red_phase(tmp_path):
+    _fixture(tmp_path)
+    for args in (
+        ("init", "-q"),
+        ("config", "user.name", "Genesis Test"),
+        ("config", "user.email", "genesis-test@example.invalid"),
+        ("add", "genesis/alpha.py"),
+        ("commit", "-qm", "baseline"),
+    ):
+        subprocess.run(["git", *args], cwd=tmp_path, check=True, capture_output=True)
+
+    ok, reason = autorepair.verify_regression_fails_on_baseline(
+        tmp_path,
+        {"tests/test_alpha.py": (
+            "from genesis.alpha import clamp\n\n"
+            "def test_clamp_caps_large_values():\n    assert clamp(50) == 10\n"
+        )},
+    )
+    assert ok, reason
