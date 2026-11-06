@@ -98,7 +98,10 @@ jobs:
         run: python -m pytest -q
 
   dispatch-agentic-pool:
-    if: github.event_name != 'pull_request'
+    # Pause all automatic issue dispatch until the remaining repair lanes,
+    # candidate promotion and independent security review are verified.
+    # Manual workflow_dispatch remains available for an authorized recovery check.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
