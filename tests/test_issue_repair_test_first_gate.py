@@ -154,7 +154,7 @@ def test_red_phase_does_not_inherit_github_credentials(monkeypatch, tmp_path):
             seen.append(env)
             return SimpleNamespace(
                 returncode=1,
-                stdout="FAILED tests/test_alpha.py::test_clamp_caps_large_values - AssertionError\n1 failed\n",
+                stdout="FAILED tests/test_alpha.py::test_clamp_caps_large_values\nE assert 50 == 10\n1 failed\n",
                 stderr="",
             )
         raise AssertionError(f"unexpected command: {command}")
@@ -172,3 +172,34 @@ def test_red_phase_does_not_inherit_github_credentials(monkeypatch, tmp_path):
     assert "GH_TOKEN" not in seen[0] and "GITHUB_TOKEN" not in seen[0]
     assert "PYTEST_ADDOPTS" not in seen[0]
     assert seen[0]["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
+
+
+def test_red_phase_rejects_runtime_errors_even_with_failed_node(monkeypatch, tmp_path):
+    _fixture(tmp_path)
+
+    def fake_run(command, **kwargs):
+        if command[:3] == ["git", "worktree", "add"]:
+            return SimpleNamespace(returncode=0)
+        if command[:3] == ["git", "worktree", "remove"]:
+            return SimpleNamespace(returncode=0)
+        if len(command) >= 3 and command[1:3] == ["-m", "pytest"]:
+            return SimpleNamespace(
+                returncode=1,
+                stdout=(
+                    "FAILED tests/test_alpha.py::test_clamp_caps_large_values - RuntimeError\n"
+                    "E RuntimeError: broken environment\n1 failed\n"
+                ),
+                stderr="",
+            )
+        raise AssertionError(f"unexpected command: {command}")
+
+    monkeypatch.setattr(autorepair.subprocess, "run", fake_run)
+    ok, detail = autorepair.verify_regression_fails_on_baseline(
+        tmp_path,
+        {"tests/test_alpha.py": (
+            "from genesis.alpha import clamp\n\n"
+            "def test_clamp_caps_large_values():\n    assert clamp(50) == 10\n"
+        )},
+    )
+    assert not ok
+    assert "not an assertion" in detail
