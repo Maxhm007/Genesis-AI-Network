@@ -431,7 +431,7 @@ def verify_regression_fails_on_baseline(
             # Under pytest assertion rewriting, a normal `assert x == y`
             # failure often appears as "E assert ..." without the literal
             # "AssertionError". Keep the exact node-id + one-failed gates above.
-            rewritten_assertion = re.search(r"(?m)^E\\s+assert\\b", output) is not None
+            rewritten_assertion = re.search(r"(?m)^E\s+assert\b", output) is not None
             if not (rewritten_assertion or "AssertionError" in output or "DID NOT RAISE" in output):
                 return False, "baseline failure was not an assertion or expected-exception failure"
             return True, f"baseline regression {node_id} failed as required"
