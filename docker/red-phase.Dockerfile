@@ -4,8 +4,9 @@ ENV PIP_DISABLE_PIP_VERSION_CHECK=1 \
     PYTHONDONTWRITEBYTECODE=1 \
     PYTHONNOUSERSITE=1
 COPY requirements.txt /tmp/genesis-requirements.txt
+COPY docker/genesis_red_phase_report.py /opt/genesis/genesis_red_phase_report.py
 RUN python -m pip install --no-cache-dir -r /tmp/genesis-requirements.txt \
     && useradd --uid 10001 --create-home genesis
 USER 10001:10001
 WORKDIR /workspace
-ENTRYPOINT ["python", "-B", "-m", "pytest"]
+ENTRYPOINT ["python", "-B", "-m", "pytest", "-p", "genesis_red_phase_report"]
