@@ -2,6 +2,9 @@
 
 from pathlib import Path
 import subprocess
+import shutil
+
+import pytest
 from types import SimpleNamespace
 
 import scripts.github_issue_autorepair as autorepair
@@ -146,12 +149,19 @@ def test_red_phase_does_not_inherit_github_credentials(monkeypatch, tmp_path):
     seen = []
 
     def fake_run(command, **kwargs):
+        if command[:3] == ["docker", "image", "inspect"]:
+            return SimpleNamespace(returncode=0)
         if command[:3] == ["git", "worktree", "add"]:
             return SimpleNamespace(returncode=0)
         if command[:3] == ["git", "worktree", "remove"]:
             return SimpleNamespace(returncode=0)
-        if len(command) >= 3 and command[1:3] == ["-m", "pytest"]:
+        if command[:2] == ["docker", "run"]:
             env = kwargs["env"]
+            assert "--network" in command and command[command.index("--network") + 1] == "none"
+            assert "--read-only" in command and "--cap-drop" in command
+            assert "--mount" in command
+            assert command[command.index("--mount") + 1].endswith(",target=/workspace,readonly")
+            assert "/var/run/docker.sock" not in " ".join(command)
             seen.append(env)
             return SimpleNamespace(
                 returncode=1,
@@ -179,11 +189,13 @@ def test_red_phase_rejects_runtime_errors_even_with_failed_node(monkeypatch, tmp
     _fixture(tmp_path)
 
     def fake_run(command, **kwargs):
+        if command[:3] == ["docker", "image", "inspect"]:
+            return SimpleNamespace(returncode=0)
         if command[:3] == ["git", "worktree", "add"]:
             return SimpleNamespace(returncode=0)
         if command[:3] == ["git", "worktree", "remove"]:
             return SimpleNamespace(returncode=0)
-        if len(command) >= 3 and command[1:3] == ["-m", "pytest"]:
+        if command[:2] == ["docker", "run"]:
             return SimpleNamespace(
                 returncode=1,
                 stdout=(
@@ -207,6 +219,13 @@ def test_red_phase_rejects_runtime_errors_even_with_failed_node(monkeypatch, tmp
 
 
 def test_real_pytest_rewritten_assertion_is_accepted_as_red_phase(tmp_path):
+    if not shutil.which("docker"):
+        pytest.skip("Docker sandbox unavailable in local development")
+    if subprocess.run(
+        ["docker", "image", "inspect", "genesis-red-phase:local"],
+        capture_output=True, check=False,
+    ).returncode != 0:
+        pytest.skip("Trusted red-phase image not built")
     _fixture(tmp_path)
     for args in (
         ("init", "-q"),
@@ -225,3 +244,62 @@ def test_real_pytest_rewritten_assertion_is_accepted_as_red_phase(tmp_path):
         )},
     )
     assert ok, reason
+
+
+def test_red_phase_fails_closed_without_trusted_container(monkeypatch, tmp_path):
+    _fixture(tmp_path)
+    calls = []
+
+    def fake_run(command, **kwargs):
+        calls.append(command)
+        if command[:3] == ["docker", "image", "inspect"]:
+            return SimpleNamespace(returncode=1, stdout="", stderr="missing")
+        raise AssertionError("host must not execute generated pytest code")
+
+    monkeypatch.setattr(autorepair.subprocess, "run", fake_run)
+    ok, reason = autorepair.verify_regression_fails_on_baseline(
+        tmp_path,
+        {"tests/test_alpha.py": (
+            "from genesis.alpha import clamp\n\n"
+            "def test_clamp_caps_large_values():\n    assert clamp(50) == 10\n"
+        )},
+    )
+    assert not ok and "image unavailable" in reason
+    assert len(calls) == 1
+
+
+def test_sandbox_never_passes_host_token_into_docker(monkeypatch, tmp_path):
+    _fixture(tmp_path)
+    monkeypatch.setenv("GH_TOKEN", "secret-not-for-container")
+    monkeypatch.setenv("GITHUB_TOKEN", "another-secret")
+    seen = []
+
+    def fake_run(command, **kwargs):
+        if command[:3] == ["docker", "image", "inspect"]:
+            return SimpleNamespace(returncode=0)
+        if command[:3] == ["git", "worktree", "add"]:
+            return SimpleNamespace(returncode=0)
+        if command[:3] == ["git", "worktree", "remove"]:
+            return SimpleNamespace(returncode=0)
+        if command[:2] == ["docker", "run"]:
+            seen.append((command, kwargs["env"]))
+            return SimpleNamespace(
+                returncode=1,
+                stdout="FAILED tests/test_alpha.py::test_clamp_caps_large_values\nE assert 50 == 10\n1 failed\n",
+                stderr="",
+            )
+        raise AssertionError(command)
+
+    monkeypatch.setattr(autorepair.subprocess, "run", fake_run)
+    ok, message = autorepair.verify_regression_fails_on_baseline(
+        tmp_path,
+        {"tests/test_alpha.py": (
+            "from genesis.alpha import clamp\n\n"
+            "def test_clamp_caps_large_values():\n    assert clamp(50) == 10\n"
+        )},
+    )
+    assert ok, message
+    assert len(seen) == 1
+    assert not any("secret-not-for-container" in value for value in map(str, seen[0]))
+    assert "GH_TOKEN" not in seen[0][1] and "GITHUB_TOKEN" not in seen[0][1]
+    assert "--network" in seen[0][0] and "none" in seen[0][0]
