@@ -388,6 +388,20 @@ def verify_regression_fails_on_baseline(
     except (OSError, SyntaxError, ValueError) as exc:
         return False, f"cannot inspect regression test: {type(exc).__name__}"
 
+    # A missing trusted sandbox image is a hard stop; never fall back to
+    # invoking generated pytest code in the privileged GitHub Actions runner.
+    sandbox_image = "genesis-red-phase:local"
+    docker_env = {"PATH": os.defpath, "HOME": "/tmp"}
+    try:
+        inspect = subprocess.run(
+            ["docker", "image", "inspect", sandbox_image],
+            capture_output=True, text=True, timeout=15, check=False, env=docker_env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False, "red-phase container runtime unavailable"
+    if inspect.returncode != 0:
+        return False, "trusted red-phase container image unavailable"
+
     with tempfile.TemporaryDirectory(prefix="genesis-red-phase-") as temp:
         checkout = Path(temp) / "baseline"
         created = False
@@ -402,25 +416,28 @@ def verify_regression_fails_on_baseline(
             test_target = checkout / test_path
             test_target.parent.mkdir(parents=True, exist_ok=True)
             test_target.write_text(proposal_files[test_path], encoding="utf-8")
-            # Generated regression code is untrusted. Do not inherit GH_TOKEN,
-            # Actions credentials, arbitrary Python startup hooks, or plugin
-            # autoload configuration from the privileged controller process.
-            test_home = Path(temp) / "home"
-            test_home.mkdir()
-            test_env = {
-                "PATH": os.defpath,
-                "HOME": str(test_home),
-                "PYTHONPATH": str(checkout),
-                "PYTEST_DISABLE_PLUGIN_AUTOLOAD": "1",
-                "PYTHONDONTWRITEBYTECODE": "1",
-                "PYTHONNOUSERSITE": "1",
-                "PYTHONSAFEPATH": "1",
-                "LANG": "C.UTF-8",
-            }
+            # No network, host credentials, Docker socket or writable repo.
+            # The trusted image contains dependencies, not generated code.
+            # Docker defaults include the host's seccomp confinement.
             result = subprocess.run(
-                [sys.executable, "-m", "pytest", "-q", "--tb=short", f"{test_path}::{test_name}"],
-                cwd=checkout, capture_output=True, text=True, timeout=120, check=False,
-                env=test_env,
+                [
+                    "docker", "run", "--rm", "--network", "none",
+                    "--read-only", "--cap-drop", "ALL",
+                    "--security-opt", "no-new-privileges",
+                    "--pids-limit", "64", "--memory", "512m", "--cpus", "1",
+                    "--user", "10001:10001",
+                    "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m",
+                    "--mount", f"type=bind,source={checkout},target=/workspace,readonly",
+                    "--workdir", "/workspace",
+                    "--env", "HOME=/tmp",
+                    "--env", "PYTHONPATH=/workspace",
+                    "--env", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
+                    "--env", "PYTHONDONTWRITEBYTECODE=1",
+                    "--env", "PYTHONNOUSERSITE=1",
+                    sandbox_image, "-q", "--tb=short", f"{test_path}::{test_name}",
+                ],
+                capture_output=True, text=True, timeout=120, check=False,
+                env=docker_env,
             )
             output = (result.stdout + "\n" + result.stderr)[-4000:]
             # Pytest's "1 failed" and the exact node ID demonstrate an
