@@ -17,6 +17,12 @@ from scripts.github_issue_autorepair import (
 )
 
 
+
+def _fake_docker_result(kwargs, *, returncode, stdout, stderr):
+    kwargs["stdout"].write(stdout)
+    kwargs["stderr"].write(stderr)
+    return SimpleNamespace(returncode=returncode)
+
 def _fixture(tmp_path: Path):
     (tmp_path / "genesis").mkdir()
     (tmp_path / "runtime").mkdir()
@@ -163,7 +169,7 @@ def test_red_phase_does_not_inherit_github_credentials(monkeypatch, tmp_path):
             assert command[command.index("--mount") + 1].endswith(",target=/workspace,readonly")
             assert "/var/run/docker.sock" not in " ".join(command)
             seen.append(env)
-            return SimpleNamespace(
+            return _fake_docker_result(kwargs,
                 returncode=1,
                 stdout="FAILED tests/test_alpha.py::test_clamp_caps_large_values\nE assert 50 == 10\n1 failed\n",
                 stderr="GENESIS_RED_PHASE_VERDICT:{\"category\": \"assertion\", \"nodeid\": \"tests/test_alpha.py::test_clamp_caps_large_values\", \"phase\": \"call\"}\n",
@@ -173,7 +179,7 @@ def test_red_phase_does_not_inherit_github_credentials(monkeypatch, tmp_path):
     monkeypatch.setattr(autorepair.subprocess, "run", fake_run)
     passed, message = autorepair.verify_regression_fails_on_baseline(
         tmp_path,
-        {"tests/test_alpha.py": (
+        {"genesis/alpha.py": "def clamp(value):\n    return min(value, 10)\n", "tests/test_alpha.py": (
             "from genesis.alpha import clamp\n\ndef test_clamp_caps_large_values():\n"
             "    assert clamp(50) == 10\n"
         )},
@@ -196,7 +202,7 @@ def test_red_phase_rejects_runtime_errors_even_with_failed_node(monkeypatch, tmp
         if command[:3] == ["git", "worktree", "remove"]:
             return SimpleNamespace(returncode=0)
         if command[:2] == ["docker", "run"]:
-            return SimpleNamespace(
+            return _fake_docker_result(kwargs,
                 returncode=1,
                 stdout=(
                     "FAILED tests/test_alpha.py::test_clamp_caps_large_values - RuntimeError\n"
@@ -209,7 +215,7 @@ def test_red_phase_rejects_runtime_errors_even_with_failed_node(monkeypatch, tmp
     monkeypatch.setattr(autorepair.subprocess, "run", fake_run)
     ok, detail = autorepair.verify_regression_fails_on_baseline(
         tmp_path,
-        {"tests/test_alpha.py": (
+        {"genesis/alpha.py": "def clamp(value):\n    return min(value, 10)\n", "tests/test_alpha.py": (
             "from genesis.alpha import clamp\n\n"
             "def test_clamp_caps_large_values():\n    assert clamp(50) == 10\n"
         )},
@@ -238,7 +244,7 @@ def test_real_pytest_rewritten_assertion_is_accepted_as_red_phase(tmp_path):
 
     ok, reason = autorepair.verify_regression_fails_on_baseline(
         tmp_path,
-        {"tests/test_alpha.py": (
+        {"genesis/alpha.py": "def clamp(value):\n    return min(value, 10)\n", "tests/test_alpha.py": (
             "from genesis.alpha import clamp\n\n"
             "def test_clamp_caps_large_values():\n    assert clamp(50) == 10\n"
         )},
@@ -259,7 +265,7 @@ def test_red_phase_fails_closed_without_trusted_container(monkeypatch, tmp_path)
     monkeypatch.setattr(autorepair.subprocess, "run", fake_run)
     ok, reason = autorepair.verify_regression_fails_on_baseline(
         tmp_path,
-        {"tests/test_alpha.py": (
+        {"genesis/alpha.py": "def clamp(value):\n    return min(value, 10)\n", "tests/test_alpha.py": (
             "from genesis.alpha import clamp\n\n"
             "def test_clamp_caps_large_values():\n    assert clamp(50) == 10\n"
         )},
@@ -283,7 +289,7 @@ def test_sandbox_never_passes_host_token_into_docker(monkeypatch, tmp_path):
             return SimpleNamespace(returncode=0)
         if command[:2] == ["docker", "run"]:
             seen.append((command, kwargs["env"]))
-            return SimpleNamespace(
+            return _fake_docker_result(kwargs,
                 returncode=1,
                 stdout="FAILED tests/test_alpha.py::test_clamp_caps_large_values\nE assert 50 == 10\n1 failed\n",
                 stderr="GENESIS_RED_PHASE_VERDICT:{\"category\": \"assertion\", \"nodeid\": \"tests/test_alpha.py::test_clamp_caps_large_values\", \"phase\": \"call\"}\n",
@@ -293,7 +299,7 @@ def test_sandbox_never_passes_host_token_into_docker(monkeypatch, tmp_path):
     monkeypatch.setattr(autorepair.subprocess, "run", fake_run)
     ok, message = autorepair.verify_regression_fails_on_baseline(
         tmp_path,
-        {"tests/test_alpha.py": (
+        {"genesis/alpha.py": "def clamp(value):\n    return min(value, 10)\n", "tests/test_alpha.py": (
             "from genesis.alpha import clamp\n\n"
             "def test_clamp_caps_large_values():\n    assert clamp(50) == 10\n"
         )},
@@ -316,7 +322,7 @@ def test_runtime_error_cannot_spoof_assertion_marker(monkeypatch, tmp_path):
         if command[:3] == ["git", "worktree", "remove"]:
             return SimpleNamespace(returncode=0)
         if command[:2] == ["docker", "run"]:
-            return SimpleNamespace(
+            return _fake_docker_result(kwargs,
                 returncode=1,
                 stdout="FAILED tests/test_alpha.py::test_clamp_caps_large_values - RuntimeError\n"
                        "E RuntimeError: backend unavailable\n"
@@ -329,10 +335,10 @@ def test_runtime_error_cannot_spoof_assertion_marker(monkeypatch, tmp_path):
 
     monkeypatch.setattr(autorepair.subprocess, "run", fake_run)
     ok, detail = autorepair.verify_regression_fails_on_baseline(
-        tmp_path, {"tests/test_alpha.py": (
+        tmp_path, {"genesis/alpha.py": "def clamp(value):\n    return min(value, 10)\n", "tests/test_alpha.py": (
             "from genesis.alpha import clamp\n\n"
             "def test_clamp_caps_large_values():\n"
-            "    assert clamp(50) == 10, 'AssertionError: expected clamp'\n"
+            "    assert clamp(50) == 10\n"
         )},
     )
     assert not ok and "classified assertion" in detail
