@@ -166,7 +166,7 @@ def test_red_phase_does_not_inherit_github_credentials(monkeypatch, tmp_path):
             return SimpleNamespace(
                 returncode=1,
                 stdout="FAILED tests/test_alpha.py::test_clamp_caps_large_values\nE assert 50 == 10\n1 failed\n",
-                stderr="",
+                stderr="GENESIS_RED_PHASE_VERDICT:{\"category\": \"assertion\", \"nodeid\": \"tests/test_alpha.py::test_clamp_caps_large_values\", \"phase\": \"call\"}\n",
             )
         raise AssertionError(f"unexpected command: {command}")
 
@@ -215,7 +215,7 @@ def test_red_phase_rejects_runtime_errors_even_with_failed_node(monkeypatch, tmp
         )},
     )
     assert not ok
-    assert "not an assertion" in detail
+    assert "classified assertion" in detail
 
 
 def test_real_pytest_rewritten_assertion_is_accepted_as_red_phase(tmp_path):
@@ -286,7 +286,7 @@ def test_sandbox_never_passes_host_token_into_docker(monkeypatch, tmp_path):
             return SimpleNamespace(
                 returncode=1,
                 stdout="FAILED tests/test_alpha.py::test_clamp_caps_large_values\nE assert 50 == 10\n1 failed\n",
-                stderr="",
+                stderr="GENESIS_RED_PHASE_VERDICT:{\"category\": \"assertion\", \"nodeid\": \"tests/test_alpha.py::test_clamp_caps_large_values\", \"phase\": \"call\"}\n",
             )
         raise AssertionError(command)
 
@@ -303,3 +303,36 @@ def test_sandbox_never_passes_host_token_into_docker(monkeypatch, tmp_path):
     assert not any("secret-not-for-container" in value for value in map(str, seen[0]))
     assert "GH_TOKEN" not in seen[0][1] and "GITHUB_TOKEN" not in seen[0][1]
     assert "--network" in seen[0][0] and "none" in seen[0][0]
+
+
+def test_runtime_error_cannot_spoof_assertion_marker(monkeypatch, tmp_path):
+    _fixture(tmp_path)
+
+    def fake_run(command, **kwargs):
+        if command[:3] == ["docker", "image", "inspect"]:
+            return SimpleNamespace(returncode=0)
+        if command[:3] == ["git", "worktree", "add"]:
+            return SimpleNamespace(returncode=0)
+        if command[:3] == ["git", "worktree", "remove"]:
+            return SimpleNamespace(returncode=0)
+        if command[:2] == ["docker", "run"]:
+            return SimpleNamespace(
+                returncode=1,
+                stdout="FAILED tests/test_alpha.py::test_clamp_caps_large_values - RuntimeError\\n"
+                       "E RuntimeError: backend unavailable\\n"
+                       "assert clamp(50) == 10, 'AssertionError: expected clamp'\\n1 failed\\n",
+                stderr='GENESIS_RED_PHASE_VERDICT:{"category": "other", '
+                       '"nodeid": "tests/test_alpha.py::test_clamp_caps_large_values", '
+                       '"phase": "call"}\\n',
+            )
+        raise AssertionError(command)
+
+    monkeypatch.setattr(autorepair.subprocess, "run", fake_run)
+    ok, detail = autorepair.verify_regression_fails_on_baseline(
+        tmp_path, {"tests/test_alpha.py": (
+            "from genesis.alpha import clamp\\n\\n"
+            "def test_clamp_caps_large_values():\\n"
+            "    assert clamp(50) == 10, 'AssertionError: expected clamp'\\n"
+        )},
+    )
+    assert not ok and "classified assertion" in detail
