@@ -6,6 +6,7 @@ import base64
 import json
 import os
 import re
+import resource
 import subprocess
 import sys
 import tempfile
@@ -528,7 +529,15 @@ def verify_regression_fails_on_baseline(
             # No network, host credentials, Docker socket or writable repo.
             # The trusted image contains dependencies, not generated code.
             # Docker defaults include the host's seccomp confinement.
-            result = subprocess.run(
+            # The Docker CLI runs on the host: its own output needs a hard
+            # OS-enforced file-size cap; Docker memory limits only the container.
+            # Avoid capture_output=True, which otherwise grows unbounded in
+            # host Python memory when generated code prints indefinitely.
+            def limit_output_bytes() -> None:
+                resource.setrlimit(resource.RLIMIT_FSIZE, (65536, 65536))
+
+            with tempfile.TemporaryFile(mode="w+t") as stdout_file, tempfile.TemporaryFile(mode="w+t") as stderr_file:
+                result = subprocess.run(
                 [
                     "docker", "run", "--rm", "--network", "none",
                     "--read-only", "--cap-drop", "ALL",
@@ -545,10 +554,17 @@ def verify_regression_fails_on_baseline(
                     "--env", "PYTHONNOUSERSITE=1",
                     sandbox_image, "-q", "--tb=short", f"{test_path}::{test_name}",
                 ],
-                capture_output=True, text=True, timeout=120, check=False,
-                env=docker_env,
-            )
-            output = (result.stdout + "\n" + result.stderr)[-4000:]
+                stdout=stdout_file, stderr=stderr_file,
+                text=True, timeout=120, check=False, env=docker_env,
+                preexec_fn=limit_output_bytes,
+                )
+                stdout_file.seek(0)
+                stderr_file.seek(0)
+                stdout = stdout_file.read(65537)
+                stderr = stderr_file.read(65537)
+            if len(stdout) >= 65536 or len(stderr) >= 65536:
+                return False, "red-phase output exceeds safe byte limit"
+            output = (stdout + "\n" + stderr)[-4000:]
             # Pytest's "1 failed" and the exact node ID demonstrate an
             # assertion failure, not a collection/import/runner failure.
             node_id = f"{test_path}::{test_name}"
@@ -558,7 +574,7 @@ def verify_regression_fails_on_baseline(
             # pytest call.excinfo, not from traceback/source text.
             # Never accept a merely textual "AssertionError" in test output.
             verdicts = []
-            for line in result.stderr.splitlines():
+            for line in stderr.splitlines():
                 prefix = "GENESIS_RED_PHASE_VERDICT:"
                 if not line.startswith(prefix):
                     continue
