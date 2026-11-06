@@ -182,7 +182,7 @@ def test_red_phase_does_not_inherit_github_credentials(monkeypatch, tmp_path):
     assert len(seen) == 1
     assert "GH_TOKEN" not in seen[0] and "GITHUB_TOKEN" not in seen[0]
     assert "PYTEST_ADDOPTS" not in seen[0]
-    assert seen[0]["PYTEST_DISABLE_PLUGIN_AUTOLOAD"] == "1"
+    assert "PYTEST_DISABLE_PLUGIN_AUTOLOAD" not in seen[0]
 
 
 def test_red_phase_rejects_runtime_errors_even_with_failed_node(monkeypatch, tmp_path):
@@ -318,21 +318,21 @@ def test_runtime_error_cannot_spoof_assertion_marker(monkeypatch, tmp_path):
         if command[:2] == ["docker", "run"]:
             return SimpleNamespace(
                 returncode=1,
-                stdout="FAILED tests/test_alpha.py::test_clamp_caps_large_values - RuntimeError\\n"
-                       "E RuntimeError: backend unavailable\\n"
-                       "assert clamp(50) == 10, 'AssertionError: expected clamp'\\n1 failed\\n",
+                stdout="FAILED tests/test_alpha.py::test_clamp_caps_large_values - RuntimeError\n"
+                       "E RuntimeError: backend unavailable\n"
+                       "assert clamp(50) == 10, 'AssertionError: expected clamp'\n1 failed\n",
                 stderr='GENESIS_RED_PHASE_VERDICT:{"category": "other", '
                        '"nodeid": "tests/test_alpha.py::test_clamp_caps_large_values", '
-                       '"phase": "call"}\\n',
+                       '"phase": "call"}\n',
             )
         raise AssertionError(command)
 
     monkeypatch.setattr(autorepair.subprocess, "run", fake_run)
     ok, detail = autorepair.verify_regression_fails_on_baseline(
         tmp_path, {"tests/test_alpha.py": (
-            "from genesis.alpha import clamp\\n\\n"
-            "def test_clamp_caps_large_values():\\n"
-            "    assert clamp(50) == 10, 'AssertionError: expected clamp'\\n"
+            "from genesis.alpha import clamp\n\n"
+            "def test_clamp_caps_large_values():\n"
+            "    assert clamp(50) == 10, 'AssertionError: expected clamp'\n"
         )},
     )
     assert not ok and "classified assertion" in detail
