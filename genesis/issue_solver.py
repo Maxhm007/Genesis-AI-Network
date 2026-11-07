@@ -10,6 +10,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 from .memory import GenesisMemory
+from .repair_checkpoints import RepairCheckpointStore, fingerprint
 from .selfdev import SelfDevelopmentExecutor, SelfDevResult, normalize_selfdev_path
 
 PROTECTED_PATHS = {"GENESIS_CONSTITUTION.md", "GENESIS_BLOCK.json"}
@@ -48,6 +49,7 @@ class IssueSolver:
         self.github_model = os.environ.get("GENESIS_REPAIR_MODEL", "openai/gpt-4o").strip()
         self.provider_timeout = int(os.environ.get("GENESIS_REPAIR_TIMEOUT_SECONDS", str(DEFAULT_PROVIDER_TIMEOUT_SECONDS)))
         self.memory = GenesisMemory(self.root)
+        self.checkpoints = RepairCheckpointStore(self.root)
 
     def run_tests(self) -> tuple[bool, str]:
         proc = subprocess.run(
@@ -338,17 +340,32 @@ class IssueSolver:
         if diagnosis.category == "constitution_integrity":
             return RepairAttempt(diagnosis, None, None, "blocked_protected_identity")
 
-        proposal = self._deterministic_proposal(diagnosis)
-        if proposal is None:
-            proposal = self._provider_proposal(diagnosis)
-        if proposal is None:
-            return RepairAttempt(diagnosis, None, None, "retry_pending_capability")
+        signature = fingerprint(diagnosis.category, failure_text)
+        if not self.checkpoints.reserve(signature, diagnosis.category):
+            # A repeated unresolved signature needs a different strategy or human
+            # review. A candidate passing tests is not a promoted, verified fix.
+            return RepairAttempt(diagnosis, None, None, "escalation_required")
 
-        proposal = self.validate_proposal(proposal)
-        result = SelfDevelopmentExecutor(self.root).execute(proposal)
-        return RepairAttempt(
-            diagnosis,
-            proposal,
-            result,
-            "candidate_repaired" if result.tests_passed and result.committed else "repair_failed_validation",
-        )
+        try:
+            proposal = self._deterministic_proposal(diagnosis)
+            if proposal is None:
+                proposal = self._provider_proposal(diagnosis)
+            if proposal is None:
+                self.checkpoints.finish(signature, "blocked", "no_repair_provider_or_proposal")
+                return RepairAttempt(diagnosis, None, None, "retry_pending_capability")
+
+            proposal = self.validate_proposal(proposal)
+            result = SelfDevelopmentExecutor(self.root).execute(proposal)
+            succeeded = result.tests_passed and result.committed
+            self.checkpoints.finish(
+                signature,
+                "candidate_created" if succeeded else "failed",
+                result.commit_sha if succeeded and result.commit_sha else "candidate_validation_failed",
+            )
+            return RepairAttempt(
+                diagnosis, proposal, result,
+                "candidate_repaired" if succeeded else "repair_failed_validation",
+            )
+        except Exception:
+            self.checkpoints.finish(signature, "failed", "repair_exception")
+            raise
