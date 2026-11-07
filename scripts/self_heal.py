@@ -21,7 +21,7 @@ SOFTWARE_DEBUGGER = AgentRole(
 
 
 def run_issue_team(attempt) -> list[dict]:
-    if attempt.status == "healthy":
+    if attempt.status in {"healthy", "escalation_required"}:
         return []
     team = AITeam(
         ProviderRegistry(),
@@ -63,7 +63,7 @@ def main() -> None:
             check=False,
             env={**os.environ},
         )
-    elif attempt.status == "needs_new_capability":
+    elif attempt.status in {"needs_new_capability", "escalation_required"}:
         title = f"Genesis capability gap: {attempt.diagnosis.category}"
         debugger_present = any(item.get("agent") == "specialist_software_debugging" for item in team_output)
         body = (
@@ -73,7 +73,25 @@ def main() -> None:
             "The issue-response team may route to a stronger configured Genesis Provider Protocol endpoint for a structured patch. "
             "No unsafe code change was made."
         )
-        subprocess.run(["gh", "issue", "create", "--title", title, "--body", body], cwd=root, check=False, env={**os.environ})
+        # Persist the escalation as a GitHub issue instead of relying on the
+        # ephemeral runner's SQLite state. Avoid repeated identical open issues.
+        if os.environ.get("GITHUB_REPOSITORY") and os.environ.get("GH_TOKEN", os.environ.get("GITHUB_TOKEN")):
+            existing = subprocess.run(
+                ["gh", "issue", "list", "--repo", os.environ["GITHUB_REPOSITORY"],
+                 "--state", "open", "--limit", "100", "--json", "title",
+                 "--jq", f'[.[] | select(.title == {json.dumps(title)})] | length'],
+                cwd=root, check=False, text=True, capture_output=True, env={**os.environ},
+            )
+            if existing.returncode != 0:
+                raise RuntimeError("Cannot check existing escalation issues; declining to create duplicate")
+            if existing.stdout.strip() == "0":
+                subprocess.run(
+                    ["gh", "issue", "create", "--repo", os.environ["GITHUB_REPOSITORY"],
+                     "--title", title, "--body", body],
+                    cwd=root, check=True, env={**os.environ},
+                )
+        else:
+            print(json.dumps({"status": "escalation_not_published", "reason": "GitHub environment unavailable"}))
 
 
 if __name__ == "__main__":
