@@ -47,9 +47,9 @@ on:
       - genesis/architecture_extensions/architecture_route_gene_0_backlog_work_to_idle_gene_002_and_gene_003.py
       - genesis/pulse.py
       - tests/test_gene_backlog_delegation_router.py
-  # Paused 2026-11-02 until the test-first gate (part 3) is on. Uncomment to resume.
-  # schedule:
-  #   - cron: '*/5 * * * *'
+  # Hourly recovery is a cost-conscious fallback; issue events trigger earlier.
+  schedule:
+    - cron: '17 * * * *'
   workflow_dispatch:
 
 permissions:
@@ -112,11 +112,9 @@ jobs:
           python-version: '3.12'
 
       - name: Install focused delegation validation dependencies
-        if: github.event_name == 'push'
         run: python -m pip install --disable-pip-version-check pytest cryptography
 
       - name: Validate parallel controller and cross-Gene delegation
-        if: github.event_name == 'push'
         # Unit tests exercise the supported six-worker scheduler; the runtime
         # dispatch step below runs one solver at a time (MAX_PARALLEL=1).
         env:
