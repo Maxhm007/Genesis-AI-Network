@@ -4,6 +4,7 @@ from pathlib import Path
 from types import SimpleNamespace
 
 from scripts import self_heal
+from genesis.issue_solver import Diagnosis
 
 
 def test_exhausted_repair_does_not_rerun_team(monkeypatch):
@@ -20,7 +21,7 @@ def test_escalation_without_github_credentials_is_safe(tmp_path: Path, monkeypat
     monkeypatch.delenv("GITHUB_REPOSITORY", raising=False)
     fake = SimpleNamespace(
         status="escalation_required",
-        diagnosis=SimpleNamespace(category="import_failure", summary="Missing dependency", failure_text="E   ImportError: missing"),
+        diagnosis=Diagnosis(category="import_failure", summary="Missing dependency", failure_text="E   ImportError: missing"),
         proposal=None,
         result=None,
     )
