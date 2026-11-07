@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import re
+import urllib.error
 import urllib.request
 import xml.etree.ElementTree as ET
 from dataclasses import asdict, dataclass
@@ -173,7 +174,7 @@ class ImmortalityScanner:
         errors: list[dict[str, str]] = []
         try:
             discovered.extend(self._from_research(self.research.longevity_scan(limit=per_source)))
-        except Exception as exc:
+        except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, ET.ParseError) as exc:
             errors.append({"source": "Europe PMC", "error": str(exc)})
 
         config_path = self.root / "config" / "immortality_sources.json"
@@ -184,7 +185,7 @@ class ImmortalityScanner:
                     continue
                 try:
                     discovered.extend(self.fetch_rss(str(feed["name"]), str(feed["url"]), per_source))
-                except Exception as exc:
+                except (urllib.error.URLError, TimeoutError, OSError, json.JSONDecodeError, ET.ParseError) as exc:
                     errors.append({"source": str(feed.get("name", feed.get("url", "unknown"))), "error": str(exc)})
 
         assessments = [self.assess(item) for item in discovered]
