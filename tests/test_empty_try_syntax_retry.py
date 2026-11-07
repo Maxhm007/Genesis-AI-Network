@@ -41,10 +41,11 @@ def test_provider_recovers_on_specific_empty_try_feedback(tmp_path):
     target = tmp_path / "genesis" / "immortality_scan.py"
     target.parent.mkdir()
     target.write_text(
-        "def scan():\n"
-        "    assessments = [3, 1]\n"
-        "    assessments.sort()\n"
-        "    return assessments\n",
+        "class Scanner:\n"
+        "    def scan(self):\n"
+        "        assessments = [3, 1]\n"
+        "        assessments.sort()\n"
+        "        return assessments\n",
         encoding="utf-8",
     )
 
@@ -61,12 +62,12 @@ def test_provider_recovers_on_specific_empty_try_feedback(tmp_path):
             else:
                 assert "EMPTY_TRY_BLOCK_RECOVERY" in prompt
                 assert "NO executable body" in prompt
-                assert "AST_SAFE_STATEMENT_RANGE: genesis/immortality_scan.py:3-3" in prompt
+                assert "AST_SAFE_STATEMENT_RANGE: genesis/immortality_scan.py:4-4" in prompt
                 replacement = "assessments.sort(key=lambda item: item)"
             return json.dumps({"edits": [{
                 "path": "genesis/immortality_scan.py",
-                "start_line": 3,
-                "end_line": 3,
+                "start_line": 4,
+                "end_line": 4,
                 "new": replacement,
             }]})
 
