@@ -15,7 +15,8 @@ def _required_int(text: str, pattern: str) -> int:
 def test_stale_reservation_threshold_exceeds_agentic_worker_timeout():
     worker_text = AGENTIC_WORKER.read_text(encoding="utf-8")
     dispatch_text = AGENTIC_DISPATCH.read_text(encoding="utf-8")
-    worker_timeout = _required_int(worker_text, r"^\s*timeout-minutes:\s*(\d+)\s*$")
+    repair_job = worker_text.split("  repair-and-promote:", 1)[1]
+    worker_timeout = _required_int(repair_job, r"^\s*timeout-minutes:\s*(\d+)\s*$")
     dispatch_stale = _required_int(dispatch_text, r"^STALE_RESERVATION_MINUTES\s*=\s*(\d+)\s*$")
     assert worker_timeout == 120
     assert dispatch_stale > worker_timeout
