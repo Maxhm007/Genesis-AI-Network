@@ -41,7 +41,7 @@ def test_exact_scoped_merged_repair_is_eligible_for_independent_verification():
     ("files", {"files": FILES + [{"filename": ".github/workflows/secret-guard.yml"}]}),
     ("files", {"files": FILES[:1]}),
     ("issue", {"issue": {**ISSUE, "labels": [{"name": "genesis-owner-paused"}]}}),
-]):
+])
 def test_rejects_unverified_or_out_of_scope_merges(field, patch):
     params = {"issue": ISSUE, "pr": PR, "changed_files": FILES, "number": 381, "pr_number": 1159, "sha": SHA}
     params.update(patch)
