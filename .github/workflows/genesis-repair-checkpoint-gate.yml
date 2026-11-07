@@ -6,10 +6,12 @@ on:
       - 'genesis/repair_checkpoints.py'
       - 'genesis/issue_solver.py'
       - 'genesis/python_syntax_retry.py'
+      - 'genesis/immortality_scan.py'
       - 'scripts/self_heal.py'
       - 'tests/test_repair_checkpoints.py'
       - 'tests/test_issue_solver.py'
       - 'tests/test_empty_try_syntax_retry.py'
+      - 'tests/test_immortality_scan.py'
       - 'tests/test_self_heal_escalation.py'
       - 'tests/test_bounded_repair_gate.py'
       - '.github/workflows/genesis-bounded-repair-worker.yml'
@@ -37,4 +39,4 @@ jobs:
       - name: Compile repair components
         run: python -m py_compile genesis/repair_checkpoints.py genesis/issue_solver.py genesis/python_syntax_retry.py scripts/self_heal.py
       - name: Run repair regression suite
-        run: python -m pytest -q tests/test_issue_solver.py tests/test_repair_checkpoints.py tests/test_self_heal_escalation.py tests/test_bounded_repair_gate.py tests/test_autonomous_recovery_activation.py tests/test_python_syntax_retry.py tests/test_empty_try_syntax_retry.py
+        run: python -m pytest -q tests/test_issue_solver.py tests/test_repair_checkpoints.py tests/test_self_heal_escalation.py tests/test_bounded_repair_gate.py tests/test_autonomous_recovery_activation.py tests/test_python_syntax_retry.py tests/test_empty_try_syntax_retry.py tests/test_immortality_scan.py
