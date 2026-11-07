@@ -31,9 +31,54 @@ env:
   PIP_CACHE_DIR: ~/.cache/pip
 
 jobs:
+  test-first-gate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    permissions:
+      contents: read
+      issues: read
+    outputs:
+      eligible: ${{ steps.eligibility.outputs.eligible }}
+    steps:
+      - name: Checkout main
+        uses: actions/checkout@v4
+        with:
+          ref: main
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Verify reserved issue and supported target
+        id: eligibility
+        env:
+          GH_TOKEN: ${{ github.token }}
+          ISSUE_NUMBER: ${{ inputs.issue_number }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          echo "eligible=false" >> "$GITHUB_OUTPUT"
+          [[ "$ISSUE_NUMBER" =~ ^[1-9][0-9]*$ ]] || { echo "Invalid issue number"; exit 1; }
+          issue_json=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels,body)
+          [[ $(jq -r '.state' <<<"$issue_json") == OPEN ]] || { echo "Issue not open"; exit 1; }
+          jq -e '[.labels[].name] | index("genesis-repair-in-progress") != null' <<<"$issue_json" >/dev/null || { echo "Issue is not reserved"; exit 1; }
+          target=$(jq -r '.body // ""' <<<"$issue_json" | python -m genesis.issue_target)
+          [[ "$target" == genesis/*.py && "$target" != *..* && -f "$target" ]] || { echo "Unsafe target"; exit 1; }
+          case "$target" in
+            genesis/autonomy_guard.py|genesis/autonomy_proof.py|genesis/blockchain.py|genesis/ephemeral_validator.py|genesis/security.py|genesis/selfdev.py|genesis/issue_solver.py|genesis/file_self_review.py|genesis/file_self_review_policy.py)
+              echo "Protected target"; exit 1 ;;
+          esac
+          echo "eligible=true" >> "$GITHUB_OUTPUT"
+      - name: Install test dependencies
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Test repair control plane before any model starts
+        if: steps.eligibility.outputs.eligible == 'true'
+        run: |
+          python -m py_compile genesis/repair_checkpoints.py genesis/issue_solver.py scripts/github_issue_autorepair.py
+          python -m pytest -q tests/test_issue_solver.py tests/test_repair_checkpoints.py tests/test_github_issue_autorepair.py
+
   repair-and-promote:
-    # Paused 2026-11-02 until the test-first gate (part 3) is on. Delete this line and the next to resume.
-    if: false
+    needs: test-first-gate
+    if: needs.test-first-gate.result == 'success' && needs.test-first-gate.outputs.eligible == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 90
     steps:
