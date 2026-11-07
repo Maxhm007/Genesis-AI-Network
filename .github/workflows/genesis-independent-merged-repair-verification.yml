@@ -70,4 +70,4 @@ jobs:
       - name: Record verified evidence, seal issue and close through Closure Manager
         env:
           GITHUB_TOKEN: ${{ github.token }}
-        run: python scripts/verify_merged_issue_repair.py
+        run: python -m scripts.verify_merged_issue_repair
