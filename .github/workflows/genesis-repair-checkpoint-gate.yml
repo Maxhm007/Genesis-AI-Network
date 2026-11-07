@@ -1,0 +1,32 @@
+name: Genesis Repair Checkpoint Gate
+
+on:
+  pull_request:
+    paths:
+      - 'genesis/repair_checkpoints.py'
+      - 'genesis/issue_solver.py'
+      - 'scripts/self_heal.py'
+      - 'tests/test_repair_checkpoints.py'
+      - 'tests/test_issue_solver.py'
+      - 'tests/test_self_heal_escalation.py'
+      - '.github/workflows/genesis-repair-checkpoint-gate.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  targeted-repair-checks:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install test dependencies
+        run: python -m pip install --disable-pip-version-check -r requirements.txt
+      - name: Compile repair components
+        run: python -m py_compile genesis/repair_checkpoints.py genesis/issue_solver.py scripts/self_heal.py
+      - name: Run repair regression suite
+        run: python -m pytest -q tests/test_issue_solver.py tests/test_repair_checkpoints.py tests/test_self_heal_escalation.py
