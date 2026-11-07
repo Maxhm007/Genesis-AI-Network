@@ -147,8 +147,23 @@ def _certificate(issue: dict, *, reason: str, reference: int | None, evidence_di
 
 def _post_certificate(repository: str, token: str, number: int, certificate: dict) -> None:
     comments = issue_comments(repository, token, number)
-    if any(CERT_MARKER in str(row.get("body") or "") for row in comments):
-        return
+    # A historical "reopened unverified root" marker is NOT a certificate.
+    # Only a valid machine-readable seal for this issue is idempotent.
+    for row in comments:
+        body = str(row.get("body") or "")
+        if not body.startswith(CERT_MARKER + "\n"):
+            continue
+        try:
+            prior = json.loads(body.split("\n", 1)[1])
+        except (ValueError, IndexError):
+            continue
+        if (isinstance(prior, dict)
+                and prior.get("schema") == "genesis.issue-closure-certificate.v1"
+                and prior.get("issue") == number
+                and prior.get("closure_reason") == certificate.get("closure_reason")
+                and prior.get("verified") == certificate.get("verified")
+                and prior.get("promoted_sha") == certificate.get("promoted_sha")):
+            return
     post_comment(repository, token, number, CERT_MARKER + "\n" + json.dumps(certificate, sort_keys=True))
 
 
