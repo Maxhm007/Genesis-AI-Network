@@ -109,6 +109,52 @@ def _syntax_retry_guidance(module: CodingModule, raw: str, error: Exception) -> 
     )
 
 
+
+def _empty_try_block_guidance(module: CodingModule, raw: str, error: Exception) -> str:
+    """Give explicit bounded feedback for a rejected comment-only try body.
+
+    Do not synthesize a replacement: the provider must author executable code
+    and ordinary syntax, scope and regression gates must still validate it.
+    """
+    message = str(error)
+    if "invalid Python syntax" not in message or "expected an indented block after 'try'" not in message:
+        return ""
+    try:
+        proposal = module._normalize_proposal_shape(module._extract_json(raw))
+    except (ValueError, TypeError):
+        return ""
+    edits = proposal.get("edits")
+    if not isinstance(edits, list) or len(edits) != 1 or not isinstance(edits[0], dict):
+        return ""
+    replacement = edits[0].get("new")
+    if not isinstance(replacement, str) or len(replacement) > 8000:
+        return ""
+    lines = replacement.splitlines()
+    # Scope to the actual invalid pattern; other syntax defects use the normal
+    # AST-based recovery path.
+    for index, line in enumerate(lines):
+        if line.strip() != "try:":
+            continue
+        body = []
+        for following in lines[index + 1:]:
+            stripped = following.strip()
+            if stripped.startswith(("except", "finally:")) and following[:len(following)-len(following.lstrip())] == line[:len(line)-len(line.lstrip())]:
+                break
+            body.append(stripped)
+        if body and all(not item or item.startswith("#") for item in body):
+            return (
+                "\\nEMPTY_TRY_BLOCK_RECOVERY: Rejected proposed try: block has NO executable body; "
+                "a comment such as '# Existing code here' is not Python code. "
+                "Do not repeat this replacement. On the next attempt, choose an actual executable "
+                "statement from NUMBERED_CONTEXT and place it INSIDE the try body with correct "
+                "indentation, followed by a valid except handler; or avoid try/except and make "
+                "a smaller complete statement edit. Preserve existing statements and ordering "
+                "(including sorting), do not write placeholder comments, and never fabricate "
+                "an exception handling policy. Return one edit in original source coordinates.\\n"
+            )
+    return ""
+
+
 def _retry_sequence_guidance(module: CodingModule, attempt: int) -> str:
     """Make deterministic syntax retries materially different across bounded attempts."""
     next_attempt = max(2, min(module.MAX_PROPOSAL_ATTEMPTS, int(attempt) + 1))
@@ -143,7 +189,7 @@ def _repair_prompt_with_ast_guidance(
     syntax_guidance = _syntax_retry_guidance(self, raw, error)
     if not syntax_guidance:
         return base
-    return base + syntax_guidance + _retry_sequence_guidance(self, attempt)
+    return base + syntax_guidance + _empty_try_block_guidance(self, raw, error) + _retry_sequence_guidance(self, attempt)
 
 
 def install_python_syntax_retry_guidance() -> None:
