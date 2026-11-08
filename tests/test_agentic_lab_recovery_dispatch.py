@@ -913,3 +913,55 @@ def test_workflow_state_without_explicit_active_fails_closed(monkeypatch, respon
     assert result["status"] == "idle"
     assert result["reason"] == "dispatch_workflow_inactive"
     assert all(method == "GET" for method, _ in calls)
+
+
+def test_optional_deepseek_disabled_does_not_block_standard_worker(monkeypatch):
+    """A manual DeepSeek pause must not freeze unrelated standard repairs."""
+    monkeypatch.setattr(module, "inactive_dispatch_workflows", _REAL_INACTIVE_DISPATCH_WORKFLOWS)
+    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [_issue(145, "open")])
+    monkeypatch.setattr(module, "safe_lane", lambda target: "generic")
+    calls = []
+
+    def fake_request(repository, token, method, path, payload=None):
+        calls.append((method, path, payload))
+        if path == "/actions/workflows/genesis-agentic-strategy-worker.yml":
+            return {"state": "active"}
+        if path == "/actions/workflows/genesis-deepseek-agentic-solver.yml":
+            return {"state": "disabled_manually"}
+        if method == "GET" and path == "/issues/145/comments?per_page=100":
+            return []
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+    result = module.reserve_and_dispatch("owner/repo", "token")
+    assert result["status"] == "dispatched"
+    assert result["issue_number"] == 145
+    assert result["workflow"] == "genesis-agentic-strategy-worker.yml"
+    assert any(
+        method == "POST" and path == "/actions/workflows/genesis-agentic-strategy-worker.yml/dispatches"
+        for method, path, _ in calls
+    )
+    assert not any(
+        method == "POST" and path == "/actions/workflows/genesis-deepseek-agentic-solver.yml/dispatches"
+        for method, path, _ in calls
+    )
+
+
+def test_unreachable_optional_deepseek_does_not_freeze_standard_worker(monkeypatch):
+    monkeypatch.setattr(module, "inactive_dispatch_workflows", _REAL_INACTIVE_DISPATCH_WORKFLOWS)
+    monkeypatch.setattr(module, "open_agentic_issues", lambda repository, token: [_issue(146, "open")])
+    monkeypatch.setattr(module, "safe_lane", lambda target: "generic")
+
+    def fake_request(repository, token, method, path, payload=None):
+        if path == "/actions/workflows/genesis-agentic-strategy-worker.yml":
+            return {"state": "active"}
+        if path == "/actions/workflows/genesis-deepseek-agentic-solver.yml":
+            raise RuntimeError("optional provider rate limited")
+        if method == "GET" and path == "/issues/146/comments?per_page=100":
+            return []
+        return {}
+
+    monkeypatch.setattr(module, "request", fake_request)
+    result = module.reserve_and_dispatch("owner/repo", "token")
+    assert result["status"] == "dispatched"
+    assert result["workflow"] == "genesis-agentic-strategy-worker.yml"
