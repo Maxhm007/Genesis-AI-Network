@@ -40,7 +40,7 @@ def test_healthy_when_heartbeats_are_current_and_work_is_active():
 def test_detects_stale_team_or_agentic_heartbeat():
     result = module.evaluate(
         team_run=_run(module.TEAM_WORKFLOW, minutes_ago=50),
-        agentic_run=_run(module.AGENTIC_WORKFLOW, minutes_ago=30),
+        agentic_run=_run(module.AGENTIC_WORKFLOW, minutes_ago=90),
         issues=[],
         now=NOW,
     )
@@ -124,3 +124,25 @@ def test_watchdog_exposes_autonomy_kernel_outcome_metrics():
     assert kernel["ready_issue_numbers"] == [70]
     assert kernel["validating_issue_numbers"] == [71]
     assert kernel["autonomous_open_count"] == 2
+
+
+def test_hourly_agentic_schedule_does_not_trigger_false_heartbeat_alarm():
+    """An hourly planned wake should have a 20-minute grace period."""
+    result = module.evaluate(
+        team_run=_run(module.TEAM_WORKFLOW),
+        agentic_run=_run(module.AGENTIC_WORKFLOW, minutes_ago=65),
+        issues=[],
+        now=NOW,
+    )
+    assert result["healthy"] is True
+    assert not any(x.startswith("agentic_lab_heartbeat_stale:") for x in result["faults"])
+
+
+def test_real_agentic_heartbeat_outage_still_detected():
+    result = module.evaluate(
+        team_run=_run(module.TEAM_WORKFLOW),
+        agentic_run=_run(module.AGENTIC_WORKFLOW, minutes_ago=95),
+        issues=[],
+        now=NOW,
+    )
+    assert any(x.startswith("agentic_lab_heartbeat_stale:") for x in result["faults"])
