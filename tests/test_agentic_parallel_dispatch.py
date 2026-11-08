@@ -689,3 +689,86 @@ def test_main_does_not_dispatch_over_a_waiting_solver_run(monkeypatch):
     )
     assert module.main() == 0
     assert dispatched == []
+
+
+
+def test_reclaim_old_384_reservation_while_other_issue_worker_is_running(monkeypatch):
+    """One unrelated worker must not monopolize an abandoned Issue #384 label."""
+    current = datetime.now(timezone.utc)
+    stale = _issue(
+        384, "2026-09-20T00:00:00Z",
+        labels=("genesis-autonomous", "genesis-repair-in-progress", "agentic-lab"),
+    )
+    stale["updated_at"] = "2026-09-20T00:00:00Z"
+    removed = []
+
+    def request(repo, token, method, path, *args):
+        if path.startswith("/actions/runs?"):
+            if "status=in_progress" in path:
+                return {"workflow_runs": [{
+                    "name": "Genesis Agentic Strategy Worker",
+                    "display_title": "Issue #386 — evidence_first",
+                    "event": "workflow_dispatch",
+                    "path": ".github/workflows/genesis-agentic-strategy-worker.yml@refs/heads/main",
+                }]}
+            return {"workflow_runs": []}
+        raise AssertionError(path)
+
+    monkeypatch.setattr(module.agentic, "request", request)
+    monkeypatch.setattr(module.agentic, "remove_label", lambda repo, token, number, label: removed.append((number, label)))
+    assert module._reclaim_orphaned_reservations("owner/repo", "token", [stale]) == [384]
+    assert (384, "genesis-repair-in-progress") in removed
+
+
+def test_matching_issue_worker_retains_stale_reservation(monkeypatch):
+    stale = _issue(384, "2026-09-20T00:00:00Z", labels=("genesis-repair-in-progress",))
+    stale["updated_at"] = "2026-09-20T00:00:00Z"
+
+    def request(repo, token, method, path, *args):
+        return {"workflow_runs": [{
+            "name": "Genesis Agentic Strategy Worker",
+            "display_title": "Issue #384 — alternative_implementation",
+            "event": "workflow_dispatch",
+            "path": ".github/workflows/genesis-agentic-strategy-worker.yml",
+        }]} if "status=in_progress" in path else {"workflow_runs": []}
+
+    monkeypatch.setattr(module.agentic, "request", request)
+    monkeypatch.setattr(module.agentic, "remove_label", lambda *args: pytest.fail("must not release owned reservation"))
+    assert module._reclaim_orphaned_reservations("owner/repo", "token", [stale]) == []
+
+
+@pytest.mark.parametrize("run", [
+    {"name": "Genesis DeepSeek Agentic Solver", "event": "workflow_dispatch"},
+    {"name": "Genesis Agentic Strategy Worker", "event": "workflow_dispatch",
+     "display_title": "unknown custom run"},
+])
+def test_unknown_live_worker_identity_blocks_unsafe_reclaim(monkeypatch, run):
+    stale = _issue(384, "2026-09-20T00:00:00Z", labels=("genesis-repair-in-progress",))
+    stale["updated_at"] = "2026-09-20T00:00:00Z"
+    monkeypatch.setattr(module.agentic, "request", lambda *args: {"workflow_runs": [run]})
+    monkeypatch.setattr(module.agentic, "remove_label", lambda *args: pytest.fail("must preserve on ambiguity"))
+    assert module._reclaim_orphaned_reservations("owner/repo", "token", [stale]) == []
+
+
+def test_truncated_actions_run_list_preserves_reservation(monkeypatch):
+    stale = _issue(384, "2026-09-20T00:00:00Z", labels=("genesis-repair-in-progress",))
+    stale["updated_at"] = "2026-09-20T00:00:00Z"
+    monkeypatch.setattr(module.agentic, "request", lambda *args: {
+        "total_count": 101,
+        "workflow_runs": [{"name": "Unrelated", "event": "workflow_dispatch"}],
+    })
+    monkeypatch.setattr(module.agentic, "remove_label", lambda *args: pytest.fail("must preserve incomplete visibility"))
+    assert module._reclaim_orphaned_reservations("owner/repo", "token", [stale]) == []
+
+
+def test_issue_number_match_is_exact_not_prefix(monkeypatch):
+    monkeypatch.setattr(module.agentic, "request", lambda *args: {
+        "workflow_runs": [{
+            "name": "Genesis Agentic Strategy Worker",
+            "display_title": "Issue #3840 — evidence_first",
+            "event": "workflow_dispatch",
+            "path": ".github/workflows/genesis-agentic-strategy-worker.yml",
+        }],
+    })
+    assert not module._live_agentic_worker_exists("owner/repo", "token", issue_number=384)
+    assert module._live_agentic_worker_exists("owner/repo", "token", issue_number=3840)

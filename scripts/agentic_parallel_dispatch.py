@@ -497,41 +497,61 @@ def _pending_solver_run_exists(repository: str, token: str) -> bool:
 
 
 def _live_agentic_worker_exists(
-    repository: str, token: str, *, statuses: tuple[str, ...] = LIVE_RUN_STATUSES
+    repository: str,
+    token: str,
+    *,
+    statuses: tuple[str, ...] = LIVE_RUN_STATUSES,
+    issue_number: int | None = None,
 ) -> bool:
-    """Return whether the single sequential lane has a queued/running worker."""
+    """Find live solver runs, optionally restricted to a specific Issue.
+
+    The Agentic Strategy Worker has an explicit `Issue #N — strategy` run-name.
+    A run for a DIFFERENT issue cannot justify preserving an orphaned label.
+    Legacy/DeepSeek/bounded worker runs with no authoritative issue number are
+    conservatively treated as possibly matching: never reclaim on ambiguity.
+    GitHub Actions lookup errors also fail closed.
+    """
     for status in statuses:
         try:
             payload = agentic.request(
-                repository,
-                token,
-                "GET",
+                repository, token, "GET",
                 f"/actions/runs?status={status}&per_page=100",
             )
         except Exception:
-            # Fail closed: never clear a reservation when Actions visibility is
-            # unavailable, because that could create duplicate workers.
             return True
         runs = payload.get("workflow_runs", []) if isinstance(payload, dict) else []
+        if not isinstance(runs, list):
+            return True
+        if isinstance(payload, dict) and int(payload.get("total_count") or 0) > len(runs):
+            # A truncated live-run page cannot safely prove absence of a worker.
+            return True
         for run in runs:
-            # Push invocations only validate the baseline; they own no issue.
             if run.get("event") != "workflow_dispatch":
                 continue
-            # Actions exposes run-name in `name` (for example Issue #867 —
-            # evidence_first), so recognize the canonical workflow path too.
             workflow_path = str(run.get("path") or "").split("@", 1)[0]
-            if workflow_path in {
+            if workflow_path not in {
                 ".github/workflows/genesis-agentic-strategy-worker.yml",
                 ".github/workflows/genesis-deepseek-agentic-solver.yml",
                 ".github/workflows/genesis-bounded-repair-worker.yml",
-            } or str(run.get("name") or "") in {
+            } and str(run.get("name") or "") not in {
                 "Genesis Agentic Strategy Worker",
                 "Genesis DeepSeek Agentic Solver",
                 "Genesis Bounded Repair Worker",
             }:
+                continue
+            if issue_number is None:
                 return True
+            # GitHub exposes custom run-name as display_title; 'name' is the
+            # workflow's static name on some API versions.
+            title = str(run.get("display_title") or run.get("name") or "")
+            match = re.match(r"^Issue #([1-9][0-9]*)\b", title)
+            if match:
+                if int(match.group(1)) == issue_number:
+                    return True
+                continue
+            # Legacy run has no usable issue identity: preserve the reservation.
+            return True
     return False
-
 
 def _reclaim_stale_sequential_reservation(repository: str, token: str) -> list[int]:
     """Release a focus reservation only when no solver worker exists at all."""
@@ -590,10 +610,15 @@ def _reclaim_orphaned_reservations(
         number = int(issue.get("number") or 0)
         if number > 0:
             stale.append((number, labels & active_labels))
-    if not stale or _live_agentic_worker_exists(repository, token):
+    if not stale:
         return []
     reclaimed = []
     for number, labels in stale:
+        # Another issue's worker may legitimately be running. It must not keep
+        # THIS expired reservation alive forever. Unknown worker identities,
+        # incomplete run lists, and API errors still fail closed.
+        if _live_agentic_worker_exists(repository, token, issue_number=number):
+            continue
         for label in sorted(labels):
             agentic.remove_label(repository, token, number, label)
         reclaimed.append(number)
