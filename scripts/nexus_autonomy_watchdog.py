@@ -91,7 +91,7 @@ def evaluate(
     issues: list[dict],
     now: datetime,
     team_max_age_minutes: int = 35,
-    agentic_max_age_minutes: int = 20,
+    agentic_max_age_minutes: int = 80,
     stalled_issue_minutes: int = 90,
     recent_progress_minutes: int = 20,
 ) -> dict:
@@ -242,7 +242,7 @@ def check(
     *,
     now: datetime | None = None,
     team_max_age_minutes: int = 35,
-    agentic_max_age_minutes: int = 20,
+    agentic_max_age_minutes: int = 80,
     stalled_issue_minutes: int = 90,
     recent_progress_minutes: int = 20,
 ) -> dict:
@@ -364,7 +364,7 @@ def main() -> int:
     parser = argparse.ArgumentParser(description="Nexus watchdog for Genesis autonomous operation.")
     parser.add_argument("--repository", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--team-max-age-minutes", type=int, default=35)
-    parser.add_argument("--agentic-max-age-minutes", type=int, default=20)
+    parser.add_argument("--agentic-max-age-minutes", type=int, default=80)
     parser.add_argument("--stalled-issue-minutes", type=int, default=90)
     parser.add_argument("--recent-progress-minutes", type=int, default=20)
     args = parser.parse_args()
