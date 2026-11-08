@@ -7,7 +7,7 @@ on:
       - 'genesis/issue_solver.py'
       - 'genesis/python_syntax_retry.py'
       - 'genesis/compact_proposal_retry.py'
-      - 'genesis/__init__.py'
+      - 'genesis/compact_edit_budget.py'
       - 'genesis/immortality_scan.py'
       - 'scripts/self_heal.py'
       - 'tests/test_repair_checkpoints.py'
@@ -34,6 +34,8 @@ jobs:
     timeout-minutes: 10
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - uses: actions/setup-python@v5
         with:
           python-version: '3.12'
