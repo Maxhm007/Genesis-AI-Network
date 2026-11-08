@@ -60,3 +60,7 @@ def install_compact_edit_materialization_budget() -> None:
         return
     CodingModule.validate_proposal = _validate_proposal_with_compact_edit_materialization_budget
     setattr(CodingModule, INSTALL_MARKER, True)
+    # This existing non-protected installation point enables bounded JSON and
+    # size-specific retry guidance without modifying the sealed package initializer.
+    from .compact_proposal_retry import install_compact_proposal_retry
+    install_compact_proposal_retry()
