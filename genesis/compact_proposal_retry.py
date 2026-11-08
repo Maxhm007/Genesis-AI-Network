@@ -39,7 +39,7 @@ def _compact_retry_feedback(module: CodingModule, raw: str, error: Exception) ->
             'Use only {"edits":[{"path":"<exact VALID_PATHS path>",'
             '"start_line":<integer>,"end_line":<integer>,"new":"<JSON-escaped executable code>"}]}. '
             "Use double quotes around keys and strings, escape embedded newlines as \\n and embedded "
-            "quotes as \\", and never use Python triple quotes outside a JSON string. "
+            "double quotes as JSON escapes, and never use Python triple quotes outside a JSON string. "
             "Choose a short, syntactically complete edit grounded in NUMBERED_CONTEXT; "
             "do not output a files mapping or a partial JSON object.\n"
         )
