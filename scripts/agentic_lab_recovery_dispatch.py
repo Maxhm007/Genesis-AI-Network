@@ -1163,10 +1163,15 @@ def inactive_dispatch_workflows(repository: str, token: str) -> list[str]:
 
 def reserve_and_dispatch(repository: str, token: str) -> dict:
     inactive = inactive_dispatch_workflows(repository, token)
-    if inactive:
-        # A disabled worker cannot accept a reservation. Stop before any label,
-        # comment or capability write so a paused worker cannot cause a loop.
-        result = {"status": "idle", "reason": "dispatch_workflow_inactive", "workflows": inactive}
+    # DeepSeek is an optional escalation lane, not a prerequisite for standard
+    # Agentic repair. An unavailable optional worker must not freeze the queue.
+    required_inactive = [
+        workflow for workflow in inactive
+        if workflow == "genesis-agentic-strategy-worker.yml"
+    ]
+    if required_inactive:
+        # Never reserve an issue when the mandatory worker cannot accept it.
+        result = {"status": "idle", "reason": "dispatch_workflow_inactive", "workflows": required_inactive}
         print(json.dumps(result, sort_keys=True))
         return result
 
@@ -1385,7 +1390,7 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
             )
             deepseek_transport_failed = deepseek_switches > deepseek_attempts
 
-            if deepseek_transport_failed:
+            if deepseek_transport_failed or "genesis-deepseek-agentic-solver.yml" in inactive:
                 remove_label(repository, token, number, DEEPSEEK_HANDOFF_LABEL)
                 provider = "agentic-default"
                 gene = "Gene 0"
@@ -1416,7 +1421,7 @@ def reserve_and_dispatch(repository: str, token: str) -> dict:
                     "<!-- genesis-deepseek-transport-bypass -->",
                     (
                         "<!-- genesis-deepseek-transport-bypass -->\n"
-                        "Genesis detected DeepSeek handoff requests without an accepted DeepSeek attempt. "
+                        "Genesis detected an unavailable DeepSeek lane or a handoff without an accepted attempt. "
                         f"The same Issue will continue through standard Agentic strategy `{strategy}`; "
                         "no successor Issue is created and the authoritative chain is unchanged."
                     ),
