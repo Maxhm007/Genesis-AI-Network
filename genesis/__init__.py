@@ -98,13 +98,6 @@ from .deterministic_coding_fallback import (
 _install_deterministic_coding_fallback()
 del _install_deterministic_coding_fallback
 
-# Model responses that overflow strict edit budgets or fail JSON parsing receive
-# bounded, explicit retry guidance; no execution or validation guard is relaxed.
-from .compact_proposal_retry import install_compact_proposal_retry as _install_compact_proposal_retry
-
-_install_compact_proposal_retry()
-del _install_compact_proposal_retry
-
 # When a bounded Python edit fails syntax validation, derive the smallest complete
 # statement from the original repository AST and feed that structural range into
 # the next retry. Genesis still authors the replacement and every normal gate runs.
