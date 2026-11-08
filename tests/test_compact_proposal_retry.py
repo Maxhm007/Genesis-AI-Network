@@ -74,5 +74,5 @@ def test_size_guidance_does_not_raise_limits(tmp_path):
     feedback = _compact_retry_feedback(module, "", ValueError("coding proposal exceeds byte limit"))
     assert "COMPACT_SIZE_RECOVERY" in feedback
     assert str(module.MAX_EDIT_BYTES) in feedback
-    assert "never" in feedback.lower()
+    assert "do not truncate code mechanically" in feedback.lower()
     assert _compact_retry_feedback(module, "", ValueError("coding proposal creates invalid Python syntax")) == ""
