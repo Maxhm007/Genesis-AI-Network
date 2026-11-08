@@ -544,7 +544,7 @@ def _live_agentic_worker_exists(
             # GitHub exposes custom run-name as display_title; 'name' is the
             # workflow's static name on some API versions.
             title = str(run.get("display_title") or run.get("name") or "")
-            match = re.match(r"^Issue #([1-9][0-9]*)\\b", title)
+            match = re.match(r"^Issue #([1-9][0-9]*)\b", title)
             if match:
                 if int(match.group(1)) == issue_number:
                     return True
