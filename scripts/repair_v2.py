@@ -282,6 +282,49 @@ def run_tracked_tests(workspace):
     return result, stats
 
 
+
+def enforce_literal_return_repair(before, after):
+    """Fail-closed automated subset: only literal values in return statements.
+
+    Without a trusted interpreter boundary, arbitrary Python code can forge
+    in-process test completion signals. Require human review for broader edits.
+    """
+    import ast
+    try:
+        old_tree = ast.parse(before.decode("utf-8"))
+        new_tree = ast.parse(after.decode("utf-8"))
+    except (UnicodeError, SyntaxError) as exc:
+        raise ValueError("Restricted auto-repair requires valid Python source") from exc
+    changes = 0
+
+    def compare(old, new, parent=None, field=None):
+        nonlocal changes
+        if type(old) is not type(new):
+            raise ValueError("Restricted auto-repair: executable structure changed")
+        if isinstance(old, ast.Constant):
+            if old.value != new.value:
+                if (parent != "Return" or field != "value" or
+                        type(old.value) is not type(new.value) or
+                        type(old.value) not in (int, float, bool, str)):
+                    raise ValueError("Restricted auto-repair: only return literals may change")
+                changes += 1
+            return
+        if isinstance(old, ast.AST):
+            for name in old._fields:
+                compare(getattr(old, name), getattr(new, name), type(old).__name__, name)
+        elif isinstance(old, (list, tuple)):
+            if len(old) != len(new):
+                raise ValueError("Restricted auto-repair: statement count changed")
+            for a, b in zip(old, new):
+                compare(a, b, parent, field)
+        elif old != new:
+            raise ValueError("Restricted auto-repair: nonliteral changes forbidden")
+
+    compare(old_tree, new_tree)
+    if not 1 <= changes <= 4:
+        raise ValueError("Restricted auto-repair: expected 1-4 safe return literals")
+    return changes
+
 def checkout_target(meta, dest):
     repo = REPOS[meta["target"]]
     if meta["repo"] != repo or not re.fullmatch("[a-f0-9]{40}", meta["sha"]):
@@ -307,6 +350,7 @@ def validate(meta, patch, output):
         base = workspace / path
         if not base.is_file() or base.is_symlink() or base.stat().st_size > 120000:
             raise ValueError("Changed file is not an ordinary existing source file")
+        base_original = base.read_bytes()
         # The sandbox receives ZERO secrets. A reproducible baseline must fail.
         baseline, baseline_stats = run_tracked_tests(workspace)
         if baseline.returncode == 0:
@@ -326,6 +370,7 @@ def validate(meta, patch, output):
         if modified.returncode or modified.stdout.strip() != path:
             raise ValueError("Patch changed unauthorized files")
         candidate_bytes = base.read_bytes()
+        enforce_literal_return_repair(base_original, candidate_bytes)
         candidate_diff = command(["git", "diff", "--binary"], workspace, 15)
         if candidate_diff.returncode:
             raise ValueError("Cannot snapshot tested candidate")
