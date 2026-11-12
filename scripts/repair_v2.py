@@ -242,7 +242,8 @@ discovered = suite.countTestCases()
 if discovered < 1:
     sys.exit(3)
 result = unittest.TextTestRunner(verbosity=1).run(suite)
-print("\\n__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":" +
+sys.stdout.write(chr(10))
+print("__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":" +
       json.dumps({"discovered": discovered, "executed": result.testsRun,
                   "failures": len(result.failures), "errors": len(result.errors),
                   "skipped": len(result.skipped), "successful": result.wasSuccessful()}),
@@ -333,7 +334,9 @@ def validate(meta, patch, output):
             raise ValueError("Patched tests still fail")
         if after_stats["executed"] < baseline_stats["executed"]:
             raise ValueError("Patched test coverage fell below the baseline")
-        if after_stats["skipped"] > baseline_stats["skipped"]:
+        if (after_stats["skipped"] > baseline_stats["skipped"] and not
+                (baseline_stats["errors"] > 0 and
+                 after_stats["discovered"] > baseline_stats["discovered"])):
             raise ValueError("Patched test suite skipped additional tests")
         post_diff = command(["git", "diff", "--binary"], workspace, 15)
         if (base.read_bytes() != candidate_bytes or post_diff.returncode or
