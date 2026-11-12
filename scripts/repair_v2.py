@@ -422,6 +422,10 @@ def publish(attestation, encoded, token):
     repo = REPOS[target]
     branch = "mutual-heal/{}-run-{}".format(meta["healer"], meta["run_id"])
     original = _api(repo, "/contents/" + path + "?ref=" + urllib.parse.quote(meta["sha"]), token=token)
+    if original.get("encoding") != "base64" or not isinstance(original.get("content"), str):
+        raise ValueError("Missing original source for independent publication gate")
+    baseline_source = base64.b64decode(original["content"])
+    enforce_literal_return_repair(baseline_source, raw)
     blob_sha = original.get("sha")
     if not isinstance(blob_sha, str):
         raise ValueError("Cannot establish original blob SHA")
