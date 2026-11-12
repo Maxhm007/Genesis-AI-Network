@@ -57,9 +57,11 @@ class GitHub:
             or suffix == "/issues"
         ):
             raise ValueError("Write operation not allowed")
-        if not (suffix.startswith("/actions/runs") or suffix.startswith("/issues")):
+        is_search = method == "GET" and suffix.startswith("/search/issues?q=")
+        if not (suffix.startswith("/actions/runs") or suffix.startswith("/issues") or is_search):
             raise ValueError("Unsupported resource")
-        url = "https://api.github.com/repos/" + REPOSITORIES[target] + suffix
+        url = ("https://api.github.com" + suffix) if is_search else (
+            "https://api.github.com/repos/" + REPOSITORIES[target] + suffix)
         headers = {
             "Authorization": "Bearer " + self.token,
             "Accept": "application/vnd.github+json",
@@ -94,17 +96,14 @@ class GitHub:
         return jobs
 
     def find_ticket(self, target, exact_title):
-        # Search a bounded recent window. If ambiguous, fail safely.
-        # Do not create a second ticket if an unread page may hide one.
-        for page in range(1, 6):
-            items = self.request("GET", target, "/issues?state=all&per_page=100&page=" + str(page))
-            if not isinstance(items, list):
-                raise ValueError("Malformed issues response")
-            if any(isinstance(item, dict) and item.get("title") == exact_title for item in items):
-                return True
-            if len(items) < 100:
-                return False
-        raise ValueError("Issue history limit reached: refusing duplicate ticket")
+        """Search all target issues (including closed), match exact title."""
+        query = 'repo:{} in:title "{}"'.format(REPOSITORIES[target], exact_title)
+        suffix = "/search/issues?q=" + urllib.parse.quote(query, safe="")
+        data = self.request("GET", target, suffix)
+        matches = data.get("items")
+        if data.get("incomplete_results") or not isinstance(matches, list):
+            raise ValueError("Incomplete issue search: refusing duplicate ticket")
+        return any(isinstance(row, dict) and row.get("title") == exact_title for row in matches)
 
     def issue(self, target, title, description):
         return self.request("POST", target, "/issues", {"title": title, "body": description})
@@ -182,27 +181,29 @@ def repair_ticket(run, failures, helper):
 
 
 def heal_once(identity, api, now=None):
-    """Each agent attempts exactly one peer recovery action per execution."""
+    """Each agent attempts at most one peer recovery action per cycle."""
     if identity not in REPOSITORIES:
         raise ValueError("Unknown healer identity")
     target = "eve" if identity == "genesis" else "genesis"
     eligible = select_failure(api.failed_runs(target), now)
     if not eligible:
         return {"status": "healthy_or_no_recent_failed_runs", "target": target}
-    run = eligible[0]
-    attempt = run["run_attempt"]
-    if attempt == 1:
-        api.retry_failed(target, run["id"])
-        return {"status": "recovery_retry_requested", "target": target,
-                "run_id": run["id"], "attempt": 1}
-    failed = diagnosis(run, api.jobs(target, run["id"]))
-    title, body = repair_ticket(run, failed, identity)
-    if api.find_ticket(target, title):
-        return {"status": "repair_ticket_existing", "target": target,
-                "run_id": run["id"]}
-    ticket = api.issue(target, title, body)
-    return {"status": "repair_ticket_created", "target": target,
-            "run_id": run["id"], "url": ticket.get("html_url")}
+    already_reported = False
+    for run in eligible[:10]:
+        attempt = run["run_attempt"]
+        if attempt == 1:
+            api.retry_failed(target, run["id"])
+            return {"status": "recovery_retry_requested", "target": target,
+                    "run_id": run["id"], "attempt": 1}
+        title, body = repair_ticket(run, diagnosis(run, api.jobs(target, run["id"])), identity)
+        if api.find_ticket(target, title):
+            already_reported = True
+            continue
+        ticket = api.issue(target, title, body)
+        return {"status": "repair_ticket_created", "target": target,
+                "run_id": run["id"], "url": ticket.get("html_url")}
+    return {"status": "repair_tickets_already_open" if already_reported else
+            "no_actionable_failure", "target": target}
 
 
 def main():
