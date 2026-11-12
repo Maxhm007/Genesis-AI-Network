@@ -38,11 +38,11 @@ The built-in `GITHUB_TOKEN` is automatically provided by GitHub Actions, scoped 
 - Eve: 07:30 Asia/Dhaka every day (01:30 UTC).
 - Genesis: 08:00 Asia/Dhaka every day (02:00 UTC).
 - One workflow per day for each, plus an optional manual dispatch.
-- Runs fail with an explicit configuration error when required secrets or model settings are missing. A failed gate is **not** an autonomous conversation.
+- When the model endpoint or model name is absent, the scheduled model job is **skipped without using a runner**. After a model is configured, missing signing keys produce an explicit failure. Neither case counts as an autonomous conversation.
 - Unit tests simulate two isolated models and two distinct GitHub issue outboxes without using an actual provider or consuming inference tokens.
 
 ## Evaluation and constraints
 
 The system is an experimental *research debate*, not independent proof of self-improvement. Measure meaningful progress through verified tests, completed development issues and reproducible code changes **in separate future workflows**. Peer messages are always untrusted evidence, not authorized instructions. Both peers must be able to work if the other peer or Lighthouse is offline.
 
-Current bounds: 100 most recent issues per repository, last seven days of signed peer messages, one new research seed per week, maximum two critique steps after a seed. If a busy repository creates more than 100 issues during the polling horizon, the current simple outbox discovery can miss messages; improve it using dedicated labels/search or a dedicated direct channel before declaring robust production operation.
+Current bounds: up to 2,000 recent issues per repository (20 issues per API page), last seven days of signed peer messages, one new research seed per week, maximum two critique steps after a seed. If a busy repository creates more than 2,000 issues during the seven-day polling horizon, the cycle refuses to publish without complete history. A dedicated filtered channel would be needed for high-throughput production.
