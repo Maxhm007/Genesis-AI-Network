@@ -1,0 +1,124 @@
+name: Genesis repairs Eve - tested code PR
+
+on:
+  schedule:
+    # Once daily; no runners started until explicit opt-in.
+    - cron: '35 1 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/repair_v2.py'
+      - 'tests/test_repair_v2.py'
+      - '.github/workflows/repair-eve-v2.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: genesis-peer-tested-repair
+  cancel-in-progress: false
+
+jobs:
+  policy-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover -s tests -p test_repair_v2.py -v
+
+  propose:
+    if: github.event_name != 'pull_request' && vars.MUTUAL_HEAL_REPAIR_ENABLED == 'true' && vars.REPAIR_MODEL_ENDPOINT != '' && vars.REPAIR_MODEL_NAME != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    outputs:
+      ready: ${{ steps.candidate.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Generate one narrow candidate (no peer write credential)
+        env:
+          REPAIR_READ_TOKEN: ${{ secrets.REPAIR_READ_TOKEN }}
+          REPAIR_MODEL_API_KEY: ${{ secrets.REPAIR_MODEL_API_KEY }}
+          REPAIR_MODEL_ENDPOINT: ${{ vars.REPAIR_MODEL_ENDPOINT }}
+          REPAIR_MODEL_NAME: ${{ vars.REPAIR_MODEL_NAME }}
+        run: python scripts/repair_v2.py prepare --identity genesis --out candidate
+      - name: Determine whether candidate exists
+        id: candidate
+        shell: bash
+        run: |
+          if [[ -s candidate/candidate.diff && -s candidate/metadata.json ]]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo 'No defensible repeated failure/candidate; no repair attempted.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - if: steps.candidate.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: peer-candidate
+          path: candidate/
+          retention-days: 1
+
+  isolated-tests:
+    if: needs.propose.outputs.ready == 'true'
+    needs: propose
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    outputs:
+      validated: ${{ steps.validated.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: peer-candidate
+          path: candidate/
+      - name: Reproduce baseline and prove patched tests pass
+        run: python scripts/repair_v2.py validate --candidate candidate --out verified
+      - name: Confirm validation output
+        id: validated
+        shell: bash
+        run: |
+          test -s verified/attestation.json
+          test -s verified/patched.b64
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: verified-peer-repair
+          path: verified/
+          retention-days: 1
+
+  create-review-pr:
+    if: needs.isolated-tests.outputs.validated == 'true'
+    needs: isolated-tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: verified-peer-repair
+          path: verified/
+      - name: Create review-only PR in Eve repository
+        env:
+          REPAIR_PR_TOKEN: ${{ secrets.REPAIR_PR_TOKEN }}
+        run: python scripts/repair_v2.py publish --verified verified
