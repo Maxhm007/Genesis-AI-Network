@@ -72,8 +72,15 @@ class MutualTests(unittest.TestCase):
     def test_existing_ticket_is_not_duplicated(self):
         api = API([run(attempt=2)], ticket_exists=True)
         result = heal.heal_once("eve", api, NOW)
-        self.assertEqual(result["status"], "repair_ticket_existing")
+        self.assertEqual(result["status"], "repair_tickets_already_open")
         self.assertFalse(api.created)
+
+    def test_existing_ticket_does_not_block_later_failure(self):
+        api = API([run(31, attempt=2), run(30, attempt=1, hours=3)],
+                  ticket_exists=True)
+        result = heal.heal_once("genesis", api, NOW)
+        self.assertEqual(result["run_id"], 30)
+        self.assertEqual(api.retried, [("eve", 30)])
 
     def test_old_and_cancelled_runs_ignored(self):
         api = API([run(hours=55), {**run(42), "conclusion": "cancelled"}])
