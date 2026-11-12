@@ -121,9 +121,9 @@ def diagnostic_log(repo, job_id, token=""):
             raw = response.read(60001)
         # A log redirected outside GitHub is never executed. Secrets should
         # already be masked by GitHub; retain only diagnostic lines.
-        output = re.sub(r"\\x1b\\[[0-9;]*m", "", raw.decode("utf-8", errors="replace"))
+        output = raw.decode("utf-8", errors="replace")
         useful = [line[-400:] for line in output.splitlines() if re.search(
-            r"traceback|exception|error|failed|assert|^\\s*File \\"", line, re.I)]
+            r"traceback|exception|error|failed|assert|File ", line, re.I)]
         return "\\n".join(useful[-25:])[:5000]
     except (OSError, ValueError, TimeoutError):
         return ""
@@ -133,7 +133,7 @@ def source_from_traceback(repo, sha, log, token=""):
     """Read one existing target Python module named by a traceback."""
     if not log or repo not in REPOS.values() or not re.fullmatch(r"[a-f0-9]{40}", sha):
         return None
-    matches = re.findall(r"(?:eve|scripts|src|genesis)/[A-Za-z0-9_/-]+\\.py", log)
+    matches = re.findall(r"(?:eve|scripts|src|genesis)/[A-Za-z0-9_/-]+[.]py", log)
     for candidate in matches[:10]:
         try:
             path = valid_path(candidate)
