@@ -218,7 +218,7 @@ def model_patch(meta, endpoint, model, api_key):
     answer = json.loads(raw)["choices"][0]["message"]["content"]
     if not isinstance(answer, str) or answer.strip() == "NO_SAFE_PATCH":
         return None
-    return answer.strip()
+    return answer if answer.endswith("\n") else answer + "\n"
 
 
 def command(argv, cwd, timeout=TEST_TIMEOUT):
