@@ -189,7 +189,7 @@ def heal_once(identity, api, now=None):
     if not eligible:
         return {"status": "healthy_or_no_recent_failed_runs", "target": target}
     already_reported = False
-    for run in eligible[:10]:
+    for run in eligible:
         attempt = run["run_attempt"]
         if attempt == 1:
             api.retry_failed(target, run["id"])
