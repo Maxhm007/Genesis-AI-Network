@@ -23,6 +23,10 @@ Genesis AI Network's permanent scientific mission is:
 
 Genesis is not one model. Models are replaceable. Code is evolvable. Knowledge is expandable. The mission and constitutional constraints are permanent.
 
+## Reciprocal recovery with Eve
+
+**Genesis repairs Eve; Eve repairs Genesis.** Their primary cross-system interaction is mutual healing rather than research conversations. Each watchdog checks the other's failed GitHub Actions, retries transient failures once, and creates traceable repair tickets for persistent failures. No peer chat is required. See [MUTUAL_HEALING.md](MUTUAL_HEALING.md) for scope, permissions and activation. Current v1 does not autonomously write verified code patches or merge changes.
+
 ## Why Genesis exists
 
 Genesis is being built as a continuously operating research and development network rather than a single chatbot or model. It is designed to:
