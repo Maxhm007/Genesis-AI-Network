@@ -1,0 +1,54 @@
+name: Genesis heals Eve
+
+on:
+  schedule:
+    - cron: '0 1,13 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/mutual_healer.py'
+      - 'tests/test_mutual_healer.py'
+      - '.github/workflows/heal-eve.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: genesis-reciprocal-workflow-healing
+  cancel-in-progress: false
+
+jobs:
+  repair-protocol-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover -s tests -p test_mutual_healer.py -v
+
+  peer-watchdog:
+    if: github.event_name != 'pull_request' && vars.MUTUAL_HEAL_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify local recovery tests
+        run: python -m unittest discover -s tests -p test_mutual_healer.py -v
+      - name: Monitor and recover Eve
+        env:
+          PEER_HEAL_TOKEN: ${{ secrets.PEER_HEAL_TOKEN }}
+        shell: bash
+        run: |
+          if [[ -z "$PEER_HEAL_TOKEN" ]]; then
+            echo "::error::Set a repository secret named PEER_HEAL_TOKEN with Eve-only Actions and Issues write permissions."
+            exit 1
+          fi
+          python scripts/mutual_healer.py --identity genesis
