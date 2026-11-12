@@ -181,12 +181,14 @@ def checkout_target(meta, dest):
     repo = REPOS[meta["target"]]
     if meta["repo"] != repo or not re.fullmatch("[a-f0-9]{40}", meta["sha"]):
         raise ValueError("Target repository/commit mismatch")
-    result = command(["git", "clone", "--quiet", "https://github.com/" + repo + ".git", str(dest)], dest.parent, 90)
+    result = command(["git", "clone", "--depth", "30", "--filter=blob:none", "--quiet", "https://github.com/" + repo + ".git", str(dest)], dest.parent, 90)
     if result.returncode:
         raise ValueError("Repository clone failed")
     result = command(["git", "checkout", "--quiet", "--detach", meta["sha"]], dest, 40)
     if result.returncode:
-        raise ValueError("Pinned failure commit unavailable")
+        fetched = command(["git", "fetch", "--quiet", "--depth", "1", "origin", meta["sha"]], dest, 60)
+        if fetched.returncode or command(["git", "checkout", "--quiet", "--detach", meta["sha"]], dest, 30).returncode:
+            raise ValueError("Pinned failure commit unavailable")
 
 
 def validate(meta, patch, output):
