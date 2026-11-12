@@ -109,6 +109,34 @@ class PeerTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             agent.Model("https://example.com/v1/chat/completions?redirect=1", "x")
 
+    def test_outbox_paginates_before_deduping(self):
+        fresh = datetime.now(timezone.utc).isoformat()
+        ignored = [{"title": "Ordinary issue", "created_at": fresh} for _ in range(100)]
+        own = agent.sign(agent.proposal("genesis", "A", "B", now=datetime.now(timezone.utc)), G)
+        stored = {"title": "[Peer outbox] genesis hypothesis " + own["proposal"]["proposal_id"],
+                  "body": agent.PREFIX + json.dumps(own) + agent.SUFFIX,
+                  "created_at": fresh}
+        class MockTransport(agent.Transport):
+            def __init__(self):
+                super().__init__("token")
+                self.pages = []
+            def _request(self, url, method="GET", payload=None):
+                self.pages.append(url)
+                if "page=1" in url: return ignored
+                if "page=2" in url: return [stored]
+                return []
+        transport = MockTransport()
+        result = transport.read_outbox("genesis")
+        self.assertEqual(len(result), 101)
+        self.assertEqual(len(transport.pages), 2)
+
+    def test_malicious_nested_json_cannot_stop_cycle(self):
+        nested = "[" * 2000 + "0" + "]" * 2000
+        bad = {"title": "[Peer outbox] eve hypothesis invalid",
+               "body": agent.PREFIX + nested + agent.SUFFIX}
+        self.t.issues["eve"].append(bad)
+        self.assertEqual(self.step("genesis")["trigger"], "weekly_seed")
+
     def test_no_model_call_on_idle(self):
         self.step("genesis")
         self.step("genesis")
