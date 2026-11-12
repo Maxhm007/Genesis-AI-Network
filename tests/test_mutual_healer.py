@@ -82,6 +82,14 @@ class MutualTests(unittest.TestCase):
         self.assertEqual(result["run_id"], 30)
         self.assertEqual(api.retried, [("eve", 30)])
 
+    def test_ten_existing_tickets_do_not_starve_older_failure(self):
+        reports = [run(200+i, attempt=2, hours=1+i/5) for i in range(10)]
+        older = run(11, attempt=1, hours=5)
+        api = API(reports + [older], ticket_exists=True)
+        result = heal.heal_once("eve", api, NOW)
+        self.assertEqual(result["status"], "recovery_retry_requested")
+        self.assertEqual(api.retried, [("genesis", 11)])
+
     def test_old_and_cancelled_runs_ignored(self):
         api = API([run(hours=55), {**run(42), "conclusion": "cancelled"}])
         result = heal.heal_once("genesis", api, NOW)
