@@ -176,6 +176,55 @@ class RepairTests(unittest.TestCase):
             self.assertEqual(result["tests_executed"], 2)
             self.assertTrue(result["tests_completed"])
 
+    def test_no_newline_stdout_cannot_hide_completion_marker(self):
+        patch = ("diff --git a/src/calc.py b/src/calc.py\n"
+                 "--- a/src/calc.py\n+++ b/src/calc.py\n"
+                 "@@ -1,2 +1,2 @@\n def value():\n-    return 1\n+    return 2\n")
+        def fake_checkout(meta, dest):
+            (dest / "src").mkdir(parents=True)
+            (dest / "tests").mkdir()
+            (dest / "src"/"calc.py").write_text("def value():\n    return 1\n")
+            (dest / "tests"/"test_calc.py").write_text(
+                "import unittest\nfrom src.calc import value\n"
+                "class TestCalc(unittest.TestCase):\n"
+                "    def test_fix(self):\n"
+                "        print('progress', end='')\n"
+                "        self.assertEqual(value(), 2)\n")
+            subprocess.run(["git", "init", "-q", str(dest)], check=True)
+            subprocess.run(["git", "add", "."], cwd=dest, check=True)
+        meta = {"healer":"genesis","target":"eve","repo":repair.REPOS["eve"],"sha":"a"*40}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(
+                repair, "checkout_target", fake_checkout):
+            result = repair.validate(meta, patch, Path(d)/"verified")
+            self.assertTrue(result["tests_completed"])
+            self.assertEqual(result["tests_executed"], 1)
+
+    def test_baseline_setup_class_failure_is_valid_reproduction(self):
+        patch = ("diff --git a/src/calc.py b/src/calc.py\n"
+                 "--- a/src/calc.py\n+++ b/src/calc.py\n"
+                 "@@ -1,2 +1,2 @@\n def boot():\n"
+                 "-    raise RuntimeError('broken')\n"
+                 "+    return 2\n")
+        def fake_checkout(meta, dest):
+            (dest / "src").mkdir(parents=True)
+            (dest / "tests").mkdir()
+            (dest / "src"/"calc.py").write_text(
+                "def boot():\n    raise RuntimeError('broken')\n")
+            (dest / "tests"/"test_calc.py").write_text(
+                "import unittest\nfrom src.calc import boot\n"
+                "class TestCalc(unittest.TestCase):\n"
+                "    @classmethod\n    def setUpClass(cls): boot()\n"
+                "    def test_first(self): self.assertTrue(True)\n"
+                "    def test_second(self): self.assertTrue(True)\n")
+            subprocess.run(["git", "init", "-q", str(dest)], check=True)
+            subprocess.run(["git", "add", "."], cwd=dest, check=True)
+        meta = {"healer":"genesis","target":"eve","repo":repair.REPOS["eve"],"sha":"a"*40}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(
+                repair, "checkout_target", fake_checkout):
+            result = repair.validate(meta, patch, Path(d)/"verified")
+            self.assertTrue(result["tests_completed"])
+            self.assertEqual(result["tests_executed"], 2)
+
     def test_directionality(self):
         self.assertEqual(repair.peer("genesis"), "eve")
         self.assertEqual(repair.peer("eve"), "genesis")
