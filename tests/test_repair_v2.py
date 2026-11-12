@@ -110,7 +110,7 @@ class RepairTests(unittest.TestCase):
             subprocess.run(["git", "add", "."], cwd=dest, check=True)
         meta = {"healer":"genesis", "target":"eve", "repo":repair.REPOS["eve"], "sha":"a"*40}
         with tempfile.TemporaryDirectory() as d, mock.patch.object(repair, "checkout_target", fake_checkout):
-            with self.assertRaisesRegex(ValueError, "changed while executing tests"):
+            with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
                 repair.validate(meta, patch, Path(d)/"verified")
 
     def test_exit_zero_before_tests_complete_is_rejected(self):
@@ -135,7 +135,7 @@ class RepairTests(unittest.TestCase):
                 "repo": repair.REPOS["eve"], "sha": "a"*40}
         with tempfile.TemporaryDirectory() as d, mock.patch.object(
                 repair, "checkout_target", fake_checkout):
-            with self.assertRaisesRegex(ValueError, "did not complete"):
+            with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
                 repair.validate(meta, patch, Path(d)/"verified")
             self.assertFalse((Path(d)/"verified"/"attestation.json").exists())
 
@@ -172,9 +172,8 @@ class RepairTests(unittest.TestCase):
                 "repo": repair.REPOS["eve"], "sha": "a"*40}
         with tempfile.TemporaryDirectory() as d, mock.patch.object(
                 repair, "checkout_target", fake_checkout):
-            result = repair.validate(meta, patch, Path(d)/"verified")
-            self.assertEqual(result["tests_executed"], 2)
-            self.assertTrue(result["tests_completed"])
+            with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+                repair.validate(meta, patch, Path(d)/"verified")
 
     def test_no_newline_stdout_cannot_hide_completion_marker(self):
         patch = ("diff --git a/src/calc.py b/src/calc.py\n"
@@ -221,9 +220,8 @@ class RepairTests(unittest.TestCase):
         meta = {"healer":"genesis","target":"eve","repo":repair.REPOS["eve"],"sha":"a"*40}
         with tempfile.TemporaryDirectory() as d, mock.patch.object(
                 repair, "checkout_target", fake_checkout):
-            result = repair.validate(meta, patch, Path(d)/"verified")
-            self.assertTrue(result["tests_completed"])
-            self.assertEqual(result["tests_executed"], 2)
+            with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+                repair.validate(meta, patch, Path(d)/"verified")
 
     def test_restored_import_can_reveal_preexisting_skipped_tests(self):
         patch = ("diff --git a/src/calc.py b/src/calc.py\n"
@@ -248,9 +246,45 @@ class RepairTests(unittest.TestCase):
         meta = {"healer":"genesis","target":"eve","repo":repair.REPOS["eve"],"sha":"a"*40}
         with tempfile.TemporaryDirectory() as d, mock.patch.object(
                 repair, "checkout_target", fake_checkout):
-            result = repair.validate(meta, patch, Path(d)/"verified")
-            self.assertTrue(result["tests_completed"])
-            self.assertEqual(result["tests_executed"], 2)
+            with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+                repair.validate(meta, patch, Path(d)/"verified")
+
+    def test_restricted_auto_repair_rejects_forged_completion_marker(self):
+        before = b"def value():\n    return 1\n"
+        after = (b"import os, sys\n"
+                 b"print('__MUTUAL_HEAL_SUITE_FINISHED__' + sys.argv[1])\n"
+                 b"os._exit(0)\n"
+                 b"def value():\n    return 1\n")
+        with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+            repair.enforce_literal_return_repair(before, after)
+
+    def test_restricted_auto_repair_allows_only_return_literals(self):
+        self.assertEqual(repair.enforce_literal_return_repair(
+            b"def value():\n    return 1\n",
+            b"def value():\n    return 2\n"), 1)
+        with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+            repair.enforce_literal_return_repair(
+                b"def value():\n    return 1\n",
+                b"def value():\n    return os._exit(0)\n")
+
+    def test_fixture_error_finishes_suite_without_auto_attestation(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "src").mkdir()
+            (root / "tests").mkdir()
+            (root / "src"/"calc.py").write_text(
+                "def boot():\n    raise RuntimeError('broken')\n")
+            (root / "tests"/"test_calc.py").write_text(
+                "import unittest\nfrom src.calc import boot\n"
+                "class TestCalc(unittest.TestCase):\n"
+                "    @classmethod\n    def setUpClass(cls): boot()\n"
+                "    def test_one(self): self.assertTrue(True)\n"
+                "    def test_two(self): self.assertTrue(True)\n")
+            run, stats = repair.run_tracked_tests(root)
+            self.assertEqual(run.returncode, 1)
+            self.assertEqual(stats["executed"], 0)
+            self.assertEqual(stats["errors"], 1)
+            self.assertEqual(stats["discovered"], 2)
 
     def test_directionality(self):
         self.assertEqual(repair.peer("genesis"), "eve")
