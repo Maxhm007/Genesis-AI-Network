@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -227,6 +228,56 @@ def command(argv, cwd, timeout=TEST_TIMEOUT):
                                                 "HOME": str(cwd), "PYTHONDONTWRITEBYTECODE": "1"})
 
 
+
+# This trusted runner reports completion only AFTER the unittest suite returns.
+# An imported module calling os._exit(0) can no longer masquerade as a passing suite.
+TEST_HARNESS = """
+import json
+import sys
+import unittest
+
+nonce = sys.argv[1]
+suite = unittest.defaultTestLoader.discover("tests")
+discovered = suite.countTestCases()
+if discovered < 1:
+    sys.exit(3)
+result = unittest.TextTestRunner(verbosity=1).run(suite)
+print("__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":" +
+      json.dumps({"discovered": discovered, "executed": result.testsRun,
+                  "failures": len(result.failures), "errors": len(result.errors),
+                  "skipped": len(result.skipped), "successful": result.wasSuccessful()}),
+      flush=True)
+sys.exit(0 if result.wasSuccessful() else 1)
+"""
+
+
+def run_tracked_tests(workspace):
+    nonce = secrets.token_hex(16)
+    result = command([sys.executable, "-c", TEST_HARNESS, nonce], workspace)
+    prefix = "__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":"
+    markers = [line[len(prefix):] for line in result.stdout.splitlines()
+               if line.startswith(prefix)]
+    if len(markers) != 1:
+        raise ValueError("Test suite did not complete; refusing unverified result")
+    try:
+        stats = json.loads(markers[0])
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid test completion record") from exc
+    if (not isinstance(stats, dict) or
+            type(stats.get("discovered")) is not int or
+            type(stats.get("executed")) is not int or
+            stats["discovered"] < 1 or stats["executed"] != stats["discovered"] or
+            type(stats.get("failures")) is not int or
+            type(stats.get("errors")) is not int or
+            type(stats.get("successful")) is not bool):
+        raise ValueError("Test suite execution incomplete or invalid")
+    if stats["successful"] != (result.returncode == 0):
+        raise ValueError("Test status contradicts completion record")
+    if stats["successful"] and (stats["failures"] or stats["errors"]):
+        raise ValueError("Passing suite contains failures")
+    return result, stats
+
+
 def checkout_target(meta, dest):
     repo = REPOS[meta["target"]]
     if meta["repo"] != repo or not re.fullmatch("[a-f0-9]{40}", meta["sha"]):
@@ -253,7 +304,7 @@ def validate(meta, patch, output):
         if not base.is_file() or base.is_symlink() or base.stat().st_size > 120000:
             raise ValueError("Changed file is not an ordinary existing source file")
         # The sandbox receives ZERO secrets. A reproducible baseline must fail.
-        baseline = command([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], workspace)
+        baseline, baseline_stats = run_tracked_tests(workspace)
         if baseline.returncode == 0:
             raise ValueError("Baseline tests pass; repair not established")
         clean = command(["git", "diff", "--quiet"], workspace, 15)
@@ -274,9 +325,11 @@ def validate(meta, patch, output):
         candidate_diff = command(["git", "diff", "--binary"], workspace, 15)
         if candidate_diff.returncode:
             raise ValueError("Cannot snapshot tested candidate")
-        after = command([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], workspace)
+        after, after_stats = run_tracked_tests(workspace)
         if after.returncode:
             raise ValueError("Patched tests still fail")
+        if after_stats["executed"] != baseline_stats["executed"]:
+            raise ValueError("Patched test count differs from baseline")
         post_diff = command(["git", "diff", "--binary"], workspace, 15)
         if (base.read_bytes() != candidate_bytes or post_diff.returncode or
                 post_diff.stdout != candidate_diff.stdout):
@@ -290,6 +343,7 @@ def validate(meta, patch, output):
     attestation = dict(meta, path=path, new_sha256=hashlib.sha256(data).hexdigest(),
                        patch_sha256=hashlib.sha256(patch.encode()).hexdigest(),
                        baseline="failed", patched="passed",
+                       tests_completed=True, tests_executed=after_stats["executed"],
                        test_command="python -m unittest discover -s tests -v")
     (dest / "attestation.json").write_text(json.dumps(attestation, indent=2), encoding="utf-8")
     return attestation
@@ -298,7 +352,10 @@ def validate(meta, patch, output):
 def publish(attestation, encoded, token):
     """Metadata-only promotion. Never executes candidate code with GitHub token."""
     meta = attestation
-    if meta.get("baseline") != "failed" or meta.get("patched") != "passed" or meta.get("test_command") != "python -m unittest discover -s tests -v":
+    if (meta.get("baseline") != "failed" or meta.get("patched") != "passed" or
+            meta.get("test_command") != "python -m unittest discover -s tests -v" or
+            meta.get("tests_completed") is not True or
+            type(meta.get("tests_executed")) is not int or meta["tests_executed"] < 1):
         raise ValueError("No valid reproduction evidence")
     target = peer(meta.get("healer"))
     if meta.get("target") != target or meta.get("repo") != REPOS[target]:
