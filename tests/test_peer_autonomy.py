@@ -4,6 +4,7 @@ import hmac
 import importlib.util
 import json
 import unittest
+import urllib.error
 from datetime import datetime, timezone
 from pathlib import Path
 
@@ -136,6 +137,17 @@ class PeerTests(unittest.TestCase):
                "body": agent.PREFIX + nested + agent.SUFFIX}
         self.t.issues["eve"].append(bad)
         self.assertEqual(self.step("genesis")["trigger"], "weekly_seed")
+
+    def test_peer_outage_does_not_block_self_research(self):
+        class PeerOffline(FakeTransport):
+            def read_outbox(self, identity):
+                if identity == "eve":
+                    raise urllib.error.URLError("Peer unavailable")
+                return super().read_outbox(identity)
+        self.t = PeerOffline()
+        result = self.step("genesis")
+        self.assertEqual(result["trigger"], "weekly_seed")
+        self.assertEqual(len(self.genesis.calls), 1)
 
     def test_no_model_call_on_idle(self):
         self.step("genesis")
