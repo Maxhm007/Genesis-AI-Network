@@ -295,7 +295,7 @@ def _parse_execution_equivalent_source(source):
     import io
     import tokenize
 
-    if not isinstance(source, bytes) or not source or source.startswith(b"\\xef\\xbb\\xbf"):
+    if not isinstance(source, bytes) or not source or source.startswith(bytes.fromhex("efbbbf")):
         raise ValueError("Restricted auto-repair requires plain UTF-8 source without BOM")
     try:
         encoding, _ = tokenize.detect_encoding(io.BytesIO(source).readline)
@@ -303,7 +303,7 @@ def _parse_execution_equivalent_source(source):
             raise ValueError("Restricted auto-repair rejects non-UTF-8 source encoding")
         # Reject all PEP 263 declarations, including UTF-8 cookies. Otherwise
         # an apparently harmless comment change could alter execution semantics.
-        cookie = re.compile(rb"^[ \\t\\f]*\\#.*?coding[:=][ \\t]*[-_.a-zA-Z0-9]+")
+        cookie = re.compile(rb"^[ \t\f]*#.*?coding[:=][ \t]*[-_.a-zA-Z0-9]+")
         if any(cookie.match(line) for line in source.splitlines()[:2]):
             raise ValueError("Restricted auto-repair forbids source encoding declarations")
         decoded = source.decode("utf-8", errors="strict")
