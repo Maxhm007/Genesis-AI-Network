@@ -328,8 +328,10 @@ def validate(meta, patch, output):
         after, after_stats = run_tracked_tests(workspace)
         if after.returncode:
             raise ValueError("Patched tests still fail")
-        if after_stats["executed"] != baseline_stats["executed"]:
-            raise ValueError("Patched test count differs from baseline")
+        if after_stats["executed"] < baseline_stats["executed"]:
+            raise ValueError("Patched test coverage fell below the baseline")
+        if after_stats["skipped"] > baseline_stats["skipped"]:
+            raise ValueError("Patched test suite skipped additional tests")
         post_diff = command(["git", "diff", "--binary"], workspace, 15)
         if (base.read_bytes() != candidate_bytes or post_diff.returncode or
                 post_diff.stdout != candidate_diff.stdout):
