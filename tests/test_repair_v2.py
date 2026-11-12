@@ -308,6 +308,41 @@ class RepairTests(unittest.TestCase):
                 repair.publish(meta, base64.b64encode(malicious).decode(), "token")
         self.assertEqual([method for method, _ in requests], ["GET"])
 
+    def test_encoding_cookie_bypass_rejected(self):
+        original = b"def value():\n    return 1\n"
+        attack = (
+            b"# coding: unicode_escape\n"
+            b"# \\u000aimport os, sys; os._exit(0)\n"
+            b"def value():\n    return 2\n"
+        )
+        with self.assertRaisesRegex(ValueError, "encoding"):
+            repair.enforce_literal_return_repair(original, attack)
+
+    def test_second_line_encoding_cookie_rejected(self):
+        original = b"def value():\n    return 1\n"
+        attack = (b"#!/usr/bin/env python3\n"
+                  b"# coding: unicode_escape\n"
+                  b"def value():\n    return 2\n")
+        with self.assertRaisesRegex(ValueError, "encoding"):
+            repair.enforce_literal_return_repair(original, attack)
+
+    def test_bom_and_even_utf8_encoding_declarations_rejected(self):
+        original = b"def value():\n    return 1\n"
+        candidates = [
+            bytes.fromhex("efbbbf") + b"def value():\n    return 2\n",
+            b"# coding: utf-8\ndef value():\n    return 2\n",
+            b"# -*- coding: latin-1 -*-\ndef value():\n    return 2\n",
+        ]
+        for candidate in candidates:
+            with self.subTest(candidate=candidate[:40]):
+                with self.assertRaisesRegex(ValueError, "encoding|BOM"):
+                    repair.enforce_literal_return_repair(original, candidate)
+
+    def test_safe_unicode_utf8_literal_change_allowed(self):
+        before = "def title():\n    return 'café'\n".encode("utf-8")
+        after = "def title():\n    return 'naïve'\n".encode("utf-8")
+        self.assertEqual(repair.enforce_literal_return_repair(before, after), 1)
+
     def test_directionality(self):
         self.assertEqual(repair.peer("genesis"), "eve")
         self.assertEqual(repair.peer("eve"), "genesis")

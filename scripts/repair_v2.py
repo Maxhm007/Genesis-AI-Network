@@ -283,18 +283,48 @@ def run_tracked_tests(workspace):
 
 
 
-def enforce_literal_return_repair(before, after):
-    """Fail-closed automated subset: only literal values in return statements.
+def _parse_execution_equivalent_source(source):
+    """Accept only UTF-8 Python source interpreted identically by byte/text parsers.
 
-    Without a trusted interpreter boundary, arbitrary Python code can forge
-    in-process test completion signals. Require human review for broader edits.
+    Python's PEP 263 encoding declarations can transform comment bytes into
+    executable code (e.g. coding: unicode_escape). Reject encoding cookies,
+    BOMs and non-UTF-8 input before AST comparison. This is deliberately
+    conservative for untrusted model-authored fixes.
     """
     import ast
+    import io
+    import tokenize
+
+    if not isinstance(source, bytes) or not source or source.startswith(bytes.fromhex("efbbbf")):
+        raise ValueError("Restricted auto-repair requires plain UTF-8 source without BOM")
     try:
-        old_tree = ast.parse(before.decode("utf-8"))
-        new_tree = ast.parse(after.decode("utf-8"))
-    except (UnicodeError, SyntaxError) as exc:
-        raise ValueError("Restricted auto-repair requires valid Python source") from exc
+        encoding, _ = tokenize.detect_encoding(io.BytesIO(source).readline)
+        if encoding.lower().replace("_", "-") != "utf-8":
+            raise ValueError("Restricted auto-repair rejects non-UTF-8 source encoding")
+        # Reject all PEP 263 declarations, including UTF-8 cookies. Otherwise
+        # an apparently harmless comment change could alter execution semantics.
+        cookie = re.compile(rb"^[ \t\f]*#.*?coding[:=][ \t]*[-_.a-zA-Z0-9]+")
+        if any(cookie.match(line) for line in source.splitlines()[:2]):
+            raise ValueError("Restricted auto-repair forbids source encoding declarations")
+        decoded = source.decode("utf-8", errors="strict")
+        byte_tree = ast.parse(source, mode="exec")
+        text_tree = ast.parse(decoded, mode="exec")
+        if ast.dump(byte_tree, include_attributes=False) != ast.dump(text_tree, include_attributes=False):
+            raise ValueError("Source parses differently from Python execution")
+        return byte_tree
+    except (SyntaxError, UnicodeError, LookupError, tokenize.TokenError) as exc:
+        raise ValueError("Restricted auto-repair requires valid UTF-8 Python") from exc
+
+
+def enforce_literal_return_repair(before, after):
+    """Only 1–4 literal return changes in equivalent UTF-8 Python source.
+
+    A candidate can otherwise forge in-process unittest success evidence.
+    The exact same guard runs in both the test job and PR publisher.
+    """
+    import ast
+    old_tree = _parse_execution_equivalent_source(before)
+    new_tree = _parse_execution_equivalent_source(after)
     changes = 0
 
     def compare(old, new, parent=None, field=None):
