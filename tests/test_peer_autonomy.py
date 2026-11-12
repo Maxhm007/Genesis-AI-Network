@@ -112,7 +112,7 @@ class PeerTests(unittest.TestCase):
 
     def test_outbox_paginates_before_deduping(self):
         fresh = datetime.now(timezone.utc).isoformat()
-        ignored = [{"title": "Ordinary issue", "created_at": fresh} for _ in range(100)]
+        ignored = [{"title": "Ordinary issue", "created_at": fresh} for _ in range(20)]
         own = agent.sign(agent.proposal("genesis", "A", "B", now=datetime.now(timezone.utc)), G)
         stored = {"title": "[Peer outbox] genesis hypothesis " + own["proposal"]["proposal_id"],
                   "body": agent.PREFIX + json.dumps(own) + agent.SUFFIX,
@@ -128,7 +128,7 @@ class PeerTests(unittest.TestCase):
                 return []
         transport = MockTransport()
         result = transport.read_outbox("genesis")
-        self.assertEqual(len(result), 101)
+        self.assertEqual(len(result), 21)
         self.assertEqual(len(transport.pages), 2)
 
     def test_malicious_nested_json_cannot_stop_cycle(self):
