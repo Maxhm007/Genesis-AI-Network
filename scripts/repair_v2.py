@@ -13,6 +13,7 @@ import hashlib
 import json
 import os
 import re
+import secrets
 import subprocess
 import sys
 import tempfile
@@ -227,6 +228,103 @@ def command(argv, cwd, timeout=TEST_TIMEOUT):
                                                 "HOME": str(cwd), "PYTHONDONTWRITEBYTECODE": "1"})
 
 
+
+# This trusted runner reports completion only AFTER the unittest suite returns.
+# An imported module calling os._exit(0) can no longer masquerade as a passing suite.
+TEST_HARNESS = """
+import json
+import sys
+import unittest
+
+nonce = sys.argv[1]
+suite = unittest.defaultTestLoader.discover("tests")
+discovered = suite.countTestCases()
+if discovered < 1:
+    sys.exit(3)
+result = unittest.TextTestRunner(verbosity=1).run(suite)
+sys.stdout.write(chr(10))
+print("__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":" +
+      json.dumps({"discovered": discovered, "executed": result.testsRun,
+                  "failures": len(result.failures), "errors": len(result.errors),
+                  "skipped": len(result.skipped), "successful": result.wasSuccessful()}),
+      flush=True)
+sys.exit(0 if result.wasSuccessful() else 1)
+"""
+
+
+def run_tracked_tests(workspace):
+    nonce = secrets.token_hex(16)
+    result = command([sys.executable, "-c", TEST_HARNESS, nonce], workspace)
+    prefix = "__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":"
+    markers = [line[len(prefix):] for line in result.stdout.splitlines()
+               if line.startswith(prefix)]
+    if len(markers) != 1:
+        raise ValueError("Test suite did not complete; refusing unverified result")
+    try:
+        stats = json.loads(markers[0])
+    except (TypeError, ValueError, json.JSONDecodeError) as exc:
+        raise ValueError("Invalid test completion record") from exc
+    if (not isinstance(stats, dict) or
+            type(stats.get("discovered")) is not int or
+            type(stats.get("executed")) is not int or
+            stats["discovered"] < 1 or stats["executed"] > stats["discovered"] or
+            (stats["successful"] and stats["executed"] != stats["discovered"]) or
+            (not stats["successful"] and stats["executed"] < stats["discovered"] and
+             (type(stats.get("errors")) is not int or stats["errors"] < 1)) or
+            type(stats.get("failures")) is not int or
+            type(stats.get("errors")) is not int or
+            type(stats.get("successful")) is not bool):
+        raise ValueError("Test suite execution incomplete or invalid")
+    if stats["successful"] != (result.returncode == 0):
+        raise ValueError("Test status contradicts completion record")
+    if stats["successful"] and (stats["failures"] or stats["errors"]):
+        raise ValueError("Passing suite contains failures")
+    return result, stats
+
+
+
+def enforce_literal_return_repair(before, after):
+    """Fail-closed automated subset: only literal values in return statements.
+
+    Without a trusted interpreter boundary, arbitrary Python code can forge
+    in-process test completion signals. Require human review for broader edits.
+    """
+    import ast
+    try:
+        old_tree = ast.parse(before.decode("utf-8"))
+        new_tree = ast.parse(after.decode("utf-8"))
+    except (UnicodeError, SyntaxError) as exc:
+        raise ValueError("Restricted auto-repair requires valid Python source") from exc
+    changes = 0
+
+    def compare(old, new, parent=None, field=None):
+        nonlocal changes
+        if type(old) is not type(new):
+            raise ValueError("Restricted auto-repair: executable structure changed")
+        if isinstance(old, ast.Constant):
+            if old.value != new.value:
+                if (parent != "Return" or field != "value" or
+                        type(old.value) is not type(new.value) or
+                        type(old.value) not in (int, float, bool, str)):
+                    raise ValueError("Restricted auto-repair: only return literals may change")
+                changes += 1
+            return
+        if isinstance(old, ast.AST):
+            for name in old._fields:
+                compare(getattr(old, name), getattr(new, name), type(old).__name__, name)
+        elif isinstance(old, (list, tuple)):
+            if len(old) != len(new):
+                raise ValueError("Restricted auto-repair: statement count changed")
+            for a, b in zip(old, new):
+                compare(a, b, parent, field)
+        elif old != new:
+            raise ValueError("Restricted auto-repair: nonliteral changes forbidden")
+
+    compare(old_tree, new_tree)
+    if not 1 <= changes <= 4:
+        raise ValueError("Restricted auto-repair: expected 1-4 safe return literals")
+    return changes
+
 def checkout_target(meta, dest):
     repo = REPOS[meta["target"]]
     if meta["repo"] != repo or not re.fullmatch("[a-f0-9]{40}", meta["sha"]):
@@ -252,8 +350,9 @@ def validate(meta, patch, output):
         base = workspace / path
         if not base.is_file() or base.is_symlink() or base.stat().st_size > 120000:
             raise ValueError("Changed file is not an ordinary existing source file")
+        base_original = base.read_bytes()
         # The sandbox receives ZERO secrets. A reproducible baseline must fail.
-        baseline = command([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], workspace)
+        baseline, baseline_stats = run_tracked_tests(workspace)
         if baseline.returncode == 0:
             raise ValueError("Baseline tests pass; repair not established")
         clean = command(["git", "diff", "--quiet"], workspace, 15)
@@ -271,12 +370,19 @@ def validate(meta, patch, output):
         if modified.returncode or modified.stdout.strip() != path:
             raise ValueError("Patch changed unauthorized files")
         candidate_bytes = base.read_bytes()
+        enforce_literal_return_repair(base_original, candidate_bytes)
         candidate_diff = command(["git", "diff", "--binary"], workspace, 15)
         if candidate_diff.returncode:
             raise ValueError("Cannot snapshot tested candidate")
-        after = command([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], workspace)
+        after, after_stats = run_tracked_tests(workspace)
         if after.returncode:
             raise ValueError("Patched tests still fail")
+        if after_stats["executed"] < baseline_stats["executed"]:
+            raise ValueError("Patched test coverage fell below the baseline")
+        if (after_stats["skipped"] > baseline_stats["skipped"] and not
+                (baseline_stats["errors"] > 0 and
+                 after_stats["discovered"] > baseline_stats["discovered"])):
+            raise ValueError("Patched test suite skipped additional tests")
         post_diff = command(["git", "diff", "--binary"], workspace, 15)
         if (base.read_bytes() != candidate_bytes or post_diff.returncode or
                 post_diff.stdout != candidate_diff.stdout):
@@ -290,6 +396,7 @@ def validate(meta, patch, output):
     attestation = dict(meta, path=path, new_sha256=hashlib.sha256(data).hexdigest(),
                        patch_sha256=hashlib.sha256(patch.encode()).hexdigest(),
                        baseline="failed", patched="passed",
+                       tests_completed=True, tests_executed=after_stats["executed"],
                        test_command="python -m unittest discover -s tests -v")
     (dest / "attestation.json").write_text(json.dumps(attestation, indent=2), encoding="utf-8")
     return attestation
@@ -298,7 +405,10 @@ def validate(meta, patch, output):
 def publish(attestation, encoded, token):
     """Metadata-only promotion. Never executes candidate code with GitHub token."""
     meta = attestation
-    if meta.get("baseline") != "failed" or meta.get("patched") != "passed" or meta.get("test_command") != "python -m unittest discover -s tests -v":
+    if (meta.get("baseline") != "failed" or meta.get("patched") != "passed" or
+            meta.get("test_command") != "python -m unittest discover -s tests -v" or
+            meta.get("tests_completed") is not True or
+            type(meta.get("tests_executed")) is not int or meta["tests_executed"] < 1):
         raise ValueError("No valid reproduction evidence")
     target = peer(meta.get("healer"))
     if meta.get("target") != target or meta.get("repo") != REPOS[target]:
@@ -312,6 +422,10 @@ def publish(attestation, encoded, token):
     repo = REPOS[target]
     branch = "mutual-heal/{}-run-{}".format(meta["healer"], meta["run_id"])
     original = _api(repo, "/contents/" + path + "?ref=" + urllib.parse.quote(meta["sha"]), token=token)
+    if original.get("encoding") != "base64" or not isinstance(original.get("content"), str):
+        raise ValueError("Missing original source for independent publication gate")
+    baseline_source = base64.b64decode(original["content"])
+    enforce_literal_return_repair(baseline_source, raw)
     blob_sha = original.get("sha")
     if not isinstance(blob_sha, str):
         raise ValueError("Cannot establish original blob SHA")

@@ -46,6 +46,8 @@ class RepairTests(unittest.TestCase):
             outcome = repair.validate(meta, patch, Path(d)/"verified")
             self.assertEqual(outcome["baseline"], "failed")
             self.assertEqual(outcome["patched"], "passed")
+            self.assertTrue(outcome["tests_completed"])
+            self.assertGreater(outcome["tests_executed"], 0)
             self.assertEqual(outcome["path"], "src/calc.py")
             self.assertTrue((Path(d)/"verified"/"attestation.json").is_file())
             self.assertTrue((Path(d)/"verified"/"patched.b64").is_file())
@@ -108,8 +110,203 @@ class RepairTests(unittest.TestCase):
             subprocess.run(["git", "add", "."], cwd=dest, check=True)
         meta = {"healer":"genesis", "target":"eve", "repo":repair.REPOS["eve"], "sha":"a"*40}
         with tempfile.TemporaryDirectory() as d, mock.patch.object(repair, "checkout_target", fake_checkout):
-            with self.assertRaisesRegex(ValueError, "changed while executing tests"):
+            with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
                 repair.validate(meta, patch, Path(d)/"verified")
+
+    def test_exit_zero_before_tests_complete_is_rejected(self):
+        patch = ("diff --git a/src/calc.py b/src/calc.py\n"
+                 "--- a/src/calc.py\n+++ b/src/calc.py\n"
+                 "@@ -1,2 +1,4 @@\n"
+                 "+import os\n+os._exit(0)\n"
+                 " def value():\n     return 1\n")
+
+        def fake_checkout(meta, dest):
+            (dest / "src").mkdir(parents=True)
+            (dest / "tests").mkdir()
+            (dest / "src" / "calc.py").write_text("def value():\n    return 1\n")
+            (dest / "tests" / "test_calc.py").write_text(
+                "import unittest\nfrom src.calc import value\n"
+                "class TestCalc(unittest.TestCase):\n"
+                "    def test_fix(self): self.assertEqual(value(), 2)\n")
+            subprocess.run(["git", "init", "-q", str(dest)], check=True)
+            subprocess.run(["git", "add", "."], cwd=dest, check=True)
+
+        meta = {"healer": "genesis", "target": "eve",
+                "repo": repair.REPOS["eve"], "sha": "a"*40}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(
+                repair, "checkout_target", fake_checkout):
+            with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+                repair.validate(meta, patch, Path(d)/"verified")
+            self.assertFalse((Path(d)/"verified"/"attestation.json").exists())
+
+    def test_publisher_refuses_missing_test_completion_attestation(self):
+        meta = {"healer": "genesis", "target": "eve",
+                "repo": repair.REPOS["eve"], "path": "src/calc.py",
+                "new_sha256": hashlib.sha256(b"safe").hexdigest(),
+                "baseline": "failed", "patched": "passed",
+                "test_command": "python -m unittest discover -s tests -v"}
+        with self.assertRaisesRegex(ValueError, "reproduction evidence"):
+            repair.publish(meta, base64.b64encode(b"safe").decode(), "secret")
+
+    def test_repairing_import_error_can_restore_additional_tests(self):
+        patch = ("diff --git a/src/calc.py b/src/calc.py\n"
+                 "--- a/src/calc.py\n+++ b/src/calc.py\n"
+                 "@@ -1,2 +1 @@\n"
+                 '-raise RuntimeError("broken import")\n'
+                 " def value(): return 2\n")
+
+        def fake_checkout(meta, dest):
+            (dest / "src").mkdir(parents=True)
+            (dest / "tests").mkdir()
+            (dest / "src" / "calc.py").write_text(
+                'raise RuntimeError("broken import")\ndef value(): return 2\n')
+            (dest / "tests" / "test_calc.py").write_text(
+                "import unittest\nfrom src.calc import value\n"
+                "class TestCalc(unittest.TestCase):\n"
+                "    def test_first(self): self.assertEqual(value(), 2)\n"
+                "    def test_second(self): self.assertEqual(value(), 2)\n")
+            subprocess.run(["git", "init", "-q", str(dest)], check=True)
+            subprocess.run(["git", "add", "."], cwd=dest, check=True)
+
+        meta = {"healer": "genesis", "target": "eve",
+                "repo": repair.REPOS["eve"], "sha": "a"*40}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(
+                repair, "checkout_target", fake_checkout):
+            with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+                repair.validate(meta, patch, Path(d)/"verified")
+
+    def test_no_newline_stdout_cannot_hide_completion_marker(self):
+        patch = ("diff --git a/src/calc.py b/src/calc.py\n"
+                 "--- a/src/calc.py\n+++ b/src/calc.py\n"
+                 "@@ -1,2 +1,2 @@\n def value():\n-    return 1\n+    return 2\n")
+        def fake_checkout(meta, dest):
+            (dest / "src").mkdir(parents=True)
+            (dest / "tests").mkdir()
+            (dest / "src"/"calc.py").write_text("def value():\n    return 1\n")
+            (dest / "tests"/"test_calc.py").write_text(
+                "import unittest\nfrom src.calc import value\n"
+                "class TestCalc(unittest.TestCase):\n"
+                "    def test_fix(self):\n"
+                "        print('progress', end='')\n"
+                "        self.assertEqual(value(), 2)\n")
+            subprocess.run(["git", "init", "-q", str(dest)], check=True)
+            subprocess.run(["git", "add", "."], cwd=dest, check=True)
+        meta = {"healer":"genesis","target":"eve","repo":repair.REPOS["eve"],"sha":"a"*40}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(
+                repair, "checkout_target", fake_checkout):
+            result = repair.validate(meta, patch, Path(d)/"verified")
+            self.assertTrue(result["tests_completed"])
+            self.assertEqual(result["tests_executed"], 1)
+
+    def test_baseline_setup_class_failure_is_valid_reproduction(self):
+        patch = ("diff --git a/src/calc.py b/src/calc.py\n"
+                 "--- a/src/calc.py\n+++ b/src/calc.py\n"
+                 "@@ -1,2 +1,2 @@\n def boot():\n"
+                 "-    raise RuntimeError('broken')\n"
+                 "+    return 2\n")
+        def fake_checkout(meta, dest):
+            (dest / "src").mkdir(parents=True)
+            (dest / "tests").mkdir()
+            (dest / "src"/"calc.py").write_text(
+                "def boot():\n    raise RuntimeError('broken')\n")
+            (dest / "tests"/"test_calc.py").write_text(
+                "import unittest\nfrom src.calc import boot\n"
+                "class TestCalc(unittest.TestCase):\n"
+                "    @classmethod\n    def setUpClass(cls): boot()\n"
+                "    def test_first(self): self.assertTrue(True)\n"
+                "    def test_second(self): self.assertTrue(True)\n")
+            subprocess.run(["git", "init", "-q", str(dest)], check=True)
+            subprocess.run(["git", "add", "."], cwd=dest, check=True)
+        meta = {"healer":"genesis","target":"eve","repo":repair.REPOS["eve"],"sha":"a"*40}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(
+                repair, "checkout_target", fake_checkout):
+            with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+                repair.validate(meta, patch, Path(d)/"verified")
+
+    def test_restored_import_can_reveal_preexisting_skipped_tests(self):
+        patch = ("diff --git a/src/calc.py b/src/calc.py\n"
+                 "--- a/src/calc.py\n+++ b/src/calc.py\n"
+                 "@@ -1,2 +1 @@\n"
+                 '-raise RuntimeError("broken import")\n'
+                 " def value(): return 2\n")
+
+        def fake_checkout(meta, dest):
+            (dest/"src").mkdir(parents=True)
+            (dest/"tests").mkdir()
+            (dest/"src"/"calc.py").write_text(
+                'raise RuntimeError("broken import")\ndef value(): return 2\n')
+            (dest/"tests"/"test_calc.py").write_text(
+                "import unittest\nfrom src.calc import value\n"
+                "class TestCalc(unittest.TestCase):\n"
+                "    @unittest.skip('existing skipped test')\n"
+                "    def test_skipped(self): self.assertEqual(value(), 2)\n"
+                "    def test_active(self): self.assertEqual(value(), 2)\n")
+            subprocess.run(["git", "init", "-q", str(dest)], check=True)
+            subprocess.run(["git", "add", "."], cwd=dest, check=True)
+        meta = {"healer":"genesis","target":"eve","repo":repair.REPOS["eve"],"sha":"a"*40}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(
+                repair, "checkout_target", fake_checkout):
+            with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+                repair.validate(meta, patch, Path(d)/"verified")
+
+    def test_restricted_auto_repair_rejects_forged_completion_marker(self):
+        before = b"def value():\n    return 1\n"
+        after = (b"import os, sys\n"
+                 b"print('__MUTUAL_HEAL_SUITE_FINISHED__' + sys.argv[1])\n"
+                 b"os._exit(0)\n"
+                 b"def value():\n    return 1\n")
+        with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+            repair.enforce_literal_return_repair(before, after)
+
+    def test_restricted_auto_repair_allows_only_return_literals(self):
+        self.assertEqual(repair.enforce_literal_return_repair(
+            b"def value():\n    return 1\n",
+            b"def value():\n    return 2\n"), 1)
+        with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+            repair.enforce_literal_return_repair(
+                b"def value():\n    return 1\n",
+                b"def value():\n    return os._exit(0)\n")
+
+    def test_fixture_error_finishes_suite_without_auto_attestation(self):
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "src").mkdir()
+            (root / "tests").mkdir()
+            (root / "src"/"calc.py").write_text(
+                "def boot():\n    raise RuntimeError('broken')\n")
+            (root / "tests"/"test_calc.py").write_text(
+                "import unittest\nfrom src.calc import boot\n"
+                "class TestCalc(unittest.TestCase):\n"
+                "    @classmethod\n    def setUpClass(cls): boot()\n"
+                "    def test_one(self): self.assertTrue(True)\n"
+                "    def test_two(self): self.assertTrue(True)\n")
+            run, stats = repair.run_tracked_tests(root)
+            self.assertEqual(run.returncode, 1)
+            self.assertEqual(stats["executed"], 0)
+            self.assertEqual(stats["errors"], 1)
+            self.assertEqual(stats["discovered"], 2)
+
+    def test_publisher_independently_rejects_executable_patch(self):
+        original = b"def value():\n    return 1\n"
+        malicious = b"import os\ndef value():\n    return os._exit(0)\n"
+        meta = {"healer": "genesis", "target": "eve", "repo": repair.REPOS["eve"],
+                "path": "src/calc.py", "sha": "a"*40, "run_id": 55,
+                "run_url": "https://github.com/Maxhm007/Eve/actions/runs/55",
+                "new_sha256": hashlib.sha256(malicious).hexdigest(),
+                "baseline": "failed", "patched": "passed",
+                "tests_completed": True, "tests_executed": 1,
+                "test_command": "python -m unittest discover -s tests -v"}
+        requests = []
+        def fake_api(repo, suffix, method="GET", payload=None, token=""):
+            requests.append((method, suffix))
+            if method != "GET":
+                raise AssertionError("No repository write is allowed")
+            return {"encoding": "base64", "sha": "b"*40,
+                    "content": base64.b64encode(original).decode()}
+        with mock.patch.object(repair, "_api", fake_api):
+            with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+                repair.publish(meta, base64.b64encode(malicious).decode(), "token")
+        self.assertEqual([method for method, _ in requests], ["GET"])
 
     def test_directionality(self):
         self.assertEqual(repair.peer("genesis"), "eve")
