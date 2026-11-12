@@ -41,7 +41,7 @@ def valid_path(path):
     parts = path.split("/")
     if any(p in (".", "..", "") or p.startswith(".") for p in parts):
         raise ValueError("Unsafe path")
-    if parts[-1] in EXCLUDED or parts[0] in (".github", "build", "dist", "vendor"):
+    if parts[-1] in EXCLUDED or parts[0] in (".github", "build", "dist", "vendor", "tests"):
         raise ValueError("Privileged or dependency file forbidden")
     return path
 
@@ -106,6 +106,48 @@ def eligible_run(run):
         return False
 
 
+def diagnostic_log(repo, job_id, token=""):
+    """Best-effort, bounded failed-job log excerpt; never treated as instructions."""
+    if repo not in REPOS.values() or type(job_id) is not int or job_id < 1:
+        raise ValueError("Invalid log source")
+    url = "https://api.github.com/repos/{}/actions/jobs/{}/logs".format(repo, job_id)
+    headers = {"Accept":"application/vnd.github+json",
+               "User-Agent":USER_AGENT}
+    if token:
+        headers["Authorization"] = "Bearer " + token
+    try:
+        request = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(request, timeout=15) as response:
+            raw = response.read(60001)
+        # A log redirected outside GitHub is never executed. Secrets should
+        # already be masked by GitHub; retain only diagnostic lines.
+        output = re.sub(r"\\x1b\\[[0-9;]*m", "", raw.decode("utf-8", errors="replace"))
+        useful = [line[-400:] for line in output.splitlines() if re.search(
+            r"traceback|exception|error|failed|assert|^\\s*File \\"", line, re.I)]
+        return "\\n".join(useful[-25:])[:5000]
+    except (OSError, ValueError, TimeoutError):
+        return ""
+
+
+def source_from_traceback(repo, sha, log, token=""):
+    """Read one existing target Python module named by a traceback."""
+    if not log or repo not in REPOS.values() or not re.fullmatch(r"[a-f0-9]{40}", sha):
+        return None
+    matches = re.findall(r"(?:eve|scripts|src|genesis)/[A-Za-z0-9_/-]+\\.py", log)
+    for candidate in matches[:10]:
+        try:
+            path = valid_path(candidate)
+            result = _api(repo, "/contents/" + urllib.parse.quote(path) + "?ref=" + sha, token=token)
+            if result.get("type") != "file" or result.get("encoding") != "base64":
+                continue
+            content = base64.b64decode(result.get("content",""), validate=False)
+            if 0 < len(content) <= 18000:
+                return {"path":path,"content":content.decode("utf-8", errors="replace")[:18000]}
+        except (ValueError, KeyError, OSError):
+            continue
+    return None
+
+
 def evidence(identity, run_id=0, token=""):
     target = peer(identity)
     repo = REPOS[target]
@@ -129,9 +171,15 @@ def evidence(identity, run_id=0, token=""):
             steps = [str(x.get("name", ""))[:120] for x in (job.get("steps") or [])
                      if x.get("conclusion") == "failure"]
             if any(re.search(r"test|pytest|unittest", item, re.I) for item in steps):
-                failures.append({"job": str(job.get("name", ""))[:120], "steps": steps[:10]})
+                failures.append({"job": str(job.get("name", ""))[:120], "steps": steps[:10],
+                                 "log_excerpt": diagnostic_log(repo, job.get("id", 0), token)
+                                 if type(job.get("id")) is int else ""})
         if failures:
-            return {"healer": identity, "target": target, "repo": repo,
+            source = next((source_from_traceback(repo, run["head_sha"], item["log_excerpt"], token)
+                           for item in failures if item["log_excerpt"]), None)
+            if source is None:
+                continue  # Refuse to invent a code patch without source context.
+            return {"source":source, "healer": identity, "target": target, "repo": repo,
                     "run_id": run["id"], "sha": run["head_sha"], "failures": failures,
                     "run_url": "https://github.com/{}/actions/runs/{}".format(repo, run["id"])}
     return None
