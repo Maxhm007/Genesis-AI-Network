@@ -122,8 +122,8 @@ class PeerTests(unittest.TestCase):
                 self.pages = []
             def _request(self, url, method="GET", payload=None):
                 self.pages.append(url)
-                if "page=1" in url: return ignored
-                if "page=2" in url: return [stored]
+                if "&page=1" in url: return ignored
+                if "&page=2" in url: return [stored]
                 return []
         transport = MockTransport()
         result = transport.read_outbox("genesis")
