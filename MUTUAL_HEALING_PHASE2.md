@@ -29,7 +29,7 @@ Schedules are gated on the opt-in variable and model settings. If disabled, they
 
 - Candidate patches are treated as hostile. All target tests run on an isolated short-lived runner without repository write secrets.
 - A passing patched test alone does **not** prove that code is safe, correct in production, or fixes every failure. The pull request requires independent code review and follow-up CI checks.
-- This v2 supports one Python file and `python -m unittest discover -s tests -v` only. Other languages, installation failures, missing evidence, unreproducible failures and larger refactors are intentionally rejected rather than guessed.
+- This v2 supports only strictly restricted changes to 1–4 existing literal values in Python `return` statements. Arbitrary imports, calls, control-flow edits, test rewrites and module/fixture repairs are **not eligible for automatic verified publication**, even if their tests appear to pass. This protects against generated code forging its own unittest completion evidence. Broader repairs require manual/independently trusted validation and review. The test command remains `python -m unittest discover -s tests -v`. Other languages, installation failures, missing evidence, unreproducible failures and larger refactors are intentionally rejected rather than guessed.
 - This system is resource-bounded: one target failed run, one model request, one patch, one baseline test and one patched test per cycle; jobs have fixed timeouts.
 - If GitHub cannot retrieve a useful log and pinned source file, no speculative patch is generated.
 - Never automatically enable workflows, bypass protected branches, alter credential permissions, close issues, or merge PRs.
@@ -41,3 +41,7 @@ Schedules are gated on the opt-in variable and model settings. If disabled, they
 - Genesis → Eve: [GitHub Actions workflow](https://github.com/Maxhm007/Genesis-AI-Network/actions/workflows/repair-eve-v2.yml)
 - Eve → Genesis: [GitHub Actions workflow](https://github.com/Maxhm007/Eve/actions/workflows/repair-genesis-v2.yml)
 - [Mutual healing issue #1174](https://github.com/Maxhm007/Genesis-AI-Network/issues/1174)
+
+## Test completion hardening
+
+A trusted wrapper emits an explicit completed-suite record after the unittest runner returns, and requires nonempty discovered/executed tests, consistent status and a nondecreasing test count. A zero exit before suite completion is rejected. This in-process record cannot by itself authenticate arbitrary executable Python, so **both** the zero-secret validation job **and** token-bearing publication job enforce the same strict AST policy: only literal return values can change. A potentially more complex model patch is rejected, not mislabeled as verified. This is intentionally narrower than general-purpose autonomous code healing.
