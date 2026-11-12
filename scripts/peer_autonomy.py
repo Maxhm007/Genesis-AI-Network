@@ -22,8 +22,8 @@ SUFFIX = "\n```\n"
 FIELDS = {"protocol", "proposal_id", "sender", "recipient", "kind", "problem_statement",
           "evidence_links", "reproduction_steps", "expected_benefit", "risks",
           "created_at", "content_hash"}
-MAX_MESSAGES = 100
-MAX_PAGES = 20
+MAX_MESSAGES = 20
+MAX_PAGES = 100
 MAX_DEPTH = 2
 MAX_AGE = timedelta(days=7)
 
@@ -148,8 +148,8 @@ class Transport:
             hdr["Content-Type"] = "application/json"
         req = urllib.request.Request(url, data=data, headers=hdr, method=method)
         with self.opener(req, timeout=30) as response:
-            data = response.read(1_000_001)
-        if len(data) > 1_000_000:
+            data = response.read(2_000_001)
+        if len(data) > 2_000_000:
             raise ValueError("GitHub response too large")
         return json.loads(data)
 
@@ -161,7 +161,7 @@ class Transport:
         gathered = []
         for page in range(1, MAX_PAGES + 1):
             url = ("https://api.github.com/repos/{}/issues?state=all&sort=created"
-                   "&direction=desc&per_page=100&page={}").format(REPOS[name], page)
+                   "&direction=desc&per_page=20&page={}").format(REPOS[name], page)
             result = self._request(url)
             if not isinstance(result, list) or len(result) > MAX_MESSAGES:
                 raise ValueError("Unexpected issue page response")
