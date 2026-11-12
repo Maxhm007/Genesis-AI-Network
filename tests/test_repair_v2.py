@@ -225,6 +225,33 @@ class RepairTests(unittest.TestCase):
             self.assertTrue(result["tests_completed"])
             self.assertEqual(result["tests_executed"], 2)
 
+    def test_restored_import_can_reveal_preexisting_skipped_tests(self):
+        patch = ("diff --git a/src/calc.py b/src/calc.py\n"
+                 "--- a/src/calc.py\n+++ b/src/calc.py\n"
+                 "@@ -1,2 +1 @@\n"
+                 '-raise RuntimeError("broken import")\n'
+                 " def value(): return 2\n")
+
+        def fake_checkout(meta, dest):
+            (dest/"src").mkdir(parents=True)
+            (dest/"tests").mkdir()
+            (dest/"src"/"calc.py").write_text(
+                'raise RuntimeError("broken import")\ndef value(): return 2\n')
+            (dest/"tests"/"test_calc.py").write_text(
+                "import unittest\nfrom src.calc import value\n"
+                "class TestCalc(unittest.TestCase):\n"
+                "    @unittest.skip('existing skipped test')\n"
+                "    def test_skipped(self): self.assertEqual(value(), 2)\n"
+                "    def test_active(self): self.assertEqual(value(), 2)\n")
+            subprocess.run(["git", "init", "-q", str(dest)], check=True)
+            subprocess.run(["git", "add", "."], cwd=dest, check=True)
+        meta = {"healer":"genesis","target":"eve","repo":repair.REPOS["eve"],"sha":"a"*40}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(
+                repair, "checkout_target", fake_checkout):
+            result = repair.validate(meta, patch, Path(d)/"verified")
+            self.assertTrue(result["tests_completed"])
+            self.assertEqual(result["tests_executed"], 2)
+
     def test_directionality(self):
         self.assertEqual(repair.peer("genesis"), "eve")
         self.assertEqual(repair.peer("eve"), "genesis")
