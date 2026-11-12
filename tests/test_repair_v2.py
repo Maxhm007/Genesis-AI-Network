@@ -50,6 +50,24 @@ class RepairTests(unittest.TestCase):
             self.assertTrue((Path(d)/"verified"/"attestation.json").is_file())
             self.assertTrue((Path(d)/"verified"/"patched.b64").is_file())
 
+    def test_model_preserves_final_diff_newline(self):
+        import json
+        diff = ("diff --git a/src/calc.py b/src/calc.py\n"
+                "--- a/src/calc.py\n+++ b/src/calc.py\n"
+                "@@ -1,2 +1,2 @@\n def value():\n-    return 1\n+    return 2")
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, count): return json.dumps({
+                "choices": [{"message": {"content": diff}}]}).encode()
+        meta = {"healer": "genesis", "failures": [],
+                "source": {"path":"src/calc.py", "content":"def value(): pass"},
+                "run_url":"test", "sha":"a"*40}
+        with mock.patch.object(repair.urllib.request, "urlopen", lambda *a, **k: Response()):
+            result = repair.model_patch(meta, "https://example.org/v1/chat/completions", "model", "")
+        self.assertTrue(result.endswith("\n"))
+        self.assertEqual(repair.inspect_patch(result), "src/calc.py")
+
     def test_source_context_reaches_model(self):
         import io
         import json
