@@ -39,6 +39,8 @@ class FakeTransport:
         number = self.next_number
         self.next_number += 1
         signed = envelope["proposal"]
+        if signed["sender"] != identity:
+            raise ValueError("Cannot write for another peer")
         title = "[Peer outbox] {} {} {}".format(identity, signed["kind"], signed["proposal_id"])
         body = agent.PREFIX + json.dumps(envelope) + agent.SUFFIX
         self.issues[identity].append({"number": number, "title": title, "body": body})
@@ -71,12 +73,14 @@ class PeerTests(unittest.TestCase):
         self.assertEqual(self.step("eve")["trigger"], "peer_reply")
         self.assertEqual(self.step("genesis")["trigger"], "peer_reply")
         self.assertEqual(self.step("eve")["trigger"], "weekly_seed")
+        self.assertEqual(self.step("genesis")["trigger"], "peer_reply")
+        self.assertEqual(self.step("eve")["trigger"], "peer_reply")
         self.assertEqual(self.step("genesis")["status"], "idle")
         self.assertEqual(self.step("eve")["status"], "idle")
-        self.assertEqual(len(self.genesis.calls), 2)
-        self.assertEqual(len(self.eve.calls), 2)
-        self.assertEqual(len(self.t.issues["genesis"]), 2)
-        self.assertEqual(len(self.t.issues["eve"]), 2)
+        self.assertEqual(len(self.genesis.calls), 3)
+        self.assertEqual(len(self.eve.calls), 3)
+        self.assertEqual(len(self.t.issues["genesis"]), 3)
+        self.assertEqual(len(self.t.issues["eve"]), 3)
 
     def test_tampered_signed_peer_message_ignored(self):
         valid = agent.sign(agent.proposal("eve", "Original hypothesis", "More tests", now=NOW), E)
