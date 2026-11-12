@@ -26,17 +26,17 @@ repair = module()
 
 class RepairTests(unittest.TestCase):
     def test_baseline_failure_then_verified_fix(self):
-        patch = ("diff --git a/src/calc.py b/src/calc.py\\n"
-                 "--- a/src/calc.py\\n+++ b/src/calc.py\\n"
-                 "@@ -1,2 +1,2 @@\\n def value():\\n-    return 1\\n+    return 2\\n")
+        patch = ("diff --git a/src/calc.py b/src/calc.py\n"
+                 "--- a/src/calc.py\n+++ b/src/calc.py\n"
+                 "@@ -1,2 +1,2 @@\n def value():\n-    return 1\n+    return 2\n")
         def fake_checkout(meta, dest):
             (dest / "src").mkdir(parents=True)
             (dest / "tests").mkdir()
-            (dest / "src" / "calc.py").write_text("def value():\\n    return 1\\n")
+            (dest / "src" / "calc.py").write_text("def value():\n    return 1\n")
             (dest / "tests" / "test_calc.py").write_text(
-                "import unittest\\nfrom src.calc import value\\n"
-                "class TestCalc(unittest.TestCase):\\n"
-                "    def test_fix(self): self.assertEqual(value(), 2)\\n")
+                "import unittest\nfrom src.calc import value\n"
+                "class TestCalc(unittest.TestCase):\n"
+                "    def test_fix(self): self.assertEqual(value(), 2)\n")
             subprocess.run(["git", "init", "-q", str(dest)], check=True)
             subprocess.run(["git", "add", "."], cwd=dest, check=True)
         meta = {"healer":"genesis", "target":"eve",
