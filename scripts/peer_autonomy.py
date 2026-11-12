@@ -11,6 +11,7 @@ import json
 import os
 import re
 import urllib.request
+import urllib.error
 from datetime import datetime, timezone, timedelta
 from urllib.parse import urlparse
 from uuid import UUID, uuid4
@@ -256,7 +257,12 @@ def cycle(identity, transport, model, own_secret, peer_secret, now=None):
     now = now or datetime.now(timezone.utc)
     counterpart = "eve" if identity == "genesis" else "genesis"
     own_issues = transport.read_outbox(identity)
-    peer_issues = transport.read_outbox(counterpart)
+    try:
+        peer_issues = transport.read_outbox(counterpart)
+    except (urllib.error.URLError, TimeoutError):
+        # An unavailable peer cannot prevent an independent local weekly seed.
+        # Do not swallow integrity/history validation errors.
+        peer_issues = []
     own = [v for issue in own_issues if (v := parse_issue(issue, own_secret, identity, now)) is not None]
     peer = [v for issue in peer_issues if (v := parse_issue(issue, peer_secret, counterpart, now)) is not None
             and v["proposal"]["recipient"] == identity]
