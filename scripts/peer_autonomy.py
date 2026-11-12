@@ -22,6 +22,7 @@ FIELDS = {"protocol", "proposal_id", "sender", "recipient", "kind", "problem_sta
           "evidence_links", "reproduction_steps", "expected_benefit", "risks",
           "created_at", "content_hash"}
 MAX_MESSAGES = 100
+MAX_PAGES = 20
 MAX_DEPTH = 2
 MAX_AGE = timedelta(days=7)
 
@@ -152,13 +153,29 @@ class Transport:
         return json.loads(data)
 
     def read_outbox(self, name):
+        """Read bounded seven-day history; never guess when history is incomplete."""
         if name not in REPOS:
             raise ValueError("Invalid peer")
-        url = "https://api.github.com/repos/{}/issues?state=all&sort=created&direction=desc&per_page=100".format(REPOS[name])
-        result = self._request(url)
-        if not isinstance(result, list) or len(result) > MAX_MESSAGES:
-            raise ValueError("Unexpected issue response")
-        return [x for x in result if isinstance(x, dict) and not x.get("pull_request")]
+        cutoff = datetime.now(timezone.utc) - MAX_AGE
+        gathered = []
+        for page in range(1, MAX_PAGES + 1):
+            url = ("https://api.github.com/repos/{}/issues?state=all&sort=created"
+                   "&direction=desc&per_page=100&page={}").format(REPOS[name], page)
+            result = self._request(url)
+            if not isinstance(result, list) or len(result) > MAX_MESSAGES:
+                raise ValueError("Unexpected issue page response")
+            gathered.extend(x for x in result if isinstance(x, dict) and not x.get("pull_request"))
+            if len(result) < MAX_MESSAGES:
+                return gathered
+            oldest = result[-1].get("created_at") if isinstance(result[-1], dict) else None
+            if isinstance(oldest, str):
+                try:
+                    stamp = datetime.fromisoformat(oldest.replace("Z", "+00:00"))
+                    if stamp.tzinfo is not None and stamp < cutoff:
+                        return gathered
+                except ValueError:
+                    pass
+        raise ValueError("More than 2000 recent issues; refuse to publish without complete history")
 
     def publish_own_issue(self, identity, envelope):
         if identity not in REPOS or envelope["proposal"]["sender"] != identity:
@@ -184,7 +201,7 @@ def parse_issue(issue, secret, identity, now=None):
         if title != "[Peer outbox] {} {} {}".format(identity, p["kind"], p["proposal_id"]):
             return None
         return verified
-    except (ValueError, TypeError, KeyError, json.JSONDecodeError):
+    except (ValueError, TypeError, KeyError, RecursionError, OverflowError, json.JSONDecodeError):
         return None
 
 
