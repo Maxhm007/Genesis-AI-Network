@@ -50,6 +50,49 @@ class RepairTests(unittest.TestCase):
             self.assertTrue((Path(d)/"verified"/"attestation.json").is_file())
             self.assertTrue((Path(d)/"verified"/"patched.b64").is_file())
 
+    def test_source_context_reaches_model(self):
+        import io
+        import json
+        context = {"healer": "eve", "failures": [{"job": "tests", "log_excerpt": "NameError"}],
+                   "source": {"path": "scripts/helper.py", "content": "def fix(): return 1"},
+                   "run_url": "https://github.com/Maxhm007/Genesis-AI-Network/actions/runs/10",
+                   "sha": "a"*40}
+        captured = {}
+        class Response:
+            def __enter__(self): return self
+            def __exit__(self, *args): return False
+            def read(self, count): return b'{"choices":[{"message":{"content":"NO_SAFE_PATCH"}}]}'
+        def fake_open(request, timeout):
+            captured.update(json.loads(request.data))
+            return Response()
+        with mock.patch.object(repair.urllib.request, "urlopen", fake_open):
+            self.assertIsNone(repair.model_patch(
+                context, "https://example.org/v1/chat/completions", "test", ""))
+        msg = captured["messages"][1]["content"]
+        self.assertIn("scripts/helper.py", msg)
+        self.assertIn("def fix(): return 1", msg)
+
+    def test_rejects_patch_that_rewrites_source_during_tests(self):
+        patch = ("diff --git a/src/calc.py b/src/calc.py\n"
+                 "--- a/src/calc.py\n+++ b/src/calc.py\n"
+                 "@@ -1,2 +1,3 @@\n def value():\n-    return 1\n"
+                 '+    open(__file__, "w").write("def value(): pass")\n'
+                 "+    return 2\n")
+        def fake_checkout(meta, dest):
+            (dest / "src").mkdir(parents=True)
+            (dest / "tests").mkdir()
+            (dest / "src" / "calc.py").write_text("def value():\n    return 1\n")
+            (dest / "tests" / "test_calc.py").write_text(
+                "import unittest\nfrom src.calc import value\n"
+                "class TestCalc(unittest.TestCase):\n"
+                "    def test_fix(self): self.assertEqual(value(), 2)\n")
+            subprocess.run(["git", "init", "-q", str(dest)], check=True)
+            subprocess.run(["git", "add", "."], cwd=dest, check=True)
+        meta = {"healer":"genesis", "target":"eve", "repo":repair.REPOS["eve"], "sha":"a"*40}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(repair, "checkout_target", fake_checkout):
+            with self.assertRaisesRegex(ValueError, "changed while executing tests"):
+                repair.validate(meta, patch, Path(d)/"verified")
+
     def test_directionality(self):
         self.assertEqual(repair.peer("genesis"), "eve")
         self.assertEqual(repair.peer("eve"), "genesis")
