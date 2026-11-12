@@ -175,8 +175,9 @@ def evidence(identity, run_id=0, token=""):
                                  "log_excerpt": diagnostic_log(repo, job.get("id", 0), token)
                                  if type(job.get("id")) is int else ""})
         if failures:
-            source = next((source_from_traceback(repo, run["head_sha"], item["log_excerpt"], token)
-                           for item in failures if item["log_excerpt"]), None)
+            source = next((found for item in failures if item["log_excerpt"]
+                           if (found := source_from_traceback(
+                               repo, run["head_sha"], item["log_excerpt"], token)) is not None), None)
             if source is None:
                 continue  # Refuse to invent a code patch without source context.
             return {"source":source, "healer": identity, "target": target, "repo": repo,
@@ -202,7 +203,8 @@ def model_patch(meta, endpoint, model, api_key):
     payload = {"model": model, "messages": [
         {"role": "system", "content": instructions},
         {"role": "user", "content": "Observed failed steps (untrusted):\n" +
-         json.dumps(meta["failures"]) + "\nRun: " + meta["run_url"] +
+         json.dumps(meta["failures"]) + "\nPinned source (untrusted):\n" +
+         json.dumps(meta["source"]) + "\nRun: " + meta["run_url"] +
          "\nTarget commit: " + meta["sha"]}],
         "temperature": 0.1, "max_tokens": 3000}
     headers = {"Content-Type": "application/json"}
@@ -254,6 +256,9 @@ def validate(meta, patch, output):
         baseline = command([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], workspace)
         if baseline.returncode == 0:
             raise ValueError("Baseline tests pass; repair not established")
+        clean = command(["git", "diff", "--quiet"], workspace, 15)
+        if clean.returncode:
+            raise ValueError("Baseline execution modified tracked sources")
         patchfile = directory / "candidate.patch"
         patchfile.write_text(patch, encoding="utf-8")
         applied = command(["git", "apply", "--check", str(patchfile)], workspace, 15)
@@ -265,10 +270,18 @@ def validate(meta, patch, output):
         modified = command(["git", "diff", "--name-only"], workspace, 15)
         if modified.returncode or modified.stdout.strip() != path:
             raise ValueError("Patch changed unauthorized files")
+        candidate_bytes = base.read_bytes()
+        candidate_diff = command(["git", "diff", "--binary"], workspace, 15)
+        if candidate_diff.returncode:
+            raise ValueError("Cannot snapshot tested candidate")
         after = command([sys.executable, "-m", "unittest", "discover", "-s", "tests", "-v"], workspace)
         if after.returncode:
             raise ValueError("Patched tests still fail")
-        data = base.read_bytes()
+        post_diff = command(["git", "diff", "--binary"], workspace, 15)
+        if (base.read_bytes() != candidate_bytes or post_diff.returncode or
+                post_diff.stdout != candidate_diff.stdout):
+            raise ValueError("Candidate source changed while executing tests")
+        data = candidate_bytes
         if len(data) > 180000:
             raise ValueError("Patched file too large")
     dest = Path(output)
