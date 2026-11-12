@@ -242,7 +242,7 @@ discovered = suite.countTestCases()
 if discovered < 1:
     sys.exit(3)
 result = unittest.TextTestRunner(verbosity=1).run(suite)
-print("__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":" +
+print("\\n__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":" +
       json.dumps({"discovered": discovered, "executed": result.testsRun,
                   "failures": len(result.failures), "errors": len(result.errors),
                   "skipped": len(result.skipped), "successful": result.wasSuccessful()}),
@@ -266,7 +266,10 @@ def run_tracked_tests(workspace):
     if (not isinstance(stats, dict) or
             type(stats.get("discovered")) is not int or
             type(stats.get("executed")) is not int or
-            stats["discovered"] < 1 or stats["executed"] != stats["discovered"] or
+            stats["discovered"] < 1 or stats["executed"] > stats["discovered"] or
+            (stats["successful"] and stats["executed"] != stats["discovered"]) or
+            (not stats["successful"] and stats["executed"] < stats["discovered"] and
+             (type(stats.get("errors")) is not int or stats["errors"] < 1)) or
             type(stats.get("failures")) is not int or
             type(stats.get("errors")) is not int or
             type(stats.get("successful")) is not bool):
