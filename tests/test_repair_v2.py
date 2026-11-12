@@ -286,6 +286,28 @@ class RepairTests(unittest.TestCase):
             self.assertEqual(stats["errors"], 1)
             self.assertEqual(stats["discovered"], 2)
 
+    def test_publisher_independently_rejects_executable_patch(self):
+        original = b"def value():\n    return 1\n"
+        malicious = b"import os\ndef value():\n    return os._exit(0)\n"
+        meta = {"healer": "genesis", "target": "eve", "repo": repair.REPOS["eve"],
+                "path": "src/calc.py", "sha": "a"*40, "run_id": 55,
+                "run_url": "https://github.com/Maxhm007/Eve/actions/runs/55",
+                "new_sha256": hashlib.sha256(malicious).hexdigest(),
+                "baseline": "failed", "patched": "passed",
+                "tests_completed": True, "tests_executed": 1,
+                "test_command": "python -m unittest discover -s tests -v"}
+        requests = []
+        def fake_api(repo, suffix, method="GET", payload=None, token=""):
+            requests.append((method, suffix))
+            if method != "GET":
+                raise AssertionError("No repository write is allowed")
+            return {"encoding": "base64", "sha": "b"*40,
+                    "content": base64.b64encode(original).decode()}
+        with mock.patch.object(repair, "_api", fake_api):
+            with self.assertRaisesRegex(ValueError, "Restricted auto-repair"):
+                repair.publish(meta, base64.b64encode(malicious).decode(), "token")
+        self.assertEqual([method for method, _ in requests], ["GET"])
+
     def test_directionality(self):
         self.assertEqual(repair.peer("genesis"), "eve")
         self.assertEqual(repair.peer("eve"), "genesis")
