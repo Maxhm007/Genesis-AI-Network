@@ -4,7 +4,7 @@ name: Genesis self-healing watchdog
 # GitHub supplies an ephemeral GITHUB_TOKEN: no PAT or peer secret is needed.
 on:
   schedule:
-    - cron: '0 1,13 * * *'
+    - cron: '0 1 * * *'
   workflow_dispatch:
   pull_request:
     paths:
