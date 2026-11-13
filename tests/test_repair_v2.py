@@ -103,6 +103,48 @@ class RepairTests(unittest.TestCase):
             self.assertEqual(stats["executed"], 1)
             self.assertTrue(stats["successful"])
 
+    def test_empty_pytest_suite_does_not_forge_reproduction(self):
+        import importlib.util
+        if importlib.util.find_spec("pytest") is None:
+            self.skipTest("pytest unavailable")
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "tests").mkdir()
+            (root / "requirements.txt").write_text("pytest>=8.0\n")
+            (root / "tests" / "test_skip_all.py").write_text(
+                "import pytest\npytest.skip('no tests', allow_module_level=True)\n")
+            with self.assertRaisesRegex(ValueError, "incomplete or invalid"):
+                repair.run_tracked_tests(root)
+
+    def test_patch_cannot_replace_collection_failure_with_module_skip(self):
+        import importlib.util
+        if importlib.util.find_spec("pytest") is None:
+            self.skipTest("pytest unavailable")
+        patch = ("diff --git a/src/flag.py b/src/flag.py\n"
+                 "--- a/src/flag.py\n+++ b/src/flag.py\n"
+                 "@@ -1,2 +1,2 @@\n def enabled():\n-    return True\n+    return False\n")
+        def checkout(meta, dest):
+            (dest / "src").mkdir(parents=True)
+            (dest / "src" / "__init__.py").write_text("")
+            (dest / "tests").mkdir()
+            (dest / "requirements.txt").write_text("pytest>=8.0\n")
+            (dest / "src" / "flag.py").write_text("def enabled():\n    return True\n")
+            (dest / "tests" / "test_skip.py").write_text(
+                "import pytest\nfrom src.flag import enabled\n"
+                "if not enabled(): pytest.skip('feature disabled', allow_module_level=True)\n"
+                "assert enabled() is False\n"
+                "def test_flag(): assert True\n")
+            (dest / "tests" / "test_other.py").write_text(
+                "def test_other(): assert True\n")
+            subprocess.run(["git", "init", "-q", str(dest)], check=True)
+            subprocess.run(["git", "add", "."], cwd=dest, check=True)
+        meta = {"healer": "eve", "target": "genesis",
+                "repo": repair.REPOS["genesis"], "sha": "a"*40}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(
+                repair, "checkout_target", checkout):
+            with self.assertRaisesRegex(ValueError, "skipped additional test modules"):
+                repair.validate(meta, patch, Path(d)/"verified")
+
     def test_genesis_pytest_collection_is_tracked(self):
         import types
         with tempfile.TemporaryDirectory() as d:

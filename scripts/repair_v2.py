@@ -267,6 +267,7 @@ class Audit:
         self.failures = 0
         self.errors = 0
         self.skipped = 0
+        self.collection_skips = 0
 
     def pytest_runtest_logreport(self, report):
         if report.when == "call" or report.failed or report.skipped:
@@ -284,6 +285,9 @@ class Audit:
         # even when no test function could execute.
         if report.failed:
             self.errors += 1
+        if report.skipped:
+            self.skipped += 1
+            self.collection_skips += 1
 
     def pytest_sessionfinish(self, session, exitstatus):
         discovered = session.testscollected
@@ -294,8 +298,9 @@ class Audit:
         print(chr(10) + "__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":" +
               json.dumps({"discovered": discovered, "executed": executed,
                           "failures": self.failures,
-                          "errors": self.errors if discovered else 1,
+                          "errors": self.errors,
                           "skipped": self.skipped,
+                          "collection_skips": self.collection_skips,
                           "successful": passed}), flush=True)
 
 audit = Audit()
@@ -474,6 +479,8 @@ def validate(meta, patch, output):
             raise ValueError("Patched tests still fail")
         if after_stats["executed"] < baseline_stats["executed"]:
             raise ValueError("Patched test coverage fell below the baseline")
+        if after_stats.get("collection_skips", 0) > baseline_stats.get("collection_skips", 0):
+            raise ValueError("Patched suite skipped additional test modules during collection")
         if (after_stats["skipped"] > baseline_stats["skipped"] and not
                 (baseline_stats["errors"] > 0 and
                  after_stats["discovered"] > baseline_stats["discovered"])):
