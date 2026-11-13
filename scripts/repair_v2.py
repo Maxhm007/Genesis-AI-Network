@@ -279,6 +279,12 @@ class Audit:
         if report.skipped:
             self.skipped += 1
 
+    def pytest_collectreport(self, report):
+        # Import/collection failures are reproducible baseline errors,
+        # even when no test function could execute.
+        if report.failed:
+            self.errors += 1
+
     def pytest_sessionfinish(self, session, exitstatus):
         discovered = session.testscollected
         executed = len(self.seen)
@@ -323,7 +329,8 @@ def run_tracked_tests(workspace):
     if (not isinstance(stats, dict) or
             type(stats.get("discovered")) is not int or
             type(stats.get("executed")) is not int or
-            stats["discovered"] < 1 or stats["executed"] > stats["discovered"] or
+            (stats["discovered"] < 1 and (stats["successful"] or stats["errors"] < 1)) or
+            stats["executed"] > stats["discovered"] or
             (stats["successful"] and stats["executed"] != stats["discovered"]) or
             (not stats["successful"] and stats["executed"] < stats["discovered"] and
              (type(stats.get("errors")) is not int or stats["errors"] < 1)) or
