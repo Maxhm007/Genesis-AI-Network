@@ -440,6 +440,8 @@ def validate(meta, patch, output):
         directory = Path(root)
         checkout_target(meta, directory / "work")
         workspace = directory / "work"
+        runner = ("python -m pytest -q tests" if _is_pytest_repository(workspace)
+                  else "python -m unittest discover -s tests -v")
         base = workspace / path
         if not base.is_file() or base.is_symlink() or base.stat().st_size > 120000:
             raise ValueError("Changed file is not an ordinary existing source file")
@@ -490,7 +492,7 @@ def validate(meta, patch, output):
                        patch_sha256=hashlib.sha256(patch.encode()).hexdigest(),
                        baseline="failed", patched="passed",
                        tests_completed=True, tests_executed=after_stats["executed"],
-                       test_command="python -m unittest discover -s tests -v")
+                       test_command=runner)
     (dest / "attestation.json").write_text(json.dumps(attestation, indent=2), encoding="utf-8")
     return attestation
 
@@ -499,7 +501,8 @@ def publish(attestation, encoded, token):
     """Metadata-only promotion. Never executes candidate code with GitHub token."""
     meta = attestation
     if (meta.get("baseline") != "failed" or meta.get("patched") != "passed" or
-            meta.get("test_command") != "python -m unittest discover -s tests -v" or
+            meta.get("test_command") not in (
+                "python -m unittest discover -s tests -v", "python -m pytest -q tests") or
             meta.get("tests_completed") is not True or
             type(meta.get("tests_executed")) is not int or meta["tests_executed"] < 1):
         raise ValueError("No valid reproduction evidence")
@@ -531,7 +534,8 @@ def publish(attestation, encoded, token):
         "## Mutual healing candidate (review required)\n\n"
         "Healer: " + meta["healer"] + "\n"
         "Failed baseline: " + meta["run_url"] + "\n"
-        "Baseline unittest: **failed**; isolated patched unittest: **passed**.\n"
+        "Test runner: `" + meta["test_command"] + "`\n"
+        "Baseline tests: **failed**; isolated patched tests: **passed**.\n"
         "Pinned parent: `" + meta["sha"] + "`\n"
         "Modified: `" + path + "`\n\n"
         "No auto-merge. Independently inspect the diff and reproducibility before approval."
