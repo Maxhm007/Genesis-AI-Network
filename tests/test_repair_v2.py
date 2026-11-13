@@ -26,6 +26,32 @@ repair = module()
 
 class RepairTests(unittest.TestCase):
 
+    def test_real_pytest_collection_error_is_reproducible(self):
+        import importlib.util
+        if importlib.util.find_spec("pytest") is None:
+            self.skipTest("pytest unavailable")
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "src").mkdir()
+            (root / "src" / "__init__.py").write_text("")
+            (root / "tests").mkdir()
+            (root / "requirements.txt").write_text("pytest>=8.0\n")
+            source = root / "src" / "calc.py"
+            source.write_text("def value():\n    return 1\n")
+            (root / "tests" / "test_collection.py").write_text(
+                "from src.calc import value\n"
+                "assert value() == 2\n"
+                "def test_runtime(): assert value() == 2\n")
+            broken, baseline = repair.run_tracked_tests(root)
+            self.assertNotEqual(broken.returncode, 0)
+            self.assertGreaterEqual(baseline["errors"], 1)
+            self.assertEqual(baseline["executed"], 0)
+            source.write_text("def value():\n    return 2\n")
+            fixed, patched = repair.run_tracked_tests(root)
+            self.assertEqual(fixed.returncode, 0)
+            self.assertEqual(patched["executed"], 1)
+            self.assertTrue(patched["successful"])
+
     def test_real_pytest_assertion_is_reproduced_and_fixed(self):
         import importlib.util
         if importlib.util.find_spec("pytest") is None:
