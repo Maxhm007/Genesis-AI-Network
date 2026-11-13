@@ -104,6 +104,16 @@ class RepairTests(unittest.TestCase):
                 self.assertIn("unittest.defaultTestLoader", args[2])
                 self.assertNotIn("pytest.main", args[2])
 
+    def test_publisher_rejects_unattested_test_runner(self):
+        meta = {
+            "healer": "genesis", "target": "eve", "repo": repair.REPOS["eve"],
+            "path": "src/calc.py", "new_sha256": hashlib.sha256(b"ok").hexdigest(),
+            "baseline": "failed", "patched": "passed", "tests_completed": True,
+            "tests_executed": 2, "test_command": "python -c 'print(1)'"
+        }
+        with self.assertRaisesRegex(ValueError, "reproduction evidence"):
+            repair.publish(meta, base64.b64encode(b"ok").decode(), "fake-local-token")
+
     def test_local_prepare_requires_matching_recipient_repository(self):
         import os
         import sys
