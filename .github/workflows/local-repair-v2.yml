@@ -96,7 +96,10 @@ jobs:
         with:
           name: local-repair-candidate
           path: candidate/
-      - name: Reproduce failure and check patched tests without secrets
+      - name: Install Genesis test dependencies in no-secret runner
+        run: |
+          python -m pip install --disable-pip-version-check 'pytest==8.4.2' 'cryptography==44.0.3'
+      - name: Reproduce full pytest failure and check patched tests without secrets
         run: python scripts/repair_v2.py validate --candidate candidate --out verified
       - name: Confirm independent test evidence
         id: verified
