@@ -181,7 +181,7 @@ def repair_ticket(run, failures, helper, target=None):
         url = "https://github.com/{}/actions/runs/{}".format(
             REPOSITORIES[target], run["id"])
     body = (
-        "## Reciprocal recovery: " + helper.title() + " → peer\n\n"
+        "## Recovery: " + helper.title() + " → " + target.title() + "\n\n"
         "The watchdog detected a completed workflow failure after a bounded retry. "
         "**A verified code fix has NOT been applied.**\n\n"
         "- Workflow: " + str(run.get("name", "Unknown"))[:200] + "\n"
