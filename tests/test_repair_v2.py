@@ -25,6 +25,72 @@ repair = module()
 
 
 class RepairTests(unittest.TestCase):
+
+    def test_local_prepare_requires_matching_recipient_repository(self):
+        import os
+        import sys
+        with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": repair.REPOS["genesis"],
+                                          "GITHUB_TOKEN": "local-scoped-token"}, clear=True), \
+             mock.patch.object(sys, "argv", ["repair_v2.py", "--local", "prepare",
+                                             "--identity", "genesis", "--out", "candidate"]), \
+             mock.patch.object(repair, "evidence") as evidence:
+            with self.assertRaisesRegex(ValueError, "current repository"):
+                repair.main()
+            evidence.assert_not_called()
+
+    def test_local_prepare_uses_native_token_on_local_target_only(self):
+        import os
+        import sys
+        import io
+        from contextlib import redirect_stdout
+        with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": repair.REPOS["eve"],
+                                          "GITHUB_TOKEN": "local-scoped-token"}, clear=True), \
+             mock.patch.object(sys, "argv", ["repair_v2.py", "--local", "prepare",
+                                             "--identity", "genesis", "--out", "candidate"]), \
+             mock.patch.object(repair, "evidence", return_value=None) as evidence, \
+             redirect_stdout(io.StringIO()):
+            repair.main()
+            evidence.assert_called_once_with("genesis", 0, "local-scoped-token")
+
+    def test_local_publisher_rejects_foreign_repository_without_writing(self):
+        import os
+        import sys
+        import json
+        with tempfile.TemporaryDirectory() as d:
+            verified = Path(d)
+            (verified / "attestation.json").write_text(json.dumps({
+                "healer": "eve", "target": "genesis"}))
+            (verified / "patched.b64").write_text("ZGF0YQ==")
+            with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": repair.REPOS["eve"],
+                                              "GITHUB_TOKEN": "local-scoped-token"}, clear=True), \
+                 mock.patch.object(sys, "argv", ["repair_v2.py", "--local", "publish",
+                                                 "--verified", str(verified)]), \
+                 mock.patch.object(repair, "publish") as publisher:
+                with self.assertRaisesRegex(ValueError, "foreign repository"):
+                    repair.main()
+                publisher.assert_not_called()
+
+    def test_local_publisher_uses_local_token_instead_of_peer_pat(self):
+        import os
+        import sys
+        import json
+        import io
+        from contextlib import redirect_stdout
+        with tempfile.TemporaryDirectory() as d:
+            verified = Path(d)
+            meta = {"healer": "genesis", "target": "eve", "repo": repair.REPOS["eve"]}
+            (verified / "attestation.json").write_text(json.dumps(meta))
+            (verified / "patched.b64").write_text("ZGF0YQ==")
+            with mock.patch.dict(os.environ, {"GITHUB_REPOSITORY": repair.REPOS["eve"],
+                                              "GITHUB_TOKEN": "local-scoped-token",
+                                              "REPAIR_PR_TOKEN": "must-not-use"}, clear=True), \
+                 mock.patch.object(sys, "argv", ["repair_v2.py", "--local", "publish",
+                                                 "--verified", str(verified)]), \
+                 mock.patch.object(repair, "publish", return_value={"status": "review_required"}) as publisher, \
+                 redirect_stdout(io.StringIO()):
+                repair.main()
+                publisher.assert_called_once_with(meta, "ZGF0YQ==", "local-scoped-token")
+
     def test_baseline_failure_then_verified_fix(self):
         patch = ("diff --git a/src/calc.py b/src/calc.py\n"
                  "--- a/src/calc.py\n+++ b/src/calc.py\n"
