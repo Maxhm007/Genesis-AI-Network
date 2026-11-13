@@ -1,0 +1,26 @@
+name: Verify mutual-healing activation helper
+
+on:
+  pull_request:
+    paths:
+      - scripts/activate_mutual_healing.py
+      - tests/test_activate_mutual_healing.py
+      - .github/workflows/test-mutual-activation-helper.yml
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  unit-tests:
+    runs-on: ubuntu-latest
+    timeout-minutes: 3
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Test safe local activation without credentials
+        run: python -m unittest discover -s tests -p test_activate_mutual_healing.py -v
