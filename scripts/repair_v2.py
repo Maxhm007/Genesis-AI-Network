@@ -480,6 +480,7 @@ def publish(attestation, encoded, token):
 
 def main():
     parser = argparse.ArgumentParser(description="Evidence-gated mutual code repair")
+    parser.add_argument("--local", action="store_true", help="Use only the current repository GITHUB_TOKEN; refuse remote-target credentials")
     sub = parser.add_subparsers(dest="command", required=True)
     prepare = sub.add_parser("prepare")
     prepare.add_argument("--identity", choices=tuple(REPOS), required=True)
@@ -492,7 +493,10 @@ def main():
     delivery.add_argument("--verified", required=True)
     args = parser.parse_args()
     if args.command == "prepare":
-        meta = evidence(args.identity, args.run_id, os.getenv("REPAIR_READ_TOKEN", ""))
+        if args.local and os.getenv("GITHUB_REPOSITORY") != REPOS[peer(args.identity)]:
+            raise ValueError("Local repair identity must target the current repository")
+        meta = evidence(args.identity, args.run_id,
+                        os.getenv("GITHUB_TOKEN", "") if args.local else os.getenv("REPAIR_READ_TOKEN", ""))
         if not meta:
             print(json.dumps({"status":"no_actionable_repeated_test_failure"}))
             return
@@ -517,7 +521,11 @@ def main():
         target = Path(args.verified)
         meta = json.loads((target/"attestation.json").read_text())
         encoded = (target/"patched.b64").read_text()
-        print(json.dumps(publish(meta,encoded,os.getenv("REPAIR_PR_TOKEN",""))))
+        if args.local and (meta.get("target") not in REPOS or
+                           os.getenv("GITHUB_REPOSITORY") != REPOS[meta["target"]]):
+            raise ValueError("Local PR publication refuses a foreign repository")
+        token = os.getenv("GITHUB_TOKEN", "") if args.local else os.getenv("REPAIR_PR_TOKEN", "")
+        print(json.dumps(publish(meta,encoded,token)))
 
 
 if __name__ == "__main__":
