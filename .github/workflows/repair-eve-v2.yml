@@ -1,9 +1,9 @@
 name: Genesis repairs Eve - tested code PR
 
+# Legacy cross-repo PAT workflow; retained for explicit manual use only.
+# The replacement token-free self-heal / peer-heal / local-repair-v2
+# workflows are the only scheduled recovery paths.
 on:
-  schedule:
-    # Once daily; no runners started until explicit opt-in.
-    - cron: '35 1 * * *'
   workflow_dispatch:
   pull_request:
     paths:
