@@ -1,0 +1,135 @@
+name: Genesis accepts Eve-style tested repair proposals
+
+# Runs in the AFFECTED repository. The repair protocol is reciprocal,
+# but all GitHub reads/writes use the repository's own ephemeral GITHUB_TOKEN.
+# Model configuration is optional until explicitly enabled; no peer PAT is used.
+on:
+  schedule:
+    - cron: '35 2 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/repair_v2.py'
+      - 'tests/test_repair_v2.py'
+      - '.github/workflows/local-repair-v2.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: local-tested-repair-${{ github.repository }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  policy-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover -s tests -p test_repair_v2.py -v
+
+  prepare:
+    if: github.event_name != 'pull_request' && vars.MUTUAL_HEAL_REPAIR_ENABLED == 'true' && vars.REPAIR_MODEL_ENDPOINT != '' && vars.REPAIR_MODEL_NAME != ''
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    permissions:
+      contents: read
+      actions: read
+    outputs:
+      ready: ${{ steps.ready.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Draft one constrained candidate for the CURRENT repository
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          REPAIR_MODEL_API_KEY: ${{ secrets.REPAIR_MODEL_API_KEY }}
+          REPAIR_MODEL_ENDPOINT: ${{ vars.REPAIR_MODEL_ENDPOINT }}
+          REPAIR_MODEL_NAME: ${{ vars.REPAIR_MODEL_NAME }}
+        run: python scripts/repair_v2.py --local prepare --identity eve --out candidate
+      - name: Check whether candidate was justified
+        id: ready
+        shell: bash
+        run: |
+          if [[ -s candidate/candidate.diff && -s candidate/metadata.json ]]; then
+            echo 'ready=true' >> "$GITHUB_OUTPUT"
+          else
+            echo 'ready=false' >> "$GITHUB_OUTPUT"
+            echo 'No repeated failing main-branch tests with a safe model candidate.' >> "$GITHUB_STEP_SUMMARY"
+          fi
+      - if: steps.ready.outputs.ready == 'true'
+        uses: actions/upload-artifact@v4
+        with:
+          name: local-repair-candidate
+          path: candidate/
+          retention-days: 1
+
+  verify:
+    if: needs.prepare.outputs.ready == 'true'
+    needs: prepare
+    runs-on: ubuntu-latest
+    timeout-minutes: 7
+    permissions:
+      contents: read
+    outputs:
+      verified: ${{ steps.verified.outputs.ready }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: local-repair-candidate
+          path: candidate/
+      - name: Reproduce failure and check patched tests without secrets
+        run: python scripts/repair_v2.py validate --candidate candidate --out verified
+      - name: Confirm independent test evidence
+        id: verified
+        run: |
+          test -s verified/attestation.json
+          test -s verified/patched.b64
+          echo 'ready=true' >> "$GITHUB_OUTPUT"
+      - uses: actions/upload-artifact@v4
+        with:
+          name: tested-local-repair
+          path: verified/
+          retention-days: 1
+
+  review-pr:
+    if: needs.verify.outputs.verified == 'true'
+    needs: verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 4
+    permissions:
+      contents: write
+      pull-requests: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - uses: actions/download-artifact@v4
+        with:
+          name: tested-local-repair
+          path: verified/
+      - name: Publish a review-only PR in THIS repository
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/repair_v2.py --local publish --verified verified
