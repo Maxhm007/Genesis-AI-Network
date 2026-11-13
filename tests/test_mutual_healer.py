@@ -144,6 +144,24 @@ class MutualTests(unittest.TestCase):
         self.assertEqual(heal.select_failure([run(name="Eve self-healing watchdog")], NOW), [])
         self.assertEqual(heal.select_failure([run(name="Genesis self-healing watchdog")], NOW), [])
 
+    def test_historical_pr_failures_are_not_retried(self):
+        old_pr = {**run(77), "event": "pull_request", "head_branch": "main"}
+        api = API([old_pr])
+        result = heal.heal_once("eve", api, NOW, target="eve")
+        self.assertEqual(result["status"], "healthy_or_no_recent_failed_runs")
+        self.assertEqual(api.retried, [])
+
+    def test_feature_branch_failures_are_not_retried(self):
+        old_feature = {**run(78), "event": "push", "head_branch": "feature/old-tests"}
+        self.assertEqual(heal.select_failure([old_feature], NOW), [])
+
+    def test_main_branch_failure_is_actionable(self):
+        production = {**run(79), "event": "schedule", "head_branch": "main"}
+        api = API([production])
+        result = heal.heal_once("genesis", api, NOW, target="genesis")
+        self.assertEqual(result["status"], "recovery_retry_requested")
+        self.assertEqual(api.retried, [("genesis", 79)])
+
     def test_missing_attempt_disables_retry(self):
         self.assertEqual(heal.select_failure([{k:v for k,v in run().items() if k!="run_attempt"}], NOW), [])
 

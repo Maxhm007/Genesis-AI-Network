@@ -143,6 +143,10 @@ def select_failure(runs, now=None, max_age_hours=MAX_AGE_HOURS):
                 continue
             if item.get("name") in EXCLUDED_NAMES:
                 continue
+            # Do not burn recovery minutes on obsolete PRs or feature branches.
+            # Main-branch failures are the only actionable production signal.
+            if item.get("event") == "pull_request" or item.get("head_branch") not in (None, "main"):
+                continue
             ident = item.get("id")
             attempt = item.get("run_attempt")
             if type(ident) is not int or ident < 1 or type(attempt) is not int or attempt < 1:
