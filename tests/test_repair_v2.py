@@ -103,6 +103,19 @@ class RepairTests(unittest.TestCase):
             self.assertEqual(stats["executed"], 1)
             self.assertTrue(stats["successful"])
 
+    def test_empty_pytest_suite_does_not_forge_reproduction(self):
+        import importlib.util
+        if importlib.util.find_spec("pytest") is None:
+            self.skipTest("pytest unavailable")
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "tests").mkdir()
+            (root / "requirements.txt").write_text("pytest>=8.0\n")
+            (root / "tests" / "test_skip_all.py").write_text(
+                "import pytest\npytest.skip('no tests', allow_module_level=True)\n")
+            with self.assertRaisesRegex(ValueError, "incomplete or invalid"):
+                repair.run_tracked_tests(root)
+
     def test_patch_cannot_replace_collection_failure_with_module_skip(self):
         import importlib.util
         if importlib.util.find_spec("pytest") is None:
