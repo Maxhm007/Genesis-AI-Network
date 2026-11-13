@@ -6,6 +6,12 @@ on:
   schedule:
     - cron: '0 1 * * *'
   workflow_dispatch:
+  # A reviewed change to this workflow on main triggers an immediate
+  # post-merge verification, without needing a PAT or GitHub CLI.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/self-heal.yml'
   pull_request:
     paths:
       - 'scripts/mutual_healer.py'
