@@ -252,9 +252,65 @@ sys.exit(0 if result.wasSuccessful() else 1)
 """
 
 
+
+# Genesis' native test suite includes pytest functions, not just TestCase classes.
+# The harness must execute the real collector or it cannot certify repairs.
+PYTEST_HARNESS = """
+import json
+import sys
+import pytest
+
+nonce = sys.argv[1]
+class Audit:
+    def __init__(self):
+        self.seen = set()
+        self.failures = 0
+        self.errors = 0
+        self.skipped = 0
+
+    def pytest_runtest_logreport(self, report):
+        if report.when == "call" or report.failed or report.skipped:
+            self.seen.add(report.nodeid)
+        if report.failed:
+            if report.when == "call":
+                self.failures += 1
+            else:
+                self.errors += 1
+        if report.skipped:
+            self.skipped += 1
+
+    def pytest_sessionfinish(self, session, exitstatus):
+        discovered = session.testscollected
+        executed = len(self.seen)
+        self.errors += session.config.pluginmanager.get_plugin(
+            "terminalreporter")._numcollected == 0 if False else 0
+        passed = exitstatus == 0 and discovered > 0 and executed == discovered
+        print("__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":" +
+              json.dumps({"discovered": discovered, "executed": executed,
+                          "failures": self.failures,
+                          "errors": self.errors if discovered else 1,
+                          "skipped": self.skipped,
+                          "successful": passed}), flush=True)
+
+audit = Audit()
+code = pytest.main(["-q", "tests"], plugins=[audit])
+sys.exit(code)
+"""
+
+
+def _is_pytest_repository(workspace):
+    # The target's checked-out, pinned requirements declare pytest.
+    # Eve uses stdlib unittest only; keep its existing tracked runner.
+    requirements = workspace / "requirements.txt"
+    if not requirements.is_file():
+        return False
+    return any(line.strip().lower().startswith("pytest") for line in
+               requirements.read_text(encoding="utf-8").splitlines())
+
 def run_tracked_tests(workspace):
     nonce = secrets.token_hex(16)
-    result = command([sys.executable, "-c", TEST_HARNESS, nonce], workspace)
+    harness = PYTEST_HARNESS if _is_pytest_repository(workspace) else TEST_HARNESS
+    result = command([sys.executable, "-c", harness, nonce], workspace)
     prefix = "__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":"
     markers = [line[len(prefix):] for line in result.stdout.splitlines()
                if line.startswith(prefix)]
