@@ -285,7 +285,7 @@ class Audit:
         self.errors += session.config.pluginmanager.get_plugin(
             "terminalreporter")._numcollected == 0 if False else 0
         passed = exitstatus == 0 and discovered > 0 and executed == discovered
-        print("__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":" +
+        print(chr(10) + "__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":" +
               json.dumps({"discovered": discovered, "executed": executed,
                           "failures": self.failures,
                           "errors": self.errors if discovered else 1,
