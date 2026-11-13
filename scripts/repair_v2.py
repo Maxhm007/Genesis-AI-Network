@@ -298,7 +298,7 @@ class Audit:
         print(chr(10) + "__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":" +
               json.dumps({"discovered": discovered, "executed": executed,
                           "failures": self.failures,
-                          "errors": self.errors if discovered else 1,
+                          "errors": self.errors,
                           "skipped": self.skipped,
                           "collection_skips": self.collection_skips,
                           "successful": passed}), flush=True)
