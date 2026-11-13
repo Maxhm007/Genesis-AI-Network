@@ -12,8 +12,9 @@ automatically minted short-lived `GITHUB_TOKEN`:
 - Each runs **once locally and once with the other AI's immutable, vetted engine**.
   The local engine runs at 07:00/07:15 and the cross-authored engine at
   19:00/19:15 Dhaka time. Both use only the affected repository's token.
-- Each watchdog excludes itself to avoid a retry loop, and checks no more than
-  thirty failed runs from the last 48 hours. **No AI code is auto-merged.**
+- Each watchdog excludes itself to avoid a retry loop, ignores historical pull
+  requests and non-main branches, and checks no more than thirty failed runs
+  from the last 48 hours. **No AI code is auto-merged.**
 - Use Actions → `self-heal.yml` → Run workflow to test. Inspect real logs:
   `healthy_or_no_recent_failed_runs` means no recent work, NOT a healed bug.
 
