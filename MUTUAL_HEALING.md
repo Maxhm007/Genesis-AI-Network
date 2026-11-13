@@ -63,7 +63,8 @@ yet verified** by this stage.
 
 ### Controls
 
-To suspend a repository's watchdog, disable `self-heal.yml` in its Actions
-page. No token setup and no custom Actions variable is necessary for this
+To suspend ALL recovery in a repository, disable **both** `self-heal.yml`
+and `peer-heal.yml` in its Actions page. They are independent scheduled
+workflows; disabling only one does not stop the other. No token setup and no custom Actions variable is necessary for this
 workflow. Existing `PEER_HEAL_TOKEN` and `MUTUAL_HEAL_ENABLED` are **not read**
 by `self-heal.yml`.
