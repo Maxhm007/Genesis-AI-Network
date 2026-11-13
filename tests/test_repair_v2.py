@@ -26,6 +26,28 @@ repair = module()
 
 class RepairTests(unittest.TestCase):
 
+    def test_real_pytest_assertion_is_reproduced_and_fixed(self):
+        import importlib.util
+        if importlib.util.find_spec("pytest") is None:
+            self.skipTest("pytest unavailable in policy test environment")
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "tests").mkdir()
+            (root / "requirements.txt").write_text("pytest>=8.0\n")
+            candidate = root / "tests" / "test_actual_pytest.py"
+            candidate.write_text("def test_actual_value():\n    assert 1 == 2\n")
+            original, baseline = repair.run_tracked_tests(root)
+            self.assertNotEqual(original.returncode, 0)
+            self.assertEqual(baseline["discovered"], 1)
+            self.assertEqual(baseline["executed"], 1)
+            self.assertEqual(baseline["failures"], 1)
+            candidate.write_text("def test_actual_value():\n    assert 2 == 2\n")
+            repaired, stats = repair.run_tracked_tests(root)
+            self.assertEqual(repaired.returncode, 0)
+            self.assertEqual(stats["discovered"], 1)
+            self.assertEqual(stats["executed"], 1)
+            self.assertTrue(stats["successful"])
+
     def test_genesis_pytest_collection_is_tracked(self):
         import types
         with tempfile.TemporaryDirectory() as d:
