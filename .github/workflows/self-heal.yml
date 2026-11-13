@@ -1,0 +1,57 @@
+name: Genesis self-healing watchdog
+
+# Every repository controls only its OWN jobs and issues.
+# GitHub supplies an ephemeral GITHUB_TOKEN: no PAT or peer secret is needed.
+on:
+  schedule:
+    - cron: '0 1,13 * * *'
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - 'scripts/mutual_healer.py'
+      - 'tests/test_mutual_healer.py'
+      - '.github/workflows/self-heal.yml'
+
+permissions:
+  contents: read
+  actions: write
+  issues: write
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  watchdog:
+    # PRs may only test the policy. Untrusted PR code never receives a write token.
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify watchdog security and retry tests
+        run: python -m unittest discover -s tests -p test_mutual_healer.py -v
+      - name: Recover one local failed run or create evidence ticket
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python scripts/mutual_healer.py --identity genesis --local
+
+  policy-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    timeout-minutes: 4
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - run: python -m unittest discover -s tests -p test_mutual_healer.py -v

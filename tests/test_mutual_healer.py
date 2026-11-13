@@ -118,6 +118,32 @@ class MutualTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             heal.GitHub("")
 
+
+    def test_local_recovery_uses_own_repository(self):
+        api = API([run()])
+        result = heal.heal_once("eve", api, NOW, target="eve")
+        self.assertEqual(result["target"], "eve")
+        self.assertEqual(api.retried, [("eve", 31)])
+
+    def test_local_github_token_cannot_touch_peer(self):
+        api = heal.LocalGitHub("github-actions-token", "eve", opener=lambda *_: None)
+        with self.assertRaisesRegex(ValueError, "peer"):
+            api.request("POST", "genesis", "/issues", {"title": "attack"})
+        with self.assertRaisesRegex(ValueError, "peer"):
+            api.request("POST", "genesis", "/actions/runs/3/rerun-failed-jobs")
+        with self.assertRaisesRegex(ValueError, "peer"):
+            api.request("GET", "genesis", "/actions/runs?status=failure")
+
+    def test_local_identity_fails_closed(self):
+        with self.assertRaises(ValueError):
+            heal.LocalGitHub("token", "unknown")
+        with self.assertRaises(ValueError):
+            heal.heal_once("eve", API(), NOW, target="unknown")
+
+    def test_self_healing_workflow_never_retries_itself(self):
+        self.assertEqual(heal.select_failure([run(name="Eve self-healing watchdog")], NOW), [])
+        self.assertEqual(heal.select_failure([run(name="Genesis self-healing watchdog")], NOW), [])
+
     def test_missing_attempt_disables_retry(self):
         self.assertEqual(heal.select_failure([{k:v for k,v in run().items() if k!="run_attempt"}], NOW), [])
 

@@ -25,7 +25,7 @@ REPOSITORIES = {
 }
 MAX_AGE_HOURS = 48
 MAX_RUNS = 30
-EXCLUDED_NAMES = {"Eve independent peer research",
+EXCLUDED_NAMES = {"Eve self-healing watchdog", "Genesis self-healing watchdog", "Eve independent peer research",
                   "Genesis independent Eve peer research"}
 AGENT = "Reciprocal-Healer/1.0"
 LIMIT = 512_000
@@ -112,6 +112,24 @@ class GitHub:
         self.request("POST", target, "/actions/runs/{}/rerun-failed-jobs".format(run_id))
 
 
+class LocalGitHub(GitHub):
+    """GitHub Actions token: READ/WRITE only the workflow's own repository.
+
+    Enforce the boundary in code even if a future refactor accidentally picks
+    a peer target.  The legacy cross-repository mode remains off by default.
+    """
+    def __init__(self, token, identity, opener=None):
+        if identity not in REPOSITORIES:
+            raise ValueError("Unknown local identity")
+        super().__init__(token, opener=opener)
+        self.identity = identity
+
+    def request(self, method, target, suffix, payload=None):
+        if target != self.identity:
+            raise ValueError("GITHUB_TOKEN cannot access or mutate the peer")
+        return super().request(method, target, suffix, payload)
+
+
 def select_failure(runs, now=None, max_age_hours=MAX_AGE_HOURS):
     """Choose a recent, actionable failure; no retry loops or old backlog."""
     now = now or datetime.now(timezone.utc)
@@ -151,17 +169,20 @@ def diagnosis(run, jobs):
     return failed[:20]
 
 
-def repair_ticket(run, failures, helper):
+def repair_ticket(run, failures, helper, target=None):
     title = "[Mutual Heal] workflow run {} failed after retry".format(run["id"])
     if helper not in REPOSITORIES:
         raise ValueError("Unknown healer")
+    target = target or ("eve" if helper == "genesis" else "genesis")
+    if target not in REPOSITORIES:
+        raise ValueError("Unknown repair target")
     url = run.get("html_url", "")
     if not isinstance(url, str) or not url.startswith("https://github.com/"):
         url = "https://github.com/{}/actions/runs/{}".format(
-            REPOSITORIES["eve" if helper == "genesis" else "genesis"], run["id"])
+            REPOSITORIES[target], run["id"])
     body = (
-        "## Reciprocal recovery: " + helper.title() + " → peer\n\n"
-        "The peer watchdog detected a completed workflow failure after a bounded retry. "
+        "## Recovery: " + helper.title() + " → " + target.title() + "\n\n"
+        "The watchdog detected a completed workflow failure after a bounded retry. "
         "**A verified code fix has NOT been applied.**\n\n"
         "- Workflow: " + str(run.get("name", "Unknown"))[:200] + "\n"
         "- Run: " + url + "\n"
@@ -180,11 +201,13 @@ def repair_ticket(run, failures, helper):
     return title, body
 
 
-def heal_once(identity, api, now=None):
+def heal_once(identity, api, now=None, target=None):
     """Each agent attempts at most one peer recovery action per cycle."""
     if identity not in REPOSITORIES:
         raise ValueError("Unknown healer identity")
-    target = "eve" if identity == "genesis" else "genesis"
+    target = target or ("eve" if identity == "genesis" else "genesis")
+    if target not in REPOSITORIES:
+        raise ValueError("Unknown target")
     eligible = select_failure(api.failed_runs(target), now)
     if not eligible:
         return {"status": "healthy_or_no_recent_failed_runs", "target": target}
@@ -195,7 +218,7 @@ def heal_once(identity, api, now=None):
             api.retry_failed(target, run["id"])
             return {"status": "recovery_retry_requested", "target": target,
                     "run_id": run["id"], "attempt": 1}
-        title, body = repair_ticket(run, diagnosis(run, api.jobs(target, run["id"])), identity)
+        title, body = repair_ticket(run, diagnosis(run, api.jobs(target, run["id"])), identity, target)
         if api.find_ticket(target, title):
             already_reported = True
             continue
@@ -209,8 +232,17 @@ def heal_once(identity, api, now=None):
 def main():
     parser = argparse.ArgumentParser(description="Mutual recovery: monitor and heal the other AI")
     parser.add_argument("--identity", required=True, choices=("genesis", "eve"))
+    parser.add_argument("--local", action="store_true",
+                        help="Recover only this repo with its own automatic GITHUB_TOKEN")
     args = parser.parse_args()
-    result = heal_once(args.identity, GitHub(os.getenv("PEER_HEAL_TOKEN", "")))
+    if args.local:
+        # GITHUB_TOKEN is scoped to the running repository, NEVER the peer.
+        if os.getenv("GITHUB_REPOSITORY") != REPOSITORIES[args.identity]:
+            raise ValueError("Local recovery refuses mismatched GitHub repository identity")
+        api = LocalGitHub(os.getenv("GITHUB_TOKEN", ""), args.identity)
+        result = heal_once(args.identity, api, target=args.identity)
+    else:
+        result = heal_once(args.identity, GitHub(os.getenv("PEER_HEAL_TOKEN", "")))
     print(json.dumps(result, sort_keys=True))
 
 
