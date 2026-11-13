@@ -169,17 +169,20 @@ def diagnosis(run, jobs):
     return failed[:20]
 
 
-def repair_ticket(run, failures, helper):
+def repair_ticket(run, failures, helper, target=None):
     title = "[Mutual Heal] workflow run {} failed after retry".format(run["id"])
     if helper not in REPOSITORIES:
         raise ValueError("Unknown healer")
+    target = target or ("eve" if helper == "genesis" else "genesis")
+    if target not in REPOSITORIES:
+        raise ValueError("Unknown repair target")
     url = run.get("html_url", "")
     if not isinstance(url, str) or not url.startswith("https://github.com/"):
         url = "https://github.com/{}/actions/runs/{}".format(
-            REPOSITORIES["eve" if helper == "genesis" else "genesis"], run["id"])
+            REPOSITORIES[target], run["id"])
     body = (
         "## Reciprocal recovery: " + helper.title() + " → peer\n\n"
-        "The peer watchdog detected a completed workflow failure after a bounded retry. "
+        "The watchdog detected a completed workflow failure after a bounded retry. "
         "**A verified code fix has NOT been applied.**\n\n"
         "- Workflow: " + str(run.get("name", "Unknown"))[:200] + "\n"
         "- Run: " + url + "\n"
@@ -215,7 +218,7 @@ def heal_once(identity, api, now=None, target=None):
             api.retry_failed(target, run["id"])
             return {"status": "recovery_retry_requested", "target": target,
                     "run_id": run["id"], "attempt": 1}
-        title, body = repair_ticket(run, diagnosis(run, api.jobs(target, run["id"])), identity)
+        title, body = repair_ticket(run, diagnosis(run, api.jobs(target, run["id"])), identity, target)
         if api.find_ticket(target, title):
             already_reported = True
             continue
