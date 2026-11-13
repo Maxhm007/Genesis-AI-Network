@@ -24,7 +24,8 @@ permissions:
   issues: write
 
 concurrency:
-  group: ${{ github.workflow }}-${{ github.ref }}
+  # Shared across self- and peer-authored healers: never race a failed-run retry.
+  group: reciprocal-healing-${{ github.repository }}-${{ github.ref }}
   cancel-in-progress: false
 
 jobs:
