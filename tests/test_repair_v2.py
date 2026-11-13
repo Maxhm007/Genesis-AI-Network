@@ -30,10 +30,10 @@ class RepairTests(unittest.TestCase):
         import types
         with tempfile.TemporaryDirectory() as d:
             root = Path(d)
-            (root / "requirements.txt").write_text("cryptography>=42.0\\npytest>=8.0\\n")
+            (root / "requirements.txt").write_text("cryptography>=42.0\npytest>=8.0\n")
             done = "__MUTUAL_HEAL_SUITE_FINISHED__" + "a"*32 + ":"
             report = '{"discovered":3,"executed":3,"failures":0,"errors":0,"skipped":0,"successful":true}'
-            result = types.SimpleNamespace(returncode=0, stdout=done+report+"\\n", stderr="")
+            result = types.SimpleNamespace(returncode=0, stdout=done+report+"\n", stderr="")
             with mock.patch.object(repair.secrets, "token_hex", return_value="a"*32), \
                  mock.patch.object(repair, "command", return_value=result) as command:
                 _, stats = repair.run_tracked_tests(root)
@@ -48,7 +48,7 @@ class RepairTests(unittest.TestCase):
             root = Path(d)
             done = "__MUTUAL_HEAL_SUITE_FINISHED__" + "b"*32 + ":"
             report = '{"discovered":1,"executed":1,"failures":0,"errors":0,"skipped":0,"successful":true}'
-            result = types.SimpleNamespace(returncode=0, stdout=done+report+"\\n", stderr="")
+            result = types.SimpleNamespace(returncode=0, stdout=done+report+"\n", stderr="")
             with mock.patch.object(repair.secrets, "token_hex", return_value="b"*32), \
                  mock.patch.object(repair, "command", return_value=result) as command:
                 repair.run_tracked_tests(root)
