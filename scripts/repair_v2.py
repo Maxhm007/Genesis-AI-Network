@@ -252,9 +252,71 @@ sys.exit(0 if result.wasSuccessful() else 1)
 """
 
 
+
+# Genesis' native test suite includes pytest functions, not just TestCase classes.
+# The harness must execute the real collector or it cannot certify repairs.
+PYTEST_HARNESS = """
+import json
+import sys
+import pytest
+
+nonce = sys.argv[1]
+class Audit:
+    def __init__(self):
+        self.seen = set()
+        self.failures = 0
+        self.errors = 0
+        self.skipped = 0
+
+    def pytest_runtest_logreport(self, report):
+        if report.when == "call" or report.failed or report.skipped:
+            self.seen.add(report.nodeid)
+        if report.failed:
+            if report.when == "call":
+                self.failures += 1
+            else:
+                self.errors += 1
+        if report.skipped:
+            self.skipped += 1
+
+    def pytest_collectreport(self, report):
+        # Import/collection failures are reproducible baseline errors,
+        # even when no test function could execute.
+        if report.failed:
+            self.errors += 1
+
+    def pytest_sessionfinish(self, session, exitstatus):
+        discovered = session.testscollected
+        executed = len(self.seen)
+        self.errors += session.config.pluginmanager.get_plugin(
+            "terminalreporter")._numcollected == 0 if False else 0
+        passed = exitstatus == 0 and discovered > 0 and executed == discovered
+        print(chr(10) + "__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":" +
+              json.dumps({"discovered": discovered, "executed": executed,
+                          "failures": self.failures,
+                          "errors": self.errors if discovered else 1,
+                          "skipped": self.skipped,
+                          "successful": passed}), flush=True)
+
+audit = Audit()
+code = pytest.main(["-q", "tests"], plugins=[audit])
+sys.exit(code)
+"""
+
+
+def _is_pytest_repository(workspace):
+    # The target's checked-out, pinned requirements declare pytest.
+    # Eve uses stdlib unittest only; keep its existing tracked runner.
+    requirements = workspace / "requirements.txt"
+    if not requirements.is_file():
+        return False
+    return any(line.strip().lower().startswith("pytest") for line in
+               requirements.read_text(encoding="utf-8").splitlines())
+
 def run_tracked_tests(workspace):
     nonce = secrets.token_hex(16)
-    result = command([sys.executable, "-c", TEST_HARNESS, nonce], workspace)
+    harness = PYTEST_HARNESS if _is_pytest_repository(workspace) else TEST_HARNESS
+    result = command([sys.executable, "-c", harness, nonce], workspace)
     prefix = "__MUTUAL_HEAL_SUITE_FINISHED__" + nonce + ":"
     markers = [line[len(prefix):] for line in result.stdout.splitlines()
                if line.startswith(prefix)]
@@ -267,7 +329,8 @@ def run_tracked_tests(workspace):
     if (not isinstance(stats, dict) or
             type(stats.get("discovered")) is not int or
             type(stats.get("executed")) is not int or
-            stats["discovered"] < 1 or stats["executed"] > stats["discovered"] or
+            (stats["discovered"] < 1 and (stats["successful"] or stats["errors"] < 1)) or
+            stats["executed"] > stats["discovered"] or
             (stats["successful"] and stats["executed"] != stats["discovered"]) or
             (not stats["successful"] and stats["executed"] < stats["discovered"] and
              (type(stats.get("errors")) is not int or stats["errors"] < 1)) or
@@ -377,6 +440,8 @@ def validate(meta, patch, output):
         directory = Path(root)
         checkout_target(meta, directory / "work")
         workspace = directory / "work"
+        runner = ("python -m pytest -q tests" if _is_pytest_repository(workspace)
+                  else "python -m unittest discover -s tests -v")
         base = workspace / path
         if not base.is_file() or base.is_symlink() or base.stat().st_size > 120000:
             raise ValueError("Changed file is not an ordinary existing source file")
@@ -427,7 +492,7 @@ def validate(meta, patch, output):
                        patch_sha256=hashlib.sha256(patch.encode()).hexdigest(),
                        baseline="failed", patched="passed",
                        tests_completed=True, tests_executed=after_stats["executed"],
-                       test_command="python -m unittest discover -s tests -v")
+                       test_command=runner)
     (dest / "attestation.json").write_text(json.dumps(attestation, indent=2), encoding="utf-8")
     return attestation
 
@@ -436,7 +501,8 @@ def publish(attestation, encoded, token):
     """Metadata-only promotion. Never executes candidate code with GitHub token."""
     meta = attestation
     if (meta.get("baseline") != "failed" or meta.get("patched") != "passed" or
-            meta.get("test_command") != "python -m unittest discover -s tests -v" or
+            meta.get("test_command") not in (
+                "python -m unittest discover -s tests -v", "python -m pytest -q tests") or
             meta.get("tests_completed") is not True or
             type(meta.get("tests_executed")) is not int or meta["tests_executed"] < 1):
         raise ValueError("No valid reproduction evidence")
@@ -468,7 +534,8 @@ def publish(attestation, encoded, token):
         "## Mutual healing candidate (review required)\n\n"
         "Healer: " + meta["healer"] + "\n"
         "Failed baseline: " + meta["run_url"] + "\n"
-        "Baseline unittest: **failed**; isolated patched unittest: **passed**.\n"
+        "Test runner: `" + meta["test_command"] + "`\n"
+        "Baseline tests: **failed**; isolated patched tests: **passed**.\n"
         "Pinned parent: `" + meta["sha"] + "`\n"
         "Modified: `" + path + "`\n\n"
         "No auto-merge. Independently inspect the diff and reproducibility before approval."
@@ -480,6 +547,7 @@ def publish(attestation, encoded, token):
 
 def main():
     parser = argparse.ArgumentParser(description="Evidence-gated mutual code repair")
+    parser.add_argument("--local", action="store_true", help="Use only the current repository GITHUB_TOKEN; refuse remote-target credentials")
     sub = parser.add_subparsers(dest="command", required=True)
     prepare = sub.add_parser("prepare")
     prepare.add_argument("--identity", choices=tuple(REPOS), required=True)
@@ -492,7 +560,10 @@ def main():
     delivery.add_argument("--verified", required=True)
     args = parser.parse_args()
     if args.command == "prepare":
-        meta = evidence(args.identity, args.run_id, os.getenv("REPAIR_READ_TOKEN", ""))
+        if args.local and os.getenv("GITHUB_REPOSITORY") != REPOS[peer(args.identity)]:
+            raise ValueError("Local repair identity must target the current repository")
+        meta = evidence(args.identity, args.run_id,
+                        os.getenv("GITHUB_TOKEN", "") if args.local else os.getenv("REPAIR_READ_TOKEN", ""))
         if not meta:
             print(json.dumps({"status":"no_actionable_repeated_test_failure"}))
             return
@@ -517,7 +588,11 @@ def main():
         target = Path(args.verified)
         meta = json.loads((target/"attestation.json").read_text())
         encoded = (target/"patched.b64").read_text()
-        print(json.dumps(publish(meta,encoded,os.getenv("REPAIR_PR_TOKEN",""))))
+        if args.local and (meta.get("target") not in REPOS or
+                           os.getenv("GITHUB_REPOSITORY") != REPOS[meta["target"]]):
+            raise ValueError("Local PR publication refuses a foreign repository")
+        token = os.getenv("GITHUB_TOKEN", "") if args.local else os.getenv("REPAIR_PR_TOKEN", "")
+        print(json.dumps(publish(meta,encoded,token)))
 
 
 if __name__ == "__main__":
