@@ -3,6 +3,7 @@ import importlib.util
 import io
 import subprocess
 import unittest
+import warnings
 from contextlib import redirect_stdout
 from pathlib import Path
 from unittest.mock import patch
@@ -58,6 +59,18 @@ class ActivationTests(unittest.TestCase):
         self.assertNotIn("EVE_PRIVATE", out.getvalue())
         self.assertNotIn("GENESIS_PRIVATE", out.getvalue())
         self.assertNotIn("MUTUAL_HEAL_REPAIR_ENABLED", str(calls))
+
+    def test_no_echo_fallback_if_hidden_input_is_unavailable(self):
+        def bad_prompt(_prompt):
+            warnings.warn("echo fallback", activation.getpass.GetPassWarning)
+            return "SHOULD_NOT_BE_ENTERED"
+        with patch.object(activation.shutil, "which", return_value="/usr/bin/gh"), \
+             patch.object(activation, "gh") as gh, \
+             patch("builtins.input", return_value="ACTIVATE"), \
+             patch.object(activation.getpass, "getpass", side_effect=bad_prompt):
+            with self.assertRaisesRegex(RuntimeError, "Private token input unavailable"):
+                activation.setup()
+            gh.assert_called_once_with("auth", "status")
 
     def test_secrets_use_stdin_not_command_line(self):
         captured = {}

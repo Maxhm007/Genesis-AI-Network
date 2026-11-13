@@ -15,6 +15,7 @@ import json
 import shutil
 import subprocess
 import sys
+import warnings
 
 GENESIS = "Maxhm007/Genesis-AI-Network"
 EVE = "Maxhm007/Eve"
@@ -62,7 +63,16 @@ def setup():
     try:
         for origin, destination, _ in CONFIGS:
             prompt = f"Fine-grained token for {destination}, stored ONLY in {origin}: "
-            value = getpass.getpass(prompt)
+            try:
+                # Python getpass can otherwise fall back to echoing secrets in
+                # unsupported IDE consoles, which is NEVER acceptable here.
+                with warnings.catch_warnings():
+                    warnings.simplefilter("error", getpass.GetPassWarning)
+                    value = getpass.getpass(prompt)
+            except getpass.GetPassWarning as exc:
+                raise RuntimeError(
+                    "Private token input unavailable. Run in a secure terminal."
+                ) from exc
             if not value:
                 raise ValueError("Missing peer token")
             if any(value == previous for previous in tokens):
