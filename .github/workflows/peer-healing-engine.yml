@@ -1,0 +1,59 @@
+name: Genesis vetted peer-healing engine
+
+# A caller imports this version-pinned workflow and lends its OWN repository
+# GITHUB_TOKEN; the engine can only repair the CALLER, never its source repo.
+on:
+  workflow_call:
+    inputs:
+      identity:
+        description: Caller identity (genesis or eve)
+        type: string
+        required: true
+  pull_request:
+    paths:
+      - '.github/workflows/peer-healing-engine.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  heal-caller:
+    if: github.event_name != 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      contents: read
+      actions: write
+      issues: write
+    steps:
+      - name: Load immutable Genesis healing engine without credentials
+        uses: actions/checkout@v4
+        with:
+          repository: Maxhm007/Genesis-AI-Network
+          ref: d60663bcaa9b98bfd09f664ef27ed3e5b7334e47
+          path: engine
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Verify Genesis engine policy
+        run: python -m unittest discover -s engine/tests -p test_mutual_healer.py -v
+      - name: Run peer-authored logic under the CALLER repository token
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          CALLER_IDENTITY: ${{ inputs.identity }}
+        run: python engine/scripts/mutual_healer.py --identity "$CALLER_IDENTITY" --local
+
+  metadata-tests:
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - run: |
+          test -f 'scripts/mutual_healer.py'
+          test -f tests/test_mutual_healer.py
