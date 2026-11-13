@@ -26,6 +26,35 @@ repair = module()
 
 class RepairTests(unittest.TestCase):
 
+    def test_pytest_only_candidate_attests_correct_runner(self):
+        import importlib.util
+        if importlib.util.find_spec("pytest") is None:
+            self.skipTest("pytest unavailable")
+        patch = ("diff --git a/src/calc.py b/src/calc.py\n"
+                 "--- a/src/calc.py\n+++ b/src/calc.py\n"
+                 "@@ -1,2 +1,2 @@\n def value():\n-    return 1\n+    return 2\n")
+        def checkout(meta, dest):
+            (dest / "src").mkdir(parents=True)
+            (dest / "src" / "__init__.py").write_text("")
+            (dest / "tests").mkdir()
+            (dest / "requirements.txt").write_text("pytest>=8.0\n")
+            (dest / "src" / "calc.py").write_text("def value():\n    return 1\n")
+            (dest / "tests" / "test_calc.py").write_text(
+                "from src.calc import value\n"
+                "def test_value(): assert value() == 2\n")
+            subprocess.run(["git", "init", "-q", str(dest)], check=True)
+            subprocess.run(["git", "add", "."], cwd=dest, check=True)
+        meta = {"healer": "eve", "target": "genesis",
+                "repo": repair.REPOS["genesis"], "sha": "a"*40,
+                "run_id": 123, "run_url": "https://github.com/test"}
+        with tempfile.TemporaryDirectory() as d, mock.patch.object(
+                repair, "checkout_target", checkout):
+            attestation = repair.validate(meta, patch, Path(d)/"verified")
+            self.assertEqual(attestation["test_command"], "python -m pytest -q tests")
+            self.assertEqual(attestation["baseline"], "failed")
+            self.assertEqual(attestation["patched"], "passed")
+            self.assertEqual(attestation["tests_executed"], 1)
+
     def test_real_pytest_collection_error_is_reproducible(self):
         import importlib.util
         if importlib.util.find_spec("pytest") is None:
