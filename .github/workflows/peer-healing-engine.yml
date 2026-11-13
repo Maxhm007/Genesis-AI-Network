@@ -30,7 +30,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: Maxhm007/Genesis-AI-Network
-          ref: d60663bcaa9b98bfd09f664ef27ed3e5b7334e47
+          ref: 94f6d6530d160ae67b918d211a906da8f0885dbd
           path: engine
           persist-credentials: false
       - uses: actions/setup-python@v5
