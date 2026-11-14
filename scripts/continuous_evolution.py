@@ -66,14 +66,22 @@ def deadline(value, now):
 
 
 def ack_exists(sequence):
-    # Cross-repository read is anonymous; Eve retains its own write authority.
-    rows = api(EVE, "/issues?state=all&per_page=100")
-    marker = "<!-- continuous-eve-turn:{} -->".format(sequence)
-    return any(isinstance(issue, dict)
-               and issue.get("title") == "[Continuous Turn] Eve #{}".format(sequence)
-               and marker in str(issue.get("body") or "")
-               and (issue.get("user") or {}).get("login") == "github-actions[bot]"
-               for issue in rows)
+    # A single durable Eve acknowledgement issue avoids unbounded issue spam.
+    # This is an operational receipt, NOT authorization for automatic merges.
+    body = api(EVE, "/issues/39").get("body", "")
+    marker, ending = "<!-- continuous-eve-ack -->", "<!-- /continuous-eve-ack -->"
+    if body.count(marker) != 1 or body.count(ending) != 1:
+        return False
+    section = body.split(marker, 1)[1].split(ending, 1)[0].strip()
+    if not section.startswith(FENCE + "json\n") or not section.endswith(FENCE):
+        return False
+    try:
+        proof = json.loads(section[len(FENCE) + 5:-len(FENCE)].strip())
+    except (TypeError, ValueError):
+        return False
+    return (proof.get("version") == 1 and
+            type(proof.get("sequence")) is int and proof["sequence"] == sequence and
+            proof.get("status") in ("completed", "failed"))
 
 
 def save(body, state, token):
