@@ -139,7 +139,7 @@ def source_from_traceback(repo, sha, log, token=""):
     # allowed; arbitrary external traceback paths remain excluded.
     matches = re.findall(
         r"(?:eve|scripts|src|genesis)/[A-Za-z0-9_/-]+[.]py"
-        r"|(?<![A-Za-z0-9_/-])(?:mutual_healer|repair_v2)[.]py",
+        r"|(?<=/)(?:mutual_healer|repair_v2)[.]py",
         log,
     )
     for candidate in matches[:10]:
