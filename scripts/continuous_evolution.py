@@ -79,9 +79,27 @@ def ack_exists(sequence):
         proof = json.loads(section[len(FENCE) + 5:-len(FENCE)].strip())
     except (TypeError, ValueError):
         return False
-    return (proof.get("version") == 1 and
+    if not (proof.get("version") == 1 and
             type(proof.get("sequence")) is int and proof["sequence"] == sequence and
-            proof.get("status") in ("completed", "failed"))
+            proof.get("status") in ("completed", "failed")):
+        return False
+    # A text-only acknowledgement is insufficient. Bind it to an actual
+    # successful Eve turn runner on main; do not accept a forged run URL.
+    import re
+    run_url = proof.get("run_url")
+    if not isinstance(run_url, str):
+        return False
+    match = re.fullmatch(
+        r"https://github[.]com/Maxhm007/Eve/actions/runs/([1-9][0-9]*)", run_url)
+    if match is None:
+        return False
+    run = api(EVE, "/actions/runs/" + match.group(1))
+    return (run.get("id") == int(match.group(1)) and
+            run.get("name") == "Eve Continuous Evolution — Peer Turn" and
+            run.get("head_branch") == "main" and
+            run.get("status") == "completed" and
+            run.get("conclusion") == "success" and
+            run.get("event") in ("schedule", "push", "workflow_dispatch"))
 
 
 def save(body, state, token):
