@@ -251,6 +251,26 @@ class RepairTests(unittest.TestCase):
                 publisher.assert_called_once_with(meta, "ZGF0YQ==", "local-scoped-token")
 
 
+
+    def test_deterministic_patch_without_final_newline_applies_with_git(self):
+        import subprocess
+        meta = {"source": {"path": "src/calc.py",
+                           "content": "def value():\n    return 1"},
+                "failures": [{"log_excerpt": "E       assert 1 == 2"}]}
+        diff = repair.deterministic_patch(meta)
+        self.assertIn("\\ No newline at end of file", diff)
+        with tempfile.TemporaryDirectory() as d:
+            root = Path(d)
+            (root / "src").mkdir()
+            (root / "src" / "calc.py").write_bytes(meta["source"]["content"].encode())
+            patch = root / "repair.patch"
+            patch.write_text(diff)
+            subprocess.run(["git", "init", "-q"], cwd=root, check=True)
+            subprocess.run(["git", "apply", "--check", str(patch)], cwd=root, check=True)
+            subprocess.run(["git", "apply", str(patch)], cwd=root, check=True)
+            self.assertEqual((root / "src" / "calc.py").read_bytes(),
+                             b"def value():\n    return 2")
+
     def test_deterministic_candidate_without_ai_provider(self):
         source = {"path": "src/calc.py", "content": "def value():\n    return 1\n"}
         meta = {"source": source, "failures": [
