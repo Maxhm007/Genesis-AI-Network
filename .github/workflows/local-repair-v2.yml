@@ -8,6 +8,11 @@ on:
   schedule:
     - cron: '35 2 * * *'
   workflow_dispatch:
+  workflow_run:
+    workflows:
+      - 'Genesis repairs Eve - tested code PR'
+      - 'Genesis verifies Eve code-repair engine'
+    types: [completed]
   # Verify the real read-only preparation job immediately after reviewed
   # deployment; never expose write tokens to an untrusted PR.
   push:
@@ -46,7 +51,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_repair_v2.py -v
 
   prepare:
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_run' || (github.event.workflow_run.conclusion == 'failure' && github.event.workflow_run.head_branch == 'main' && github.event.workflow_run.run_attempt >= 2))
     runs-on: ubuntu-latest
     timeout-minutes: 7
     permissions:
@@ -67,7 +72,9 @@ jobs:
           REPAIR_MODEL_API_KEY: ${{ secrets.REPAIR_MODEL_API_KEY }}
           REPAIR_MODEL_ENDPOINT: ${{ vars.REPAIR_MODEL_ENDPOINT }}
           REPAIR_MODEL_NAME: ${{ vars.REPAIR_MODEL_NAME }}
-        run: python scripts/repair_v2.py --local prepare --identity eve --out candidate
+          TRIGGERED_RUN_ID: ${{ github.event.workflow_run.id }}
+        shell: bash
+        run: python scripts/repair_v2.py --local prepare --identity eve --out candidate --run-id "${TRIGGERED_RUN_ID:-0}"
       - name: Check whether candidate was justified
         id: ready
         shell: bash
