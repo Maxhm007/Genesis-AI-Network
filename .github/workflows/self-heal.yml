@@ -54,6 +54,7 @@ jobs:
       - name: Recover one local failed run or create evidence ticket
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          TRIGGERED_RUN_ID: ${{ github.event.workflow_run.id }}
         run: python scripts/mutual_healer.py --identity genesis --local
 
   policy-tests:
