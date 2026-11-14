@@ -16,9 +16,10 @@ on:
 permissions:
   contents: read
   issues: write
+  actions: write
 # Share the teammate lock with the existing Genesis heartbeat.
 concurrency:
-  group: genesis-teammate-autonomous-development
+  group: ${{ github.event_name == 'pull_request' && format('genesis-continuous-pr-{0}', github.event.pull_request.number) || 'genesis-teammate-autonomous-development' }}
   cancel-in-progress: false
 jobs:
   turn:
