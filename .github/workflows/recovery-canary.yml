@@ -1,0 +1,30 @@
+name: Genesis recovery canary
+
+# A safe, intentionally failing first attempt verifies real Actions retry recovery.
+# No secrets, network mutations, application changes, or recurring schedule.
+# After the first failed attempt, the self-heal workflow retries failed jobs once.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/recovery-canary.yml'
+      - '.github/workflows/self-heal.yml'
+
+permissions:
+  contents: read
+
+jobs:
+  recovery-canary:
+    runs-on: ubuntu-latest
+    timeout-minutes: 2
+    steps:
+      - name: Intentional first-attempt failure to exercise autonomous recovery
+        if: ${{ github.run_attempt == 1 }}
+        run: |
+          echo 'Expected canary failure: recovery watchdog must retry failed jobs once.'
+          exit 1
+      - name: Prove recovery retry succeeded
+        if: ${{ github.run_attempt > 1 }}
+        run: |
+          echo 'RECOVERY_CANARY_PASSED: autonomous watchdog retried this workflow.'
