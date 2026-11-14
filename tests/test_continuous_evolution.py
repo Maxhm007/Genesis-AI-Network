@@ -71,10 +71,12 @@ class LedgerTests(TestCase):
                 store["body"] = payload["body"]
                 return {}
             return store
+        worker = mock.Mock(return_value=SimpleNamespace(returncode=0, stdout="", stderr=""))
         with mock.patch.object(m, "api", side_effect=fake_api):
-            self.assertEqual(m.tick("local"), "eve_ack_accepted")
-        self.assertEqual(m.decode(store["body"])["sequence"], 3)
-        self.assertEqual(m.decode(store["body"])["owner"], "genesis")
+            self.assertEqual(m.tick("local", work=worker), "genesis teammate exit 0")
+        worker.assert_called_once()
+        self.assertEqual(m.decode(store["body"])["sequence"], 4)
+        self.assertEqual(m.decode(store["body"])["owner"], "eve")
 
     def test_expired_eve_turn_recovers(self):
         state = {"version": 1, "sequence": 2, "owner": "eve", "status": "running",
@@ -92,6 +94,21 @@ class LedgerTests(TestCase):
         with mock.patch.object(m, "api", side_effect=fake_api):
             self.assertEqual(m.tick("local"), "eve_lease_expired")
         self.assertEqual(m.decode(store["body"])["owner"], "genesis")
+
+    def test_nonzero_genesis_exit_has_explicit_failure_category(self):
+        store = {"body": self.body}
+        def fake_api(repo, suffix, method="GET", payload=None, token=""):
+            if method == "PATCH":
+                store["body"] = payload["body"]
+                return {}
+            return store
+        failed = mock.Mock(return_value=SimpleNamespace(
+            returncode=1, stdout="", stderr="Traceback (most recent call last)"))
+        with mock.patch.object(m, "api", side_effect=fake_api):
+            result = m.tick("local", work=failed)
+        self.assertEqual(result, "genesis teammate exit 1; category=traceback")
+        self.assertIn("category=traceback", m.decode(store["body"])["last_result"])
+        self.assertEqual(m.decode(store["body"])["owner"], "eve")
 
     def test_no_peer_write_authority(self):
         with self.assertRaises(ValueError):
