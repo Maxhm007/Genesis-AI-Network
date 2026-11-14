@@ -25,6 +25,19 @@ jobs:
         run: |
           echo 'Expected canary failure: recovery watchdog must retry failed jobs once.'
           exit 1
+      - name: Verify the watchdog initiated this retry
+        if: ${{ github.run_attempt > 1 }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          expected="[Watchdog Retry] Genesis canary run ${GITHUB_RUN_ID}"
+          gh api "repos/${GITHUB_REPOSITORY}/issues?state=all&per_page=100" --jq '.[].title' | grep -Fxq "$expected" || {
+            echo "::error::No watchdog-origin retry evidence for this run; manual rerun does not count."
+            exit 1
+          }
+          echo 'Verified a matching watchdog-origin retry request.'
       - name: Prove recovery retry succeeded
         if: ${{ github.run_attempt > 1 }}
         run: |
