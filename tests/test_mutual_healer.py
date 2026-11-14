@@ -37,6 +37,9 @@ class API:
     def failed_runs(self, target):
         return self.runs
 
+    def run_by_id(self, target, identifier):
+        return next((item for item in self.runs if item["id"] == identifier), {})
+
     def retry_failed(self, target, identifier):
         self.retried.append((target, identifier))
 
@@ -54,6 +57,22 @@ class API:
 
 
 class MutualTests(unittest.TestCase):
+    def test_targeted_failure_uses_event_run_not_newest_failure(self):
+        api = API([run(200, attempt=1), run(77, attempt=1, hours=2)])
+        outcome = heal.heal_once("eve", api, NOW, target="eve", run_id=77)
+        self.assertEqual(outcome["status"], "recovery_retry_requested")
+        self.assertEqual(api.retried, [("eve", 77)])
+
+    def test_targeted_successful_run_never_retried(self):
+        api = API([{**run(77), "conclusion": "success"}])
+        outcome = heal.heal_once("eve", api, NOW, target="eve", run_id=77)
+        self.assertEqual(outcome["status"], "healthy_or_no_recent_failed_runs")
+        self.assertEqual(api.retried, [])
+
+    def test_invalid_targeted_id_rejected(self):
+        with self.assertRaises(ValueError):
+            heal.heal_once("eve", API(), NOW, target="eve", run_id=-1)
+
     def test_first_failure_requests_one_retry(self):
         api = API([run(), run(32, attempt=1, hours=2)])
         outcome = heal.heal_once("genesis", api, NOW)
