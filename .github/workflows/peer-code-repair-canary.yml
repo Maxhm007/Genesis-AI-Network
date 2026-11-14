@@ -12,6 +12,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   peer-code-repair:
@@ -40,3 +41,7 @@ jobs:
         run: |
           echo "Peer Eve fixture repair passed on ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
           echo "Source peer SHA: 8e6a770725288cca0de491ba126f298a7f6f978e" >> "$GITHUB_STEP_SUMMARY"
+          title="[Peer Repair Proof] Genesis verified Eve code-repair engine run ${GITHUB_RUN_ID}"
+          if ! gh issue list --repo "$GITHUB_REPOSITORY" --state all --limit 100 --json title --jq '.[].title' | grep -Fxq "$title"; then
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "The Eve-authored pinned repair engine executed in Genesis. A disposable unittest fixture failed before its one-file literal patch and passed afterward. Run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. This is peer-engine fixture acceptance, not production bug repair."
+          fi
