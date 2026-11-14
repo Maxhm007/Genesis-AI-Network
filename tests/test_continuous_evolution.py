@@ -38,6 +38,19 @@ class LedgerTests(TestCase):
             m.decode(m.encode(self.body, {"version": 1, "sequence": 0,
                                           "owner": "eve", "status": "ready"}))
 
+    def test_running_lease_must_be_valid_and_timezone_aware(self):
+        for lease in (None, "not-a-date", "2026-11-14T20:00:00"):
+            state = {"version": 1, "sequence": 2, "owner": "eve",
+                     "status": "running", "lease_until": lease}
+            with self.subTest(lease=lease), self.assertRaises(ValueError):
+                m.decode(m.encode(self.body, state))
+
+    def test_deadline_rejects_malformed_or_naive_lease(self):
+        now = datetime.now(timezone.utc)
+        for lease in (None, "not-a-date", "2026-11-14T20:00:00"):
+            with self.subTest(lease=lease), self.assertRaises(ValueError):
+                m.deadline(lease, now)
+
     def test_genesis_turn_runs_once_then_assigns_eve(self):
         store = {"body": self.body}
         actions = []

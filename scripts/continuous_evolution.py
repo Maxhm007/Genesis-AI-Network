@@ -48,6 +48,17 @@ def decode(body):
             state["sequence"] < 1 or state.get("owner") not in ("genesis", "eve") or
             state.get("status") not in ("ready", "running")):
         raise ValueError("Unrecognized turn state")
+    lease_until = state.get("lease_until")
+    if state["status"] == "ready":
+        if lease_until is not None:
+            raise ValueError("Ready turn cannot hold a lease")
+    else:
+        try:
+            parsed_lease = datetime.fromisoformat(str(lease_until).replace("Z", "+00:00"))
+        except (ValueError, TypeError) as exc:
+            raise ValueError("Running turn requires a valid lease") from exc
+        if parsed_lease.tzinfo is None or parsed_lease.utcoffset() is None:
+            raise ValueError("Running turn lease must include a timezone")
     return state
 
 
@@ -60,9 +71,12 @@ def encode(body, state):
 
 def deadline(value, now):
     try:
-        return datetime.fromisoformat(str(value).replace("Z", "+00:00")) < now
-    except (ValueError, TypeError):
-        return False
+        parsed = datetime.fromisoformat(str(value).replace("Z", "+00:00"))
+    except (ValueError, TypeError) as exc:
+        raise ValueError("Invalid turn lease") from exc
+    if parsed.tzinfo is None or parsed.utcoffset() is None:
+        raise ValueError("Turn lease must include a timezone")
+    return parsed < now
 
 
 def ack_exists(sequence):
