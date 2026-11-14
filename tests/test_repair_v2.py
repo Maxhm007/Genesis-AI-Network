@@ -26,6 +26,31 @@ repair = module()
 
 class RepairTests(unittest.TestCase):
 
+    def test_root_level_source_is_found_from_realistic_traceback(self):
+        # The recipient repository has root modules; its traceback may not
+        # contain the previously required eve/ or src/ directory prefix.
+        import base64
+        repo = repair.REPOS["eve"]
+        sha = "a" * 40
+        log = 'File "/home/runner/work/Eve/Eve/mutual_healer.py", line 41, in heal_once'
+        response = {
+            "type": "file", "encoding": "base64",
+            "content": base64.b64encode(b"def marker():\\n    return 1\\n").decode(),
+        }
+        with mock.patch.object(repair, "_api", return_value=response) as read:
+            result = repair.source_from_traceback(repo, sha, log, "local-token")
+        self.assertEqual(result["path"], "mutual_healer.py")
+        self.assertIn("return 1", result["content"])
+        self.assertIn("/contents/mutual_healer.py?ref=" + sha, read.call_args.args[1])
+
+    def test_arbitrary_root_module_is_not_trusted_without_known_prefix(self):
+        repo = repair.REPOS["eve"]
+        log = 'File "/tmp/unknown_library.py", line 2, in run'
+        with mock.patch.object(repair, "_api") as read:
+            self.assertIsNone(repair.source_from_traceback(repo, "a"*40, log))
+        read.assert_not_called()
+
+
     def test_pytest_only_candidate_attests_correct_runner(self):
         import importlib.util
         if importlib.util.find_spec("pytest") is None:
