@@ -5,13 +5,15 @@ actual failing/passing unittest behavior. It does not modify production code.
 """
 import importlib.util
 import json
+import os
 import subprocess
 import sys
 import tempfile
 from pathlib import Path
 
 def cmd(*args, cwd):
-    return subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=35)
+    return subprocess.run(args, cwd=cwd, text=True, capture_output=True, timeout=35,
+                          env={**os.environ, "PYTHONDONTWRITEBYTECODE": "1"})
 
 def main():
     peer_file = Path(sys.argv[1]).resolve()
