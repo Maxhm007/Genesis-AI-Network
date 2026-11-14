@@ -26,6 +26,42 @@ repair = module()
 
 class RepairTests(unittest.TestCase):
 
+    def test_traceback_prefers_innermost_application_frame(self):
+        import base64
+        repo = repair.REPOS["eve"]
+        sha = "a" * 40
+        traceback = (
+            'File "/runner/work/Eve/Eve/scripts/outer.py", line 4, in run\n' * 15
+            + 'File "/runner/work/Eve/Eve/src/fault.py", line 8, in broken\n'
+        )
+        response = {
+            "type": "file", "encoding": "base64",
+            "content": base64.b64encode(b"def broken():\n    return 1\n").decode(),
+        }
+        with mock.patch.object(repair, "_api", return_value=response) as read:
+            source = repair.source_from_traceback(repo, sha, traceback, "local-token")
+        self.assertEqual(source["path"], "src/fault.py")
+        self.assertIn("/contents/src/fault.py?ref=" + sha, read.call_args.args[1])
+        self.assertEqual(read.call_count, 1)
+
+    def test_traceback_ignores_repeated_frames_with_bounded_retrieval(self):
+        import base64
+        repo = repair.REPOS["eve"]
+        sha = "b" * 40
+        traceback = (
+            'File "/runner/work/Eve/Eve/src/repeated.py", line 4, in worker\n' * 200
+            + 'File "/runner/work/Eve/Eve/src/actual.py", line 8, in broken\n'
+        )
+        response = {
+            "type": "file", "encoding": "base64",
+            "content": base64.b64encode(b"def broken():\n    return 1\n").decode(),
+        }
+        with mock.patch.object(repair, "_api", return_value=response) as read:
+            source = repair.source_from_traceback(repo, sha, traceback)
+        self.assertEqual(source["path"], "src/actual.py")
+        self.assertEqual(read.call_count, 1)
+
+
     def test_diagnostic_log_keeps_late_failure_after_long_output(self):
         import io
         # Old implementation read only the first 60 KiB and lost this failure.
