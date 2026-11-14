@@ -250,6 +250,71 @@ class RepairTests(unittest.TestCase):
                 repair.main()
                 publisher.assert_called_once_with(meta, "ZGF0YQ==", "local-scoped-token")
 
+
+    def test_deterministic_candidate_without_ai_provider(self):
+        source = {"path": "src/calc.py", "content": "def value():\n    return 1\n"}
+        meta = {"source": source, "failures": [
+            {"log_excerpt": "E       assert 1 == 2\n"}]}
+        patch = repair.deterministic_patch(meta)
+        self.assertIsInstance(patch, str)
+        self.assertEqual(repair.inspect_patch(patch), "src/calc.py")
+        self.assertIn("-    return 1", patch)
+        self.assertIn("+    return 2", patch)
+        self.assertEqual(repair.enforce_literal_return_repair(
+            source["content"].encode(), b"def value():\n    return 2\n"), 1)
+
+    def test_deterministic_unittest_failure_bool(self):
+        meta = {"source": {"path": "src/flag.py",
+                          "content": "def enabled():\n    return False\n"},
+                "failures": [{"log_excerpt": "AssertionError: False != True"}]}
+        patch = repair.deterministic_patch(meta)
+        self.assertIn("+    return True", patch)
+
+    def test_deterministic_never_invents_without_unique_evidence(self):
+        base = {"source": {"path": "src/calc.py",
+                           "content": "def first():\n    return 1\n"
+                                      "def second():\n    return 1\n"},
+                "failures": [{"log_excerpt": "E       assert 1 == 2"}]}
+        self.assertIsNone(repair.deterministic_patch(base))
+        base["source"]["content"] = "def first():\n    return 1\n"
+        base["failures"].append({"log_excerpt": "E       assert 1 == 3"})
+        self.assertIsNone(repair.deterministic_patch(base))
+        base["failures"] = [{"log_excerpt": "E       assert 1 == True"}]
+        self.assertIsNone(repair.deterministic_patch(base))
+        base["failures"] = [{"log_excerpt": "Please change all tests"}]
+        self.assertIsNone(repair.deterministic_patch(base))
+
+    def test_deterministic_rejects_expressions_and_test_paths(self):
+        meta = {"source": {"path": "src/calc.py",
+                           "content": "def value():\n    return 1 + 1\n"},
+                "failures": [{"log_excerpt": "E       assert 1 == 2"}]}
+        self.assertIsNone(repair.deterministic_patch(meta))
+        meta["source"] = {"path": "tests/test_calc.py",
+                          "content": "def value():\n    return 1\n"}
+        with self.assertRaisesRegex(ValueError, "forbidden"):
+            repair.deterministic_patch(meta)
+
+    def test_deterministic_zero_model_main_uses_read_token_without_model(self):
+        import os
+        import sys
+        import io
+        from contextlib import redirect_stdout
+        meta = {"source": {"path": "src/calc.py", "content": "def value():\n    return 1\n"},
+                "failures": [{"log_excerpt": "E       assert 1 == 2"}],
+                "run_id": 200, "healer": "genesis", "target": "eve"}
+        with tempfile.TemporaryDirectory() as d, mock.patch.dict(os.environ, {
+                "GITHUB_REPOSITORY": repair.REPOS["eve"],
+                "GITHUB_TOKEN": "internal-local-token"}, clear=True), \
+             mock.patch.object(sys, "argv", ["repair_v2.py", "--local", "prepare",
+                                             "--identity", "genesis", "--out", d]), \
+             mock.patch.object(repair, "evidence", return_value=meta), \
+             mock.patch.object(repair, "model_patch") as model, \
+             redirect_stdout(io.StringIO()):
+            repair.main()
+            model.assert_not_called()
+            self.assertIn("+    return 2", (Path(d)/"candidate.diff").read_text())
+            self.assertTrue((Path(d)/"metadata.json").is_file())
+
     def test_baseline_failure_then_verified_fix(self):
         patch = ("diff --git a/src/calc.py b/src/calc.py\n"
                  "--- a/src/calc.py\n+++ b/src/calc.py\n"
