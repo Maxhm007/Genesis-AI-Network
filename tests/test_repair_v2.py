@@ -26,6 +26,76 @@ repair = module()
 
 class RepairTests(unittest.TestCase):
 
+    def test_repeated_main_failure_evidence_to_verified_patch(self):
+        """Exercise eligible run -> failed job -> pinned source -> safe patch -> passing test."""
+        import os
+        import json
+        source = "def answer():\n    return 1\n"
+        sha = "c" * 40
+        run_id = 43219876
+        repo = repair.REPOS["eve"]
+        run = {
+            "id": run_id, "status": "completed", "conclusion": "failure",
+            "run_attempt": 2, "head_branch": "main", "head_sha": sha,
+            "created_at": datetime.now(timezone.utc).isoformat(),
+        }
+        jobs = {"jobs": [{"id": 123, "name": "unit tests", "conclusion": "failure",
+                          "steps": [{"name": "Run unittest discover -s tests",
+                                     "conclusion": "failure"}]}]}
+        remote_source = {
+            "type": "file", "encoding": "base64",
+            "content": base64.b64encode(source.encode()).decode(),
+        }
+        log = ('File "/runner/work/Eve/Eve/src/calc.py", line 2, in answer\n'
+               'AssertionError: 1 != 2\n')
+        def fake_api(api_repo, suffix, method="GET", payload=None, token=""):
+            self.assertEqual(api_repo, repo)
+            self.assertEqual(token, "local")
+            if suffix == "/actions/runs/" + str(run_id):
+                return run
+            if suffix == "/actions/runs/" + str(run_id) + "/jobs?per_page=100":
+                return jobs
+            if suffix == "/contents/src/calc.py?ref=" + sha:
+                return remote_source
+            raise AssertionError("Unexpected API request: " + suffix)
+        with mock.patch.object(repair, "_api", side_effect=fake_api), \
+             mock.patch.object(repair, "diagnostic_log", return_value=log):
+            metadata = repair.evidence("genesis", run_id, "local")
+        self.assertEqual(metadata["sha"], sha)
+        self.assertEqual(metadata["source"]["path"], "src/calc.py")
+        self.assertEqual(metadata["failures"][0]["log_excerpt"], log)
+        patch = repair.deterministic_patch(metadata)
+        self.assertIsNotNone(patch)
+        self.assertEqual(repair.inspect_patch(patch), "src/calc.py")
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            (root / "src").mkdir()
+            (root / "tests").mkdir()
+            (root / "src" / "__init__.py").write_text("")
+            target = root / "src" / "calc.py"
+            target.write_text(source)
+            (root / "tests" / "test_calc.py").write_text(
+                "import unittest\nfrom src.calc import answer\n"
+                "class Check(unittest.TestCase):\n"
+                "    def test_answer(self): self.assertEqual(answer(), 2)\n"
+            )
+            env = {**os.environ, "PYTHONDONTWRITEBYTECODE": "1"}
+            def run_suite():
+                return subprocess.run(
+                    ["python", "-m", "unittest", "discover", "-s", "tests"],
+                    cwd=root, env=env, capture_output=True, text=True, timeout=15,
+                )
+            self.assertNotEqual(run_suite().returncode, 0)
+            patch_file = root / "candidate.diff"
+            patch_file.write_text(patch)
+            subprocess.run(["git", "apply", str(patch_file)],
+                           cwd=root, check=True, capture_output=True)
+            repair.enforce_literal_return_repair(source.encode(), target.read_bytes())
+            result = run_suite()
+            self.assertEqual(result.returncode, 0, result.stderr)
+            self.assertEqual(target.read_text(), "def answer():\n    return 2\n")
+
+
     def test_traceback_prefers_innermost_application_frame(self):
         import base64
         repo = repair.REPOS["eve"]
