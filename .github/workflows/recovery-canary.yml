@@ -1,7 +1,7 @@
 name: Genesis recovery canary
 
 # A safe, intentionally failing first attempt verifies real Actions retry recovery.
-# No secrets, network mutations, application changes, or recurring schedule.
+# No external secrets, application changes, or recurring schedule.
 # After the first failed attempt, the self-heal workflow retries failed jobs once.
 on:
   workflow_dispatch:
@@ -13,6 +13,7 @@ on:
 
 permissions:
   contents: read
+  issues: write
 
 jobs:
   recovery-canary:
@@ -28,3 +29,16 @@ jobs:
         if: ${{ github.run_attempt > 1 }}
         run: |
           echo 'RECOVERY_CANARY_PASSED: autonomous watchdog retried this workflow.'
+      - name: Record successful retry as a searchable evidence issue
+        if: ${{ github.run_attempt > 1 }}
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          set -euo pipefail
+          title="[Recovery Proof] Genesis canary run ${GITHUB_RUN_ID}"
+          if gh issue list --repo "$GITHUB_REPOSITORY" --state all --limit 100 --json title --jq '.[].title' | grep -Fxq "$title"; then
+            echo 'Evidence issue already exists; no duplicate created.'
+          else
+            gh issue create --repo "$GITHUB_REPOSITORY" --title "$title" --body "Recovery canary succeeded on attempt ${GITHUB_RUN_ATTEMPT}. Run: https://github.com/${GITHUB_REPOSITORY}/actions/runs/${GITHUB_RUN_ID}. Confirm watchdog initiated the retry before treating this as autonomous healing proof."
+          fi
