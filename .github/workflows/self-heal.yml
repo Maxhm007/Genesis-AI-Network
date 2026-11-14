@@ -4,7 +4,15 @@ name: Genesis self-healing watchdog
 # GitHub supplies an ephemeral GITHUB_TOKEN: no PAT or peer secret is needed.
 on:
   schedule:
-    - cron: '0 1 * * *'
+    - cron: '0 1,7,13,19 * * *'
+  # React promptly to failed peer healing and tested repair proposals.
+  # Runs use the trusted default-branch workflow; PR code is never executed with write permissions.
+  workflow_run:
+    workflows:
+      - 'Genesis uses Eve healing engine'
+      - 'Genesis accepts Eve-style tested repair proposals'
+    types: [completed]
+    branches: [main]
   workflow_dispatch:
   # A reviewed change to this workflow on main triggers an immediate
   # post-merge verification, without needing a PAT or GitHub CLI.
@@ -31,7 +39,7 @@ concurrency:
 jobs:
   watchdog:
     # PRs may only test the policy. Untrusted PR code never receives a write token.
-    if: github.event_name != 'pull_request'
+    if: github.event_name != 'pull_request' && (github.event_name != 'workflow_run' || github.event.workflow_run.conclusion == 'failure')
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
