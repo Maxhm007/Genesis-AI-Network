@@ -10,7 +10,7 @@ on:
   workflow_dispatch:
   workflow_run:
     workflows:
-      - 'Genesis repairs Eve - tested code PR'
+      - 'Genesis Agentic Lab Recovery'
       - 'Genesis verifies Eve code-repair engine'
     types: [completed]
   # Verify the real read-only preparation job immediately after reviewed
