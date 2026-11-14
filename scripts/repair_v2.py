@@ -134,7 +134,14 @@ def source_from_traceback(repo, sha, log, token=""):
     """Read one existing target Python module named by a traceback."""
     if not log or repo not in REPOS.values() or not re.fullmatch(r"[a-f0-9]{40}", sha):
         return None
-    matches = re.findall(r"(?:eve|scripts|src|genesis)/[A-Za-z0-9_/-]+[.]py", log)
+    # GitHub traceback paths may identify approved root-level Python modules
+    # without an "eve/" or "src/" prefix. These two exact basenames are
+    # allowed; arbitrary external traceback paths remain excluded.
+    matches = re.findall(
+        r"(?:eve|scripts|src|genesis)/[A-Za-z0-9_/-]+[.]py"
+        r"|(?<=/)(?:mutual_healer|repair_v2)[.]py",
+        log,
+    )
     for candidate in matches[:10]:
         try:
             path = valid_path(candidate)
