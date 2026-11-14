@@ -73,6 +73,27 @@ class MutualTests(unittest.TestCase):
         with self.assertRaises(ValueError):
             heal.heal_once("eve", API(), NOW, target="eve", run_id=-1)
 
+    def test_canary_first_failure_records_watchdog_provenance_before_retry(self):
+        api = API([run(91, name="Eve recovery canary")])
+        result = heal.heal_once("genesis", api, NOW, target="eve", run_id=91)
+        self.assertEqual(result["status"], "recovery_retry_requested")
+        self.assertEqual(api.retried, [("eve", 91)])
+        self.assertEqual(len(api.created), 1)
+        self.assertEqual(api.created[0][1], "[Watchdog Retry] Eve canary run 91")
+        self.assertIn("actions/runs/91", api.created[0][2])
+
+    def test_existing_canary_watchdog_provenance_deduplicated(self):
+        api = API([run(92, name="Eve recovery canary")], ticket_exists=True)
+        heal.heal_once("genesis", api, NOW, target="eve", run_id=92)
+        self.assertEqual(api.created, [])
+        self.assertEqual(api.retried, [("eve", 92)])
+
+    def test_normal_failure_does_not_create_provenance_issue(self):
+        api = API([run(93, name="CI tests")])
+        heal.heal_once("genesis", api, NOW, target="eve", run_id=93)
+        self.assertEqual(api.created, [])
+        self.assertEqual(api.retried, [("eve", 93)])
+
     def test_first_failure_requests_one_retry(self):
         api = API([run(), run(32, attempt=1, hours=2)])
         outcome = heal.heal_once("genesis", api, NOW)
