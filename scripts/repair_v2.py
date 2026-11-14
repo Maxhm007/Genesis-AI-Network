@@ -118,14 +118,22 @@ def diagnostic_log(repo, job_id, token=""):
         headers["Authorization"] = "Bearer " + token
     try:
         request = urllib.request.Request(url, headers=headers)
+        # Failure tracebacks normally appear near the END of lengthy CI logs.
+        # Read at most 2 MiB and retain only the last 64 KiB; never run log text.
+        tail = b""
+        remaining = 2 * 1024 * 1024
         with urllib.request.urlopen(request, timeout=15) as response:
-            raw = response.read(60001)
-        # A log redirected outside GitHub is never executed. Secrets should
-        # already be masked by GitHub; retain only diagnostic lines.
-        output = raw.decode("utf-8", errors="replace")
+            while remaining:
+                chunk = response.read(min(65536, remaining))
+                if not chunk:
+                    break
+                tail = (tail + chunk)[-65536:]
+                remaining -= len(chunk)
+        # GitHub masks workflow secrets; keep only bounded diagnostic excerpts.
+        output = tail.decode("utf-8", errors="replace")
         useful = [line[-400:] for line in output.splitlines() if re.search(
             r"traceback|exception|error|failed|assert|File ", line, re.I)]
-        return "\\n".join(useful[-25:])[:5000]
+        return "\n".join(useful[-25:])[-5000:]
     except (OSError, ValueError, TimeoutError):
         return ""
 

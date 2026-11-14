@@ -26,6 +26,28 @@ repair = module()
 
 class RepairTests(unittest.TestCase):
 
+    def test_diagnostic_log_keeps_late_failure_after_long_output(self):
+        import io
+        # Old implementation read only the first 60 KiB and lost this failure.
+        fake_log = ("quiet setup progress\n" * 5000 +
+                    'File "/runner/work/Eve/Eve/mutual_healer.py", line 17\n' +
+                    "AssertionError: 1 != 2\n")
+        with mock.patch.object(repair.urllib.request, "urlopen",
+                               return_value=io.BytesIO(fake_log.encode())):
+            excerpt = repair.diagnostic_log(repair.REPOS["eve"], 17, "local")
+        self.assertIn("mutual_healer.py", excerpt)
+        self.assertIn("AssertionError: 1 != 2", excerpt)
+        self.assertNotIn("quiet setup progress", excerpt)
+
+    def test_diagnostic_log_bounded_when_failure_missing(self):
+        import io
+        fake_log = ("noise without diagnostic markers\n" * 80000).encode()
+        with mock.patch.object(repair.urllib.request, "urlopen",
+                               return_value=io.BytesIO(fake_log)):
+            excerpt = repair.diagnostic_log(repair.REPOS["eve"], 18)
+        self.assertLessEqual(len(excerpt), 5000)
+
+
     def test_root_level_source_is_found_from_realistic_traceback(self):
         # The recipient repository has root modules; its traceback may not
         # contain the previously required eve/ or src/ directory prefix.
