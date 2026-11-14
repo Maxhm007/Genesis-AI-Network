@@ -255,8 +255,13 @@ def deterministic_patch(meta):
     proposed[index] = m.group(1) + repr(desired_value) + m.group(2)
     after_code = "".join(proposed)
     enforce_literal_return_repair(code.encode("utf-8"), after_code.encode("utf-8"))
-    unified = "".join(difflib.unified_diff(
+    records = list(difflib.unified_diff(
         lines, proposed, fromfile="a/" + path, tofile="b/" + path))
+    # The original source may omit the final newline. Git requires an
+    # explicit marker after each affected unterminated diff record.
+    unified = "".join(item if item.endswith("\n") else
+                      item + "\n\\ No newline at end of file\n"
+                      for item in records)
     diff = "diff --git a/{0} b/{0}\n".format(path) + unified
     inspect_patch(diff)
     return diff
