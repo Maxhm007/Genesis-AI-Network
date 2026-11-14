@@ -150,7 +150,11 @@ def source_from_traceback(repo, sha, log, token=""):
         r"|(?<=/)(?:mutual_healer|repair_v2)[.]py",
         log,
     )
-    for candidate in matches[:10]:
+    # Tracebacks are ordered outermost-to-innermost: prioritize the actual
+    # failing frame at the end. De-duplicate repetitive framework frames
+    # before applying the same 10-file retrieval budget.
+    candidates = list(dict.fromkeys(reversed(matches)))
+    for candidate in candidates[:10]:
         try:
             path = valid_path(candidate)
             result = _api(repo, "/contents/" + urllib.parse.quote(path) + "?ref=" + sha, token=token)
