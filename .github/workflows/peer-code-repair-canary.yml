@@ -1,0 +1,42 @@
+name: Genesis verifies Eve code-repair engine
+
+# Runs immutable peer-authored repair code against an isolated disposable
+# Python fixture. Does not break main or grant cross-repository write access.
+on:
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/peer-code-repair-canary.yml'
+      - 'scripts/peer_repair_acceptance.py'
+
+permissions:
+  contents: read
+
+jobs:
+  peer-code-repair:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/checkout@v4
+        with:
+          repository: Maxhm007/Eve
+          ref: 8e6a770725288cca0de491ba126f298a7f6f978e
+          path: peer-engine
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+      - name: Execute Eve-authored repair against a real failing test fixture
+        run: python scripts/peer_repair_acceptance.py peer-engine/repair_v2.py
+      - name: Record verified peer code-repair result
+        if: success()
+        env:
+          GH_TOKEN: ${{ github.token }}
+        shell: bash
+        run: |
+          echo "Peer Eve fixture repair passed on ${GITHUB_SHA}" >> "$GITHUB_STEP_SUMMARY"
+          echo "Source peer SHA: 8e6a770725288cca0de491ba126f298a7f6f978e" >> "$GITHUB_STEP_SUMMARY"
