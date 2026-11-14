@@ -187,6 +187,80 @@ def evidence(identity, run_id=0, token=""):
     return None
 
 
+
+def deterministic_patch(meta):
+    """Bounded zero-model hypothesis: one observed int/bool equality mismatch.
+
+    This is NOT general AI code repair. Never obey diagnostic log instructions;
+    treat text only as evidence of a narrow Python assertion mismatch. The
+    separate secret-free job must still reproduce baseline failure and verify
+    the exact patched suite before a human-reviewed PR may be published.
+    """
+    import ast
+    import difflib
+
+    source = meta.get("source") or {}
+    path = valid_path(source.get("path"))
+    code = source.get("content")
+    failures = meta.get("failures") or []
+    if not isinstance(code, str) or len(code.encode("utf-8")) > 18000:
+        return None
+    if not isinstance(failures, list):
+        return None
+    logs = "\n".join(str(item.get("log_excerpt", ""))[:5000]
+                     for item in failures[:10] if isinstance(item, dict))
+    # pytest: "assert 1 == 2"; unittest: "AssertionError: 1 != 2".
+    token = r"(?:True|False|[0-9]{1,6})"
+    pytest_match = re.findall(r"\bassert\s+(" + token + r")\s*==\s*(" + token + r")\b", logs)
+    unittest_match = re.findall(r"AssertionError:\s*(" + token + r")\s*!=\s*(" + token + r")\b", logs)
+    evidence_pairs = set(pytest_match + unittest_match)
+    if len(evidence_pairs) != 1:
+        return None
+    observed, expected = next(iter(evidence_pairs))
+    if observed == expected:
+        return None
+    def literal(value):
+        if value == "True": return True
+        if value == "False": return False
+        return int(value)
+
+    actual_value, desired_value = literal(observed), literal(expected)
+    if type(actual_value) is not type(desired_value):
+        return None
+    try:
+        tree = ast.parse(code)
+    except (SyntaxError, ValueError):
+        return None
+    candidates = [
+        node for node in ast.walk(tree)
+        if isinstance(node, ast.Return)
+        and isinstance(node.value, ast.Constant)
+        and type(node.value.value) is type(actual_value)
+        and node.value.value == actual_value
+    ]
+    if len(candidates) != 1:
+        return None
+    lines = code.splitlines(keepends=True)
+    index = candidates[0].lineno - 1
+    if not 0 <= index < len(lines):
+        return None
+    before = lines[index]
+    # Only change a complete, simple return literal statement, not an
+    # expression, annotation, comment, conditional, or malicious payload.
+    m = re.fullmatch(r"([ \t]*return[ \t]+)" + re.escape(observed) +
+                     r"([ \t]*(?:#[^\r\n]*)?\r?\n?)", before)
+    if not m:
+        return None
+    proposed = lines.copy()
+    proposed[index] = m.group(1) + repr(desired_value) + m.group(2)
+    after_code = "".join(proposed)
+    enforce_literal_return_repair(code.encode("utf-8"), after_code.encode("utf-8"))
+    unified = "".join(difflib.unified_diff(
+        lines, proposed, fromfile="a/" + path, tofile="b/" + path))
+    diff = "diff --git a/{0} b/{0}\n".format(path) + unified
+    inspect_patch(diff)
+    return diff
+
 def model_patch(meta, endpoint, model, api_key):
     parsed = urllib.parse.urlparse(endpoint)
     if parsed.scheme != "https" or parsed.path.rstrip("/") != "/v1/chat/completions" or not parsed.hostname or parsed.username or parsed.password or parsed.query or parsed.fragment:
@@ -574,11 +648,13 @@ def main():
         if not meta:
             print(json.dumps({"status":"no_actionable_repeated_test_failure"}))
             return
-        patch = model_patch(meta, os.getenv("REPAIR_MODEL_ENDPOINT",""),
-                            os.getenv("REPAIR_MODEL_NAME",""),
-                            os.getenv("REPAIR_MODEL_API_KEY",""))
+        endpoint, model = os.getenv("REPAIR_MODEL_ENDPOINT", ""), os.getenv("REPAIR_MODEL_NAME", "")
+        if endpoint and model:
+            patch = model_patch(meta, endpoint, model, os.getenv("REPAIR_MODEL_API_KEY", ""))
+        else:
+            patch = deterministic_patch(meta)
         if not patch:
-            print(json.dumps({"status":"model_declined_unsafe_or_insufficient_evidence"}))
+            print(json.dumps({"status":"no_safe_candidate_from_evidence"}))
             return
         inspect_patch(patch)
         target = Path(args.out)
