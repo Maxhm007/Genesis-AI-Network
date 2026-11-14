@@ -4,6 +4,10 @@ name: Genesis verifies Eve code-repair engine
 # Python fixture. Does not break main or grant cross-repository write access.
 on:
   workflow_dispatch:
+  pull_request:
+    paths:
+      - '.github/workflows/peer-code-repair-canary.yml'
+      - 'scripts/peer_repair_acceptance.py'
   push:
     branches: [main]
     paths:
@@ -34,7 +38,7 @@ jobs:
       - name: Execute Eve-authored repair against a real failing test fixture
         run: python scripts/peer_repair_acceptance.py peer-engine/repair_v2.py
       - name: Record verified peer code-repair result
-        if: success()
+        if: success() && github.event_name != 'pull_request'
         env:
           GH_TOKEN: ${{ github.token }}
         shell: bash
