@@ -88,6 +88,11 @@ class GitHub:
             raise ValueError("Malformed workflow runs response")
         return runs
 
+    def run_by_id(self, target, run_id):
+        if type(run_id) is not int or run_id < 1:
+            raise ValueError("Invalid run ID")
+        return self.request("GET", target, "/actions/runs/{}".format(run_id))
+
     def jobs(self, target, run_id):
         data = self.request("GET", target, "/actions/runs/{}/jobs?per_page=100".format(run_id))
         jobs = data.get("jobs")
@@ -205,14 +210,20 @@ def repair_ticket(run, failures, helper, target=None):
     return title, body
 
 
-def heal_once(identity, api, now=None, target=None):
+def heal_once(identity, api, now=None, target=None, run_id=None):
     """Each agent attempts at most one peer recovery action per cycle."""
     if identity not in REPOSITORIES:
         raise ValueError("Unknown healer identity")
     target = target or ("eve" if identity == "genesis" else "genesis")
     if target not in REPOSITORIES:
         raise ValueError("Unknown target")
-    eligible = select_failure(api.failed_runs(target), now)
+    if run_id is not None:
+        if type(run_id) is not int or run_id < 1:
+            raise ValueError("Invalid triggered run ID")
+        # Handle the exact failed workflow, even if the repository has >30 failures.
+        eligible = select_failure([api.run_by_id(target, run_id)], now)
+    else:
+        eligible = select_failure(api.failed_runs(target), now)
     if not eligible:
         return {"status": "healthy_or_no_recent_failed_runs", "target": target}
     already_reported = False
@@ -244,7 +255,9 @@ def main():
         if os.getenv("GITHUB_REPOSITORY") != REPOSITORIES[args.identity]:
             raise ValueError("Local recovery refuses mismatched GitHub repository identity")
         api = LocalGitHub(os.getenv("GITHUB_TOKEN", ""), args.identity)
-        result = heal_once(args.identity, api, target=args.identity)
+        triggered = os.getenv("TRIGGERED_RUN_ID", "").strip()
+        run_id = int(triggered) if triggered else None
+        result = heal_once(args.identity, api, target=args.identity, run_id=run_id)
     else:
         result = heal_once(args.identity, GitHub(os.getenv("PEER_HEAL_TOKEN", "")))
     print(json.dumps(result, sort_keys=True))
