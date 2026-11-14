@@ -116,3 +116,27 @@ The three-stage separation remains mandatory:
 This is operational tooling, **not proof of source healing** until a genuine
 failing `main` test is reproduced, a validated PR is opened, reviewed and
 its eventual follow-up CI succeeds.
+
+### No-model automatic candidate path (bounded)
+
+The `local-repair-v2.yml` prepare job now runs on schedule without repository
+variable setup. If a model endpoint + model name are configured, the existing
+model candidate generator remains available. Otherwise it tries a **small
+deterministic repair hypothesis**, not a general AI solver:
+
+- Only a completed, twice-failed test run on `main` within 48 hours qualifies.
+- GitHub's failed-job logs must contain one unambiguous observed-versus-expected
+  integer/boolean assertion; the pinned traceback must identify an ordinary
+  Python source file with exactly one matching literal `return`.
+- The generator changes only that literal, and the existing strict AST guard
+  verifies that no other executable structure changed.
+- A separate job without credentials must demonstrate baseline tests **fail**
+  and patched tests **pass** with no additional skips or incomplete reporting.
+- The publication job creates only a **review-only PR** using the target
+  repo's own `GITHUB_TOKEN`. Branch rules and human review still apply.
+
+No assert evidence, unclear source, passing baseline, model credential or
+PR-creation permission: the pipeline safely declines or reports the blocker,
+rather than pretending to have healed code. No secrets or cross-repo PATs
+are needed for the deterministic mode. The previous opt-in model variables
+are OPTIONAL for the model-powered path, not required for this limited path.
