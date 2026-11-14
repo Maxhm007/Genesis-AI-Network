@@ -105,7 +105,9 @@ def tick(token, now=None, work=None):
     if state["owner"] == "eve":
         if ack_exists(state["sequence"]):
             save(body, advance(state, "genesis", "eve ack #{}".format(state["sequence"])), token)
-            return "eve_ack_accepted"
+            # A verified handoff can immediately start the next Genesis turn;
+            # this is one bounded recursion, not an unbounded busy loop.
+            return tick(token, now=now, work=work)
         if state["status"] == "running" and deadline(state.get("lease_until"), now):
             save(body, advance(state, "genesis", "eve lease expired"), token)
             return "eve_lease_expired"
@@ -128,7 +130,14 @@ def tick(token, now=None, work=None):
         capture_output=True, text=True, timeout=450, check=False))
     try:
         completed = runner()
+        # Exit code is a completion signal, not evidence of a successful fix.
+        # Retain a short diagnostic category, not raw potentially sensitive logs.
         result = "genesis teammate exit {}".format(completed.returncode)
+        if completed.returncode != 0:
+            output = (completed.stderr or completed.stdout or "")
+            category = "traceback" if "Traceback (most recent call last)" in output else (
+                "github_api" if "GitHub API" in output else "command_failed")
+            result += "; category=" + category
     except subprocess.TimeoutExpired:
         result = "genesis teammate timed out"
     save(encode(body, state), advance(state, "eve", result), token)
