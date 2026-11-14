@@ -62,10 +62,14 @@ class LedgerTests(TestCase):
                  "lease_until": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
         store = {"body": m.encode(self.body, state)}
         acknowledgement = ("<!-- continuous-eve-ack -->\n" + m.FENCE +
-                           'json\n{"version":1,"sequence":2,"status":"completed"}\n' +
+                           'json\n{"version":1,"sequence":2,"status":"completed","run_url":"https://github.com/Maxhm007/Eve/actions/runs/12345"}\n' +
                            m.FENCE + "\n<!-- /continuous-eve-ack -->")
         def fake_api(repo, suffix, method="GET", payload=None, token=""):
             if repo == m.EVE:
+                if suffix == "/actions/runs/12345":
+                    return {"id": 12345, "name": "Eve Continuous Evolution — Peer Turn",
+                            "head_branch": "main", "status": "completed",
+                            "conclusion": "success", "event": "schedule"}
                 return {"body": acknowledgement}
             if method == "PATCH":
                 store["body"] = payload["body"]
@@ -77,6 +81,30 @@ class LedgerTests(TestCase):
         worker.assert_called_once()
         self.assertEqual(m.decode(store["body"])["sequence"], 4)
         self.assertEqual(m.decode(store["body"])["owner"], "eve")
+
+    def test_eve_receipt_rejected_if_actions_run_not_successful(self):
+        receipt = ("<!-- continuous-eve-ack -->\n" + m.FENCE +
+                   'json\n{"version":1,"sequence":2,"status":"completed","run_url":"https://github.com/Maxhm007/Eve/actions/runs/12345"}\n' +
+                   m.FENCE + "\n<!-- /continuous-eve-ack -->")
+        def api(repo, suffix, method="GET", payload=None, token=""):
+            self.assertEqual(repo, m.EVE)
+            if suffix == "/issues/39":
+                return {"body": receipt}
+            if suffix == "/actions/runs/12345":
+                return {"id": 12345, "name": "Eve Continuous Evolution — Peer Turn",
+                        "head_branch": "main", "status": "completed",
+                        "conclusion": "failure", "event": "schedule"}
+            raise AssertionError("Unexpected request")
+        with mock.patch.object(m, "api", side_effect=api):
+            self.assertFalse(m.ack_exists(2))
+
+    def test_eve_receipt_rejected_if_url_untrusted(self):
+        receipt = ("<!-- continuous-eve-ack -->\n" + m.FENCE +
+                   'json\n{"version":1,"sequence":2,"status":"completed","run_url":"https://evil.invalid/run/12345"}\n' +
+                   m.FENCE + "\n<!-- /continuous-eve-ack -->")
+        with mock.patch.object(m, "api", return_value={"body": receipt}) as api:
+            self.assertFalse(m.ack_exists(2))
+        api.assert_called_once_with(m.EVE, "/issues/39")
 
     def test_expired_eve_turn_recovers(self):
         state = {"version": 1, "sequence": 2, "owner": "eve", "status": "running",
