@@ -237,9 +237,9 @@ def heal_once(identity, api, now=None, target=None, run_id=None):
                 if not api.find_ticket(target, audit_title):
                     run_url = "https://github.com/{}/actions/runs/{}".format(REPOSITORIES[target], run["id"])
                     api.issue(target, audit_title,
-                              "Watchdog {} requested automatic canary recovery.\n"
-                              "Original failed run: {}\n"
-                              "Recovery is confirmed only after the retried job passes.\n".format(
+                              ("Watchdog {} requested automatic canary recovery.\n"
+                               "Original failed run: {}\n"
+                               "Recovery is confirmed only after the retried job passes.\n").format(
                                   identity.title(), run_url))
             api.retry_failed(target, run["id"])
             return {"status": "recovery_retry_requested", "target": target,
