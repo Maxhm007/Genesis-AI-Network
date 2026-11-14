@@ -2,11 +2,18 @@ name: Genesis accepts Eve-style tested repair proposals
 
 # Runs in the AFFECTED repository. The repair protocol is reciprocal,
 # but all GitHub reads/writes use the repository's own ephemeral GITHUB_TOKEN.
-# Model configuration is optional until explicitly enabled; no peer PAT is used.
+# With no model endpoint: try only a proven bounded assertion-literal heuristic.
+# A model endpoint, if provided, remains optional. No peer PAT is used.
 on:
   schedule:
     - cron: '35 2 * * *'
   workflow_dispatch:
+  # Verify the real read-only preparation job immediately after reviewed
+  # deployment; never expose write tokens to an untrusted PR.
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/local-repair-v2.yml'
   pull_request:
     paths:
       - 'scripts/repair_v2.py'
@@ -39,7 +46,7 @@ jobs:
       - run: python -m unittest discover -s tests -p test_repair_v2.py -v
 
   prepare:
-    if: github.event_name != 'pull_request' && vars.MUTUAL_HEAL_REPAIR_ENABLED == 'true' && vars.REPAIR_MODEL_ENDPOINT != '' && vars.REPAIR_MODEL_NAME != ''
+    if: github.event_name != 'pull_request'
     runs-on: ubuntu-latest
     timeout-minutes: 7
     permissions:
@@ -69,7 +76,7 @@ jobs:
             echo 'ready=true' >> "$GITHUB_OUTPUT"
           else
             echo 'ready=false' >> "$GITHUB_OUTPUT"
-            echo 'No repeated failing main-branch tests with a safe model candidate.' >> "$GITHUB_STEP_SUMMARY"
+            echo 'No reproducible recent main-branch failure with a safe candidate.' >> "$GITHUB_STEP_SUMMARY"
           fi
       - if: steps.ready.outputs.ready == 'true'
         uses: actions/upload-artifact@v4
