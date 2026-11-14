@@ -1,0 +1,42 @@
+name: Genesis Eve Continuous Evolution — Nexus
+on:
+  schedule:
+    - cron: '4,14,24,34,44,54 * * * *'
+  workflow_dispatch:
+  push:
+    branches: [main]
+    paths:
+      - '.github/workflows/continuous-evolution.yml'
+      - 'scripts/continuous_evolution.py'
+  pull_request:
+    paths:
+      - '.github/workflows/continuous-evolution.yml'
+      - 'scripts/continuous_evolution.py'
+      - 'tests/test_continuous_evolution.py'
+permissions:
+  contents: read
+  issues: write
+# Share the teammate lock with the existing Genesis heartbeat.
+concurrency:
+  group: genesis-teammate-autonomous-development
+  cancel-in-progress: false
+jobs:
+  turn:
+    runs-on: ubuntu-latest
+    timeout-minutes: 12
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          ref: ${{ github.event_name == 'pull_request' && github.sha || 'main' }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Test state machine and token isolation
+        run: python -m unittest discover -s tests -p test_continuous_evolution.py -v
+      - name: Execute one Nexus turn or acknowledge Eve
+        if: github.event_name != 'pull_request'
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+          PYTHONPATH: ${{ github.workspace }}
+        run: python scripts/continuous_evolution.py
