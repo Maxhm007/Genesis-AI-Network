@@ -10,6 +10,8 @@ on:
       - scripts/agentic_lab_capability_first_dispatch.py
       - scripts/agentic_lab_recovery_dispatch.py
       - scripts/github_issue_autorepair.py
+      - scripts/local_reasoning_provider.py
+      - tests/test_local_reasoning*.py
       - genesis/human_oversight.py
       - genesis/autonomy_guard.py
       - genesis/architecture_decomposer.py

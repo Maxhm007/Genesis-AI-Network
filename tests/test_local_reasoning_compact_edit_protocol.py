@@ -170,3 +170,28 @@ def test_legacy_json_output_remains_accepted_unchanged():
 
     assert module.normalize_bounded_coding_output(raw) == raw
     assert module.bounded_coding_output_complete(raw) is True
+
+
+def test_architecture_file_blocks_preserve_source_without_json_escaping():
+    module = _load_provider_module()
+    raw = 'FILE_BLOCK|genesis/architecture_extensions/health.py\ndef health():\n    return {"state": "unknown"}\nEND_FILE\nFILE_BLOCK|tests/test_health.py\ndef test_health():\n    assert "state" in {"state": "unknown"}\nEND_FILE\nEND_FILES'
+    parsed = module.parse_architecture_files(raw)
+    assert parsed['files']['genesis/architecture_extensions/health.py'] == 'def health():\n    return {"state": "unknown"}\n'
+    assert module.bounded_coding_output_complete(raw)
+    first_file = raw.split('FILE_BLOCK|tests/')[0]
+    assert not module.bounded_coding_output_complete(first_file)
+    import pytest
+    for malformed in (raw.removesuffix('END_FILES'), raw.replace('tests/test_health.py', 'genesis/architecture_extensions/health.py'), raw.replace('tests/test_health.py', '../escape.py')):
+        with pytest.raises(ValueError):
+            module.parse_architecture_files(malformed)
+
+
+def test_architecture_prompt_prefers_two_terminated_files():
+    module = _load_provider_module()
+    prompt = 'ROLE: Genesis bounded architecture module implementer\nPLANNED_NEW_PATH: genesis/architecture_extensions/health.py\nOUTPUT: Return one JSON object with keys title, rationale, files.\nThe files object must contain exactly these two keys: x, y\nISSUE_EVIDENCE: measure closure velocity'
+    output = module.simplify_architecture_prompt(prompt)
+    assert 'FILE_BLOCK|genesis/architecture_extensions/health.py' in output
+    assert 'FILE_BLOCK|tests/test_health.py' in output
+    assert 'Return one JSON object' not in output
+    assert 'ISSUE_EVIDENCE: measure closure velocity' in output
+    assert module.simplify_architecture_prompt('ROLE: bounded_coding_engineer\nobjective') == 'ROLE: bounded_coding_engineer\nobjective'
