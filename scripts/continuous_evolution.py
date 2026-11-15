@@ -65,10 +65,13 @@ def deadline(value, now):
         return False
 
 
-def ack_exists(sequence):
+def ack_exists(sequence, token=""):
     # A single durable Eve acknowledgement issue avoids unbounded issue spam.
     # This is an operational receipt, NOT authorization for automatic merges.
-    body = api(EVE, "/issues/39").get("body", "")
+    # Use this run's repository-scoped GITHUB_TOKEN for public peer reads.
+    # This avoids the 60/hour anonymous REST limit; api() still rejects every
+    # non-Genesis write, so the token cannot mutate Eve.
+    body = api(EVE, "/issues/39", token=token).get("body", "")
     marker, ending = "<!-- continuous-eve-ack -->", "<!-- /continuous-eve-ack -->"
     if body.count(marker) != 1 or body.count(ending) != 1:
         return False
@@ -93,7 +96,7 @@ def ack_exists(sequence):
         r"https://github[.]com/Maxhm007/Eve/actions/runs/([1-9][0-9]*)", run_url)
     if match is None:
         return False
-    run = api(EVE, "/actions/runs/" + match.group(1))
+    run = api(EVE, "/actions/runs/" + match.group(1), token=token)
     return (run.get("id") == int(match.group(1)) and
             run.get("name") == "Eve Continuous Evolution — Peer Turn" and
             run.get("head_branch") == "main" and
@@ -121,7 +124,7 @@ def tick(token, now=None, work=None):
     body = issue["body"]
     state = decode(body)
     if state["owner"] == "eve":
-        if ack_exists(state["sequence"]):
+        if ack_exists(state["sequence"], token=token):
             save(body, advance(state, "genesis", "eve ack #{}".format(state["sequence"])), token)
             # A verified handoff can immediately start the next Genesis turn;
             # this is one bounded recursion, not an unbounded busy loop.

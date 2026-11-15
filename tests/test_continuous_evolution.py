@@ -103,8 +103,23 @@ class LedgerTests(TestCase):
                    'json\n{"version":1,"sequence":2,"status":"completed","run_url":"https://evil.invalid/run/12345"}\n' +
                    m.FENCE + "\n<!-- /continuous-eve-ack -->")
         with mock.patch.object(m, "api", return_value={"body": receipt}) as api:
-            self.assertFalse(m.ack_exists(2))
-        api.assert_called_once_with(m.EVE, "/issues/39")
+            self.assertFalse(m.ack_exists(2, token="genesis-token"))
+        api.assert_called_once_with(m.EVE, "/issues/39", token="genesis-token")
+
+    def test_peer_run_evidence_uses_repository_scoped_token_for_reads(self):
+        receipt = ("<!-- continuous-eve-ack -->\n" + m.FENCE +
+                   'json\n{"version":1,"sequence":2,"status":"completed","run_url":"https://github.com/Maxhm007/Eve/actions/runs/12345"}\n' +
+                   m.FENCE + "\n<!-- /continuous-eve-ack -->")
+        def api(repo, suffix, method="GET", payload=None, token=""):
+            self.assertEqual(token, "genesis-token")
+            if suffix == "/issues/39":
+                return {"body": receipt}
+            return {"id": 12345, "name": "Eve Continuous Evolution — Peer Turn",
+                    "head_branch": "main", "status": "completed",
+                    "conclusion": "success", "event": "schedule"}
+        with mock.patch.object(m, "api", side_effect=api) as mocked_api:
+            self.assertTrue(m.ack_exists(2, token="genesis-token"))
+        self.assertEqual(mocked_api.call_count, 2)
 
     def test_expired_eve_turn_recovers(self):
         state = {"version": 1, "sequence": 2, "owner": "eve", "status": "running",
