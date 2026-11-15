@@ -124,3 +124,15 @@ The Genesis Constitution and explicit owner instructions have higher priority th
 The human owner has final authority over product direction, merges, destructive operations, secrets, and policy changes.
 
 When uncertain about a reversible implementation detail, choose the smallest safe option and continue. For destructive or irreversible actions, stop and surface the decision to the owner.
+
+## Cursor Cloud specific instructions
+
+Python 3.12 is the runtime. Dependencies come from `requirements.txt` into `.venv`. After environment install, `/usr/local/bin/python` points at that virtualenv, because Genesis shells out to `python` (not `python3`) for pytest and promotion. Do not install `requirements-model-training.txt` for ordinary development; it pulls the optional model-training stack.
+
+Canonical checks, from the repository root:
+
+- Tests: `python -m pytest -q`
+- One node cycle (verifies the constitution, then Europe PMC and Hugging Face metadata): `python run_genesis.py --cycles 1`
+- Local UI and message API: `python -m genesis.communication_server` on `http://127.0.0.1:8787` (`GET /health`, `POST /v1/message`). The server must stay on loopback unless `GENESIS_COMM_TOKEN` is set.
+
+`state/` and `runtime/` are local node data and are gitignored. The team-chat page loads roster data from `/v1/team`; sending a message through the local API is `POST /v1/message`.
