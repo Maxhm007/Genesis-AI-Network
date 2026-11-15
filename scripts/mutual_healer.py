@@ -102,7 +102,7 @@ class GitHub:
 
     def find_ticket(self, target, exact_title):
         """Search all target issues (including closed), match exact title."""
-        query = 'repo:{} in:title "{}"'.format(REPOSITORIES[target], exact_title)
+        query = 'repo:{} is:issue in:title "{}"'.format(REPOSITORIES[target], exact_title)
         suffix = "/search/issues?q=" + urllib.parse.quote(query, safe="")
         data = self.request("GET", target, suffix)
         matches = data.get("items")
