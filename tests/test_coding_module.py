@@ -155,6 +155,9 @@ def test_coding_prompt_requires_exactly_one_small_edit(tmp_path: Path):
     module.propose("Tune one value", ["genesis/example.py"], provider=provider)
     assert "exactly ONE smallest useful edit" in provider.prompt
     assert "no title/rationale/markdown/explanation" in provider.prompt
+    assert r'write each newline as the two characters \n' in provider.prompt
+    assert r'escape each double quote as \"' in provider.prompt
+    assert "Do not use Python triple-quoted strings" in provider.prompt
     assert "GROUNDED_LINE_HINT: genesis/example.py:1" in provider.prompt
     assert "existing allowed path" not in provider.prompt
     assert module.MAX_EDITS == 1

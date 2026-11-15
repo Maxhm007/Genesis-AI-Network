@@ -1320,6 +1320,9 @@ class CodingModule:
         return (
             'Return one JSON object with exactly one "edits" array containing exactly one object. '
             'That edit object must contain "path", integer "start_line", integer "end_line", and string "new". '
+            'Encode the response as strict JSON: inside "new", write each newline as the two characters \\n, '
+            'escape each double quote as \\" and each backslash as \\\\. Do not use Python triple-quoted strings, '
+            'literal multiline JSON strings, or markdown fences. '
             'The "new" value must be the actual repository replacement code/content, never an example or placeholder. '
             'An edit that only adds comments, docstrings, pass or ... is rejected; change real code. '
             'Every name you use must already be defined in that scope, and never leave code after return. '
