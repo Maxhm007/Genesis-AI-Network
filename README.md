@@ -1,5 +1,8 @@
 # Genesis AI Network — Gene
 
+**Genesis × Eve continuity:** [Portable project handoff and operating runbook](GENESIS_EVE_HANDOFF.md) — start here in a new Codex, ChatGPT or workstation session. This file is a dated snapshot; always verify the live GitHub ledgers before acting.
+
+
 > **Gene is a decentralized, self-developing scientific AI network designed for long-term independence, resilience, and the mission of physical human immortality.**
 
 [![Independent Validator Gate](https://github.com/Maxhm007/Genesis-AI-Network/actions/workflows/independent-validator-gate.yml/badge.svg)](https://github.com/Maxhm007/Genesis-AI-Network/actions/workflows/independent-validator-gate.yml)
