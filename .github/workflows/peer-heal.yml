@@ -30,7 +30,7 @@ concurrency:
 jobs:
   peer-vetted-healing:
     if: github.event_name != 'pull_request'
-    uses: Maxhm007/Eve/.github/workflows/peer-healing-engine.yml@73e00bcb32179e1672265df71a5a92d3888c85f2
+    uses: Maxhm007/Eve/.github/workflows/peer-healing-engine.yml@9effb5b0f5df33191c1d4988b2715609cc540a46
     with:
       identity: genesis
     secrets:
