@@ -33,7 +33,8 @@ jobs:
     uses: Maxhm007/Eve/.github/workflows/peer-healing-engine.yml@73e00bcb32179e1672265df71a5a92d3888c85f2
     with:
       identity: genesis
-    secrets: inherit
+    secrets:
+      PEER_HEAL_TOKEN: ${{ secrets.PEER_HEAL_TOKEN }}
 
   policy-tests:
     if: github.event_name == 'pull_request'
