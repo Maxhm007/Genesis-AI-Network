@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import json
 import os
 import re
@@ -341,6 +342,116 @@ def _backlog_governor_satisfaction(issue: dict, root: Path) -> dict | None:
     }
 
 
+
+def _learned_capability_satisfaction(issue: dict, root: Path) -> dict | None:
+    """Recognize a new-capability task already implemented on main with matching evidence."""
+    body = str(issue.get("body") or "")
+    title = str(issue.get("title") or "")
+    task_type = _TASK_TYPE_RE.search(body)
+    target = extract_issue_target(body)
+    if (
+        task_type is None
+        or task_type.group(1).strip() != "new_capability"
+        or target != GitHubIssueLearnedCapabilityProvider.TARGET
+        or GitHubIssueLearnedCapabilityProvider.TASK_MARKER not in body
+        or GitHubIssueLearnedCapabilityProvider.SOURCE_LINE not in body
+        or GitHubIssueLearnedCapabilityProvider.TARGET_LINE not in body
+        or "verified transferable lesson" not in body.lower()
+        or "External learning evidence:" not in body
+    ):
+        return None
+
+    author = str(dict(issue.get("user") or {}).get("login") or "")
+    if author != GitHubIssueLearnedCapabilityProvider.MACHINE_AUTHOR:
+        return None
+
+    name_match = re.search(r"\b(learned_[0-9a-fA-F]{12,64})\b", title)
+    if name_match is None:
+        return None
+    capability_name = name_match.group(1).lower()
+
+    objective_match = re.search(r"(?s)### Objective\s*(.+?)(?:\n\n### Acceptance|\Z)", body)
+    if objective_match is None:
+        return None
+    objective = objective_match.group(1)
+    lesson_match = re.search(
+        r"Use the learned idea:\s*(.+?)(?:\s+Acceptance:|\s+External learning evidence:)",
+        objective,
+        re.S,
+    )
+    evidence_match = re.search(
+        r"External learning evidence:\s*(.+?)(?:\s+\*?\s*Incubator evidence:|\s+Target exactly|\Z)",
+        objective,
+        re.S,
+    )
+    if lesson_match is None or evidence_match is None:
+        return None
+    lesson = GitHubIssueLearnedCapabilityProvider._bounded_text(
+        lesson_match.group(1), GitHubIssueLearnedCapabilityProvider.MAX_LESSON_BYTES
+    )
+    evidence = GitHubIssueLearnedCapabilityProvider._bounded_text(
+        evidence_match.group(1), GitHubIssueLearnedCapabilityProvider.MAX_EVIDENCE_BYTES
+    )
+    if not lesson or not evidence:
+        return None
+
+    source_path = root / target
+    tests_path = root / "tests" / "test_learned_capabilities.py"
+    if not source_path.is_file() or not tests_path.is_file():
+        return None
+    try:
+        tree = ast.parse(source_path.read_text(encoding="utf-8"), filename=target)
+    except (OSError, SyntaxError, UnicodeError):
+        return None
+
+    functions = {
+        node.name: node
+        for node in tree.body
+        if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+    }
+    for node in tree.body:
+        if not isinstance(node, ast.Expr) or not isinstance(node.value, ast.Call):
+            continue
+        call = node.value
+        if not isinstance(call.func, ast.Name) or call.func.id != "register_capability" or len(call.args) < 4:
+            continue
+        try:
+            registered_name = ast.literal_eval(call.args[0])
+            description = ast.literal_eval(call.args[1])
+            registered_evidence = ast.literal_eval(call.args[2])
+        except (ValueError, TypeError):
+            continue
+        handler_ref = call.args[3]
+        if registered_name != capability_name or not isinstance(handler_ref, ast.Name):
+            continue
+        handler = functions.get(handler_ref.id)
+        if handler is None or not isinstance(description, str) or not isinstance(registered_evidence, str):
+            continue
+        executable_body = [
+            statement for statement in handler.body
+            if not (
+                isinstance(statement, ast.Expr)
+                and isinstance(statement.value, ast.Constant)
+                and isinstance(statement.value.value, str)
+            )
+            and not isinstance(statement, ast.Pass)
+        ]
+        if not executable_body:
+            continue
+        if "Verified lesson:" not in description or lesson[:100] not in description:
+            continue
+        if evidence[:100] not in registered_evidence:
+            continue
+        return {
+            "task_type": "learned_capability",
+            "target": target,
+            "capability_name": capability_name,
+            "handler": handler_ref.id,
+            "evidence_excerpt": evidence[:160],
+        }
+    return None
+
+
 def _full_suite_passes(root: Path) -> tuple[bool, str]:
     completed = subprocess.run(
         [sys.executable, "-m", "pytest", "-q"],
@@ -363,6 +474,8 @@ def _close_if_current_main_satisfies(issue_number: int, repository: str, root: P
     satisfaction = _benchmark_runner_satisfaction(issue, root)
     if satisfaction is None:
         satisfaction = _capability_growth_satisfaction(issue, root)
+    if satisfaction is None:
+        satisfaction = _learned_capability_satisfaction(issue, root)
     if satisfaction is None:
         satisfaction = _backlog_governor_satisfaction(issue, root)
     if satisfaction is None:
@@ -387,6 +500,14 @@ def _close_if_current_main_satisfies(issue_number: int, repository: str, root: P
             f"- Blocker: `{satisfaction['blocker']}`\n"
             "- Capability route: bounded evidence-first capability-growth adapter present\n"
             "- Regression coverage: safe script blocker allowed; protected script blocker rejected\n"
+        )
+    elif satisfaction.get("task_type") == "learned_capability":
+        detail_lines = (
+            "Genesis verified that the current `main` already satisfies this learned-capability issue, so no duplicate model-generated edit is required.\n\n"
+            f"- Target: `{satisfaction['target']}`\n"
+            f"- Registered capability: `{satisfaction['capability_name']}`\n"
+            f"- Executable handler: `{satisfaction['handler']}`\n"
+            f"- Evidence recorded: {satisfaction['evidence_excerpt']}\n"
         )
     elif satisfaction.get("task_type") == "backlog_governor":
         detail_lines = (
