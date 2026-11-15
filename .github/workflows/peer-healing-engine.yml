@@ -1,13 +1,16 @@
 name: Genesis vetted peer-healing engine
 
-# A caller imports this version-pinned workflow and lends its OWN repository
-# GITHUB_TOKEN; the engine can only repair the CALLER, never its source repo.
+# Runs version-pinned peer-authored logic with a token scoped to the opposite repository.
 on:
   workflow_call:
     inputs:
       identity:
         description: Caller identity (genesis or eve)
         type: string
+        required: true
+    secrets:
+      PEER_HEAL_TOKEN:
+        description: Fine-grained token for the opposite repository's Actions and Issues permissions
         required: true
   pull_request:
     paths:
@@ -38,11 +41,11 @@ jobs:
           python-version: '3.11'
       - name: Verify Genesis engine policy
         run: python -m unittest discover -s engine/tests -p test_mutual_healer.py -v
-      - name: Run peer-authored logic under the CALLER repository token
+      - name: Check and recover the peer repository
         env:
-          GITHUB_TOKEN: ${{ github.token }}
+          PEER_HEAL_TOKEN: ${{ secrets.PEER_HEAL_TOKEN }}
           CALLER_IDENTITY: ${{ inputs.identity }}
-        run: python engine/scripts/mutual_healer.py --identity "$CALLER_IDENTITY" --local
+        run: python engine/scripts/mutual_healer.py --identity "$CALLER_IDENTITY"
 
   metadata-tests:
     if: github.event_name == 'pull_request'
