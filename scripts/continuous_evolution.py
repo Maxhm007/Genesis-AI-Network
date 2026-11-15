@@ -65,7 +65,7 @@ def deadline(value, now):
         return False
 
 
-def ack_exists(sequence, token=""):
+def ack_result(sequence, token=""):
     # A single durable Eve acknowledgement issue avoids unbounded issue spam.
     # This is an operational receipt, NOT authorization for automatic merges.
     # Use this run's repository-scoped GITHUB_TOKEN for public peer reads.
@@ -74,35 +74,44 @@ def ack_exists(sequence, token=""):
     body = api(EVE, "/issues/39", token=token).get("body", "")
     marker, ending = "<!-- continuous-eve-ack -->", "<!-- /continuous-eve-ack -->"
     if body.count(marker) != 1 or body.count(ending) != 1:
-        return False
+        return "pending", ""
     section = body.split(marker, 1)[1].split(ending, 1)[0].strip()
     if not section.startswith(FENCE + "json\n") or not section.endswith(FENCE):
-        return False
+        return "pending", ""
     try:
         proof = json.loads(section[len(FENCE) + 5:-len(FENCE)].strip())
     except (TypeError, ValueError):
-        return False
+        return "pending", ""
     if not (proof.get("version") == 1 and
             type(proof.get("sequence")) is int and proof["sequence"] == sequence and
             proof.get("status") in ("completed", "failed")):
-        return False
+        return "pending", ""
     # A text-only acknowledgement is insufficient. Bind it to an actual
     # successful Eve turn runner on main; do not accept a forged run URL.
     import re
     run_url = proof.get("run_url")
     if not isinstance(run_url, str):
-        return False
+        return "rejected", "invalid_run_url"
     match = re.fullmatch(
         r"https://github[.]com/Maxhm007/Eve/actions/runs/([1-9][0-9]*)", run_url)
     if match is None:
-        return False
+        return "rejected", "invalid_run_url"
     run = api(EVE, "/actions/runs/" + match.group(1), token=token)
-    return (run.get("id") == int(match.group(1)) and
-            run.get("name") == "Eve Continuous Evolution — Peer Turn" and
-            run.get("head_branch") == "main" and
-            run.get("status") == "completed" and
-            run.get("conclusion") == "success" and
-            run.get("event") in ("schedule", "push", "workflow_dispatch"))
+    if run.get("id") != int(match.group(1)) or run.get("name") != "Eve Continuous Evolution — Peer Turn":
+        return "rejected", "run_identity_mismatch"
+    if run.get("status") != "completed":
+        return "pending", ""
+    if run.get("head_branch") != "main":
+        return "rejected", "non_main_ref"
+    if run.get("event") not in ("schedule", "push", "workflow_dispatch"):
+        return "rejected", "unsupported_event"
+    if run.get("conclusion") != "success":
+        return "rejected", "run_failed"
+    return "accepted", proof
+
+
+def ack_exists(sequence, token=""):
+    return ack_result(sequence, token)[0] == "accepted"
 
 
 def save(body, state, token):
@@ -124,10 +133,20 @@ def tick(token, now=None, work=None):
     body = issue["body"]
     state = decode(body)
     if state["owner"] == "eve":
-        if ack_exists(state["sequence"], token=token):
-            save(body, advance(state, "genesis", "eve ack #{}".format(state["sequence"])), token)
-            # A verified handoff can immediately start the next Genesis turn;
-            # this is one bounded recursion, not an unbounded busy loop.
+        receipt_status, receipt = ack_result(state["sequence"], token=token)
+        if receipt_status == "accepted":
+            if receipt.get("status") == "failed":
+                result = "eve failed #{}: {}".format(
+                    state["sequence"], str(receipt.get("summary", "unspecified failure"))[:160])
+            else:
+                result = "eve completed #{}".format(state["sequence"])
+            save(body, advance(state, "genesis", result), token)
+            return tick(token, now=now, work=work)
+        if receipt_status == "rejected":
+            result = "eve receipt rejected: {}".format(receipt)
+            save(body, advance(state, "genesis", result), token)
+            # A terminal rejected receipt can be recorded and recovered in
+            # this bounded tick, without waiting for the lease to expire.
             return tick(token, now=now, work=work)
         if state["status"] == "running" and deadline(state.get("lease_until"), now):
             save(body, advance(state, "genesis", "eve lease expired"), token)
@@ -161,6 +180,8 @@ def tick(token, now=None, work=None):
             result += "; category=" + category
     except subprocess.TimeoutExpired:
         result = "genesis teammate timed out"
+    if state.get("last_result", "").startswith(("eve failed #", "eve receipt rejected:")):
+        result = result + "; " + state["last_result"]
     save(encode(body, state), advance(state, "eve", result), token)
     return result
 

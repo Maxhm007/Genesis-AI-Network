@@ -121,6 +121,34 @@ class LedgerTests(TestCase):
             self.assertTrue(m.ack_exists(2, token="genesis-token"))
         self.assertEqual(mocked_api.call_count, 2)
 
+    def test_terminal_non_main_eve_receipt_is_rejected_and_recovered(self):
+        state = {"version": 1, "sequence": 12, "owner": "eve", "status": "running",
+                 "lease_until": (datetime.now(timezone.utc) + timedelta(minutes=10)).isoformat()}
+        store = {"body": m.encode(self.body, state)}
+        receipt = ("<!-- continuous-eve-ack -->\n" + m.FENCE +
+                   'json\n{"version":1,"sequence":12,"status":"completed","run_url":"https://github.com/Maxhm007/Eve/actions/runs/12345"}\n' +
+                   m.FENCE + "\n<!-- /continuous-eve-ack -->")
+        def fake_api(repo, suffix, method="GET", payload=None, token=""):
+            if repo == m.EVE and suffix == "/issues/39":
+                return {"body": receipt}
+            if repo == m.EVE and suffix == "/actions/runs/12345":
+                return {"id": 12345, "name": "Eve Continuous Evolution — Peer Turn",
+                        "head_branch": "fix/peer-read", "status": "completed",
+                        "conclusion": "success", "event": "workflow_dispatch"}
+            if repo == m.GENESIS and method == "PATCH":
+                store["body"] = payload["body"]
+                return {}
+            if repo == m.GENESIS:
+                return {"body": store["body"]}
+            raise AssertionError("Unexpected request")
+        worker = mock.Mock(return_value=SimpleNamespace(returncode=0, stdout="", stderr=""))
+        with mock.patch.object(m, "api", side_effect=fake_api):
+            result = m.tick("genesis-token", work=worker)
+        worker.assert_called_once()
+        self.assertIn("eve receipt rejected: non_main_ref", result)
+        self.assertIn("eve receipt rejected: non_main_ref",
+                      m.decode(store["body"])["last_result"])
+
     def test_expired_eve_turn_recovers(self):
         state = {"version": 1, "sequence": 2, "owner": "eve", "status": "running",
                  "lease_until": (datetime.now(timezone.utc) - timedelta(minutes=5)).isoformat()}
