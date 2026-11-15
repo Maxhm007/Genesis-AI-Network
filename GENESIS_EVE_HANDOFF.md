@@ -21,6 +21,7 @@
 | Eve local completion acknowledgements | https://github.com/Maxhm007/Eve/issues/39 |
 | Genesis autonomous-loop degradation investigation | https://github.com/Maxhm007/Genesis-AI-Network/issues/1130 |
 | Actual end-to-end reciprocal **code** repair milestone | https://github.com/Maxhm007/Genesis-AI-Network/issues/1174 |
+| Google Apps Script external automation (user-configured; verify triggers) | https://script.google.com/home/projects/10Rrzq4JXvm6RgZ2d9HmoKjep4ZW-MOeLWFyvkHNqWaxaY_jyIFHdDlIv/triggers |
 | Genesis current Actions | https://github.com/Maxhm007/Genesis-AI-Network/actions |
 | Eve current Actions | https://github.com/Maxhm007/Eve/actions |
 | Genesis open PRs | https://github.com/Maxhm007/Genesis-AI-Network/pulls |
@@ -126,11 +127,32 @@ The owner reported configuring **fine-grained token access** for both repositori
 - Prefer independent worktrees for parallel code inspection/validation; never let a peer-authored untrusted patch execute with token-bearing privileges.
 - A Codex Desktop or Codex Cloud session is finite. Continuous unattended operation exists **only if deployed and confirmed via actual workflows/agents**, not because a prompt demands it.
 
+## 7A. Google Apps Script — user-configured external automation
+
+The owner has also set up a Google Apps Script project for Genesis/Eve-related automation. Its **actual code, deployment, trigger frequencies, enabled state and integration endpoints have not been independently inspected** in this handoff. Do not assume every trigger is active or that it currently wakes both repositories.
+
+- **Apps Script project ID:** `10Rrzq4JXvm6RgZ2d9HmoKjep4ZW-MOeLWFyvkHNqWaxaY_jyIFHdDlIv`
+- **Direct triggers page:** https://script.google.com/home/projects/10Rrzq4JXvm6RgZ2d9HmoKjep4ZW-MOeLWFyvkHNqWaxaY_jyIFHdDlIv/triggers
+- **Project overview:** https://script.google.com/home/projects/10Rrzq4JXvm6RgZ2d9HmoKjep4ZW-MOeLWFyvkHNqWaxaY_jyIFHdDlIv/edit
+- **Status at 2026-11-16:** User reports setup completed; trigger configuration, permissions, execution logs and GitHub wake behavior still require verification.
+
+### How to inspect in a future Codex or browser session
+
+1. Open the Apps Script project while signed into the authorized Google account; identify its main functions, trigger definitions, execution history, project properties and deployment type. Do **not** publish script properties or secrets.
+2. Determine whether the script dispatches GitHub workflows, checks GitHub health, retries missed schedules, or performs other tasks. Record observed functions and targets, not guessed ones.
+3. Trace the exact GitHub repository/workflow endpoint, HTTP request method, GitHub App/PAT permissions, idempotency rules, failure retries and rate limits. Be sure the project is authorized for each target repository.
+4. Check whether it duplicates existing Genesis FIFO, Nexus watchdog, Eve continuous-evolution cron, or peer-healing heartbeats. Use Apps Script as a **bounded supplemental scheduler/watchdog** only if needed; do not create dispatch loops or bypass GitHub Actions budgets.
+5. Verify a trigger from its **Apps Script execution log** through the corresponding GitHub Actions run ID to an actual ledger or issue update before calling it operational.
+6. Store token values only in approved secret storage; never include them in GitHub documentation, script logging, PR comments, or chat output. Rotate any credential accidentally exposed.
+7. Once verified, update this section in **both repositories** with the actual script functions, trigger frequency/timezone, event flow, failure recovery and links to non-sensitive evidence.
+
+The GitHub-hosted project documentation is a pointer to this external Apps Script installation, **not** a backup of private Apps Script source code or credentials. Full portability requires separately preserving a secure script source/manifest copy and non-secret setup instructions, subject to owner authorization.
+
 ## 8. Safe operating procedure for any new agent/session
 
 **Read this document, then verify present state.**
 
-1. Identify local Git repositories and authenticated GitHub accounts; preserve dirty worktrees.
+1. Identify local Git repositories and authenticated GitHub accounts; preserve dirty worktrees. Check the separately configured Google Apps Script triggers if external scheduling is relevant.
 2. Read both current main README and workflow/policy files; fetch latest commits, PRs, issues and Actions runs.
 3. Read Genesis issue #1212 and Eve issue #39. Confirm latest sequence, owner, outstanding lease and linked run evidence. Check errors and whether work is genuinely productive.
 4. Inspect Genesis #1130 (autonomy) and #1174 (real peer code repair) plus new issues/PRs. Avoid duplicating work.
