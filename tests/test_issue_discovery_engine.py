@@ -233,7 +233,7 @@ def test_safe_argv_subprocess_is_not_ranked_as_shell_boundary(tmp_path: Path) ->
     _write(
         tmp_path,
         "genesis/worker.py",
-        "import subprocess\\n\\ndef run(root):\\n    return subprocess.run(['git', 'status', '--short'], cwd=root, capture_output=True)\\n",
+        "import subprocess\n\ndef run(root):\n    return subprocess.run(['git', 'status', '--short'], cwd=root, capture_output=True)\n",
     )
 
     candidate = GenesisIssueDiscoveryEngine(tmp_path)._score_path(tmp_path / "genesis/worker.py")
@@ -245,7 +245,7 @@ def test_shell_interpreted_subprocess_is_ranked_as_shell_boundary(tmp_path: Path
     _write(
         tmp_path,
         "genesis/worker.py",
-        "import subprocess\\n\\ndef run(command):\\n    return subprocess.run(command, shell=True)\\n",
+        "import subprocess\n\ndef run(command):\n    return subprocess.run(command, shell=True)\n",
     )
 
     candidate = GenesisIssueDiscoveryEngine(tmp_path)._score_path(tmp_path / "genesis/worker.py")
