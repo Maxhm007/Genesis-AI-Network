@@ -303,7 +303,11 @@ def _model_lab_root(explicit_root: Path | None) -> Path | None:
 
 
 class ProviderRegistry:
-    def __init__(self, include_bootstrap: bool = True, root: Path | None = None) -> None:
+    def __init__(self, include_bootstrap: bool = True, root: Path | None = None):
+        self._bootstrap_enabled = include_bootstrap
+        self._root = root or Path.cwd()
+        self._providers: dict[str, GenesisHTTPProvider] = {}
+        self._initialized = False
         self._providers: list[IntelligenceProvider] = []
         self._discovery_errors: list[str] = []
         if include_bootstrap:
