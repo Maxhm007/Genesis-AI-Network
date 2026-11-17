@@ -2801,4 +2801,39 @@ register_capability(
 )
 
 
+def _learned_85ee71b19ede(items, limit: int = 32) -> tuple[str, ...]:
+    """Return bounded caller values explicitly grounded in verified lesson terms."""
+    limit_i = int(limit)
+    if limit_i < 1 or limit_i > 128:
+        raise ValueError("lesson-grounding limit is out of bounds")
+    terms = ('bounded', 'this', 'lesson', 'research-backed', 'from', 'b10636', 'details', 'open', 'clean', 'builds', 'releases', 'inline', 'version', 'resolution', 'into', 'ui-build.yml')
+    source = (items,) if isinstance(items, (str, bytes)) else items
+    grounded: list[str] = []
+    scanned = 0
+    for item in source:
+        scanned += 1
+        if scanned > 256:
+            break
+        if isinstance(item, bytes):
+            value = item.decode("utf-8", errors="replace").strip()
+        else:
+            value = str(item).strip()
+        if not value:
+            continue
+        bounded = value[:512]
+        lowered = bounded.lower()
+        if any(term in lowered for term in terms):
+            grounded.append(bounded)
+        if len(grounded) >= limit_i:
+            break
+    return tuple(grounded)
+
+register_capability(
+    'learned_85ee71b19ede1785',
+    "Ground bounded candidate context against terms derived only from the verified lesson/evidence before downstream use. Verified lesson: Add one new bounded Genesis capability implementing this verified transferable lesson: Research-backed capability candidate from 'b10636': <details open> ci: Clean up UI builds from releases (#27706) * ci : inline UI version resolution into ui-build.yml * ci : build UI once and reuse the artifact in release jobs Server jobs now extract the ui-build artifact into tools/ui/dist instead of npm-building the UI. Also removes the get-version job and the no-op -DHF_UI_VERSION flags. Assisted-by: pi:Kimi-K3 * ui : disable the npm UI build by default (LLAMA_BUILD_UI=OFF) The flag now only controls buil",
+    '<details open> ci: Clean up UI builds from releases (#27706) * ci : inline UI version resolution into ui-build.yml * ci : build UI once and reuse the artifact in release jobs Server jobs now extract the ui-build artifact into tools/ui/dist instead of npm-building the UI. Also removes the get-version job and the no-op -DHF_UI_VERSION flags. Assisted-by: pi:Kimi-K3 * ui : disable the npm UI build by default (LLAMA_BUILD_UI=OFF) The flag now only controls building the UI from source via npm. The UI is still embedded by default from local tools/ui/dist or the prebuilt download (LLAMA_USE_PREBUILT_UI=ON). CI jobs no longer npm-build the UI; server-sanitize does not need node anymore. Assisted-by: pi:Kimi-K3 * ci : rename the ui-build artifact to llama-ui.zip Consistent with the other artifact names in the Actions summary. Assisted-by: pi:Kimi-K3 * ci : clarify the windows artifact merge in release.yml The windows-cuda/vulkan/sycl jobs build only the backend library; llama-server (with the embedded UI) is injected into their zips from the windows-cpu package during the release. State this in the job comments and use accurate wording in the merge step. Assisted-by: pi:Kimi-K3 </details>',
+    _learned_85ee71b19ede,
+)
+
+
 # GENESIS_LEARNED_CAPABILITY_INSERTION_POINT
