@@ -200,3 +200,29 @@ def test_orphan_recovery_refuses_control_root_candidate(monkeypatch):
 
     assert runner.recover_orphan_governor_candidates() is None
     assert created == []
+
+
+def test_explicit_shared_non_cancelling_concurrency_is_not_reported(tmp_path: Path):
+    for name in ("peer-heal.yml", "self-heal.yml"):
+        write(
+            tmp_path,
+            f".github/workflows/{name}",
+            f"""name: {name}
+on:
+  schedule:
+    - cron: '0 1 * * *'
+concurrency:
+  # Shared across reciprocal healing workflows to avoid racing retries.
+  group: reciprocal-healing
+  cancel-in-progress: false
+jobs:
+  run:
+    runs-on: ubuntu-latest
+    steps:
+      - run: echo ok
+""",
+        )
+
+    report = analyze(tmp_path)
+
+    assert not any(f.kind == "duplicate_concurrency_group" for f in report.findings)

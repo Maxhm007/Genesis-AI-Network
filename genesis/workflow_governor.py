@@ -47,6 +47,7 @@ class WorkflowInfo:
     has_issues: bool
     has_workflow_run: bool
     concurrency_group: str
+    intentional_shared_concurrency: bool
     write_permissions: tuple[str, ...]
     workflow_refs: tuple[str, ...]
     lines: int
@@ -82,6 +83,27 @@ def _section_present(text: str, key: str) -> bool:
     return bool(re.search(rf"^\s{{2}}{re.escape(key)}\s*:", text, re.M))
 
 
+def _intentional_shared_concurrency(text: str) -> bool:
+    lines = text.splitlines()
+    start = next(
+        (index for index, line in enumerate(lines) if line.strip() == "concurrency:" and not line.startswith(" ")),
+        None,
+    )
+    if start is None:
+        return False
+    block = []
+    for line in lines[start + 1:]:
+        if line.strip() and len(line) == len(line.lstrip(" ")):
+            break
+        block.append(line)
+    content = "\n".join(block)
+    declares_shared_purpose = bool(re.search(r"(?im)^\s*#\s*shared across\b", content))
+    preserves_queued_runs = bool(
+        re.search(r"(?m)^\s{2,}cancel-in-progress:\s*false\s*(?:#.*)?$", content)
+    )
+    return declares_shared_purpose and preserves_queued_runs
+
+
 def inspect_workflow(path: Path) -> WorkflowInfo:
     text = path.read_text(encoding="utf-8")
     name_match = re.search(r"^name:\s*(.+?)\s*$", text, re.M)
@@ -105,6 +127,7 @@ def inspect_workflow(path: Path) -> WorkflowInfo:
         has_issues=_section_present(text, "issues"),
         has_workflow_run=_section_present(text, "workflow_run"),
         concurrency_group=(group_match.group(1).strip() if group_match else ""),
+        intentional_shared_concurrency=_intentional_shared_concurrency(text),
         write_permissions=tuple(sorted(set(WRITE_PERMISSION_RE.findall(text)))),
         workflow_refs=tuple(refs),
         lines=len(text.splitlines()),
@@ -160,7 +183,7 @@ def analyze(root: Path) -> GovernanceReport:
         if w.concurrency_group and w.has_schedule:
             groups.setdefault(w.concurrency_group, []).append(w)
     for group, members in sorted(groups.items()):
-        if len(members) > 1:
+        if len(members) > 1 and not all(x.intentional_shared_concurrency for x in members):
             names = ", ".join(Path(x.path).name for x in members)
             for w in members:
                 findings.append(Finding(

@@ -14,7 +14,7 @@ from genesis.workflow_governor import analyze, apply_candidate, choose_autonomou
 
 
 ROOT = Path(__file__).resolve().parents[1]
-ISSUE_NUMBER = "860"
+ISSUE_NUMBER = os.environ.get("GENESIS_WORKFLOW_GOVERNANCE_ISSUE", "868")
 
 
 def run(*args: str, check: bool = True) -> subprocess.CompletedProcess[str]:
