@@ -126,16 +126,21 @@ def evaluate(
     active: list[int] = []
     recent_progress: list[int] = []
     stalled: list[int] = []
+    kernel_issues = []
     for issue in issues:
         labels = _labels(issue)
         body = str(issue.get("body") or "")
         title = str(issue.get("title") or "")
-        if MARKER in body or title == TITLE:
+        if (MARKER in body or title == TITLE
+                or title.startswith("[Genesis Teammate] ")
+                or title == "[Monitoring] Live Genesis Actions status report"
+                or "<!-- genesis-eve-continuous-ledger -->" in body):
             continue
         if "<!-- genesis-team-task -->" in body and "Autonomous Genesis development task from issue #" in body:
             # Legacy Nexus execution duplicates are reconciled against their
             # authoritative source issue by the teammate heartbeat.
             continue
+        kernel_issues.append(issue)
         if "genesis-autonomous" not in labels or "genesis-verified" in labels or labels & IGNORE_LABELS:
             continue
         number = int(issue.get("number") or 0)
@@ -168,15 +173,6 @@ def evaluate(
     evidence["recent_progress_issues"] = recent_progress[:20]
     evidence["stalled_issues"] = stalled[:20]
 
-    kernel_issues = []
-    for issue in issues:
-        body = str(issue.get("body") or "")
-        title = str(issue.get("title") or "")
-        if MARKER in body or title == TITLE:
-            continue
-        if "<!-- genesis-team-task -->" in body and "Autonomous Genesis development task from issue #" in body:
-            continue
-        kernel_issues.append(issue)
     kernel = summarize_issues(
         kernel_issues,
         now=now,
