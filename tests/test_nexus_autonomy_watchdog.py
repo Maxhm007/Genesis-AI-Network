@@ -146,3 +146,24 @@ def test_real_agentic_heartbeat_outage_still_detected():
         now=NOW,
     )
     assert any(x.startswith("agentic_lab_heartbeat_stale:") for x in result["faults"])
+
+
+def test_permanent_records_do_not_mask_a_stalled_repair():
+    issues = [
+        dict(_issue(1000), title="[Genesis Teammate] Nexus — Team Leader"),
+        dict(_issue(1100), title="[Monitoring] Live Genesis Actions status report"),
+        dict(_issue(1212), body="<!-- genesis-eve-continuous-ledger -->"),
+        _issue(473, labels=("genesis-autonomous",), minutes_ago=200),
+    ]
+    for record in issues[:3]:
+        record["labels"] = ["genesis-autonomous"]
+    result = module.evaluate(
+        team_run=_run(module.TEAM_WORKFLOW),
+        agentic_run=_run(module.AGENTIC_WORKFLOW),
+        issues=issues,
+        now=NOW,
+    )
+    assert result["evidence"]["actionable_issues"] == [473]
+    assert result["evidence"]["autonomy_kernel"]["autonomous_open_count"] == 1
+    assert "actionable_backlog_has_no_active_autonomous_worker" in result["faults"]
+    assert "stalled_autonomous_issues:473" in result["faults"]
