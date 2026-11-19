@@ -1401,7 +1401,7 @@ class CodingModule:
 
         prompt = (
             "ROLE: bounded_coding_engineer\n"
-            "TASK: Make one small implementation edit toward OBJECTIVE using only NUMBERED_CONTEXT.\n"
+            "TASK: Make exactly ONE smallest useful edit to the implementation toward OBJECTIVE using only NUMBERED_CONTEXT.\n"
             f"OUTPUT_CONTRACT: {self._output_contract(require_regression_test)}\n"
             f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
             f"GROUNDED_LINE_HINT: {preferred_path}:{preferred_line}\n"
