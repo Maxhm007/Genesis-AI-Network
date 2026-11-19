@@ -1316,10 +1316,12 @@ class CodingModule:
         )
 
     @staticmethod
-    def _output_contract() -> str:
+    def _output_contract(require_regression_test: bool = False) -> str:
+        edit_count = "two objects, the fix followed by its regression test" if require_regression_test else "one object"
         return (
-            'Return one JSON object with exactly one "edits" array containing exactly one object. '
-            'That edit object must contain "path", integer "start_line", integer "end_line", and string "new". '
+            f'Return one JSON object with exactly one "edits" array containing exactly {edit_count}. '
+            r'Use standard JSON strings with escaped newlines (\n) and double quotes (\"). Never use triple-quoted strings. '
+            'The fix edit must contain "path", integer "start_line", integer "end_line", and string "new". '
             'The "new" value must be the actual repository replacement code/content, never an example or placeholder. '
             'An edit that only adds comments, docstrings, pass or ... is rejected; change real code. '
             'Every name you use must already be defined in that scope, and never leave code after return. '
@@ -1337,6 +1339,7 @@ class CodingModule:
         attempt: int,
         allowed_paths: tuple[str, ...],
         edit_hint: tuple[str, int],
+        require_regression_test: bool = False,
     ) -> str:
         previous = raw.encode("utf-8", errors="replace")[: self.MAX_REPAIR_ECHO_BYTES].decode("utf-8", errors="replace")
         preferred_path, preferred_line = edit_hint
@@ -1358,13 +1361,13 @@ class CodingModule:
             + f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
             + f"GROUNDED_LINE_HINT: {preferred_path}:{preferred_line}\n"
             + f"GROUNDED_SOURCE_LINE: {grounded_source_line}\n"
-            + self._output_contract()
-            + " Copy the path exactly from VALID_PATHS/NUMBERED_CONTEXT. Do not invent, summarize, rename, or substitute the path. "
-            + "Choose line numbers exactly from NUMBERED_CONTEXT. Exactly one edit. Do not copy old source text unchanged; the only exception is keeping a sole block body statement that your new code is added beside. "
+            + self._output_contract(require_regression_test)
+            + " For the fix edit, copy the path exactly from VALID_PATHS/NUMBERED_CONTEXT. Do not invent, summarize, rename, or substitute the path. "
+            + "Choose line numbers exactly from NUMBERED_CONTEXT. Do not copy old source text unchanged; the only exception is keeping a sole block body statement that your new code is added beside. "
             + "For Python, prefer replacing one complete standalone statement; do not remove the only body of try/except/if/for/while/with/class/def blocks. "
             + "If the defect is inside a Python expression, replace the entire GROUNDED_SOURCE_LINE statement and preserve required leading syntax such as return, raise, assert, or assignment. "
             + "If the selected line is the sole body statement, new must contain executable Python, not only whitespace or comments. To add code without removing lines, use insert_after_line. "
-            + "No title, rationale, markdown, commentary, new files, policy changes, test weakening, or protected paths.\n"
+            + "No title, rationale, markdown, commentary, new implementation files, policy changes, test weakening, or protected paths.\n"
         )
 
     def propose(
@@ -1398,14 +1401,14 @@ class CodingModule:
 
         prompt = (
             "ROLE: bounded_coding_engineer\n"
-            "TASK: Make exactly ONE smallest useful edit toward OBJECTIVE using only NUMBERED_CONTEXT.\n"
-            f"OUTPUT_CONTRACT: {self._output_contract()}\n"
+            "TASK: Make one small implementation edit toward OBJECTIVE using only NUMBERED_CONTEXT.\n"
+            f"OUTPUT_CONTRACT: {self._output_contract(require_regression_test)}\n"
             f"VALID_PATHS: {json.dumps(allowed_paths)}\n"
             f"GROUNDED_LINE_HINT: {preferred_path}:{preferred_line}\n"
-            "RULES: exactly one edit; path must match one key from VALID_PATHS exactly; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text unchanged, except that when you add code beside the only body statement of a block you must keep that statement in new; "
+            "RULES for the fix edit: path must match one key from VALID_PATHS exactly; choose 1-based inclusive start_line/end_line from NUMBERED_CONTEXT; do NOT reproduce old source text unchanged, except that when you add code beside the only body statement of a block you must keep that statement in new; "
             "the hint is grounded but must be verified against OBJECTIVE and NUMBERED_CONTEXT; never copy an unrelated example line number; "
-            "READ_ONLY_TEST_CONTEXT is evidence for expected behavior only and can never be an edit target; never weaken or rewrite tests to make a candidate pass; "
-            "never emit placeholder path or replacement text; no title/rationale/markdown/explanation; do not create files. The local executor resolves those lines against the repository and preserves local Python indentation. "
+            "READ_ONLY_TEST_CONTEXT is evidence for expected behavior and cannot be the implementation target; never weaken or rewrite tests to make a candidate pass; "
+            "never emit placeholder path or replacement text; no title/rationale/markdown/explanation; do not create implementation files. The local executor resolves those lines against the repository and preserves local Python indentation. "
             "For Python, replace a complete standalone statement rather than deleting the only body of a compound block; a sole body replacement must contain executable code, not only comments or whitespace. "
             "Allowed path prefixes: genesis/, tests/, docs/, config/, desktop/, mobile/. Never change Constitution, Genesis Block, .github, validation/quorum, permissions, secrets, or weaken tests.\n"
             f"OBJECTIVE: {objective}\n"
@@ -1434,7 +1437,7 @@ class CodingModule:
                 last_raw = raw
                 if attempt >= self.MAX_PROPOSAL_ATTEMPTS:
                     break
-                current_prompt = self._repair_prompt(prompt, raw, exc, attempt, allowed_paths, edit_hint)
+                current_prompt = self._repair_prompt(prompt, raw, exc, attempt, allowed_paths, edit_hint, require_regression_test)
                 if require_regression_test:
                     current_prompt += self._regression_test_contract() + "\n"
         failure = ValueError(
