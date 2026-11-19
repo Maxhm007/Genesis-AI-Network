@@ -231,3 +231,27 @@ def test_dedupe_reuses_same_issue_even_when_capacity_fills(tmp_path: Path, monke
     assert rebound_first is not None and rebound_second is not None
     assert rebound_first.payload["github_issue_number"] == rebound_second.payload["github_issue_number"]
     assert result["deferred"] == []
+
+
+def test_source_issue_number_bypasses_capacity_in_both_storage_formats(tmp_path: Path) -> None:
+    queue = _queue(tmp_path)
+    for key in ("source_issue_number", "github_source_issue_number"):
+        for value, expected in ((470, True), ("470", True), ("0", False), ("invalid", False)):
+            task, _ = queue.create_unique(
+                f"{key}-{type(value).__name__}-{value}",
+                "Verify admission for an issue-linked capability.",
+                module_id="genesis.coding",
+                priority=80,
+                payload={"task_type": "new_capability", key: value},
+            )
+            assert bypasses_backpressure(task) is expected
+
+
+def test_user_security_and_action_work_bypasses_research_limit(tmp_path: Path) -> None:
+    queue = _queue(tmp_path)
+    for source, kind in (("user", "new_capability"), ("genesis", "security_repair"), ("genesis", "action_failure")):
+        task, _ = queue.create_unique(
+            kind, "Check admission for priority work.", module_id="genesis.coding",
+            priority=80, payload={"task_type": kind, "source": source},
+        )
+        assert not capacity_limited_task(task)
