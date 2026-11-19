@@ -60,7 +60,7 @@ def latest_problem_comment(comments: list[dict], fallback: str = "") -> str:
     for row in reversed(comments):
         body = str(row.get("body") or "").strip()
         lower = body.lower()
-        if not body:
+        if not body or body.startswith(CURRENT_PROBLEM_MARKER):
             continue
         if "<!-- genesis-closure-certificate -->" in lower:
             continue
