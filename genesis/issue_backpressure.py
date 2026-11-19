@@ -52,8 +52,6 @@ _OWNER_BYPASS_KEYS = (
     "owner_assigned",
     "user_created_issue",
     "github_user_created",
-    "source_issue_number",
-    "github_source_issue_number",
 )
 _TASK_TYPE_RE = re.compile(r"^- \*\*Task type:\*\* `([^`]+)`", re.MULTILINE)
 _SOURCE_RE = re.compile(r"^- \*\*Source:\*\* `([^`]+)`", re.MULTILINE)
@@ -169,6 +167,9 @@ def bypasses_backpressure(task) -> bool:
         return True
     if source in _OWNER_SOURCE_VALUES:
         return True
+    for key in ("source_issue_number", "github_source_issue_number"):
+        if re.fullmatch(r"0*[1-9][0-9]*", str(payload.get(key, "")).strip()):
+            return True
     return any(_truthy(payload.get(key)) for key in _OWNER_BYPASS_KEYS)
 
 
