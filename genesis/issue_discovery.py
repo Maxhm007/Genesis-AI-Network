@@ -94,6 +94,26 @@ class GenesisIssueDiscoveryEngine:
             return ".".join(reversed(parts))
         return ""
 
+    @staticmethod
+    def _has_unsafe_shell_boundary(nodes: list[ast.AST]) -> bool:
+        """Flag shell interpretation, not ordinary argument-vector subprocess use."""
+        for node in nodes:
+            if not isinstance(node, ast.Call):
+                continue
+            name = GenesisIssueDiscoveryEngine._call_name(node)
+            if name == "os.system":
+                return True
+            if name not in {"subprocess.run", "subprocess.Popen"}:
+                continue
+            if any(
+                keyword.arg == "shell"
+                and isinstance(keyword.value, ast.Constant)
+                and keyword.value.value is True
+                for keyword in node.keywords
+            ):
+                return True
+        return False
+
     def _score_path(self, path: Path) -> IssueDiscoveryCandidate:
         relative = path.relative_to(self.root).as_posix()
         text = path.read_text(encoding="utf-8", errors="replace")
@@ -146,7 +166,7 @@ class GenesisIssueDiscoveryEngine:
             if broad_handlers:
                 score += 12 + min(12, broad_handlers * 3)
                 reasons.append("broad_exception_handler")
-            if any(name in calls for name in {"subprocess.run", "subprocess.Popen", "os.system"}):
+            if self._has_unsafe_shell_boundary(nodes):
                 score += 18
                 reasons.append("subprocess_or_shell_boundary")
             if any(name.startswith(("urllib.", "requests.", "socket.")) for name in calls):
@@ -231,7 +251,7 @@ class GenesisIssueDiscoveryEngine:
         return (
             "ROLE: genesis_issue_discovery_engine\n"
             "Independently inspect this Genesis source file for one concrete, meaningful software issue. "
-            "Use the supplied risk signals as hints, not proof. Look for correctness bugs, unsafe coercion, edge cases, "
+            "Use the supplied risk signals as hints, not proof. In particular, subprocess.run/Popen with an argv list and no shell=True is not by itself a security defect; require evidence of shell interpretation or an unsafe command boundary. Look for correctness bugs, unsafe coercion, edge cases, "
             "state mistakes, error-handling defects, reliability failures, or testable autonomy defects. "
             "Do not invent style work, speculative refactoring, or changes that weaken tests, Security, validation, governance, "
             "protected boundaries, or promotion. Return compact JSON only with keys decision, summary, acceptance, evidence, confidence. "

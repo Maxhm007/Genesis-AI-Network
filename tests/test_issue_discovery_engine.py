@@ -226,3 +226,28 @@ def test_timeout_stops_current_discovery_batch_after_one_provider_call(tmp_path:
     assert result["scanned"][0]["status"] == "provider_error"
     assert provider.calls == 1
     assert queue.list(limit=10) == []
+
+
+
+def test_safe_argv_subprocess_is_not_ranked_as_shell_boundary(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "genesis/worker.py",
+        "import subprocess\n\ndef run(root):\n    return subprocess.run(['git', 'status', '--short'], cwd=root, capture_output=True)\n",
+    )
+
+    candidate = GenesisIssueDiscoveryEngine(tmp_path)._score_path(tmp_path / "genesis/worker.py")
+
+    assert "subprocess_or_shell_boundary" not in candidate.reasons
+
+
+def test_shell_interpreted_subprocess_is_ranked_as_shell_boundary(tmp_path: Path) -> None:
+    _write(
+        tmp_path,
+        "genesis/worker.py",
+        "import subprocess\n\ndef run(command):\n    return subprocess.run(command, shell=True)\n",
+    )
+
+    candidate = GenesisIssueDiscoveryEngine(tmp_path)._score_path(tmp_path / "genesis/worker.py")
+
+    assert "subprocess_or_shell_boundary" in candidate.reasons
