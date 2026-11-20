@@ -92,11 +92,16 @@ jobs:
         with:
           python-version: '3.12'
       - run: python -m pip install -r requirements.txt
+      - name: Build trusted offline red-phase test sandbox
+        run: docker build --file docker/red-phase.Dockerfile --tag genesis-red-phase:local .
       - name: Verify full repair-worker baseline
         run: python -m pytest -q
 
   dispatch-agentic-pool:
-    if: github.event_name != 'pull_request'
+    # Pause all automatic issue dispatch until the remaining repair lanes,
+    # candidate promotion and independent security review are verified.
+    # Manual workflow_dispatch remains available for an authorized recovery check.
+    if: github.event_name == 'workflow_dispatch'
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:

@@ -1,11 +1,15 @@
 from __future__ import annotations
 
 import argparse
+import ast
 import base64
 import json
 import os
 import re
+import resource
 import subprocess
+import sys
+import tempfile
 import urllib.error
 import urllib.parse
 import urllib.request
@@ -212,8 +216,10 @@ def allowed_issue_repair_paths(context_paths: list[str]) -> set[str]:
     allowed = set(context_paths)
     for relative in context_paths:
         path = Path(relative)
-        if relative.startswith("genesis/") and path.suffix == ".py":
+        if (relative.startswith("genesis/") or relative.startswith("scripts/")) and path.suffix == ".py":
             allowed.add(f"tests/test_{path.stem}.py")
+            # Test-first coding contract explicitly offers a new *_regression.py file.
+            allowed.add(f"tests/test_{path.stem}_regression.py")
     return allowed
 
 
@@ -325,6 +331,7 @@ def propose_issue_repair(
     provider: IntelligenceProvider | None = None,
     repair_memory: list[dict] | None = None,
     maintainer_guidance: str = "",
+    require_regression_test: bool = False,
 ) -> CodingProposal:
     coding = CodingModule(root)
     deterministic = GitHubIssueLearnedCapabilityProvider.for_issue(root, issue, coding)
@@ -346,7 +353,253 @@ def propose_issue_repair(
         issue_coding_objective(issue, repair_memory, maintainer_guidance),
         coding_paths,
         provider=provider,
+        **({"require_regression_test": True} if require_regression_test else {}),
     )
+
+
+
+
+def _safe_red_phase_regression(
+    source: str, test_name: str, code_target: str,
+) -> bool:
+    """Conservatively allow only simple assertions calling the existing target.
+
+    This is a syntax safety filter, NOT a general Python sandbox. It prevents
+    generated tests from using fixtures, capfd.disabled(), os._exit(),
+    dynamic execution, stdout writes, pytest hooks, or arbitrary imports to
+    impersonate trusted evidence. Unsupported tests fail closed.
+    """
+    try:
+        tree = ast.parse(source)
+    except SyntaxError:
+        return False
+    imported: set[str] = set()
+    target_module = code_target.removesuffix(".py").replace("/", ".")
+    for item in tree.body:
+        if isinstance(item, ast.ImportFrom):
+            if item.module != target_module or item.level:
+                return False
+            for alias in item.names:
+                if alias.name == "*":
+                    return False
+                imported.add(alias.asname or alias.name)
+        elif isinstance(item, ast.Import):
+            if any(alias.name != "pytest" or alias.asname for alias in item.names):
+                return False
+        elif isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            # Existing tests are trustworthy baseline material. The newly
+            # introduced test alone gets this restrictive syntax policy.
+            if item.name != test_name:
+                continue
+            if not isinstance(item, ast.FunctionDef) or item.decorator_list:
+                return False
+            if item.args.posonlyargs or item.args.args or item.args.kwonlyargs or item.args.vararg or item.args.kwarg:
+                return False
+            if not item.body or len(item.body) > 5:
+                return False
+            def safe_expr(node: ast.AST) -> bool:
+                if isinstance(node, (ast.Constant, ast.Name)):
+                    return not isinstance(node, ast.Name) or (
+                        node.id in imported or node.id in {"True", "False", "None"}
+                        or node.id in assigned
+                    )
+                if isinstance(node, (ast.List, ast.Tuple, ast.Set)):
+                    return all(safe_expr(v) for v in node.elts)
+                if isinstance(node, ast.Dict):
+                    return all(k is not None and safe_expr(k) and safe_expr(v)
+                               for k, v in zip(node.keys, node.values))
+                if isinstance(node, ast.Compare):
+                    return safe_expr(node.left) and all(safe_expr(x) for x in node.comparators) and all(
+                        isinstance(op, (ast.Eq, ast.NotEq, ast.Lt, ast.LtE, ast.Gt, ast.GtE, ast.Is, ast.IsNot, ast.In, ast.NotIn))
+                        for op in node.ops
+                    )
+                if isinstance(node, ast.BoolOp):
+                    return all(safe_expr(x) for x in node.values)
+                if isinstance(node, ast.UnaryOp) and isinstance(node.op, ast.Not):
+                    return safe_expr(node.operand)
+                if isinstance(node, ast.Call):
+                    # Only call trusted code imported from the target module;
+                    # never arbitrary builtins, pytest utilities or attributes.
+                    return (
+                        isinstance(node.func, ast.Name)
+                        and node.func.id in imported
+                        and not node.keywords
+                        and all(safe_expr(x) for x in node.args)
+                    )
+                return False
+            assigned: set[str] = set()
+            found_assert = False
+            for statement in item.body:
+                if isinstance(statement, ast.Assign) and len(statement.targets) == 1 and isinstance(statement.targets[0], ast.Name):
+                    if not safe_expr(statement.value) or statement.targets[0].id in imported:
+                        return False
+                    assigned.add(statement.targets[0].id)
+                elif isinstance(statement, ast.Assert):
+                    if not safe_expr(statement.test) or statement.msg is not None:
+                        return False
+                    found_assert = True
+                else:
+                    return False
+            return found_assert
+        elif not isinstance(item, (ast.FunctionDef, ast.AsyncFunctionDef)):
+            return False
+    return False
+
+
+def verify_regression_fails_on_baseline(
+    root: Path, proposal_files: dict[str, str],
+) -> tuple[bool, str]:
+    """Fail closed unless the ONE newly added regression fails on unchanged HEAD.
+
+    The test runs in a disposable detached worktree; generated source fixes are
+    never written into that baseline. A collection error, infrastructure error,
+    passing baseline, timeout, or ambiguous result is not red-phase evidence.
+    """
+    test_paths = [path for path in proposal_files if path.startswith("tests/test_") and path.endswith(".py")]
+    if len(test_paths) != 1:
+        return False, "expected exactly one regression test file"
+    test_path = test_paths[0]
+    code_targets = [
+        path for path in proposal_files
+        if (path.startswith("genesis/") or path.startswith("scripts/"))
+        and path.endswith(".py")
+    ]
+    if len(code_targets) != 1:
+        return False, "expected exactly one source target"
+    try:
+        original_path = root / test_path
+        old_text = original_path.read_text(encoding="utf-8") if original_path.is_file() else ""
+        old_names = {
+            node.name for node in ast.parse(old_text).body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        new_names = {
+            node.name for node in ast.parse(proposal_files[test_path]).body
+            if isinstance(node, (ast.FunctionDef, ast.AsyncFunctionDef))
+        }
+        added = new_names - old_names
+        if len(added) != 1 or not next(iter(added)).startswith("test_"):
+            return False, "regression must introduce exactly one new test function"
+        test_name = next(iter(added))
+        # Validate ONLY the inserted test, not trusted existing baseline code.
+        new_nodes = [
+            item for item in ast.parse(proposal_files[test_path]).body
+            if isinstance(item, ast.FunctionDef) and item.name == test_name
+        ]
+        # Existing regression files may contain trusted imports and other
+        # tests. Limit new imports to the target module and pytest.
+        new_imports = [
+            item for item in ast.parse(proposal_files[test_path]).body
+            if isinstance(item, (ast.Import, ast.ImportFrom))
+        ]
+        restricted_source = ast.unparse(ast.Module(body=[*new_imports, *new_nodes], type_ignores=[]))
+        if not _safe_red_phase_regression(restricted_source, test_name, code_targets[0]):
+            return False, "generated regression uses unsafe or unsupported syntax"
+    except (OSError, SyntaxError, ValueError) as exc:
+        return False, f"cannot inspect regression test: {type(exc).__name__}"
+
+    # A missing trusted sandbox image is a hard stop; never fall back to
+    # invoking generated pytest code in the privileged GitHub Actions runner.
+    sandbox_image = "genesis-red-phase:local"
+    docker_env = {"PATH": os.defpath, "HOME": "/tmp"}
+    try:
+        inspect = subprocess.run(
+            ["docker", "image", "inspect", sandbox_image],
+            capture_output=True, text=True, timeout=15, check=False, env=docker_env,
+        )
+    except (OSError, subprocess.TimeoutExpired):
+        return False, "red-phase container runtime unavailable"
+    if inspect.returncode != 0:
+        return False, "trusted red-phase container image unavailable"
+
+    with tempfile.TemporaryDirectory(prefix="genesis-red-phase-") as temp:
+        checkout = Path(temp) / "baseline"
+        created = False
+        try:
+            add = subprocess.run(
+                ["git", "worktree", "add", "--detach", str(checkout), "HEAD"],
+                cwd=root, capture_output=True, text=True, timeout=45, check=False,
+            )
+            if add.returncode != 0:
+                return False, "baseline worktree unavailable"
+            created = True
+            test_target = checkout / test_path
+            test_target.parent.mkdir(parents=True, exist_ok=True)
+            test_target.write_text(proposal_files[test_path], encoding="utf-8")
+            # No network, host credentials, Docker socket or writable repo.
+            # The trusted image contains dependencies, not generated code.
+            # Docker defaults include the host's seccomp confinement.
+            # The Docker CLI runs on the host: its own output needs a hard
+            # OS-enforced file-size cap; Docker memory limits only the container.
+            # Avoid capture_output=True, which otherwise grows unbounded in
+            # host Python memory when generated code prints indefinitely.
+            def limit_output_bytes() -> None:
+                resource.setrlimit(resource.RLIMIT_FSIZE, (65536, 65536))
+
+            with tempfile.TemporaryFile(mode="w+t") as stdout_file, tempfile.TemporaryFile(mode="w+t") as stderr_file:
+                result = subprocess.run(
+                [
+                    "docker", "run", "--rm", "--network", "none",
+                    "--read-only", "--cap-drop", "ALL",
+                    "--security-opt", "no-new-privileges",
+                    "--pids-limit", "64", "--memory", "512m", "--cpus", "1",
+                    "--user", "10001:10001",
+                    "--tmpfs", "/tmp:rw,nosuid,nodev,size=64m",
+                    "--mount", f"type=bind,source={checkout},target=/workspace,readonly",
+                    "--workdir", "/workspace",
+                    "--env", "HOME=/tmp",
+                    "--env", "PYTHONPATH=/workspace:/opt/genesis",
+                    "--env", "PYTEST_DISABLE_PLUGIN_AUTOLOAD=1",
+                    "--env", "PYTHONDONTWRITEBYTECODE=1",
+                    "--env", "PYTHONNOUSERSITE=1",
+                    sandbox_image, "-q", "--tb=short", f"{test_path}::{test_name}",
+                ],
+                stdout=stdout_file, stderr=stderr_file,
+                text=True, timeout=120, check=False, env=docker_env,
+                preexec_fn=limit_output_bytes,
+                )
+                stdout_file.seek(0)
+                stderr_file.seek(0)
+                stdout = stdout_file.read(65537)
+                stderr = stderr_file.read(65537)
+            if len(stdout) >= 65536 or len(stderr) >= 65536:
+                return False, "red-phase output exceeds safe byte limit"
+            output = (stdout + "\n" + stderr)[-4000:]
+            # Pytest's "1 failed" and the exact node ID demonstrate an
+            # assertion failure, not a collection/import/runner failure.
+            node_id = f"{test_path}::{test_name}"
+            if result.returncode != 1 or "1 failed" not in output or f"FAILED {node_id}" not in output:
+                return False, "regression did not produce an isolated failing baseline test"
+            # This verdict comes from the trusted plugin's actual
+            # pytest call.excinfo, not from traceback/source text.
+            # Never accept a merely textual "AssertionError" in test output.
+            verdicts = []
+            for line in stderr.splitlines():
+                prefix = "GENESIS_RED_PHASE_VERDICT:"
+                if not line.startswith(prefix):
+                    continue
+                try:
+                    verdicts.append(json.loads(line[len(prefix):]))
+                except (ValueError, TypeError):
+                    return False, "malformed trusted red-phase verdict"
+            if (
+                len(verdicts) != 1
+                or verdicts[0] != {
+                    "nodeid": node_id, "phase": "call",
+                    "category": verdicts[0].get("category"),
+                }
+                or verdicts[0]["category"] not in ("assertion", "missing_exception")
+            ):
+                return False, "baseline failure was not a classified assertion or expected-exception failure"
+            return True, f"baseline regression {node_id} failed as required"
+        except (OSError, subprocess.TimeoutExpired) as exc:
+            return False, f"baseline regression check unavailable: {type(exc).__name__}"
+        finally:
+            if created:
+                subprocess.run(
+                    ["git", "worktree", "remove", "--force", str(checkout)],
+                    cwd=root, capture_output=True, text=True, timeout=45, check=False,
+                )
 
 
 def _proposal_change_excerpt(root: Path, files: dict[str, str]) -> str:
@@ -445,6 +698,9 @@ def solve_reported_issue(
 
     memory = repair_memory if repair_memory is not None else []
     executor = executor or SelfDevelopmentExecutor(root)
+    # A paused production worker must not resume until it explicitly opts into
+    # the fail-closed paired code + regression-test proposal contract.
+    require_regression_test = os.environ.get("GENESIS_REQUIRE_REGRESSION_TEST") == "1"
 
     last_proposal: dict | None = None
     last_result = None
@@ -458,6 +714,7 @@ def solve_reported_issue(
                 provider=provider,
                 repair_memory=memory,
                 maintainer_guidance=maintainer_guidance,
+                **({"require_regression_test": True} if require_regression_test else {}),
             )
         except Exception as exc:
             failure = {
@@ -493,6 +750,21 @@ def solve_reported_issue(
             return RepairAttempt(diagnosis, proposal, None, "repair_rejected_scope", validation_attempts=validation_runs)
         if not (changed & set(context_paths)):
             return RepairAttempt(diagnosis, proposal, None, "repair_rejected_test_only", validation_attempts=validation_runs)
+        if require_regression_test and (
+            len(changed) != 2 or
+            len([path for path in changed if path.startswith("tests/test_") and path.endswith(".py")]) != 1 or
+            len([path for path in changed if path in context_paths and not path.startswith("tests/")]) != 1
+        ):
+            return RepairAttempt(diagnosis, proposal, None, "repair_rejected_missing_regression_test", validation_attempts=validation_runs)
+
+        if require_regression_test:
+            red_ok, red_evidence = verify_regression_fails_on_baseline(root, proposal["files"])
+            if not red_ok:
+                return RepairAttempt(
+                    diagnosis, proposal, None, "repair_rejected_regression_not_red",
+                    {"outcome": "regression_not_red", "validation": red_evidence},
+                    validation_runs,
+                )
 
         proposal["provenance"] = {
             "initiator": f"github.issue.{issue.get('number')}",
