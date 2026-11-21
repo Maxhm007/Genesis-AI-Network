@@ -159,6 +159,7 @@ jobs:
           set -euo pipefail
           issue_json=$(gh issue view "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --json state,labels,body,title)
           if jq -e '([.labels[].name] | index("genesis-owner-paused")) != null' <<<"$issue_json" >/dev/null; then
+            echo "::notice::Agentic reservation declined (owner_paused)"
             echo "eligible=false" >> "$GITHUB_OUTPUT"
             exit 0
           fi
@@ -180,20 +181,28 @@ jobs:
           esac
           if grep -Fq '<!-- genesis-performance-indicator -->' <<<"$body"; then actionable=false; fi
 
-          safe=true
-          if [[ "$actionable" != "true" ]]; then safe=false; fi
-          if [[ "$state" != "OPEN" || "$reserved" != "true" || "$agentic" != "true" ]]; then safe=false; fi
-          if [[ -z "$target" || "$target" == *".."* ]]; then safe=false; fi
+          reasons=()
+          if [[ "$actionable" != "true" ]]; then reasons+=(non_actionable); fi
+          if [[ "$state" != "OPEN" ]]; then reasons+=(issue_not_open); fi
+          if [[ "$reserved" != "true" ]]; then reasons+=(reservation_missing); fi
+          if [[ "$agentic" != "true" ]]; then reasons+=(agentic_label_missing); fi
+          if [[ -z "$target" || "$target" == *".."*  ]]; then reasons+=(invalid_target); fi
           if [[ ! -f "$target" ]]; then
             if [[ "$task_type" != "architecture_expansion" || "$architecture_new_target" != "$target" || "$target" != genesis/architecture_extensions/*.py ]]; then
-              safe=false
+              reasons+=(target_missing)
             fi
           fi
-          if [[ "$target" != genesis/*.py && "$target" != scripts/*.py ]]; then safe=false; fi
+          if [[ "$target" != genesis/*.py && "$target" != scripts/*.py ]]; then reasons+=(unsupported_target); fi
           case "$target" in
             genesis/autonomy_guard.py|genesis/autonomy_proof.py|genesis/blockchain.py|genesis/ephemeral_validator.py|genesis/security.py|genesis/selfdev.py|genesis/issue_solver.py|genesis/file_self_review.py|genesis/file_self_review_policy.py|scripts/secret_guard.py|scripts/privileged_change_gate.py|scripts/verify_validator_votes.py|scripts/action_repair_guard.py|scripts/issue_acceptance_guard.py)
-              safe=false ;;
+              reasons+=(protected_target) ;;
           esac
+
+          safe=true
+          if (( ${#reasons[@]} > 0 )); then
+            safe=false
+            echo "::notice::Agentic reservation declined (${reasons[*]})"
+          fi
 
           echo "target=$target" >> "$GITHUB_OUTPUT"
           echo "eligible=$safe" >> "$GITHUB_OUTPUT"
@@ -213,7 +222,7 @@ jobs:
             gh issue edit "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --add-label genesis-autonomous --add-label agentic-lab --add-label genesis-solver-exhausted >/dev/null 2>&1 || true
             printf '%s\n%s\n' \
               "<!-- genesis-agentic-strategy-result:${STRATEGY} -->" \
-              "Agentic Lab strategy worker declined this reservation because the Issue is not open/owned, the target is unsafe, or the reservation is stale. The Issue remains open and authoritative. repair status: \`blocked_protected_or_unsupported_target\`. No child/successor/capability Issue is created. Worker run: ${GITHUB_RUN_ID}." \
+              "Agentic Lab strategy worker declined this reservation with checks: ${reasons[*]}. The Issue remains open and authoritative. repair status: \`blocked_protected_or_unsupported_target\`. No child/successor/capability Issue is created. Worker run: ${GITHUB_RUN_ID}." \
               > /tmp/genesis-agentic-declined.md
             gh issue comment "$ISSUE_NUMBER" --repo "$GITHUB_REPOSITORY" --body-file /tmp/genesis-agentic-declined.md
           fi
