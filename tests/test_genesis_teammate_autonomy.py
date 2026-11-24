@@ -23,3 +23,11 @@ def test_teammate_skips_owner_paused_issue(monkeypatch):
     monkeypatch.setattr(module, 'open_development_issues', lambda: [paused])
     monkeypatch.setattr(module, 'autonomous_claim_exists', lambda number: False)
     assert module.select_autonomous_issue() is None
+
+
+def test_forge_developer_role_handling():
+    import scripts.genesis_teammate as module
+    assert "forge" in module.ROLE_MAP
+    role, description = module.ROLE_MAP["forge"]
+    assert role == "engineer"
+    assert "Implementation and repair" in description
