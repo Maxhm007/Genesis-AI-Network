@@ -815,8 +815,14 @@ def test_capability_escalation_issue_is_reusable_and_bounded(monkeypatch):
     assert "independent validation" in body.lower()
 
 
-def test_baseline_validation_repair_rearms_execution_but_controller_edit_does_not(tmp_path):
-    baseline_test = tmp_path / "tests/test_autonomy_heartbeat.py"
+@pytest.mark.parametrize("repair_path", [
+    "tests/test_autonomy_heartbeat.py",
+    "genesis/compact_proposal_retry.py",
+    "genesis/python_syntax_retry.py",
+    ".github/workflows/gate/manifest.json",
+])
+def test_baseline_validation_repair_rearms_execution_but_controller_edit_does_not(tmp_path, repair_path):
+    baseline_test = tmp_path / repair_path
     baseline_test.parent.mkdir(parents=True)
     baseline_test.write_text("broken baseline")
     before = module.repair_execution_generation(tmp_path)
