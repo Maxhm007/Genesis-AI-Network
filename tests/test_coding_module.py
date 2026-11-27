@@ -124,7 +124,7 @@ def test_coding_module_repairs_parse_and_schema_errors_with_same_provider(tmp_pa
     assert proposal.files["genesis/example.py"] == "VALUE = 8\n"
     assert provider.calls == 3
     assert "RETRY:" in provider.prompts[1]
-    assert "Exactly one edit" in provider.prompts[2]
+    assert '"edits" array containing exactly one object' in provider.prompts[2]
     assert "GROUNDED_LINE_HINT: genesis/example.py:1" in provider.prompts[1]
     assert "existing allowed path" not in provider.prompts[1]
 
