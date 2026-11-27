@@ -54,9 +54,11 @@ def _repair_prompt_with_compact_feedback(
     attempt: int,
     allowed_paths: tuple[str, ...],
     edit_hint: tuple[str, int],
+    require_regression_test: bool = False,
 ) -> str:
     base = _ORIGINAL_REPAIR_PROMPT(
-        self, original_prompt, raw, error, attempt, allowed_paths, edit_hint
+        self, original_prompt, raw, error, attempt, allowed_paths, edit_hint,
+        require_regression_test=require_regression_test,
     )
     return base + _compact_retry_feedback(self, raw, error)
 

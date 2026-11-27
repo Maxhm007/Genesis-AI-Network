@@ -122,8 +122,14 @@ def test_test_first_mode_keeps_the_fix_inside_valid_paths(tmp_path: Path) -> Non
             stray = {"path": "genesis/other.py", "start_line": 1, "end_line": 1, "new": "VALUE = 2"}
             return json.dumps(_proposal(stray, {"path": "tests/test_sample.py", "insert_after_line": 5, "new": NEW_TEST}))
 
+    provider = _Stray()
     with pytest.raises(ValueError, match="VALID_PATHS"):
-        module.propose("Clamp must cap large values at 10", ["genesis/sample.py"], provider=_Stray(), require_regression_test=True)
+        module.propose("Clamp must cap large values at 10", ["genesis/sample.py"], provider=provider, require_regression_test=True)
+    assert len(provider.prompts) > 1
+    assert all(
+        '"edits" array containing exactly two objects' in prompt
+        for prompt in provider.prompts[1:]
+    )
 
 
 def test_test_first_mode_rejects_a_test_slid_under_an_existing_decorator(tmp_path: Path) -> None:

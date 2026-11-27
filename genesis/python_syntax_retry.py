@@ -184,8 +184,12 @@ def _repair_prompt_with_ast_guidance(
     attempt: int,
     allowed_paths: tuple[str, ...],
     edit_hint: tuple[str, int],
+    require_regression_test: bool = False,
 ) -> str:
-    base = _ORIGINAL_REPAIR_PROMPT(self, original_prompt, raw, error, attempt, allowed_paths, edit_hint)
+    base = _ORIGINAL_REPAIR_PROMPT(
+        self, original_prompt, raw, error, attempt, allowed_paths, edit_hint,
+        require_regression_test=require_regression_test,
+    )
     syntax_guidance = _syntax_retry_guidance(self, raw, error)
     if not syntax_guidance:
         return base
